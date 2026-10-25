@@ -209,13 +209,14 @@ fs::path file_path() {
 Loaded load(const fs::path& file) {
     Loaded loaded;
     const std::string name = file.string();
+    const std::string native = file.string();
     const auto unusable = [&](const std::string& why) {
         loaded.error = why;
         loaded.log.push_back("display: defaults (" + why + ")");
         return loaded;
     };
     struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    if (::stat(native.c_str(), &st) != 0) {
         const int error = errno;
         if (error == ENOENT || error == ENOTDIR) {
             loaded.log.push_back("display: defaults (no " + name + ")");

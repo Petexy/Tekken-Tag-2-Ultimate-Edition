@@ -139,8 +139,9 @@ fs::path file_path() {
 Loaded load(const fs::path& file, const Resolver& resolve) {
     Loaded loaded{default_keys(), {}};
     const std::string name = file.string();
+    const std::string native = file.string();
     struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    if (::stat(native.c_str(), &st) != 0) {
         const int error = errno;
         loaded.log.push_back(error == ENOENT || error == ENOTDIR
                                  ? "keyboard: defaults (no " + name + ")"
@@ -186,9 +187,15 @@ Watcher::Watcher(fs::path file, Resolver resolve) : file_(std::move(file)), reso
 
 Watcher::Stamp Watcher::stamp() const {
     struct stat st{};
-    if (::stat(file_.c_str(), &st) != 0) return {};
+    const std::string native = file_.string();
+    if (::stat(native.c_str(), &st) != 0) return {};
+#ifdef _WIN32
+    const auto ns = [](time_t t) { return int64_t{t} * 1'000'000'000; };
+    return {true, st.st_dev, st.st_ino, static_cast<uint64_t>(st.st_size), ns(st.st_mtime), ns(st.st_ctime)};
+#else
     const auto ns = [](const timespec& t) { return int64_t{t.tv_sec} * 1'000'000'000 + t.tv_nsec; };
     return {true, st.st_dev, st.st_ino, static_cast<uint64_t>(st.st_size), ns(st.st_mtim), ns(st.st_ctim)};
+#endif
 }
 
 std::optional<Loaded> Watcher::reload() {

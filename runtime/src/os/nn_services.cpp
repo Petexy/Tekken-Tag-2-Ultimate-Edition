@@ -81,9 +81,18 @@ Result act_country(char* out) {
 // Offset of local time from UTC in microseconds.
 int64_t act_utc_offset() {
     const time_t now = std::time(nullptr);
-    struct tm local;
+    std::tm local {};
+    std::tm utc {};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+    gmtime_s(&utc, &now);
+#else
     localtime_r(&now, &local);
-    return int64_t{local.tm_gmtoff} * 1000000;
+    gmtime_r(&now, &utc);
+#endif
+    const time_t local_epoch = std::mktime(&local);
+    const time_t utc_as_local_epoch = std::mktime(&utc);
+    return static_cast<int64_t>(std::difftime(local_epoch, utc_as_local_epoch)) * 1000000;
 }
 Result act_parental_slot(uint8_t* out, uint8_t) {
     if (out) *out = kSlot;

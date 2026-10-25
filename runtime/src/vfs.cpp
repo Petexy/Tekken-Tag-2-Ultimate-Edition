@@ -7,6 +7,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <io.h>
+#include <climits>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -24,6 +28,60 @@ namespace cafe::vfs {
 namespace {
 
 namespace fs = std::filesystem;
+
+#ifdef _WIN32
+constexpr int kOpenBinary = O_BINARY;
+#else
+constexpr int kOpenBinary = 0;
+#endif
+
+#ifdef _WIN32
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+
+ssize_t pread_compat(int fd, void* buffer, size_t size, uint64_t position) {
+    static std::mutex io_mutex;
+    std::lock_guard lock(io_mutex);
+    const auto saved = _lseeki64(fd, 0, SEEK_CUR);
+    if (saved < 0) return -1;
+    if (_lseeki64(fd, static_cast<__int64>(position), SEEK_SET) < 0) return -1;
+    const int n = _read(fd, buffer, static_cast<unsigned>(std::min<size_t>(size, INT_MAX)));
+    const int error = errno;
+    _lseeki64(fd, saved, SEEK_SET);
+    errno = error;
+    return n;
+}
+
+ssize_t pwrite_compat(int fd, const void* buffer, size_t size, uint64_t position) {
+    static std::mutex io_mutex;
+    std::lock_guard lock(io_mutex);
+    const auto saved = _lseeki64(fd, 0, SEEK_CUR);
+    if (saved < 0) return -1;
+    if (_lseeki64(fd, static_cast<__int64>(position), SEEK_SET) < 0) return -1;
+    const int n = _write(fd, buffer, static_cast<unsigned>(std::min<size_t>(size, INT_MAX)));
+    const int error = errno;
+    _lseeki64(fd, saved, SEEK_SET);
+    errno = error;
+    return n;
+}
+
+int fsync_compat(int fd) {
+    return _commit(fd);
+}
+#else
+ssize_t pread_compat(int fd, void* buffer, size_t size, uint64_t position) {
+    return ::pread(fd, buffer, size, static_cast<off_t>(position));
+}
+
+ssize_t pwrite_compat(int fd, const void* buffer, size_t size, uint64_t position) {
+    return ::pwrite(fd, buffer, size, static_cast<off_t>(position));
+}
+
+int fsync_compat(int fd) {
+    return ::fsync(fd);
+}
+#endif
 
 struct Source {
     std::unique_ptr<ZArchiveReader> archive; // null: host directory
@@ -191,6 +249,7 @@ Status from_errno(int error) {
 
 Status open_host(const fs::path& path, std::string_view mode, int32_t& handle) {
     File file;
+    const std::string native = path.string();
     int flags = 0;
     const bool plus = mode.find('+') != std::string_view::npos;
     switch (mode.empty() ? 'r' : mode[0]) {
@@ -200,8 +259,8 @@ Status open_host(const fs::path& path, std::string_view mode, int32_t& handle) {
     default: return kAccessError;
     }
     struct stat st;
-    if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
-    file.fd = ::open(path.c_str(), flags | O_CLOEXEC, 0644);
+    if (::stat(native.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
+    file.fd = ::open(native.c_str(), flags | O_CLOEXEC | kOpenBinary, 0644);
     if (file.fd < 0) return from_errno(errno);
     fstat(file.fd, &st);
     file.size = static_cast<uint64_t>(st.st_size);
@@ -212,7 +271,8 @@ Status open_host(const fs::path& path, std::string_view mode, int32_t& handle) {
 
 Status stat_host(const fs::path& path, Stat& stat) {
     struct stat st;
-    if (::stat(path.c_str(), &st) != 0) return from_errno(errno);
+    const std::string native = path.string();
+    if (::stat(native.c_str(), &st) != 0) return from_errno(errno);
     stat.directory = S_ISDIR(st.st_mode);
     stat.size = stat.directory ? 0 : static_cast<uint64_t>(st.st_size);
     return kOk;
@@ -234,9 +294,10 @@ Status list_host(const fs::path& path, Dir& dir) {
 Status open_underlying(const std::string& relative, File& file) {
     if (!g_source.archive) {
         const fs::path path = game_host_path(relative);
+        const std::string native = path.string();
         struct stat st;
-        if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
-        file.fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (::stat(native.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
+        file.fd = ::open(native.c_str(), O_RDONLY | O_CLOEXEC | kOpenBinary);
         if (file.fd < 0) return from_errno(errno);
         fstat(file.fd, &st);
         file.size = static_cast<uint64_t>(st.st_size);
@@ -255,8 +316,8 @@ uint64_t read_underlying(const File& file, uint64_t position, uint64_t size, voi
     if (file.archive) return g_source.archive->ReadFromFile(file.node, position, size, buffer);
     uint64_t transferred = 0;
     while (transferred < size) {
-        const ssize_t n = ::pread(file.fd, static_cast<uint8_t*>(buffer) + transferred, size - transferred,
-                                  static_cast<off_t>(position + transferred));
+        const ssize_t n =
+            pread_compat(file.fd, static_cast<uint8_t*>(buffer) + transferred, size - transferred, position + transferred);
         if (n <= 0) break;
         transferred += static_cast<uint64_t>(n);
     }
@@ -327,15 +388,16 @@ bool set_archive_entries(const std::string& archive, const std::map<uint32_t, st
 
 void open_game(const fs::path& source) {
     g_source = Source{};
+    const std::string source_name = source.string();
     std::error_code ec;
     if (fs::is_directory(source, ec)) {
         g_source.directory = source;
         return;
     }
     g_source.archive.reset(ZArchiveReader::OpenFromFile(source));
-    if (!g_source.archive) fatal("cannot open game archive %s", source.c_str());
+    if (!g_source.archive) fatal("cannot open game archive %s", source_name.c_str());
     g_source.layers = wua::game_layers(*g_source.archive);
-    if (g_source.layers.empty()) fatal("%s does not contain a title with code/Tekken.rpx", source.c_str());
+    if (g_source.layers.empty()) fatal("%s does not contain a title with code/Tekken.rpx", source_name.c_str());
     if (g_source.layers.size() > 1) {
         std::string order;
         for (const std::string& layer : g_source.layers) order += (order.empty() ? "" : " over ") + layer;
@@ -491,8 +553,8 @@ Status write_file(int32_t handle, const void* buffer, uint64_t size, std::option
     if (file.append) file.position = file.size;
     transferred = 0;
     while (transferred < size) {
-        const ssize_t n = ::pwrite(file.fd, static_cast<const uint8_t*>(buffer) + transferred,
-                                   size - transferred, static_cast<off_t>(file.position + transferred));
+        const ssize_t n = pwrite_compat(file.fd, static_cast<const uint8_t*>(buffer) + transferred,
+                                        size - transferred, file.position + transferred);
         if (n < 0) return from_errno(errno);
         transferred += static_cast<uint64_t>(n);
     }
@@ -530,7 +592,7 @@ Status flush_file(int32_t handle) {
     std::lock_guard lock(g_mutex);
     const auto it = g_files.find(handle);
     if (it == g_files.end()) return kFatal;
-    if (it->second.fd >= 0) ::fsync(it->second.fd);
+    if (it->second.fd >= 0) fsync_compat(it->second.fd);
     return kOk;
 }
 

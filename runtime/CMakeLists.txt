@@ -1,14 +1,10 @@
 find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 find_package(ZLIB REQUIRED)
 
-# Linked as objects, not an archive: strong import implementations here must
-# replace the weak defaults in the generated imports.cpp, and the export
-# registrations must not be dropped by the linker.
-add_library(cafe_runtime OBJECT
+set(cafe_runtime_sources
     src/memory.cpp
     src/loader.cpp
     src/dispatch.cpp
-    src/diagnostics.cpp
     src/exports.cpp
     src/sysmem.cpp
     src/os/thread.cpp
@@ -32,7 +28,6 @@ add_library(cafe_runtime OBJECT
     src/os/hardware.cpp
     src/vfs.cpp
     src/wua.cpp
-    src/install.cpp
     src/gpu/command_processor.cpp
     src/gpu/display.cpp
     src/gpu/null_backend.cpp
@@ -65,6 +60,17 @@ add_library(cafe_runtime OBJECT
     src/title/practice.cpp
     src/title/presentation.cpp
     src/title/roster.cpp)
+
+if(WIN32)
+    list(APPEND cafe_runtime_sources src/diagnostics_windows.cpp src/install_windows.cpp)
+else()
+    list(APPEND cafe_runtime_sources src/diagnostics.cpp src/install.cpp)
+endif()
+
+# Linked as objects, not an archive: strong import implementations here must
+# replace the weak defaults in the generated imports.cpp, and the export
+# registrations must not be dropped by the linker.
+add_library(cafe_runtime OBJECT ${cafe_runtime_sources})
 target_include_directories(cafe_runtime PUBLIC include PRIVATE src)
 target_compile_features(cafe_runtime PUBLIC cxx_std_20)
 find_package(Vulkan REQUIRED)

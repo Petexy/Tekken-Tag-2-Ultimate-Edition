@@ -1,0 +1,61 @@
+{
+  "version": 4,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "ucrt64-release",
+      "displayName": "MSYS2 UCRT64 Release (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-ucrt64-tools-ucrt64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "C:/tools/msys64/ucrt64/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "C:/tools/msys64/ucrt64/bin/clang++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/tools/msys64/ucrt64/bin/ninja.exe",
+        "TTT2_ENABLE_LAUNCHER": "OFF",
+        "TTT2_ENABLE_TESTS": "OFF"
+      },
+      "environment": {
+        "PATH": "C:/tools/msys64/ucrt64/bin;C:/tools/msys64/usr/bin;$penv{PATH}",
+        "PKG_CONFIG": "C:/tools/msys64/ucrt64/bin/pkg-config.exe",
+        "PKG_CONFIG_PATH": "C:/tools/msys64/ucrt64/lib/pkgconfig;C:/tools/msys64/ucrt64/share/pkgconfig"
+      }
+    },
+    {
+      "name": "ucrt64-launcher-gcc",
+      "displayName": "MSYS2 UCRT64 Launcher Kit (GCC, Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-ucrt64-launcher",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "C:/tools/msys64/ucrt64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "C:/tools/msys64/ucrt64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/tools/msys64/ucrt64/bin/ninja.exe",
+        "CMAKE_C_FLAGS": "-fPIE",
+        "CMAKE_CXX_FLAGS": "-fPIE",
+        "TTT2_ENABLE_LAUNCHER": "ON",
+        "TTT2_ENABLE_TESTS": "OFF",
+        "TTT2_GENERATED_DIR": ""
+      },
+      "environment": {
+        "PATH": "C:/tools/msys64/ucrt64/bin;C:/tools/msys64/usr/bin;$penv{PATH}",
+        "PKG_CONFIG": "C:/tools/msys64/ucrt64/bin/pkg-config.exe",
+        "PKG_CONFIG_PATH": "C:/tools/msys64/ucrt64/lib/pkgconfig;C:/tools/msys64/ucrt64/share/pkgconfig"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ucrt64-release",
+      "configurePreset": "ucrt64-release"
+    },
+    {
+      "name": "ucrt64-launcher-gcc",
+      "configurePreset": "ucrt64-launcher-gcc"
+    }
+  ]
+}

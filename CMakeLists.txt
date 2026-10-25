@@ -1,9 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(ttt2_recomp_tools LANGUAGES C CXX)
 
-if(NOT UNIX)
-    message(FATAL_ERROR "The safe extraction utility currently requires a POSIX host.")
-endif()
+option(TTT2_ENABLE_LAUNCHER "Build the launcher and builder kit" ${UNIX})
+option(TTT2_ENABLE_TESTS "Build test targets" ${UNIX})
 
 add_subdirectory(third_party/ZArchive EXCLUDE_FROM_ALL)
 
@@ -21,16 +20,24 @@ target_include_directories(amd_addrlib PRIVATE ${ADDRLIB_DIR}/src)
 target_compile_features(amd_addrlib PRIVATE cxx_std_17)
 target_compile_options(amd_addrlib PRIVATE -w)
 
-add_executable(wua_extract tools/wua_extract.cpp)
-target_compile_features(wua_extract PRIVATE cxx_std_20)
-target_link_libraries(wua_extract PRIVATE ZArchive::zarchive)
-target_compile_options(wua_extract PRIVATE -Wall -Wextra -Wpedantic)
+if(UNIX)
+    add_executable(wua_extract tools/wua_extract.cpp)
+    target_compile_features(wua_extract PRIVATE cxx_std_20)
+    target_link_libraries(wua_extract PRIVATE ZArchive::zarchive)
+    target_compile_options(wua_extract PRIVATE -Wall -Wextra -Wpedantic)
+else()
+    message(STATUS "wua_extract is disabled on this host: it currently requires POSIX APIs.")
+endif()
 
 # Function-level PowerPC -> C++ recompiler for the standalone port.
 add_subdirectory(recomp)
 add_subdirectory(runtime)
 enable_testing()
-add_subdirectory(tests)
+if(TTT2_ENABLE_TESTS)
+    add_subdirectory(tests)
+else()
+    message(STATUS "Tests are disabled (TTT2_ENABLE_TESTS=OFF).")
+endif()
 
 # How the generated code is compiled, here and by the launcher's kit on the
 # players' PCs (launcher/builder). Translated code is huge and flat: -O2
@@ -55,4 +62,8 @@ endif()
 
 # The players' launcher (launcher/): builds the game program on the player's
 # PC from their .wua, installs it and adds Tekken 7's characters.
-add_subdirectory(launcher)
+if(TTT2_ENABLE_LAUNCHER)
+    add_subdirectory(launcher)
+else()
+    message(STATUS "Launcher and builder kit are disabled (TTT2_ENABLE_LAUNCHER=OFF).")
+endif()

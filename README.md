@@ -106,6 +106,19 @@ Other distributions package the same libraries under similar names; older
 releases such as Ubuntu 24.04 and Debian 12 ship SDL and Vulkan headers that
 are too old.
 
+### Windows (MSYS2 UCRT64)
+
+This branch can now be configured and built from **MSYS2 UCRT64** for the
+runtime and recompilation tools (`cafe-recomp`, `ttt2`, etc.).
+
+Current Windows scope:
+
+- `wua_extract` is disabled (POSIX-only utility).
+- The GTK launcher and kit builder are disabled by default.
+- `ttt2 --install` and `ttt2 --update` are available for folder installs and
+  `.wua` input.
+- Desktop-menu integration is still Linux-only.
+
 ## Building
 
 ```bash
@@ -126,10 +139,119 @@ cmake -B build -DTTT2_GENERATED_DIR="$PWD/generated/ttt2"
 cmake --build build --target ttt2
 ```
 
+On MSYS2 UCRT64:
+
+```bash
+pacman -S --needed git cmake ninja python \
+  mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-openssl \
+  mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-zstd \
+  mingw-w64-ucrt-x86_64-vulkan-headers mingw-w64-ucrt-x86_64-vulkan-loader \
+  mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-shaderc
+
+cmake -S . -B build-ucrt64 -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DTTT2_ENABLE_LAUNCHER=OFF \
+  -DTTT2_ENABLE_TESTS=OFF
+cmake --build build-ucrt64 --target cafe-recomp ttt2
+```
+
+If both `/usr/bin/cmake` and `/ucrt64/bin/cmake` are installed, use the
+UCRT64 one for this project:
+
+```bash
+/ucrt64/bin/cmake --preset ucrt64-release
+/ucrt64/bin/cmake --build --preset ucrt64-release --target cafe-recomp ttt2
+```
+
+In VS Code on Windows, this repository also includes
+`CMakeUserPresets.json` with an `ucrt64-release` preset wired for
+`C:/tools/msys64`. Select that preset in CMake Tools, then configure and
+build:
+
+```bash
+cmake --preset ucrt64-release
+cmake --build --preset ucrt64-release --target cafe-recomp ttt2
+```
+
+If CMake reports that `CMakeCache.txt` was created from a different source
+path (for example `/c/...` vs `E:/...`), delete the build folder and
+configure again:
+
+```bash
+rm -rf build-ucrt64-tools-ucrt64
+cmake --preset ucrt64-release
+```
+
 Recompiling takes a few seconds; compiling the generated code takes a few
 minutes. `local/`, `generated/`, `third_party/` and `build*/` are ignored by
 Git, so nothing derived from the game ends up in a commit; keep captures and
 dumps from the debugging options under `local/` too.
+
+### Windows quick start (validated flow)
+
+Run these in an **MSYS2 UCRT64** shell from the repository root:
+
+```bash
+cmake --preset ucrt64-release
+cmake --build --preset ucrt64-release --target cafe-recomp
+```
+
+Generate the game C++ from a supported Wii U dump folder (must contain
+`code/Tekken.rpx` with the SHA-256 listed in [The game](#the-game)):
+
+```bash
+./build-ucrt64-tools-ucrt64/recomp/cafe-recomp.exe \
+  "/c/path/to/TEKKEN TAG TOURNAMENT 2 Wii U EDITION/code/Tekken.rpx" \
+  "$PWD/generated/ttt2"
+```
+
+Then configure the runtime against the generated output and build `ttt2`:
+
+```bash
+cmake --preset ucrt64-release -DTTT2_GENERATED_DIR="$PWD/generated/ttt2"
+cmake --build --preset ucrt64-release --target ttt2
+```
+
+Run:
+
+```bash
+./build-ucrt64-tools-ucrt64/ttt2.exe "/c/path/to/TEKKEN TAG TOURNAMENT 2 Wii U EDITION"
+```
+
+Notes:
+
+- Launching `ttt2.exe` directly by double-click usually fails because it needs
+  a game path argument.
+- If the folder is correct but `ttt2` says the RPX hash does not match, verify
+  `code/Tekken.rpx` hash in the same shell:
+
+  ```bash
+  sha256sum "/c/path/to/TEKKEN TAG TOURNAMENT 2 Wii U EDITION/code/Tekken.rpx"
+  ```
+
+### Windows portable runtime folder
+
+This repository can also be run from a portable folder that contains
+`ttt2.exe` plus the required UCRT64 runtime DLLs:
+
+- `portable/ttt2-portable/ttt2.exe`
+- `portable/ttt2-portable/run-ttt2.bat`
+
+Use either:
+
+```bat
+portable\ttt2-portable\run-ttt2.bat
+```
+
+or pass a game folder explicitly:
+
+```bat
+portable\ttt2-portable\run-ttt2.bat "C:\path\to\TEKKEN TAG TOURNAMENT 2 Wii U EDITION"
+```
+
+If you rebuild `ttt2`, refresh the portable folder by copying the new
+`build-ucrt64-tools-ucrt64/ttt2.exe` and runtime `*.dll` files into
+`portable/ttt2-portable/`.
 
 ## The launcher
 
