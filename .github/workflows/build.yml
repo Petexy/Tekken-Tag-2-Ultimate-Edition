@@ -23,7 +23,7 @@ jobs:
           pacman -Syu --noconfirm --needed git cmake ninja clang gcc python
           python-numpy python-pillow zstd zlib openssl vulkan-headers
           vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Fetch pinned source dependencies
         run: python tools/setup_deps.py
       - name: Configure the original Linux build
@@ -42,7 +42,7 @@ jobs:
         run: cmake --build build-linux --parallel 2
       - name: Require the Linux launcher and compiler kit
         run: |
-          test -x build-linux/launcher/app/ttt2-launcher
+          test -x build-linux/launcher/ttt2-launcher
           test -f build-linux/launcher/kit/kit.ini
       - name: Test without proprietary game files
         run: ctest --test-dir build-linux --output-on-failure --timeout 120
@@ -51,7 +51,7 @@ jobs:
     name: Windows (MSYS2 CLANG64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build and test the documented Windows path
         shell: powershell
         run: >-
