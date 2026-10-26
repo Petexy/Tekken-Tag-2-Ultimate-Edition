@@ -1,0 +1,60 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.compiler }}, launcher enabled)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+    steps:
+      - name: Install Linux build dependencies
+        run: >-
+          pacman -Syu --noconfirm --needed git cmake ninja clang gcc python
+          python-numpy python-pillow zstd zlib openssl vulkan-headers
+          vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+      - uses: actions/checkout@v4
+      - name: Fetch pinned source dependencies
+        run: python tools/setup_deps.py
+      - name: Configure the original Linux build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == clang ]]; then
+            cc=clang
+            cxx=clang++
+          else
+            cc=gcc
+            cxx=g++
+          fi
+          cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx"
+      - name: Build runtime, tools, launcher and compiler kit
+        run: cmake --build build-linux --parallel 2
+      - name: Require the Linux launcher and compiler kit
+        run: |
+          test -x build-linux/launcher/app/ttt2-launcher
+          test -f build-linux/launcher/kit/kit.ini
+      - name: Test without proprietary game files
+        run: ctest --test-dir build-linux --output-on-failure --timeout 120
+
+  windows:
+    name: Windows (MSYS2 CLANG64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test the documented Windows path
+        shell: powershell
+        run: >-
+          ./tools/build_windows.ps1
+          -MsysRoot "$env:RUNNER_TEMP/ttt2-msys/msys64"
+          -BuildDirectory build-windows-ci -Jobs 2

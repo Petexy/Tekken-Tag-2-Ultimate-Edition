@@ -3,7 +3,8 @@
 <img width="1593" height="888" alt="image" src="https://github.com/user-attachments/assets/3bd58409-1442-4ce7-b9a6-8f036f38f4f8" />
 
 
-An unofficial native Linux port of **Tekken Tag Tournament 2 Wii U Edition**,
+An unofficial native port of **Tekken Tag Tournament 2 Wii U Edition** for
+Linux, with experimental Windows 11 support,
 made by static recompilation: the game's PowerPC code is translated to C++
 ahead of time and runs as native x86-64 code on a reimplementation of the
 Wii U's system libraries. There is no CPU emulation; the game's GPU commands
@@ -66,7 +67,10 @@ Playable from boot through arcade mode. Not done yet: the Wii U GamePad's
 screen and speaker, online play, the software keyboard and error viewer
 screens, and audio effects the game does not seem to use. Only the European
 version with update 16 is supported (other versions have different code).
-Tested on Linux with an AMD GPU (RADV) under KDE Plasma (Wayland). Design
+Tested on Linux with an AMD GPU (RADV) under KDE Plasma (Wayland). Native
+Windows 11 gameplay, Tekken 7 character imports and leverless movement in
+Practice have also been confirmed by a player. Windows uses command-line
+build and import tools; the GTK launcher remains Linux-only. Design
 notes, measurements and milestones are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -90,16 +94,20 @@ refuse a game whose executable is not the one they were built from.
 
 ## Requirements
 
-- Linux on x86-64 with AVX2 and FMA (x86-64-v3: Intel Haswell, AMD Excavator
+- Linux or Windows 11 on x86-64 with AVX2 and FMA (x86-64-v3: Intel Haswell, AMD Excavator
   or newer).
 - A Vulkan 1.3 GPU and driver with `VK_EXT_external_memory_host` and push
   descriptors (current AMD, Intel and NVIDIA drivers).
-- To build: Git, CMake 3.20+, Ninja, Clang (or GCC 15+), Python 3, and the
+- To build on Linux: Git, CMake 3.20+, Ninja, Clang (or GCC 15+), Python 3, and the
   development files of SDL 3.2 or newer, shaderc, the Vulkan loader, Vulkan
   headers recent enough to define `VK_KHR_present_wait2` (mid-2025 or
   newer), OpenSSL 3, zstd and zlib; for the launcher also GTK 4.10 or newer
   (without it the launcher is left out) and MinGW (optional: the Tekken 7
   and Tekken 8 helpers are then built in).
+- To build on Windows: Git and PowerShell 5.1 or newer. The Windows build
+  script installs an isolated MSYS2 CLANG64 toolchain and its dependencies
+  when needed. MSVC and the MSYS2 MINGW64/UCRT64 environments are not
+  supported by this build path.
 
 On Arch Linux:
 
@@ -112,6 +120,81 @@ releases such as Ubuntu 24.04 and Debian 12 ship SDL and Vulkan headers that
 are too old.
 
 ## Building
+
+### Windows 11 (experimental)
+
+The command-line tools and runtime can also be built as native Windows
+x86-64 binaries with **MSYS2 CLANG64**. Native gameplay and imports have
+been confirmed on Windows 11. The GTK launcher and its compiler kit remain Linux-only;
+the command-line character importer also supports Windows (see below).
+
+Clone this fork, then run the build script from PowerShell:
+
+```powershell
+git clone https://github.com/verqion/Tekken-Tag-2-Ultimate-Edition.git
+cd Tekken-Tag-2-Ultimate-Edition
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_windows.ps1
+```
+
+The script finds MSYS2 in `%LOCALAPPDATA%\ttt2-build\msys64` or `C:\msys64`,
+or downloads and checks an isolated copy when neither exists. It installs
+Clang, CMake, Ninja, Python and the native libraries, fetches the pinned sources,
+builds into **`build-windows`** and runs the Windows tests. It uses its own
+compiler paths, so a new terminal does not need changes to `PATH`, and it
+keeps the existing `build` directory separate. `-MsysRoot PATH`,
+`-BuildDirectory PATH`, `-Jobs N` and `-SkipTests` customize those steps.
+Use this script if a bare `cmake -G Ninja` command cannot find Ninja or
+Clang; installing Visual Studio alone does not supply this toolchain.
+
+The ready-to-run tools and their required DLLs are in **`build-windows/bin`**:
+`wua_extract.exe`, `cafe-recomp.exe`, `cafe-census.exe`, `cafe-semgen.exe` and
+`cafe-shader.exe`. The runtime archive is
+`build-windows/runtime/libttt2_runtime.a`. These do not contain the game.
+
+To generate and compile **`ttt2.exe`**, provide your own European game with
+update v16, as a `.wua` or an extracted game folder:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build_windows.ps1 -Game "D:\Games\Tekken Tag 2 EU v16.wua"
+.\build-windows\bin\ttt2.exe "D:\Games\Tekken Tag 2 EU v16.wua"
+```
+
+An extracted folder works too: pass the folder that contains `code/`,
+`content/` and `meta/` to `-Game`. Generated C++ stays in
+`generated/ttt2-windows`. The script also creates `build-windows/bin/Play.cmd`
+to start the compiled game with the source you supplied. Keep the packaged
+DLLs beside `ttt2.exe`.
+
+To install a standalone copy and create a desktop shortcut:
+
+```powershell
+.\build-windows\bin\ttt2.exe --install "D:\Games\Tekken Tag 2 EU v16.wua" "$env:USERPROFILE\Games\TekkenTag2Ultimate"
+& "$env:USERPROFILE\Games\TekkenTag2Ultimate\Tekken Tag Tournament 2.exe"
+```
+
+The installer copies the game files and required DLLs. The original archive
+is no longer required by the installed copy. Add `--no-launcher` to skip
+the desktop shortcut. Close the game before updating its executable after
+a rebuild:
+
+```powershell
+.\build-windows\bin\ttt2.exe --update "$env:USERPROFILE\Games\TekkenTag2Ultimate"
+```
+
+The script checks the RPX's SHA-256 before generating C++, and builds the
+game only when the matching executable exists. The runtime link test uses
+empty test tables and is **not** a playable game executable. Windows still
+requires an AVX2/FMA CPU and a Vulkan driver with the extensions listed
+above. Settings and saves use `.config/ttt2` and `.local/share/ttt2` under
+`HOME`, falling back to `USERPROFILE`; `XDG_CONFIG_HOME`, `TTT2_SAVE_DIR` and
+the other environment overrides remain available.
+
+Tests run automatically unless `-SkipTests` is used. With `-Game`, they
+also check the original game's combat input conversion using your local
+RPX and generated code. That test requires no full game launch. CI builds
+the runtime and tools from synthetic fixtures without any game files.
+
+### Linux
 
 ```bash
 git clone https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition.git && cd Tekken-Tag-2-Ultimate-Edition
@@ -135,6 +218,12 @@ Recompiling takes a few seconds; compiling the generated code takes a few
 minutes. `local/`, `generated/`, `third_party/` and `build*/` are ignored by
 Git, so nothing derived from the game ends up in a commit; keep captures and
 dumps from the debugging options under `local/` too.
+
+The original Linux build still enables the launcher and compiler kit by
+default. `-DTTT2_BUILD_LAUNCHER=OFF` builds only the runtime and tools;
+`ctest --test-dir build --output-on-failure` runs the tests. GitHub Actions
+builds the Linux path with both Clang and GCC, including the launcher and
+compiler kit, and checks the native Windows build separately.
 
 ## The launcher
 
@@ -265,6 +354,12 @@ keyboard) confirms and the right one goes back, except with a Nintendo
 controller, which confirms with its A as on the Wii U. The icons follow the
 last controller used (the keyboard counts as a neutral one).
 
+Leverless controllers work in D-pad (DP) and left-stick (LS) modes. Digital
+directions also feed the left-stick axes, and left-stick movement produces
+the D-pad inputs used in combat. Opposite digital directions on the same
+axis cancel to neutral. Stick direction flags are reported along with
+their analog axes, including press and release events.
+
 In Practice, 3 (left kick: by default K, or a gamepad's bottom button) and
 + (Start: Enter) pressed together, in either order, put both fighters back
 where the stage put them, standing, as Tekken 8's position reset does; the
@@ -309,6 +404,24 @@ Debugging variables are listed in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#running-the-port).
 
 ## Adding fighters
+
+On Windows, with Steam running and Tekken Tag 2 installed using
+`ttt2.exe --install`, use the native wrapper instead of the Linux tools:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/import_characters_windows.ps1 -GameDirectory "C:\Users\YOUR_USER\Games\TekkenTag2Ultimate"
+```
+
+It installs native Python, numpy and Pillow if needed, finds Tekken 7 in
+Steam's Windows libraries, checks your DLC ownership, runs Tekken 7 without
+sound on a private desktop while saving the required files, and converts all
+owned supported fighters. `-Fighters kazumi,chloe` selects particular
+fighters when invoking the script from PowerShell; `-OutDirectory PATH`
+changes where the packs go. The default is
+`%USERPROFILE%\.local\share\ttt2\characters`, also found by the Windows
+runtime. When using `-OutDirectory`, set `TTT2_CHARACTERS` to that same path
+when starting the game. Only processes created for the import are closed afterwards.
+Proton, gamescope and pactl are not needed on Windows.
 
 The fighters of Tekken 7 that Tekken Tag Tournament 2 does not have can join
 the roster beside its own (no fighter is replaced): Kazumi Mishima, Lucky
