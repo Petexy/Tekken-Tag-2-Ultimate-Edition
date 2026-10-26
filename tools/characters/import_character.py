@@ -307,7 +307,7 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
     # only fighters the player owns, whichever movesets are already saved (DLC fighters: as Steam tells)
     ids = [importer.definition(f).TEKKEN7_ID for f in fighters]
     if any(fid in autodump.DLC for fid in ids):
-        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden in Tekken 7\'s Proton prefix)')
+        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs in the background)')
     try:
         skipped = autodump.unowned(ids)
     except autodump.DumpError as error:

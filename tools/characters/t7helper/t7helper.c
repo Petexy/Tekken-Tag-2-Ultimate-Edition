@@ -1,12 +1,12 @@
-/* t7helper: loads Tekken 7 fighters' movesets through the game's own loader, from inside its Wine prefix (run with
- * Proton next to the running game; tools/characters/ttt2char/tekken7/autodump.py drives it).
+/* t7helper: loads Tekken 7 fighters' movesets through the game's own loader, on native Windows or in Wine
+ * next to the running game; tools/characters/ttt2char/tekken7/autodump.py drives it.
  *
  *   t7helper serve <port> <secret>     takes one connection at a time on 127.0.0.1:<port> (Proton's launcher passes no
  *                                      stdin/stdout on); the first line must be the secret, then commands, one per
  *                                      line, each answered on the connection:
  *     dlc <steam_api64.dll path>       the game's DLC as the game asks Steam (SteamAppId=389730, Steam running):
  *                                      "<appid> <owned 0/1> <name>" lines, then "end" ("error ..." without Steam)
- *     attach                           finds the game (TekkenGame-Win64-Shipping.exe) and where it is loaded, and checks
+ *     attach [pid]                     finds the game (or uses the session's pid), locates its image and checks
  *                                      that it is the build whose functions this helper knows (by hashes of their
  *                                      first bytes): "ok", or "error ..."
  *     ready                            whether the game's task manager and file loader exist yet: "1" or "0"
@@ -201,9 +201,9 @@ static int matches(const struct Function* f) {
     return h == f->hash;
 }
 
-static void attach(void) {
+static void attach(DWORD requested_pid) {
     g_checked = 0;
-    const DWORD pid = game_pid();
+    const DWORD pid = requested_pid ? requested_pid : game_pid();
     if (!pid) {
         out_printf("error Tekken 7 is not running\n");
         return;
@@ -514,7 +514,11 @@ static int serve(int port, const char* secret) {
         } else if (!strcmp(cmd, "dlc") && sscanf(line, "%*s %299[^\n]", arg) == 1) {
             dlc(arg);
         } else if (!strcmp(cmd, "attach")) {
-            attach();
+            if (sscanf(line, "%*s %llu", &a) == 1 && a > 0xffffffffull) {
+                out_printf("error invalid game process id\n");
+            } else {
+                attach((DWORD)a);
+            }
         } else if (!strcmp(cmd, "ready")) {
             ready();
         } else if (!strcmp(cmd, "common")) {

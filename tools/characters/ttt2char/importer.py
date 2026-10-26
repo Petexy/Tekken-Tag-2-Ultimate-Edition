@@ -63,6 +63,18 @@ def ttt2_folder(folder):
 saved_movesets = tkmvst.saved_movesets          # (there: launcher.py reads them without numpy)
 
 
+def _slot_for(folder, code, reserved_slot=None):
+    """A serial import chooses a free place; a batch may preassign unique new places."""
+    if reserved_slot is None:
+        return pack.choose_slot(folder, code)
+    places = pack.places_of(pack.installed(folder))
+    if not isinstance(reserved_slot, int) or not 0 <= reserved_slot < pack.MAX_FIGHTERS or \
+            any(k == reserved_slot and owner != code for owner, k in places.items()) or \
+            (code in places and places[code] != reserved_slot):
+        raise InputError('the reserved character slot is invalid or already occupied')
+    return reserved_slot
+
+
 def find_movesets(folder, d):
     """The fighter's and Heihachi's .tkmvst files in `folder`."""
     if not folder or not os.path.isdir(folder):
@@ -124,7 +136,7 @@ def tekken8_moveset(d, folder):
     return (k, files, references), None
 
 
-def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, files=FILES, tekken8=None):
+def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, files=FILES, tekken8=None, reserved_slot=None):
     """Imports fighter `name`; returns the pack's folder. movesets: the folder of the fighter's saved movesets
     (Tekken 7: the .tkmvst files; Tekken 8: tekken8/autodump.py's, None: its MOVESETS). make_shared: also remake what
     the packs share (shared/; an import of several fighters makes it once, after the last). files: the folder of the
@@ -132,7 +144,7 @@ def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, fi
     installation (a Tekken 8 fighter's, else for shared/ when a Tekken 8 fighter's pack is installed; None: found
     through Steam)."""
     try:
-        return _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8)
+        return _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, reserved_slot)
     except EncryptedError as error:
         raise InputError('Tekken 7 keeps %s encrypted and it has not been saved from the running game yet: run '
                          'dump_tekken7.py %s (or import_character.py, which runs it) with Steam running'
@@ -266,7 +278,7 @@ def _source(d, tekken7, tekken8, files):
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
 
 
-def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
+def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, reserved_slot):
     d = definition(name)
     folder, open_source = _source(d, tekken7, tekken8, files)
     saved8 = None
@@ -288,7 +300,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
     if not archives.has(key_of(d.DONOR + '.xml')):
         raise InputError('%s has no %s files: is it the Wii U game\'s folder?' % (game, d.DONOR))
 
-    slot = pack.choose_slot(out, d.CODE)
+    slot = _slot_for(out, d.CODE, reserved_slot)
     if slot is None:
         raise InputError('the game has room for %d added fighters and %s holds them already: delete one\'s folder '
                          'first' % (pack.MAX_FIGHTERS, out))

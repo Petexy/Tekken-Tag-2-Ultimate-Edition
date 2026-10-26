@@ -25,9 +25,10 @@ yet).
 Written for this project (no third-party code).
 """
 import atexit
-import fcntl
 import hashlib
 import os
+if os.name != 'nt':
+    import fcntl
 import re
 import secrets
 import shutil
@@ -104,7 +105,8 @@ def _libraries(steam, sandbox=None):
     out = [steam]
     vdf = os.path.join(steam, 'steamapps', 'libraryfolders.vdf')
     if os.path.isfile(vdf):
-        out += [_host_path(p, sandbox) for p in re.findall(r'"path"\s+"([^"]+)"', _text(vdf))]
+        out += [_host_path(p.replace('\\\\', '\\') if os.name == 'nt' else p, sandbox)
+                for p in re.findall(r'"path"\s+"([^"]+)"', _text(vdf))]
     return list(dict.fromkeys(out))
 
 
@@ -279,7 +281,8 @@ class Helper:
             out.append((int(a), owned == '1', name))
 
     def attach(self):
-        return self._answer('attach')
+        pid = getattr(self, 'target_pid', None)
+        return self._answer('attach %d' % pid if pid else 'attach')
 
     def ready(self):
         return self._answer('ready') == '1'
@@ -500,7 +503,7 @@ def _owner_alive(tag):
     return fields is not None and fields[19] == started.partition('.')[0]
 
 
-def _kill(pids, sig=signal.SIGKILL):
+def _kill(pids, sig=getattr(signal, 'SIGKILL', signal.SIGTERM)):
     for pid in pids:
         try:
             os.kill(pid, sig)
@@ -760,7 +763,7 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     cache = cache or CACHE
     run = os.path.join(cache, 'run')
     helper_exe = build_helper(cache)
-    log('Tekken 7: %s (Proton: %s)' % (t7.game, os.path.basename(t7.proton)))
+    log('Tekken 7: %s (%s)' % (t7.game, 'native Windows' if os.name == 'nt' else 'Proton: ' + os.path.basename(t7.proton)))
     owned = owned_dlc(t7, helper_exe, run)
     names = dict(fighters)
     if names:
@@ -824,3 +827,8 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     finally:
         s.close()
     return dumped, skipped
+
+
+if os.name == 'nt':
+    from .autodump_windows import (Session, build_helper, find_tekken7, owned_dlc,
+                                   steam_running, steams, tekken7_running)

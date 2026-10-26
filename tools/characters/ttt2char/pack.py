@@ -99,8 +99,11 @@ def output_folder(folder):
     folder = os.path.abspath(os.path.expanduser(folder or default_folder()))
     real = os.path.realpath(folder)       # through symbolic links, which could lead into the repository
     # (installed, in <prefix>/share/ttt2/characters as in the AppImage, the importer is in no repository)
-    if os.path.exists(os.path.join(REPOSITORY, '.git')) and os.path.commonpath([real, REPOSITORY]) == REPOSITORY \
-            and not git_ignores(real):
+    try:
+        inside_repository = os.path.normcase(os.path.commonpath([real, REPOSITORY])) == os.path.normcase(REPOSITORY)
+    except ValueError:
+        inside_repository = False  # Windows paths on different drives cannot overlap.
+    if os.path.exists(os.path.join(REPOSITORY, '.git')) and inside_repository and not git_ignores(real):
         raise InputError('the pack would go into the repository (%s): packs hold Namco\'s assets and must stay out '
                          'of it; leave out --out (the default is %s)' % (folder, default_folder()))
     return folder
