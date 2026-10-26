@@ -55,18 +55,17 @@ bool there(const fs::path& path) {
 }
 
 // A program that runs until it is killed, made at `program` as the game's
-// program would be (a copy of sleep: a script would show as its shell in
-// /proc/<pid>/exe). Its pid once it runs from there, or 0.
+// program would be (a copy of this test in --wait mode: a script would show
+// as its shell in /proc/<pid>/exe). Its pid once it runs from there, or 0.
 pid_t run_program(const fs::path& program) {
     std::error_code ec;
     fs::create_directories(program.parent_path(), ec);
-    fs::copy_file("/bin/sleep", program, fs::copy_options::overwrite_existing, ec);
+    fs::copy_file("/proc/self/exe", program, fs::copy_options::overwrite_existing, ec);
     fs::permissions(program, fs::perms::owner_all, ec);
     if (ec) return 0;
     const pid_t pid = ::fork();
     if (pid == 0) {
-        // (argv[0] "sleep": a multi-call coreutils picks its tool by it.)
-        ::execl(program.c_str(), "sleep", "60", static_cast<char*>(nullptr));
+        ::execl(program.c_str(), program.c_str(), "--wait", static_cast<char*>(nullptr));
         ::_exit(127);
     }
     const std::string exe = "/proc/" + std::to_string(pid) + "/exe";
@@ -998,6 +997,9 @@ void test_release(const fs::path& root) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--wait") {
+        for (;;) ::pause();
+    }
     const fs::path base = fs::absolute(argc > 1 ? fs::path(argv[1]) : fs::temp_directory_path()).lexically_normal();
     fs::create_directories(base);
     std::string pattern = (base / "launcher_core_test.XXXXXX").string();

@@ -395,7 +395,14 @@ class Sessions(unittest.TestCase):
         self.bin, self.logs = os.path.join(h, 'bin'), os.path.join(h, 'logs')
         for d in (self.bin, self.logs, os.path.join(h, 'run')):
             os.makedirs(d)
-        sleep = shutil.which('sleep')
+        # A dedicated ELF fixture keeps /proc's process names independent of
+        # whether the distribution ships GNU or multi-call coreutils.
+        from ttt2char import native
+        if native.compiler() is None:
+            self.skipTest('a C compiler is needed for the fake game processes')
+        src = os.path.join(h, 'sleeper.c')
+        write(src, '#include <unistd.h>\nint main(void) { for (;;) pause(); }\n')
+        sleep = native.build('sleeper', src, kind='executable', cache=os.path.join(h, 'native'))
         for name in ('TekkenGame-Win64-Shipping', 'steam'):
             shutil.copy(sleep, os.path.join(self.bin, name))
         proton = os.path.join(h, 'proton')

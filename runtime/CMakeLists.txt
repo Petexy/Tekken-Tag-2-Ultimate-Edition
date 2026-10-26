@@ -76,7 +76,7 @@ endif()
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 # GLSL -> SPIR-V at run time.
-find_library(SHADERC_LIBRARY NAMES shaderc_shared REQUIRED)
+find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc REQUIRED)
 target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title OpenSSL::Crypto ZArchive::zarchive amd_addrlib cafe_latte
     Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY})
 # Vulkan structures are initialised with only their sType.
