@@ -1,3 +1,12 @@
+# Optional regression against the player's recompiled game input routine.
+# Ordinary tests still need no proprietary game data.
+set(TTT2_INPUT_TEST_RPX "" CACHE FILEPATH "Matching Tekken.rpx for the combat input regression")
+if(TARGET ttt2_generated AND EXISTS "${TTT2_INPUT_TEST_RPX}")
+    add_executable(game_input_test game_input_test.cpp)
+    target_link_libraries(game_input_test PRIVATE cafe_runtime ttt2_generated)
+    add_test(NAME game_input_test COMMAND game_input_test "${TTT2_INPUT_TEST_RPX}")
+endif()
+
 include(runtime_input.cmake)
 
 if(WIN32)

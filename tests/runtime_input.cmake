@@ -14,6 +14,10 @@ add_library(runtime_check_stub OBJECT ${stub})
 target_include_directories(runtime_check_stub PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)
 target_compile_features(runtime_check_stub PRIVATE cxx_std_20)
 
+add_executable(input_test input_test.cpp $<TARGET_OBJECTS:runtime_check_stub>)
+target_link_libraries(input_test PRIVATE cafe_runtime)
+add_test(NAME input_test COMMAND input_test)
+
 add_executable(runtime_link_test ${CMAKE_SOURCE_DIR}/runtime/src/main.cpp $<TARGET_OBJECTS:runtime_check_stub>)
 target_link_libraries(runtime_link_test PRIVATE cafe_runtime)
 add_test(NAME runtime_cli_help COMMAND runtime_link_test --help)

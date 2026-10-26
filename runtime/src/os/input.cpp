@@ -8,6 +8,7 @@
 #include "cafe/input.h"
 #include "cafe/vfs.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -192,6 +193,41 @@ uint32_t gate_select(uint32_t hold) {
 constexpr int32_t kVpadOk = 0;
 constexpr int32_t kVpadNoController = -2;
 
+GamepadState movement_state(GamepadState state) {
+    // Keep DP and LS movement consistent. Resolve opposite digital
+    // directions to neutral on that axis; digital input takes precedence
+    // over analog drift.
+    const auto digital_axis = [&](uint32_t negative, uint32_t positive, float analog) {
+        const bool neg = state.buttons & negative, pos = state.buttons & positive;
+        if (!neg && !pos) return std::clamp(analog, -1.0f, 1.0f);
+        if (neg && pos) state.buttons &= ~(negative | positive);
+        return float(pos) - float(neg);
+    };
+    state.left_x = digital_axis(vpad::kLeft, vpad::kRight, state.left_x);
+    state.left_y = digital_axis(vpad::kDown, vpad::kUp, state.left_y);
+    state.right_x = std::clamp(state.right_x, -1.0f, 1.0f);
+    state.right_y = std::clamp(state.right_y, -1.0f, 1.0f);
+
+    // Wii U reports stick directions in hold/trigger/release too. Sending
+    // only axes leaves LS-mode controllers without these digital inputs.
+    constexpr uint32_t directions = vpad::kStickLLeft | vpad::kStickLRight | vpad::kStickLUp | vpad::kStickLDown |
+                                    vpad::kStickRLeft | vpad::kStickRRight | vpad::kStickRUp | vpad::kStickRDown;
+    state.buttons &= ~directions;
+    const auto stick_axis = [&](float value, uint32_t negative, uint32_t positive) {
+        if (value <= -0.5f) state.buttons |= negative;
+        if (value >= 0.5f) state.buttons |= positive;
+    };
+    stick_axis(state.left_x, vpad::kStickLLeft, vpad::kStickLRight);
+    stick_axis(state.left_y, vpad::kStickLDown, vpad::kStickLUp);
+    stick_axis(state.right_x, vpad::kStickRLeft, vpad::kStickRRight);
+    stick_axis(state.right_y, vpad::kStickRDown, vpad::kStickRUp);
+    // Combat's sub_03F52F20 matches the D-pad masks, not the VPAD stick
+    // emulation flags. An LS-mode leverless therefore needs these bits too.
+    stick_axis(state.left_x, vpad::kLeft, vpad::kRight);
+    stick_axis(state.left_y, vpad::kDown, vpad::kUp);
+    return state;
+}
+
 struct Vec2 { be<float> x, y; };
 struct Vec3 { be<float> x, y, z; };
 struct TouchData { be<uint16_t> x, y, touched, validity; };
@@ -224,13 +260,16 @@ int32_t VPADRead(int32_t channel, VPADStatus* status, uint32_t count, be<int32_t
     }
     std::lock_guard lock(g_input_mutex);
     std::memset(status, 0, sizeof(VPADStatus));
-    const uint32_t hold = gate_select(g_gamepad.buttons | scripted_buttons());
+    GamepadState state = g_gamepad;
+    state.buttons |= scripted_buttons();
+    state = movement_state(state);
+    const uint32_t hold = gate_select(state.buttons);
     status->hold = hold;
     status->trigger = hold & ~g_previous_hold;
     status->release = g_previous_hold & ~hold;
     g_previous_hold = hold;
-    status->left_stick = {g_gamepad.left_x, g_gamepad.left_y};
-    status->right_stick = {g_gamepad.right_x, g_gamepad.right_y};
+    status->left_stick = {state.left_x, state.left_y};
+    status->right_stick = {state.right_x, state.right_y};
     // A GamePad lying flat and still: gravity on -Z (in g), identity frame.
     status->acceleration = {0.0f, 0.0f, -1.0f};
     status->acc_magnitude = 1.0f;

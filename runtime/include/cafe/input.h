@@ -14,6 +14,12 @@ constexpr uint32_t kLeft = 0x0800, kRight = 0x0400, kUp = 0x0200, kDown = 0x0100
 constexpr uint32_t kZL = 0x0080, kZR = 0x0040, kL = 0x0020, kR = 0x0010;
 constexpr uint32_t kPlus = 0x0008, kMinus = 0x0004, kHome = 0x0002;
 constexpr uint32_t kStickR = 0x00020000, kStickL = 0x00040000;
+// VPAD_STICK_*_EMULATION_*: direction flags alongside the analog axes.
+// https://github.com/devkitPro/wut/blob/master/include/vpad/input.h
+constexpr uint32_t kStickLLeft = 0x40000000, kStickLRight = 0x20000000;
+constexpr uint32_t kStickLUp = 0x10000000, kStickLDown = 0x08000000;
+constexpr uint32_t kStickRLeft = 0x04000000, kStickRRight = 0x02000000;
+constexpr uint32_t kStickRUp = 0x01000000, kStickRDown = 0x00800000;
 } // namespace vpad
 
 struct GamepadState {
