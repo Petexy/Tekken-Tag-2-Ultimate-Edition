@@ -2,11 +2,12 @@
 /build*/
 /third_party/
 /generated/
+/portable/
 __pycache__/
 *.pyc
 # launcher/appimage/make_appimage.sh's output
 *.AppImage
-
+*.bat
 # The game and anything taken or generated from it stay out of the repository.
 *.wua
 *.wud
@@ -40,3 +41,15 @@ character.ini
 *.pak
 *.nus3bank
 *.part
+
+# Extra safety for local/portable character import outputs and copied game data.
+# These folders are runtime/importer outputs and may contain copyrighted assets.
+/game/
+/data/
+/characters/
+/tekken7/
+/.local/
+**/ttt2/characters/
+**/ttt2/tekken7/
+colours.json
+*.add
