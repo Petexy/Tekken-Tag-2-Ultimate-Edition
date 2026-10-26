@@ -16,10 +16,15 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <winternl.h>
+#endif
 
 namespace fs = std::filesystem;
 
 namespace {
+#ifndef _WIN32
 class Fd {
 public:
     explicit Fd(int value = -1) : value_(value) {}
@@ -44,6 +49,7 @@ private:
     const int error = errno;
     throw std::runtime_error(operation + ": " + std::strerror(error));
 }
+#endif
 
 void validate_component(std::string_view name) {
     if (name.empty() || name == "." || name == "..")
@@ -53,6 +59,15 @@ void validate_component(std::string_view name) {
         if (c < 32 || c == 127 || c == '/' || c == '\\')
             throw std::runtime_error("Archive contains an unsafe path component");
     }
+#ifdef _WIN32
+    if (name.find_first_of(":<>\"|?*") != std::string_view::npos || name.back() == '.' || name.back() == ' ')
+        throw std::runtime_error("Archive contains an unsafe Windows path component");
+    std::string stem(name.substr(0, name.find('.')));
+    std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return std::toupper(c); });
+    if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+        (stem.size() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem[3] >= '0' && stem[3] <= '9'))
+        throw std::runtime_error("Archive contains a reserved Windows device name");
+#endif
 }
 
 struct Entry {
@@ -98,6 +113,9 @@ std::vector<Entry> inventory(ZArchiveReader& reader) {
     return files;
 }
 
+#ifdef _WIN32
+#include "wua_extract_windows.h"
+#else
 Fd child_directory(int parent, const std::string& name) {
     if (::mkdirat(parent, name.c_str(), 0755) != 0 && errno != EEXIST)
         system_error("Cannot create directory " + name);
@@ -118,16 +136,6 @@ Fd output_directory(const fs::path& output) {
     return current;
 }
 
-bool analysis_file(const std::string& path) {
-    // WUA paths are TITLEID_VERSION/code/... and TITLEID_VERSION/meta/....
-    const auto first = path.find('/');
-    if (first == std::string::npos) return false;
-    const auto second = path.find('/', first + 1);
-    if (second == std::string::npos) return false;
-    const auto directory = path.substr(first + 1, second - first - 1);
-    return directory == "code" || directory == "meta";
-}
-
 void extract_file(ZArchiveReader& reader, const Entry& entry, int root) {
     const int duplicate = ::fcntl(root, F_DUPFD_CLOEXEC, 0);
     if (duplicate < 0) system_error("Cannot duplicate output directory handle");
@@ -140,7 +148,7 @@ void extract_file(ZArchiveReader& reader, const Entry& entry, int root) {
     if (output.get() < 0)
         system_error("Cannot create output file (existing files are never overwritten) " + entry.path);
     try {
-        std::array<unsigned char, 1024 * 1024> buffer{};
+        std::vector<unsigned char> buffer(1024 * 1024);
         uint64_t offset = 0;
         while (offset < entry.size) {
             const auto length = std::min<uint64_t>(buffer.size(), entry.size - offset);
@@ -162,6 +170,16 @@ void extract_file(ZArchiveReader& reader, const Entry& entry, int root) {
         ::unlinkat(parent.get(), name.c_str(), 0);
         throw;
     }
+}
+#endif
+
+bool analysis_file(const std::string& path) {
+    const auto first = path.find('/');
+    if (first == std::string::npos) return false;
+    const auto second = path.find('/', first + 1);
+    if (second == std::string::npos) return false;
+    const auto directory = path.substr(first + 1, second - first - 1);
+    return directory == "code" || directory == "meta";
 }
 } // namespace
 

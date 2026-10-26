@@ -5,6 +5,7 @@
 // account is a non-network account, both states every title must handle.
 
 #include "kernel.h"
+#include "host/time.h"
 
 #include "cafe/export.h"
 
@@ -81,9 +82,7 @@ Result act_country(char* out) {
 // Offset of local time from UTC in microseconds.
 int64_t act_utc_offset() {
     const time_t now = std::time(nullptr);
-    struct tm local;
-    localtime_r(&now, &local);
-    return int64_t{local.tm_gmtoff} * 1000000;
+    return host::utc_offset(now) * 1000000;
 }
 Result act_parental_slot(uint8_t* out, uint8_t) {
     if (out) *out = kSlot;

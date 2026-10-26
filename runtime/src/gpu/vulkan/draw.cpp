@@ -114,6 +114,9 @@ std::filesystem::path cache_directory() {
         std::filesystem::path d;
         if (const char* x = std::getenv("XDG_CACHE_HOME"); x && *x) d = x;
         else if (const char* h = std::getenv("HOME")) d = std::filesystem::path(h) / ".cache";
+#ifdef _WIN32
+        else if (const char* h = std::getenv("USERPROFILE")) d = std::filesystem::path(h) / ".cache";
+#endif
         else return std::filesystem::path();
         d /= "ttt2";
         std::error_code ec;

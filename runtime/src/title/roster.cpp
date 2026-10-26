@@ -352,6 +352,9 @@ fs::path packs_directory() {
     if (const char* dir = std::getenv("TTT2_CHARACTERS"); dir && *dir) return dir;
     if (const char* data = std::getenv("XDG_DATA_HOME"); data && *data) return fs::path(data) / "ttt2/characters";
     const char* home = std::getenv("HOME");
+#ifdef _WIN32
+    if (!home || !*home) home = std::getenv("USERPROFILE");
+#endif
     return fs::path(home ? home : ".") / ".local/share/ttt2/characters";
 }
 
@@ -429,7 +432,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                          std::all_of(pack.code.begin(), pack.code.end(), [](char c) { return c >= 'a' && c <= 'z'; });
     if (!code_ok || pack.donor.empty()) {
         std::fprintf(stderr, "ttt2: warning: %s needs a three-letter `code` and a `donor`; skipped\n",
-                     (directory / "character.ini").c_str());
+                     (directory / "character.ini").string().c_str());
         return std::nullopt;
     }
     std::error_code ec;
@@ -450,7 +453,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                 ((static_cast<size_t>(header[6]) << 8) | header[7]) == pack.outfits.size();
         if (!valid) {
             std::fprintf(stderr, "ttt2: warning: %s: invalid/incomplete outfit sets; using the default costume\n",
-                         directory.c_str());
+                         directory.string().c_str());
             pack.outfits.clear();
         }
     }
@@ -613,7 +616,7 @@ std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t
     std::vector<std::string> failed;
     for (const auto& [name, map] : raw) {
         if (vfs::set_archive_entries(name, map)) continue;
-        std::fprintf(stderr, "ttt2: warning: %s: its entries of %s could not be added\n", from.c_str(), name.c_str());
+        std::fprintf(stderr, "ttt2: warning: %s: its entries of %s could not be added\n", from.string().c_str(), name.c_str());
         failed.push_back(name);
     }
     return failed;
@@ -659,7 +662,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         } else if (f.name.size() < 4 ||
                    (f.name.compare(f.name.size() - 4, 4, ".mop") != 0 &&
                     (f.name.size() < 10 || f.name.compare(f.name.size() - 10, 10, ".havok.xml") != 0))) {
-            std::fprintf(stderr, "ttt2: warning: neither %s nor its donor has %s\n", pack.directory.c_str(),
+            std::fprintf(stderr, "ttt2: warning: neither %s nor its donor has %s\n", pack.directory.string().c_str(),
                          f.name.c_str());
             return false;
         }
@@ -737,11 +740,11 @@ void add_shared(const fs::path& directory) {
         if (!contents) continue;
         if (!add_title_copy(located, name, *key, *contents, entries, raw)) {
             std::fprintf(stderr, "ttt2: warning: %s: %s does not fit the title's entry; left out\n",
-                         directory.c_str(), name.c_str());
+                         directory.string().c_str(), name.c_str());
         }
     }
     if (!vfs::set_archive_entries("content/hdd/data100", entries)) {
-        std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.c_str());
+        std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.string().c_str());
         return;
     }
     const auto failed = serve_raw(raw, directory);
@@ -1251,7 +1254,7 @@ void prepare_roster() {
             at.push_back(&pack);
         } else {
             std::fprintf(stderr, "ttt2: warning: %s: all %d places of added fighters are taken; skipped\n",
-                         pack.directory.c_str(), kMaxFighters);
+                         pack.directory.string().c_str(), kMaxFighters);
         }
     }
     outfit_menu::CodeOwners codes;
@@ -1270,35 +1273,35 @@ void prepare_roster() {
         const Pack& pack = *at[k];
         if (codes.conflicts(k)) {
             std::fprintf(stderr, "ttt2: warning: %s: duplicate fighter/outfit code; skipped\n",
-                         pack.directory.c_str());
+                         pack.directory.string().c_str());
             continue;
         }
         if (pack.format < kPackFormat) {
             std::fprintf(stderr,
                          "ttt2: warning: %s was made by an older importer (pack format %d, this game loads %d): add "
                          "it again (the launcher offers it); skipped\n",
-                         pack.directory.c_str(), pack.format, kPackFormat);
+                         pack.directory.string().c_str(), pack.format, kPackFormat);
             continue;
         }
         if (pack.format > kPackFormat) {
             std::fprintf(stderr,
                          "ttt2: warning: %s was made by a newer importer (pack format %d, this game loads %d): "
                          "update the game; skipped\n",
-                         pack.directory.c_str(), pack.format, kPackFormat);
+                         pack.directory.string().c_str(), pack.format, kPackFormat);
             continue;
         }
         const auto donor = fighter_id(pack.donor);
         const auto donor_row = donor ? motion_row(*donor) : std::nullopt;
         if (!donor || *donor >= 59 || !donor_row) {
             std::fprintf(stderr, "ttt2: warning: %s: no fighter `%s` to borrow from; skipped\n",
-                         pack.directory.c_str(), pack.donor.c_str());
+                         pack.directory.string().c_str(), pack.donor.c_str());
             continue;
         }
         if (fighter_id(pack.code) || std::any_of(g_added.begin(), g_added.end(), [&](const Added& a) {
                 return a.active && a.code == pack.code;
             })) {
             std::fprintf(stderr, "ttt2: warning: %s: the code `%s` is a fighter's already; skipped\n",
-                         pack.directory.c_str(), pack.code.c_str());
+                         pack.directory.string().c_str(), pack.code.c_str());
             continue;
         }
         Added& added = g_added[k];
@@ -1335,7 +1338,7 @@ void prepare_roster() {
         }
         if (added.outfits.size() != pack.outfits.size()) continue;
         if (!add_entries(pack, *donor_row, k)) {
-            std::fprintf(stderr, "ttt2: warning: %s could not be added\n", pack.directory.c_str());
+            std::fprintf(stderr, "ttt2: warning: %s could not be added\n", pack.directory.string().c_str());
             continue;
         }
         added.code_string = guest_string(pack.code);
@@ -1345,13 +1348,13 @@ void prepare_roster() {
             added.column = kCells[k].column;
             added.grid_row = kCells[k].row;
         } else {
-            std::fprintf(stderr, "ttt2: warning: %s: no free cell left in the select grid\n", pack.directory.c_str());
+            std::fprintf(stderr, "ttt2: warning: %s: no free cell left in the select grid\n", pack.directory.string().c_str());
         }
         patch_title(k);
         prepare_art(pack, k, directory / "shared");
         prepare_costumes(pack, *donor, k);
         g_active = true;
-        std::fprintf(stderr, "ttt2: added the fighter %s from %s (id %u)\n", pack.code.c_str(), pack.directory.c_str(),
+        std::fprintf(stderr, "ttt2: added the fighter %s from %s (id %u)\n", pack.code.c_str(), pack.directory.string().c_str(),
                      added.id);
     }
     if (!g_active) return;

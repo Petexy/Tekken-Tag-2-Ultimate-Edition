@@ -2,10 +2,14 @@
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #include <signal.h>
 #include <ucontext.h>
 #include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -33,6 +37,30 @@ void print_backtrace(const PPCContext& ctx) {
     }
 }
 
+#ifdef _WIN32
+LONG WINAPI fault_handler(EXCEPTION_POINTERS* exception) {
+    const auto code = exception->ExceptionRecord->ExceptionCode;
+    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_IN_PAGE_ERROR &&
+        code != EXCEPTION_ILLEGAL_INSTRUCTION && code != EXCEPTION_STACK_OVERFLOW)
+        return EXCEPTION_CONTINUE_SEARCH;
+    const auto address = exception->ExceptionRecord->ExceptionAddress;
+    std::fprintf(stderr, "\nhost exception 0x%08lX at %p\n", code, address);
+    if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) {
+        const auto host = exception->ExceptionRecord->ExceptionInformation[1];
+        const auto base = reinterpret_cast<uintptr_t>(guest_base());
+        if (base && host >= base && host - base < (uint64_t{1} << 32) + 0x10000)
+            std::fprintf(stderr, "guest memory fault: 0x%08llX\n", static_cast<unsigned long long>(host - base));
+    }
+    MEMORY_BASIC_INFORMATION region{};
+    if (VirtualQuery(address, &region, sizeof region)) {
+        std::fprintf(stderr, "host code offset: 0x%llX\n",
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address) -
+                                                      reinterpret_cast<uintptr_t>(region.AllocationBase)));
+    }
+    if (t_current) print_guest_state(*t_current);
+    std::_Exit(70);
+}
+#else
 void fault_handler(int signal, siginfo_t* info, void* context) {
     const auto host = reinterpret_cast<uintptr_t>(info->si_addr);
     const auto base = reinterpret_cast<uintptr_t>(guest_base());
@@ -62,6 +90,7 @@ void fault_handler(int signal, siginfo_t* info, void* context) {
     }
     std::_Exit(128 + signal);
 }
+#endif
 
 } // namespace
 
@@ -96,6 +125,9 @@ void fatal(const char* format, ...) {
 }
 
 void install_fault_handler() {
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(fault_handler);
+#else
     static char alternate_stack[64 * 1024];
     stack_t stack{};
     stack.ss_sp = alternate_stack;
@@ -106,6 +138,7 @@ void install_fault_handler() {
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigaction(SIGSEGV, &action, nullptr);
     sigaction(SIGBUS, &action, nullptr);
+#endif
 }
 
 } // namespace cafe

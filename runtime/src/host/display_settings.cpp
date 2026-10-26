@@ -1,4 +1,5 @@
 #include "host/display_settings.h"
+#include "host/file.h"
 
 #include <sys/stat.h>
 
@@ -87,8 +88,7 @@ std::string summary(const Settings& s) {
 bool set(const char* value) { return value != nullptr && *value != '\0'; }
 
 fs::path home() {
-    const char* h = std::getenv("HOME");
-    return h && *h ? fs::path(h) : fs::path("/");
+    return file::home();
 }
 
 Active g_active;
@@ -209,7 +209,7 @@ std::string format(const Settings& settings) {
 
 fs::path file_path() {
     const char* config = std::getenv("XDG_CONFIG_HOME");
-    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2" / "display.ini";
+    return (config && fs::path(config).is_absolute() ? fs::path(config) : home() / ".config") / "ttt2" / "display.ini";
 }
 
 Loaded load(const fs::path& file) {
@@ -220,8 +220,8 @@ Loaded load(const fs::path& file) {
         loaded.log.push_back("display: defaults (" + why + ")");
         return loaded;
     };
-    struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    file::Stat st{};
+    if (file::stat(file, &st) != 0) {
         const int error = errno;
         if (error == ENOENT || error == ENOTDIR) {
             loaded.log.push_back("display: defaults (no " + name + ")");

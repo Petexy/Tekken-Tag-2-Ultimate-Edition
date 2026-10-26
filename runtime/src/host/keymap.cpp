@@ -1,4 +1,5 @@
 #include "host/keymap.h"
+#include "host/file.h"
 
 #include <sys/stat.h>
 
@@ -69,8 +70,7 @@ Key key_of(std::string_view value, const Resolver& resolve) {
 }
 
 fs::path home() {
-    const char* h = std::getenv("HOME");
-    return h && *h ? fs::path(h) : fs::path("/");
+    return file::home();
 }
 
 } // namespace
@@ -133,14 +133,14 @@ Parsed parse(std::string_view text, const Resolver& resolve) {
 
 fs::path file_path() {
     const char* config = std::getenv("XDG_CONFIG_HOME");
-    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2" / "keyboard.ini";
+    return (config && fs::path(config).is_absolute() ? fs::path(config) : home() / ".config") / "ttt2" / "keyboard.ini";
 }
 
 Loaded load(const fs::path& file, const Resolver& resolve) {
     Loaded loaded{default_keys(), {}};
     const std::string name = file.string();
-    struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    file::Stat st{};
+    if (file::stat(file, &st) != 0) {
         const int error = errno;
         loaded.log.push_back(error == ENOENT || error == ENOTDIR
                                  ? "keyboard: defaults (no " + name + ")"
@@ -185,10 +185,25 @@ Loaded load(const fs::path& file, const Resolver& resolve) {
 Watcher::Watcher(fs::path file, Resolver resolve) : file_(std::move(file)), resolve_(std::move(resolve)) {}
 
 Watcher::Stamp Watcher::stamp() const {
+#ifdef _WIN32
+    const HANDLE handle = CreateFileW(file_.c_str(), FILE_READ_ATTRIBUTES,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {};
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool ok = GetFileInformationByHandle(handle, &info);
+    CloseHandle(handle);
+    if (!ok) return {};
+    const auto time = [](FILETIME t) { return static_cast<int64_t>((uint64_t{t.dwHighDateTime} << 32) | t.dwLowDateTime); };
+    return {true, info.dwVolumeSerialNumber, (uint64_t{info.nFileIndexHigh} << 32) | info.nFileIndexLow,
+            (uint64_t{info.nFileSizeHigh} << 32) | info.nFileSizeLow,
+            time(info.ftLastWriteTime), time(info.ftCreationTime)};
+#else
     struct stat st{};
     if (::stat(file_.c_str(), &st) != 0) return {};
     const auto ns = [](const timespec& t) { return int64_t{t.tv_sec} * 1'000'000'000 + t.tv_nsec; };
     return {true, st.st_dev, st.st_ino, static_cast<uint64_t>(st.st_size), ns(st.st_mtim), ns(st.st_ctim)};
+#endif
 }
 
 std::optional<Loaded> Watcher::reload() {

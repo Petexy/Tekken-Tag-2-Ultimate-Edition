@@ -29,6 +29,7 @@
 
 #include "gpu/gpu.h"
 #include "host/window.h"
+#include <pthread.h>
 
 #include "cafe/runtime.h"
 

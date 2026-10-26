@@ -68,6 +68,11 @@ add_library(cafe_runtime OBJECT
     src/title/roster.cpp)
 target_include_directories(cafe_runtime PUBLIC include PRIVATE src)
 target_compile_features(cafe_runtime PUBLIC cxx_std_20)
+find_package(Threads REQUIRED)
+target_link_libraries(cafe_runtime PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(cafe_runtime PUBLIC ole32 shell32 uuid)
+endif()
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 # GLSL -> SPIR-V at run time.
@@ -76,6 +81,11 @@ target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title OpenSSL::Crypto ZA
     Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY})
 # Vulkan structures are initialised with only their sType.
 target_compile_options(cafe_runtime PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
+
+# A build artifact even before the player's RPX has generated the game code.
+# Executables still link cafe_runtime as objects to retain export registrations.
+add_library(ttt2_runtime STATIC)
+target_link_libraries(ttt2_runtime PUBLIC cafe_runtime)
 
 # The title's file formats and the pictures and texts made from them
 # (title/): no runtime, so tests use them on synthetic data.

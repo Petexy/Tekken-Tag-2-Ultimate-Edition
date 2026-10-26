@@ -1,3 +1,10 @@
+include(runtime_input.cmake)
+
+if(WIN32)
+    include(windows.cmake)
+    return()
+endif()
+
 # Differential semantics test: generated code vs Dolphin's interpreter.
 # Needs the Dolphin reference checkout (third_party/ref/dolphin) and the game
 # executable (TTT2_RPX), which supplies the instruction encodings under test.
@@ -113,12 +120,14 @@ add_test(NAME keymap_test COMMAND keymap_test ${CMAKE_CURRENT_BINARY_DIR}/keymap
 
 # keyboard.ini as the launcher writes it, read by the game's parser: their
 # inputs, defaults and reserved keys stay the same.
+if(TARGET ttt2_launcher_core)
 add_executable(keyboard_file_test keyboard_file_test.cpp ${CMAKE_SOURCE_DIR}/runtime/src/host/keymap.cpp)
 target_include_directories(keyboard_file_test PRIVATE
     ${CMAKE_SOURCE_DIR}/runtime/src ${CMAKE_SOURCE_DIR}/runtime/include)
 target_link_libraries(keyboard_file_test PRIVATE ttt2_launcher_core SDL3::SDL3)
 target_compile_options(keyboard_file_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME keyboard_file_test COMMAND keyboard_file_test)
+endif()
 
 # The display settings from display.ini, the environment over them and the
 # window's size (files in a scratch folder of the build tree; no SDL).

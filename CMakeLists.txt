@@ -1,8 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 project(ttt2_recomp_tools LANGUAGES C CXX)
 
-if(NOT UNIX)
-    message(FATAL_ERROR "The safe extraction utility currently requires a POSIX host.")
+if(WIN32 AND (NOT MINGW OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+    message(FATAL_ERROR "Windows builds require MSYS2 CLANG64. Run tools/build_windows.ps1.")
+endif()
+
+option(TTT2_BUILD_LAUNCHER "Build the Linux launcher and its compiler kit" ${UNIX})
+if(TTT2_BUILD_LAUNCHER AND NOT UNIX)
+    message(FATAL_ERROR "The GTK launcher and its compiler kit currently require Linux. Use the command-line tools on Windows.")
+endif()
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 endif()
 
 add_subdirectory(third_party/ZArchive EXCLUDE_FROM_ALL)
@@ -29,8 +37,7 @@ target_compile_options(wua_extract PRIVATE -Wall -Wextra -Wpedantic)
 # Function-level PowerPC -> C++ recompiler for the standalone port.
 add_subdirectory(recomp)
 add_subdirectory(runtime)
-enable_testing()
-add_subdirectory(tests)
+include(CTest)
 
 # How the generated code is compiled, here and by the launcher's kit on the
 # players' PCs (launcher/builder). Translated code is huge and flat: -O2
@@ -55,4 +62,9 @@ endif()
 
 # The players' launcher (launcher/): builds the game program on the player's
 # PC from their .wua, installs it and adds Tekken 7's characters.
-add_subdirectory(launcher)
+if(TTT2_BUILD_LAUNCHER)
+    add_subdirectory(launcher)
+endif()
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
