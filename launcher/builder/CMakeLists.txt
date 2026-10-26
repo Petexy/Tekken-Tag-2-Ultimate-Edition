@@ -71,6 +71,7 @@ file(CONFIGURE OUTPUT ${TTT2_KIT_DIR}/VERSION CONTENT "${TTT2_KIT_VERSION}\n")
 # found here too (with the same, cached, result).
 find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
 find_package(ZLIB REQUIRED)
+find_package(Threads REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 function(ttt2_link_closure item)
