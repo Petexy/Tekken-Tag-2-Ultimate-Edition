@@ -179,7 +179,11 @@ constexpr Named kSdlNames[] = {
     {144, "Language 1"}, {145, "Language 2"}, {146, "Language 3"}, {147, "Language 4"}, {148, "Language 5"},
     {149, "Language 6"}, {150, "Language 7"}, {151, "Language 8"}, {152, "Language 9"}, {153, "AltErase"},
     {154, "SysReq"}, {155, "Cancel"}, {156, "Clear"}, {157, "Prior"}, {158, "Return"}, {159, "Separator"},
-    {160, "Out"}, {161, "Oper"}, {162, "Clear / Again"}, {163, "CrSel"}, {164, "ExSel"}, {176, "Keypad 00"},
+    {160, "Out"}, {161, "Oper"}, {162, "Clear / Again"}, {163, "CrSel"}, {164, "ExSel"},
+#ifdef TTT2_SDL_HAS_FRONT
+    {165, "Front"},
+#endif
+    {176, "Keypad 00"},
     {177, "Keypad 000"}, {178, "ThousandsSeparator"}, {179, "DecimalSeparator"}, {180, "CurrencyUnit"},
     {181, "CurrencySubUnit"}, {182, "Keypad ("}, {183, "Keypad )"}, {184, "Keypad {"}, {185, "Keypad }"},
     {186, "Keypad Tab"}, {187, "Keypad Backspace"}, {188, "Keypad A"}, {189, "Keypad B"}, {190, "Keypad C"},

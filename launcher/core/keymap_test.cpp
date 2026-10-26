@@ -106,7 +106,8 @@ void test_tables() {
         check(n.usage >= kFirstKey && n.usage < kKeyCount && named.insert(n.usage).second,
               std::string("keys: SDL names ") + n.name + " once");
     }
-    check(named.size() == 246, "keys: SDL's 246 names");
+    const bool front = usage_by_name("Front") == 165;
+    check(named.size() == 246 + static_cast<size_t>(front), "keys: SDL's names, including Front when supported");
     check(key_name(29) == "Z" && key_name(40) == "Enter" && key_name(282) == "AC Back" && key_name(118) == "Key 118" &&
               key_name(300) == "Key 300",
           "keys: the names shown (SDL's Menu is not the Menu key)");

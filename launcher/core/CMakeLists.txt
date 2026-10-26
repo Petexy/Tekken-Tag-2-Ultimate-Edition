@@ -24,6 +24,20 @@ target_include_directories(ttt2_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_features(ttt2_launcher_core PUBLIC cxx_std_20)
 target_compile_options(ttt2_launcher_core PRIVATE -Wall -Wextra -Wpedantic)
 
+# Keep the launcher's name table aligned with the SDL used by the runtime.
+# This is a compile-time feature check; the GTK launcher does not link SDL.
+find_package(SDL3 REQUIRED CONFIG)
+include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_LIBRARIES SDL3::SDL3)
+check_cxx_source_compiles("#include <SDL3/SDL_scancode.h>\nint main() { return SDL_SCANCODE_FRONT; }"
+    TTT2_SDL_HAS_FRONT)
+cmake_pop_check_state()
+if(TTT2_SDL_HAS_FRONT)
+    target_compile_definitions(ttt2_launcher_core PRIVATE TTT2_SDL_HAS_FRONT)
+endif()
+
 add_executable(launcher_core_test core_test.cpp)
 target_link_libraries(launcher_core_test PRIVATE ttt2_launcher_core)
 target_compile_options(launcher_core_test PRIVATE -Wall -Wextra)
