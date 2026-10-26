@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Saves Tekken 7 fighters' movesets (what import_character.py needs from the running game) without you doing
-anything: Tekken 7 runs in the background, with no window and no sound, its own loader loads the fighters while it
-sits on its start-up screens (nothing is pressed), and it is closed again. The files Tekken 7 keeps encrypted (Geese's
-and Noctis's costumes, Noctis's voice) are saved too, as the game reads them (--files). Only fighters your Steam
-account owns are dumped; the others are listed as skipped.
+anything: Tekken 7 runs in the background, its own loader loads the fighters while it sits on its start-up screens
+(nothing is pressed), and it is closed again. The files Tekken 7 keeps encrypted (Geese's and Noctis's costumes,
+Noctis's voice) are saved too, as the game reads them (--files). Only fighters your Steam account owns are dumped;
+the others are listed as skipped.
 
     python3 tools/characters/dump_tekken7.py --all
     python3 tools/characters/dump_tekken7.py kazumi negan
 
-Needs Steam running, Tekken 7 started once from Steam (its Proton prefix), gamescope, PulseAudio/PipeWire (pactl),
-MinGW (x86_64-w64-mingw32-gcc, to build the small helper the first time) and Python 3.
+Linux needs Steam running, Tekken 7 started once from Steam (its Proton prefix), gamescope, PulseAudio/PipeWire
+(pactl), MinGW (x86_64-w64-mingw32-gcc, to build the small helper the first time) and Python 3.
+Windows needs Steam running, Tekken 7 installed, a C compiler to build t7helper.exe (or TTT2_T7HELPER set to a
+prebuilt helper), and Python 3.
 """
 import argparse
 import os
@@ -32,6 +34,9 @@ def main():
     parser.add_argument('--files', default=autodump.FILES, metavar='FOLDER',
                         help='where the files Tekken 7 keeps encrypted go, as the game reads them (default: %(default)s; '
                              'import_character.py reads them there)')
+    parser.add_argument('--attach-running', action='store_true', default=None,
+                        help='attach to an already running Tekken 7 process instead of starting a new one '
+                             '(Windows: this also avoids closing your existing game process on exit)')
     args = parser.parse_args()
     names = list(importer.CHARACTERS) if args.all else args.fighter
     if not names:
@@ -49,7 +54,13 @@ def main():
         if entries:
             files[d.TEKKEN7_ID] = (d.NAME, entries)
     try:
-        dumped, skipped = autodump.dump(fighters, os.path.expanduser(args.out), files=files, paks=paks)
+        dumped, skipped = autodump.dump(
+            fighters,
+            os.path.expanduser(args.out),
+            files=files,
+            paks=paks,
+            attach_running=args.attach_running,
+        )
     except autodump.DumpError as e:
         print('error: %s' % e, file=sys.stderr)
         return 1

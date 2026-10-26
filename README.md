@@ -430,14 +430,18 @@ Nothing of them is in this repository: an importer makes them from **your own
 copies of both games** and writes character packs on your computer. You need:
 
 - Tekken 7 for PC (Steam), installed and started from Steam at least once
-  (the importer finds it, its Proton and its prefix through Steam), and Steam
-  running: the Steam of your distribution's packages or Valve's installer
-  (Steam from Flatpak or Snap is found, but not supported yet);
+  (the importer finds it through Steam), and Steam running;
 - the game installed with the launcher or `ttt2 --install` (the importer
   reads its folder);
-- gamescope, `pactl` (PipeWire or PulseAudio), MinGW
-  (`x86_64-w64-mingw32-gcc`, to build a small helper the first time) and
-  Python 3 with numpy and Pillow.
+- Python 3 with numpy and Pillow;
+- on Linux: gamescope, `pactl` (PipeWire or PulseAudio), and MinGW
+  (`x86_64-w64-mingw32-gcc`, to build a small helper the first time);
+- on Windows: a C compiler to build `t7helper.exe` (MSYS2 UCRT64 `gcc` or
+  `clang` works), or set `TTT2_T7HELPER` to a prebuilt helper.
+
+On Windows, the helper now defaults to a compatibility fallback for unknown
+Tekken 7 signatures (`TTT2_T7HELPER_ALLOW_UNKNOWN=1`). Set
+`TTT2_T7HELPER_ALLOW_UNKNOWN=0` to require strict signature matching.
 
 ```bash
 python3 tools/characters/import_character.py --all --game /path/to/your/install
@@ -445,8 +449,8 @@ python3 tools/characters/import_character.py --all --game /path/to/your/install
 
 A fighter's moveset exists only inside the running Tekken 7, so the importer
 first saves the movesets it does not have yet: Tekken 7 starts in the
-background, with no window and no sound (gamescope's headless mode and a
-silent audio output of its own), the game's own loader loads the fighters
+background (on Linux, through gamescope's headless mode and a silent audio
+output of its own), the game's own loader loads the fighters
 while it sits on its start-up screens, and it is closed again. Nothing is
 pressed and no menu is used, so your key bindings and settings do not matter.
 Stopping the importer (Ctrl+C, or Cancel in the launcher) closes the hidden
@@ -463,6 +467,10 @@ importer. `tools/characters/dump_tekken7.py` does that step alone (the
 movesets go to `~/.local/share/ttt2/tekken7/movesets/`); movesets saved with
 [TKMovesets2](https://github.com/Kiloutre/TKMovesets) work too
 (`--movesets FOLDER`).
+On Windows, you can start Tekken 7 yourself first and run the dumper with
+`--attach-running` to attach to the existing process instead of launching a
+new one. The importer supports the same flow:
+`python3 tools/characters/import_character.py --all --attach-running --game /path/to/your/install`.
 
 The fighters' names for the importer: `kazumi`, `chloe`, `eliza`, `claudio`,
 `akuma`, `gigas`, `josie`, `katarina`, `master_raven`, `shaheen`,

@@ -1,10 +1,12 @@
 """Tekken 7 movesets dumped in the background: the importer's .tkmvst files without the player doing anything.
 
 Tekken 7's data files are encrypted; a fighter's moveset is readable only once the game has loaded it, so the game
-has to run, and it runs where nobody sees or hears it, and with nothing pressed:
-* Proton runs it inside gamescope's headless backend (no window, no output) with its sound sent to a silent sink of
-  its own (Tekken 7 does not start without an audio device);
-* t7helper.exe (tools/characters/t7helper, built with MinGW, or the launcher's prebuilt one that $TTT2_T7HELPER
+has to run, with nothing pressed:
+* on Linux, Proton runs it inside gamescope's headless backend (no window, no output) with its sound sent to a
+  silent sink of its own (Tekken 7 does not start without an audio device);
+* on Windows, the game is started natively and closed when the session ends;
+* t7helper.exe (tools/characters/t7helper, built with MinGW or a local compiler, or the launcher's prebuilt one that
+  $TTT2_T7HELPER
   names) runs next to it in its Wine prefix: it asks Steam, as the game does, which DLC the player owns (only owned
   fighters are dumped), and it calls the game's own loader for each fighter while the game sits on its start-up
   screens: the function that loads a fighter's files by its code (the game's background tasks read and decrypt
@@ -16,16 +18,17 @@ Some fighters' files the game keeps encrypted in its paks (Geese Howard's and No
 the helper has the game read them with its own file reader (the one its loading uses), which hands them over decoded,
 and they are saved under their pak paths in a folder of their own (FILES) that the importer reads them from.
 No menu, key or screen is involved, so the player's key bindings, settings, language or pop-ups do not matter.
-Nothing is written into the game's files, its saves or its prefix (but the helper's copy at C:\\t7helper.exe).
+Nothing is written into the game's files or saves (on Linux, not to its prefix either; only the helper's copy at
+C:\\t7helper.exe).
 A session ends what it started and nothing else (Session.close; also on the SIGTERM of the launcher's Cancel, see
 signals.py): a Tekken 7 the player starts from Steam meanwhile goes on, and what a killed importer left running is
-ended by the next session. Steam from Flatpak or Snap is found, but Tekken 7 is not run through it (not supported
-yet).
+ended by the next session. On Linux, Steam from Flatpak or Snap is found, but Tekken 7 is not run through it (not
+supported yet).
 
 Written for this project (no third-party code).
 """
 import atexit
-import fcntl
+import csv
 import hashlib
 import os
 import re
@@ -40,6 +43,13 @@ import time
 from .. import signals
 from .pak import plain
 
+WINDOWS = os.name == 'nt'
+
+if WINDOWS:
+    import msvcrt
+else:
+    import fcntl
+
 APP_ID = 389730
 GAME_COMM = 'TekkenGame-Win6'                 # the game's Linux process name (15 characters)
 SINK = 'ttt2_tekken7_silent'
@@ -48,18 +58,29 @@ STEAMWORKS = 'Engine/Binaries/ThirdParty/Steamworks/Steamv132/Win64/steam_api64.
 HEIHACHI = 8                                    # every import needs his moveset (the id maps)
 BATCH = 4                                       # fighters loaded at once
 LOAD_TIMEOUT = 90                               # seconds a batch may take
+WINDOWS_SHARED_TIMEOUT = 600                    # give native Windows sessions enough warm-up time
 # Tekken 7's DLC fighters: their roster ids and the Steam app ids of the DLC that has them (Steam's public lists)
 DLC = {36: 592370, 43: 592373, 44: 592374, 45: 878460, 46: 878461, 47: 878462, 48: 878463, 49: 878464, 50: 878465,
        51: 1114561, 52: 1162600, 53: 1162601, 54: 1236500, 55: 1289451, 56: 1289453}
 RECORD_MOVELIST = 0x68                          # a fighter record's command list: written last, once all is loaded
 COMMON_ANIMATIONS = 0x38
 # the movesets saved from the game, and the encrypted files as the game reads them (pak paths below it)
-MOVESETS = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'movesets')
-FILES = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'files')
+if WINDOWS:
+    _data_root = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'ttt2')
+else:
+    _data_root = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2')
+MOVESETS = os.path.join(_data_root, 'tekken7', 'movesets')
+FILES = os.path.join(_data_root, 'tekken7', 'files')
 # the helper's build and its run's logs: $XDG_CACHE_HOME/ttt2 as the game's and the launcher's caches
-CACHE = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'ttt2', 'tekken7')
+if WINDOWS:
+    _cache_root = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'ttt2', 'cache')
+else:
+    _cache_root = os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache')
+CACHE = os.path.join(_cache_root, 'ttt2', 'tekken7') if not WINDOWS else os.path.join(_cache_root, 'tekken7')
 FILE_BATCH = 64                                 # files the game reads at once (the helper takes up to 256) ...
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
+WINDOWS_FILE_BATCH = 8                          # native Windows needs smaller encrypted-file chunks
+WINDOWS_FILE_BATCH_BYTES = 24 << 20
 
 
 class DumpError(Exception):
@@ -69,7 +90,7 @@ class DumpError(Exception):
 # ---------------------------------------------------------------- finding the game
 
 class Tekken7:
-    def __init__(self, steam, game, prefix, proton):
+    def __init__(self, steam, game, prefix=None, proton=None):
         self.steam, self.game, self.prefix, self.proton = steam, game, prefix, proton
 
 
@@ -78,14 +99,24 @@ def _text(path):
         return f.read()
 
 
-# Steam's folder: the distribution's Steam (or Valve's installer's) first, then Flathub's and the Snap Store's, which
-# keep it in a home folder of their own
-STEAMS = (('~/.local/share/Steam', None), ('~/.steam/steam', None),
-          ('~/.var/app/com.valvesoftware.Steam/.local/share/Steam', 'flatpak'),
-          ('~/.var/app/com.valvesoftware.Steam/data/Steam', 'flatpak'),
-          ('~/snap/steam/common/.local/share/Steam', 'snap'))
-FLATPAK_HOME = '~/.var/app/com.valvesoftware.Steam'
-SANDBOX_NAMES = {'flatpak': 'Flatpak', 'snap': 'Snap'}
+if WINDOWS:
+    STEAMS = ((os.path.join(os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)'), 'Steam'), None),
+              (os.path.join(os.environ.get('PROGRAMFILES', r'C:\Program Files'), 'Steam'), None))
+    FLATPAK_HOME = ''
+    SANDBOX_NAMES = {}
+else:
+    # Steam's folder: the distribution's Steam (or Valve's installer's) first, then Flathub's and the Snap Store's,
+    # which keep it in a home folder of their own
+    STEAMS = (('~/.local/share/Steam', None), ('~/.steam/steam', None),
+              ('~/.var/app/com.valvesoftware.Steam/.local/share/Steam', 'flatpak'),
+              ('~/.var/app/com.valvesoftware.Steam/data/Steam', 'flatpak'),
+              ('~/snap/steam/common/.local/share/Steam', 'snap'))
+    FLATPAK_HOME = '~/.var/app/com.valvesoftware.Steam'
+    SANDBOX_NAMES = {'flatpak': 'Flatpak', 'snap': 'Snap'}
+
+
+def _vdf_unescape(path):
+    return path.replace('\\\\', '\\') if WINDOWS else path
 
 
 def _host_path(path, sandbox):
@@ -104,7 +135,7 @@ def _libraries(steam, sandbox=None):
     out = [steam]
     vdf = os.path.join(steam, 'steamapps', 'libraryfolders.vdf')
     if os.path.isfile(vdf):
-        out += [_host_path(p, sandbox) for p in re.findall(r'"path"\s+"([^"]+)"', _text(vdf))]
+        out += [_host_path(_vdf_unescape(p), sandbox) for p in re.findall(r'"path"\s+"([^"]+)"', _text(vdf))]
     return list(dict.fromkeys(out))
 
 
@@ -155,6 +186,8 @@ def tekken7_steam():
 def find_tekken7():
     """Tekken 7's install, its Proton prefix and the Proton it uses, through Steam's files."""
     steam, sandbox, lib, game = _tekken7_library()
+    if WINDOWS:
+        return Tekken7(steam, game)
     if sandbox:
         # (its Proton and its prefix are made for the sandbox, and the sandboxed Steam would have to answer a game
         # started outside it: not tried yet)
@@ -172,6 +205,24 @@ def find_tekken7():
 
 
 def _running(comm):
+    if WINDOWS:
+        name = comm.lower()
+        try:
+            proc = subprocess.run(
+                ['tasklist', '/FO', 'CSV', '/NH'],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        rows = csv.reader(line for line in proc.stdout.splitlines() if line.strip())
+        for row in rows:
+            if row and row[0].strip().lower() == name:
+                pid = row[1].strip() if len(row) > 1 else ''
+                return int(pid) if pid.isdigit() else 1
+        return None
     for pid in os.listdir('/proc'):
         if pid.isdigit():
             try:
@@ -184,7 +235,7 @@ def _running(comm):
 
 
 def steam_running():
-    return _running('steam') is not None
+    return _running('steam.exe' if WINDOWS else 'steam') is not None
 
 
 HELPER_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 't7helper', 't7helper.c')
@@ -210,13 +261,25 @@ def build_helper(cache):
         return ready
     exe = os.path.join(cache, 't7helper.exe')
     src = os.path.normpath(HELPER_SOURCE)
-    gcc = shutil.which('x86_64-w64-mingw32-gcc')
-    if gcc is None:
+    candidates = [c for c in ('x86_64-w64-mingw32-gcc', 'gcc', 'clang') if shutil.which(c) is not None]
+    if not candidates:
+        if WINDOWS:
+            raise DumpError('building the helper needs a C compiler with Win32 support (try MSYS2 UCRT64 gcc/clang, '
+                            'or set TTT2_T7HELPER to a prebuilt t7helper.exe)')
         raise DumpError('building the helper needs MinGW (x86_64-w64-mingw32-gcc; Arch: mingw-w64-gcc, '
                         'Debian/Ubuntu: gcc-mingw-w64-x86-64)')
     os.makedirs(cache, exist_ok=True)
-    subprocess.run([gcc, '-O2', '-mwindows', '-o', exe, src, '-lws2_32'], check=True)
-    return exe
+    errors = []
+    for cc in candidates:
+        cmd = [cc, '-O2', '-mwindows', '-o', exe, src, '-lws2_32']
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0 and os.path.isfile(exe):
+            return exe
+        stderr = (proc.stderr or '').strip()
+        stdout = (proc.stdout or '').strip()
+        details = stderr or stdout or ('exit code %d' % proc.returncode)
+        errors.append('%s: %s' % (cc, details))
+    raise DumpError('could not build t7helper.exe:\n' + '\n'.join(errors))
 
 
 # ---------------------------------------------------------------- the helper
@@ -367,18 +430,41 @@ SESSION_TAG = 'TTT2_T7_SESSION'     # in the environment of all a session starts
 def _lock_path(prefix):
     """The prefix's lock file: the same for every importer run, whatever its cache folder (in XDG_RUNTIME_DIR, the
     user's own folder for such files)."""
-    folder = os.environ.get('XDG_RUNTIME_DIR')
+    folder = os.environ.get('XDG_RUNTIME_DIR') if not WINDOWS else os.environ.get('LOCALAPPDATA')
     if not folder or not os.path.isdir(folder):
         folder = tempfile.gettempdir()
-    name = hashlib.sha1(os.path.realpath(prefix).encode('utf-8', 'surrogateescape')).hexdigest()[:16]
-    return os.path.join(folder, 'ttt2-tekken7-%d-%s.lock' % (os.getuid(), name))
+    name_source = os.path.realpath(prefix) if prefix else os.path.realpath(__file__)
+    name = hashlib.sha1(name_source.encode('utf-8', 'surrogateescape')).hexdigest()[:16]
+    owner = str(os.getuid()) if hasattr(os, 'getuid') else str(os.getpid())
+    return os.path.join(folder, 'ttt2-tekken7-%s-%s.lock' % (owner, name))
 
 
 def _lock(path, timeout=300):
     """The prefix's lock, waited for: one session at a time (a session's end stops what it started in the prefix,
     and the launcher's check of the DLC must not end an import's session). Never a link's target (it may be in
     /tmp); not passed on to what the session starts, so it is free again as soon as this program has ended."""
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    if WINDOWS:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        f = open(path, 'a+b')
+        end = time.time() + timeout
+        while True:
+            try:
+                f.seek(0)
+                f.write(b'0')
+                f.flush()
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return f
+            except OSError:
+                if time.time() > end:
+                    f.close()
+                    raise DumpError('%s for %d s: try again when it is done' % (BUSY, timeout))
+                time.sleep(0.5)
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, 'O_CLOEXEC'):
+        flags |= os.O_CLOEXEC
+    fd = os.open(path, flags, 0o600)
     f = os.fdopen(fd, 'w')
     end = time.time() + timeout
     while True:
@@ -406,6 +492,8 @@ def _free_port():
 
 def _processes():
     """{pid: (comm, {name: value} of its environment as it started)} of the processes this user may read."""
+    if WINDOWS:
+        return {}
     out = {}
     for pid in os.listdir('/proc'):
         if not pid.isdigit():
@@ -428,6 +516,8 @@ def _processes():
 
 def _stat(pid):
     """The fields of /proc/<pid>/stat after the command's name (state, parent, ...), or None when it is gone."""
+    if WINDOWS:
+        return None
     try:
         with open('/proc/%d/stat' % pid) as f:
             return f.read().rsplit(')', 1)[1].split()
@@ -476,6 +566,8 @@ def _players(prefix, processes):
 
 def tekken7_running(t7):
     """Whether the player's own Tekken 7 runs (or is being started): a session would share its prefix."""
+    if WINDOWS:
+        return _running('TekkenGame-Win64-Shipping.exe') is not None
     return bool(_players(t7.prefix, _processes()))
 
 
@@ -500,7 +592,7 @@ def _owner_alive(tag):
     return fields is not None and fields[19] == started.partition('.')[0]
 
 
-def _kill(pids, sig=signal.SIGKILL):
+def _kill(pids, sig=getattr(signal, 'SIGKILL', signal.SIGTERM)):
     for pid in pids:
         try:
             os.kill(pid, sig)
@@ -584,20 +676,68 @@ class Session:
     what it started: a Tekken 7 the player starts from Steam meanwhile goes on. A session whose program was killed
     (SIGKILL: no close) is ended by the next session."""
 
-    def __init__(self, t7, helper_exe, run, with_game):
-        for tool in ('gamescope', 'pactl') if with_game else ('gamescope',):
-            if shutil.which(tool) is None:
-                raise DumpError('Tekken 7 runs hidden in gamescope, with its sound sent to a silent output (pactl, of '
-                                'PipeWire or PulseAudio): install %s with your distribution\'s packages' % tool)
+    def __init__(self, t7, helper_exe, run, with_game, require_running=False):
+        if not WINDOWS:
+            for tool in ('gamescope', 'pactl') if with_game else ('gamescope',):
+                if shutil.which(tool) is None:
+                    raise DumpError('Tekken 7 runs hidden in gamescope, with its sound sent to a silent output '
+                                    '(pactl, of PipeWire or PulseAudio): install %s with your distribution\'s '
+                                    'packages' % tool)
         self.t7, self.run, self.closed = t7, run, False
         self.lock = self.gamescope = self.helper = self.sink_module = None
+        self.helper_proc = None
+        self.game_proc = None
+        self.with_game = with_game
+        self.require_running = require_running
         self.tag = _new_tag()
         _open.append(self)
         try:
-            self._start(helper_exe, with_game)
+            if WINDOWS:
+                self._start_windows(helper_exe, with_game)
+            else:
+                self._start(helper_exe, with_game)
         except BaseException:
             self.close()
             raise
+
+    def _start_windows(self, helper_exe, with_game):
+        t7, run = self.t7, self.run
+        os.makedirs(run, exist_ok=True)
+        self.lock = _lock(_lock_path(t7.game))
+        running = tekken7_running(t7)
+        if with_game and running:
+            raise DumpError(RUNNING)
+        if not with_game and self.require_running and not running:
+            raise DumpError('Tekken 7 is not running')
+        self.port, self.secret = _free_port(), secrets.token_hex(16)
+
+        if with_game:
+            game_root = os.path.join(t7.game, 'TEKKEN 7.exe')
+            game_bin = os.path.join(t7.game, 'TekkenGame', 'Binaries', 'Win64', 'TekkenGame-Win64-Shipping.exe')
+            game_launch = game_root if os.path.isfile(game_root) else game_bin
+            if not os.path.isfile(game_launch):
+                raise DumpError('TEKKEN 7 executable not found in %s' % t7.game)
+            self.game_proc = subprocess.Popen([game_launch], cwd=t7.game)
+            with open(os.path.join(run, 'game.pid'), 'w') as f:
+                f.write(str(self.game_proc.pid))
+
+        helper_log = open(os.path.join(run, 'helper.log'), 'w')
+        helper_cmd = [helper_exe, 'serve', str(self.port), self.secret]
+        create_no_window = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        helper_env = dict(
+            os.environ,
+            SteamAppId=str(APP_ID),
+            SteamGameId=str(APP_ID),
+        )
+        helper_env.setdefault('TTT2_T7HELPER_ALLOW_UNKNOWN', '1')
+        self.helper_proc = subprocess.Popen(
+            helper_cmd,
+            cwd=run,
+            env=helper_env,
+            stdout=helper_log,
+            stderr=subprocess.STDOUT,
+            creationflags=create_no_window,
+        )
 
     def _start(self, helper_exe, with_game):
         t7, run = self.t7, self.run
@@ -636,6 +776,15 @@ class Session:
                  '--', inside], env=env, stdout=log, stderr=subprocess.STDOUT)
 
     def wait_game(self, timeout=240):
+        if WINDOWS:
+            end = time.time() + timeout
+            while time.time() < end:
+                if _running('TekkenGame-Win64-Shipping.exe') is not None:
+                    return self.game_proc.pid if self.game_proc else 0
+                if self.game_proc is not None and self.game_proc.poll() is not None:
+                    raise DumpError('Tekken 7 ended before it got ready')
+                time.sleep(0.5)
+            raise DumpError('Tekken 7 did not start within %d s' % timeout)
         end = time.time() + timeout
         while time.time() < end:
             p = os.path.join(self.run, 'game.pid')
@@ -659,7 +808,20 @@ class Session:
             try:
                 if self.helper:
                     self.helper.quit()
-                if self.lock is not None:       # (else another session may be running, and this one started nothing)
+                if WINDOWS:
+                    if self.helper_proc is not None and self.helper_proc.poll() is None:
+                        self.helper_proc.terminate()
+                        try:
+                            self.helper_proc.wait(5)
+                        except subprocess.TimeoutExpired:
+                            self.helper_proc.kill()
+                    if self.with_game and self.game_proc is not None and self.game_proc.poll() is None:
+                        self.game_proc.terminate()
+                        try:
+                            self.game_proc.wait(10)
+                        except subprocess.TimeoutExpired:
+                            self.game_proc.kill()
+                elif self.lock is not None:       # (else another session may be running, and this one started nothing)
                     _end(self.t7, [self.tag], self.gamescope)
                 if self.sink_module:
                     _pactl('unload-module', self.sink_module, timeout=5)
@@ -694,10 +856,12 @@ def unsaved_files(paks, code):
 
 def _save_files(h, paks, entries):
     """Has the game read the entries (in batches) and saves them below paks.saved."""
+    max_files = WINDOWS_FILE_BATCH if WINDOWS else FILE_BATCH
+    max_bytes = WINDOWS_FILE_BATCH_BYTES if WINDOWS else FILE_BATCH_BYTES
     k = 0
     while k < len(entries):
         batch, size = [], 0
-        while k < len(entries) and len(batch) < FILE_BATCH and (not batch or size + entries[k].usize <= FILE_BATCH_BYTES):
+        while k < len(entries) and len(batch) < max_files and (not batch or size + entries[k].usize <= max_bytes):
             batch.append(entries[k])
             size += entries[k].usize
             k += 1
@@ -713,19 +877,22 @@ def _save_files(h, paks, entries):
 
 # ---------------------------------------------------------------- dumping
 
-def owned_dlc(t7, helper_exe, run):
+def owned_dlc(t7, helper_exe, run, allow_running=False):
     """{DLC app id: owned} as the game asks Steam."""
-    if tekken7_running(t7):                 # (Session checks again, once no other session runs)
+    if tekken7_running(t7) and not allow_running:                 # (Session checks again, once no other session runs)
         raise DumpError(RUNNING)
-    s = Session(t7, helper_exe, run, False)
+    s = Session(t7, helper_exe, run, False, require_running=False)
     try:
         h = s.connect()
-        return {a: owned for a, owned, _ in h.dlc('Z:' + os.path.join(t7.game, STEAMWORKS))}
+        dll = os.path.join(t7.game, STEAMWORKS)
+        if not WINDOWS:
+            dll = 'Z:' + dll
+        return {a: owned for a, owned, _ in h.dlc(dll)}
     finally:
         s.close()
 
 
-def unowned(fighters, cache=None):
+def unowned(fighters, cache=None, allow_running=False):
     """{roster id: reason} of the fighters (roster ids) whose DLC the player's Steam account does not own, as Steam
     tells the game (Steam must be running). Base-game fighters are always owned."""
     dlc = [fid for fid in fighters if fid in DLC]
@@ -734,7 +901,7 @@ def unowned(fighters, cache=None):
     if not steam_running():
         raise DumpError('Steam is not running: start it, then try again (it tells which fighters you own)')
     cache = cache or CACHE
-    owned = owned_dlc(find_tekken7(), build_helper(cache), os.path.join(cache, 'run'))
+    owned = owned_dlc(find_tekken7(), build_helper(cache), os.path.join(cache, 'run'), allow_running=allow_running)
     return {fid: 'its DLC is not owned' for fid in dlc if not owned.get(DLC[fid], False)}
 
 
@@ -747,7 +914,7 @@ def _until(what, condition, timeout):
     raise DumpError(what)
 
 
-def dump(fighters, out, log=print, cache=None, files=None, paks=None):
+def dump(fighters, out, log=print, cache=None, files=None, paks=None, attach_running=None):
     """Dumps the fighters ({roster id: (Tekken 7 code, name)}) into `out` as T7_<name>.tkmvst; Heihachi too (when
     there are any). files: {roster id: (name, [pak entries])}: also saves those encrypted files (from unsaved_files)
     of the fighters, as the game reads them, below paks.saved. -> ({id: path} dumped, {id: reason} skipped)."""
@@ -755,30 +922,48 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     if not steam_running():
         raise DumpError('Steam is not running: start it, then try again (Tekken 7 needs it)')
     t7 = find_tekken7()
-    if tekken7_running(t7):
+    running = tekken7_running(t7)
+    if attach_running is None:
+        attach_running = WINDOWS and running
+    if running and not attach_running:
         raise DumpError(RUNNING)
     cache = cache or CACHE
     run = os.path.join(cache, 'run')
     helper_exe = build_helper(cache)
-    log('Tekken 7: %s (Proton: %s)' % (t7.game, os.path.basename(t7.proton)))
-    owned = owned_dlc(t7, helper_exe, run)
+    if t7.proton:
+        log('Tekken 7: %s (Proton: %s)' % (t7.game, os.path.basename(t7.proton)))
+    else:
+        log('Tekken 7: %s (native Windows)' % t7.game)
+    owned = {}
+    try:
+        owned = owned_dlc(t7, helper_exe, run, allow_running=attach_running)
+    except DumpError as e:
+        if not (WINDOWS and attach_running):
+            raise
+        log('DLC ownership probe failed while attached to a running game; continuing without DLC ownership filter (%s).' % e)
     names = dict(fighters)
     if names:
         names.setdefault(HEIHACHI, ('hei', 'Heihachi'))
     files = {fid: v for fid, v in (files or {}).items() if v[1]}
     skipped = {}
     for fid in list(names) + list(files):
-        if fid in DLC and not owned.get(DLC[fid], False):
+        if owned and fid in DLC and not owned.get(DLC[fid], False):
             skipped[fid] = 'its DLC is not owned'
     wanted = [fid for fid in names if fid not in skipped]
     files = {fid: v for fid, v in files.items() if fid not in skipped}
+    files_pre = {} if WINDOWS else files
+    files_post = files if WINDOWS else {}
     dumped = {}
     if not wanted and not files:
         return dumped, skipped
-    log('Starting Tekken 7 in the background (no window, no sound) ...')
-    s = Session(t7, helper_exe, run, True)
+    if attach_running:
+        log('Attaching to the running Tekken 7 process ...')
+    else:
+        log('Starting Tekken 7 in the background ...')
+    s = Session(t7, helper_exe, run, not attach_running, require_running=attach_running)
     try:
-        s.wait_game()
+        if not attach_running:
+            s.wait_game()
         h = s.connect()
         end = time.time() + 60
         while True:                                      # (the game's code may not be mapped at once)
@@ -789,17 +974,66 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
                 if time.time() > end:
                     raise
                 time.sleep(1)
-        _until('Tekken 7 did not get ready', h.ready, 120)
-        for fid, (name, entries) in files.items():
+        try:
+            _until('Tekken 7 did not get ready', h.ready, 120)
+        except DumpError:
+            if WINDOWS:
+                log('Tekken 7 readiness probe did not report ready; continuing with compatibility flow ...')
+            else:
+                raise
+        failed_files = set()
+        for fid, (name, entries) in files_pre.items():
             log('  %s: %d encrypted files (%d MB), as the game reads them'
                 % (name, len(entries), sum(e.usize for e in entries) >> 20))
-            _save_files(h, paks, entries)
+            try:
+                _save_files(h, paks, entries)
+            except DumpError as e:
+                if WINDOWS:
+                    skipped[fid] = 'its encrypted files could not be read (%s)' % e
+                    failed_files.add(fid)
+                    log('  %s: skipping (encrypted files could not be read)' % name)
+                    continue
+                raise
+        if failed_files:
+            wanted = [fid for fid in wanted if fid not in failed_files]
+            if not wanted:
+                return dumped, skipped
         if wanted:
-            common = h.common()
-            _until('the shared animations did not load', lambda: h.u64(common + COMMON_ANIMATIONS), LOAD_TIMEOUT)
-        for k in range(0, len(wanted), BATCH):
+            if WINDOWS:
+                deadline = time.time() + WINDOWS_SHARED_TIMEOUT
+                common = None
+                common_error = None
+                log('Waiting for Tekken 7 runtime to become ready for shared animations ...')
+                while time.time() < deadline:
+                    try:
+                        common = h.common()
+                    except DumpError as e:
+                        common_error = e
+                        if 'cannot allocate' not in str(e).lower():
+                            raise
+                        time.sleep(2)
+                        continue
+                    remaining = max(1, int(deadline - time.time()))
+                    step_timeout = min(30, remaining)
+                    try:
+                        _until('the shared animations did not load', lambda: h.u64(common + COMMON_ANIMATIONS), step_timeout)
+                        common_error = None
+                        break
+                    except DumpError as e:
+                        common_error = e
+                        time.sleep(2)
+                if common is None or common_error is not None:
+                    reason = common_error or DumpError('timeout')
+                    for fid in wanted:
+                        skipped[fid] = 'shared animations did not become ready (%s)' % reason
+                    return dumped, skipped
+            else:
+                common = h.common()
+                _until('the shared animations did not load', lambda: h.u64(common + COMMON_ANIMATIONS), LOAD_TIMEOUT)
+        batch_size = 1 if WINDOWS else BATCH
+        for k in range(0, len(wanted), batch_size):
             batch = {}
-            for fid in wanted[k:k + BATCH]:
+            for fid in wanted[k:k + batch_size]:
                 try:
                     batch[fid] = h.load(fid)
                 except DumpError as e:
@@ -821,6 +1055,17 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
                 time.sleep(0.5)
             for fid in pending:
                 skipped[fid] = 'it did not load'
+        for fid, (name, entries) in files_post.items():
+            log('  %s: %d encrypted files (%d MB), as the game reads them'
+                % (name, len(entries), sum(e.usize for e in entries) >> 20))
+            try:
+                _save_files(h, paks, entries)
+            except DumpError as e:
+                skipped[fid] = 'its encrypted files could not be read (%s)' % e
+                if WINDOWS:
+                    log('  %s: skipping encrypted files (%s)' % (name, e))
+                else:
+                    raise
     finally:
         s.close()
     return dumped, skipped

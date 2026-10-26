@@ -115,6 +115,9 @@ def main():
     parser.add_argument('--progress', action='store_true',
                         help='also print progress lines for the launcher (@step, @added, @removed, @skipped, @error, '
                              '@done)')
+    parser.add_argument('--attach-running', action='store_true',
+                        help='on Windows, attach to a Tekken 7 process you started yourself instead of launching a '
+                             'new one for the moveset/encrypted-files dump step')
     args = parser.parse_args()
     progress = Progress(args.progress)
     fighters = list(CHARACTERS) if args.all else list(dict.fromkeys(f.lower() for f in args.fighter))
@@ -158,7 +161,7 @@ def add(args, fighters, progress):
     if any(fid in autodump.DLC for fid in ids):
         progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden in Tekken 7\'s Proton prefix)')
     try:
-        skipped = autodump.unowned(ids)
+        skipped = autodump.unowned(ids, allow_running=args.attach_running)
     except autodump.DumpError as error:
         progress.fail(str(error))
     for fighter in list(fighters):
@@ -191,7 +194,7 @@ def add(args, fighters, progress):
         progress('step', 'dump', 'Saving what Tekken 7 has only while it runs (it runs hidden in the background for a '
                  'minute or two)')
         try:
-            _, skipped = autodump.dump(needed, movesets, files=files, paks=paks)
+            _, skipped = autodump.dump(needed, movesets, files=files, paks=paks, attach_running=args.attach_running)
         except autodump.DumpError as error:
             progress.fail(str(error))
         who = {fid: name for fid, (_, name) in needed.items()}

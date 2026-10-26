@@ -38,6 +38,8 @@
 
 /* ------------------------------------------------------------ the game (TEKKEN 7, Steam build 10546199) */
 
+static const unsigned long long IMAGE_BASE = 0x140000000ull;
+
 /* The game's functions the helper calls, each checked before any call by a hash (64-bit FNV-1a) of its first bytes,
  * so another build of the game is refused, not crashed. */
 struct Function {
@@ -61,6 +63,8 @@ enum { RECORD_SIZE = 0x70, RECORD_MOVESET = 0x40, RECORD_ANIMATIONS = 0x48, RECO
 
 static HANDLE g_game;
 static int g_checked;
+static int g_allow_unknown;
+static unsigned long long g_base;
 
 /* ------------------------------------------------------------ answers */
 
@@ -156,6 +160,31 @@ static DWORD game_pid(void) {
     return pid;
 }
 
+static unsigned long long game_base(DWORD pid) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    MODULEENTRY32 me;
+    memset(&me, 0, sizeof me);
+    me.dwSize = sizeof me;
+    unsigned long long base = 0;
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    for (BOOL ok = Module32First(snap, &me); ok; ok = Module32Next(snap, &me)) {
+        if (_stricmp(me.szModule, "TekkenGame-Win64-Shipping.exe") == 0) {
+            base = (unsigned long long)(size_t)me.modBaseAddr;
+            break;
+        }
+    }
+    CloseHandle(snap);
+    return base;
+}
+
+static unsigned long long map_address(unsigned long long absolute) {
+    return g_base ? g_base + (absolute - IMAGE_BASE) : absolute;
+}
+
+static unsigned long long function_address(const struct Function* f) {
+    return map_address(f->address);
+}
+
 static int read_game(unsigned long long address, void* out, size_t size) {
     SIZE_T got = 0;
     return g_game && ReadProcessMemory(g_game, (void*)(size_t)address, out, size, &got) && got == size;
@@ -169,10 +198,22 @@ static unsigned long long read_u64(unsigned long long address) {
 
 static int matches(const struct Function* f) {
     unsigned char b[16];
-    if (f->length > sizeof b || !read_game(f->address, b, f->length)) return 0;
+    const unsigned long long at = function_address(f);
+    if (f->length > sizeof b || !read_game(at, b, f->length)) return 0;
     unsigned long long h = 0xcbf29ce484222325ull;
     for (size_t i = 0; i < f->length; ++i) h = (h ^ b[i]) * 0x100000001b3ull;
     return h == f->hash;
+}
+
+/* -> 1 when bytes were read (hash in out), 0 when bytes could not be read. */
+static int hash_at(const struct Function* f, unsigned long long* out) {
+    unsigned char b[16];
+    const unsigned long long at = function_address(f);
+    if (f->length > sizeof b || !read_game(at, b, f->length)) return 0;
+    unsigned long long h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < f->length; ++i) h = (h ^ b[i]) * 0x100000001b3ull;
+    *out = h;
+    return 1;
 }
 
 static void attach(void) {
@@ -188,14 +229,38 @@ static void attach(void) {
         out_printf("error cannot open the game (%lu)\n", (unsigned long)GetLastError());
         return;
     }
-    const struct Function* all[] = {&ALLOCATE, &FIGHTER_INFO, &LOAD_FIGHTER, &LOAD_COMMON, &FIXUP_MOVESET,
-                                    &FIXUP_MOVELIST, &LOAD_FILE, &FREE};
+    g_base = game_base(pid);
+    if (!g_base) {
+        out_printf("error cannot locate Tekken 7 module base\n");
+        return;
+    }
+    static const struct { const char* name; const struct Function* f; } all[] = {
+        {"ALLOCATE", &ALLOCATE}, {"FIGHTER_INFO", &FIGHTER_INFO}, {"LOAD_FIGHTER", &LOAD_FIGHTER},
+        {"LOAD_COMMON", &LOAD_COMMON}, {"FIXUP_MOVESET", &FIXUP_MOVESET},
+        {"FIXUP_MOVELIST", &FIXUP_MOVELIST}, {"LOAD_FILE", &LOAD_FILE}, {"FREE", &FREE}
+    };
     for (size_t i = 0; i < sizeof all / sizeof all[0]; ++i) {
-        if (!matches(all[i])) {
-            out_printf("error this Tekken 7 build is not the one the helper knows\n");
+        unsigned long long got = 0;
+        if (!hash_at(all[i].f, &got)) {
+            out_printf("error the game is not ready yet\n");
             return;
         }
+        if (got != all[i].f->hash) {
+            if (got) {
+                fprintf(stderr, "t7helper: signature mismatch in %s at 0x%llx (expected 0x%016llx, got 0x%016llx)\n",
+                        all[i].name, function_address(all[i].f), all[i].f->hash, got);
+            } else {
+                fprintf(stderr, "t7helper: signature mismatch in %s at 0x%llx (could not read bytes)\n",
+                        all[i].name, function_address(all[i].f));
+            }
+            if (!g_allow_unknown) {
+                out_printf("error this Tekken 7 build is not the one the helper knows\n");
+                return;
+            }
+            fprintf(stderr, "t7helper: proceeding with TTT2_T7HELPER_ALLOW_UNKNOWN=1 (unsafe): %s\n", all[i].name);
+        }
     }
+    if (g_allow_unknown) fprintf(stderr, "t7helper: attach completed in compatibility mode\n");
     g_checked = 1;
     out_printf("ok\n");
 }
@@ -220,7 +285,7 @@ static unsigned long long call(const struct Function* f, unsigned long long a1, 
     put64(code, &n, 0x48, 0xB9, a1);         /* mov rcx */
     put64(code, &n, 0x48, 0xBA, a2);         /* mov rdx */
     put64(code, &n, 0x49, 0xB8, a3);         /* mov r8 */
-    put64(code, &n, 0x48, 0xB8, f->address); /* mov rax */
+    put64(code, &n, 0x48, 0xB8, function_address(f)); /* mov rax */
     code[n++] = 0xFF; code[n++] = 0xD0;      /* call rax */
     put64(code, &n, 0x48, 0xB9, result);     /* mov rcx, result */
     code[n++] = 0x48; code[n++] = 0x89; code[n++] = 0x01;                     /* mov [rcx], rax */
@@ -358,7 +423,7 @@ static void fetch(void) {
 }
 
 static void ready(void) {
-    out_printf("%d\n", g_checked && read_u64(TASK_MANAGER) && read_u64(FILE_LOADER) ? 1 : 0);
+    out_printf("%d\n", g_checked && read_u64(map_address(TASK_MANAGER)) && read_u64(map_address(FILE_LOADER)) ? 1 : 0);
 }
 
 static void common(void) {
@@ -508,6 +573,8 @@ static int serve(int port, const char* secret) {
 }
 
 int main(int argc, char** argv) {
+    const char* allow = getenv("TTT2_T7HELPER_ALLOW_UNKNOWN");
+    g_allow_unknown = allow && *allow && strcmp(allow, "0");
     if (argc >= 4 && !strcmp(argv[1], "serve")) return serve(atoi(argv[2]), argv[3]);
     fprintf(stderr, "usage: t7helper serve <port> <secret>\n");
     return 1;
