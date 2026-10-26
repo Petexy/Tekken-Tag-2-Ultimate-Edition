@@ -151,6 +151,12 @@ Texture* Renderer::texture(const uint32_t words[7]) {
         t->memory[0][1] = s.image + s.image_size;
         t->memory[1][0] = s.mipmaps;
         t->memory[1][1] = s.mip_levels > 1 ? uint32_t{s.mipmaps} + s.mipmap_size : uint32_t{s.mipmaps};
+        for (uint32_t level = 0; level < std::min(r.last_level + 1, 14u); ++level) {
+            uint32_t address = level == 0 ? uint32_t{s.image}
+                                          : s.mipmaps + (level > 1 ? uint32_t{s.mip_level_offset[level - 1]} : 0u);
+            if (gx2::is_macro_tiled(r.tile_mode)) address &= ~0x700u;
+            t->level_address[level] = address;
+        }
         for (const auto& range : t->memory) {
             if (range[1] > range[0]) for_pages(range[0], range[1], [&](uint32_t page) { texture_pages_[page].push_back(t.get()); });
         }
@@ -244,14 +250,11 @@ static void report_target_texture_once(uint32_t format, float scale) {
 bool Renderer::load_texture_from_targets(Texture& t) {
     const Resource r = decode(t.words.data());
     const FormatInfo f = color_format(r.format);
-    const gx2::Surface s = surface_of(r);
     const uint32_t levels = std::min(r.last_level + 1, 14u);
     const Target* sources[14] = {};
     uint64_t newest = 0;
     for (uint32_t level = 0; level < levels; ++level) {
-        uint32_t address = level == 0 ? uint32_t{s.image}
-                                      : s.mipmaps + (level > 1 ? uint32_t{s.mip_level_offset[level - 1]} : 0u);
-        if (gx2::is_macro_tiled(r.tile_mode)) address &= ~0x700u;
+        const uint32_t address = t.level_address[level];
         const Target* src = find_target(address, 0, false);
         if (src == nullptr || src->written <= src->overwritten) {
             if (level == 0) return false;

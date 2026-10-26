@@ -2,7 +2,7 @@
 Type=Application
 Name=Ultimate Launcher
 GenericName=Game Launcher
-Comment=Install and play Tekken Tag Tournament 2, and add Tekken 7's characters
+Comment=Install and play Tekken Tag Tournament 2, and add Tekken 7's and Tekken 8's characters
 Exec=ttt2-launcher %f
 Icon=io.github.petexy.TekkenTag2UltimateEdition
 Terminal=false

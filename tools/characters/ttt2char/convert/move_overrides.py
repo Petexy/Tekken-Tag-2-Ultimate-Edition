@@ -1,6 +1,10 @@
 """Opt-in gameplay edits applied before generating Tag Assault twins."""
 from . import tagsystem as TS
 
+# The string buffer of the fighter's game (a variable a capture row sets and a dispatch row tests: Tekken 7's 352 /
+# 0x80a6, Tekken 8's counterparts in the id maps between the two games); the id maps give TTT2's (313 / 0x8096)
+STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
+
 
 def apply(c):
     # Explicit neutral inputs only: do not add attack cancels or alter recovery.
@@ -127,8 +131,8 @@ def apply(c):
 
 def direct_buffered_string(c, name):
     """Expose a buffered follow-up as a native direct input, retaining its gates."""
-    variable = c.map_req(352)
-    setter = c.map_req(0x80a6)
+    variable = c.map_req(STRING_VAR[c.game])
+    setter = c.map_req(STRING_SET[c.game])
     if variable is None or setter is None:
         raise ValueError('no mapped string buffer')
     move = c.T['moves'][c.newidx[c.kn[name]]]
@@ -208,7 +212,7 @@ def normalize_buffered_strings(c):
     left intact. These neutral-target capture cancels are not actual attacks,
     but expose an extra cancel to TTT2's assist bookkeeping.
     """
-    variable, setter = c.map_req(352), c.map_req(0x80a6)
+    variable, setter = c.map_req(STRING_VAR[c.game]), c.map_req(STRING_SET[c.game])
     if variable is None or setter is None:
         return
     for name, original in c.kn.items():
@@ -290,3 +294,50 @@ def trim_recovery(c, name, frames):
     end['start_frame'] = max(end['win_start'], end['start_frame'] - frames)
     move['cancel'] = TS.write(c.T, 'cancels', rows)
     c.stats['move recovery frames removed'] += frames
+
+
+# the command list's bound marks (command_bounds): the standing alias the walk starts from; a cancel row's press
+# bits (1 2 4 8 the buttons, 0x100 tag; 9-17 are held ones) and its "any of them" flag; requirement 0 = always
+STANDING, PRESS_BITS, ANY_OF, ALWAYS = 0x8001, 0x1FF, 0x20000000, 0
+
+
+def command_bounds(c):
+    """The moves MOVESET['bounds'] makes bounds (or not) for the command list (its bound icon): a function of a
+    command's presses [(stick, buttons, frame)] (a cancel row's direction and press bits, the demo frame of the
+    press) -> {press number from 1: bound} for the presses that reach such a move; None when the definition names
+    none. The presses walk the converted moveset from standing: each takes the first input row of the current move
+    (its groups inline) whose direction, buttons and window fit it and whose requirements always hold; a press no
+    row takes ends the walk."""
+    named = c.defn.MOVESET.get('bounds', {})
+    if not named:
+        return None
+    from . import idmaps as M
+    T = c.T
+
+    def rows(i):
+        for r in TS.cancels(T, T['moves'][i]['cancel']):
+            if r['direction'] == M.GROUP:
+                yield from TS.chain(T['group_cancels'], r['move_id'], lambda g: g['direction'] == M.GROUP_END)
+            else:
+                yield r
+
+    def takes(r, stick, buttons, frame):
+        bits = r['button'] & PRESS_BITS
+        return bool(bits and r['direction'] < M.LIST_END and (not r['direction'] or r['direction'] & stick)
+                    and (bits & buttons if r['button'] & ANY_OF else bits == buttons)
+                    and r['win_start'] <= frame <= r['win_end']
+                    and all(cond == ALWAYS for cond, _ in TS.reqs(T, r['req'])))
+
+    def marks(presses):
+        marked = {c.newidx[c.kn[name]]: bound for name, bound in named.items()}     # (resolved when walked)
+        out, move, start = {}, TS.resolve(c.aliases, STANDING), None
+        for n, (stick, buttons, frame) in enumerate(presses, 1):
+            at = 1 if start is None else frame - start + 1
+            row = next((r for r in rows(move) if takes(r, stick, buttons, at)), None)
+            if row is None:
+                break
+            move, start = TS.resolve(c.aliases, row['move_id']), frame
+            if move in marked:
+                out[n] = marked[move]
+        return out
+    return marks

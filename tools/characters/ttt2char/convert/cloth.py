@@ -28,6 +28,8 @@ layout below). So for each clothing asset whose vertices may move at least FREE_
   legs), pairs (every bone but a chain's top below the chest with the hips and legs, kicks reach anywhere, and with
   the belly or chest when near; none for chains hung from an arm), each capsule as thick as reaches the nearest of
   its cloth bones at rest (TOUCH), and links between neighbouring chains (Lars's values).
+Tekken 8's strands (tekken8/cloth.py: the cords and strap ends its Catwalk Cloth swings) come in as such cloths too,
+each with its own link length, shortest chain and how it hangs.
 
 The spring file (big-endian), as the game's files have it (1572 of its 1607 spring files read this way to the byte):
     f32 5.0, 28 zero bytes | u32 entry count, 12 zero bytes | entries of 0x60 bytes: u32 OPT number, 11 f32
@@ -247,13 +249,14 @@ def _frame(x, outward):
     return np.stack([x, y, np.cross(x, y)], 1)
 
 
-def _drape(nodes, body, normals):
-    """Link directions for the chain through nodes if it was modelled flowing (tilted more than FLOWING from
+def _drape(nodes, body, normals, flowing=FLOWING, down=None):
+    """Link directions for the chain through nodes if it was modelled flowing (tilted more than `flowing` from
     straight down, root to tip): HANG from straight down toward where it flowed, the bones kept MARGIN outside the
-    body (points, outward normals). None for a chain modelled hanging."""
-    down = np.array([0.0, -1.0, 0.0])
+    body (points, outward normals). None for a chain modelled hanging. down: another way to hang (a unit vector:
+    along an arm, for a Tekken 8 strand hung from one)."""
+    down = np.array([0.0, -1.0, 0.0]) if down is None else np.asarray(down, np.float64)
     whole = nodes[-1] - nodes[0]
-    if float(np.arccos(np.clip(whole @ down / max(np.linalg.norm(whole), 1e-9), -1, 1))) <= FLOWING:
+    if float(np.arccos(np.clip(whole @ down / max(np.linalg.norm(whole), 1e-9), -1, 1))) <= flowing:
         return None
     side = whole - down * float(whole @ down)
     side = side / np.linalg.norm(side) if np.linalg.norm(side) > 1e-6 else np.array([0.0, 0.0, -1.0])
@@ -277,8 +280,10 @@ def _drape(nodes, body, normals):
 
 def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     """Adds the cloth's chains to k: bones `cloth<c>_<chain>_<link>` after its Tekken 7 bones (bind frames in TTT2
-    space), the drawn vertices skinned to them, the chains draped. -> [{'part', 'bones' (k bone indices),
-    'neighbours' (chain numbers)}] in chain number order."""
+    space), the drawn vertices skinned to them, the chains draped. A cloth's own 'link' and 'reach' (mm), 'flowing'
+    and 'down' (_drape's; Tekken 8's strands: tekken8/cloth.py) stand for LINK, REACH, FLOWING and straight down
+    (`link` scales its link as it scales LINK). -> [{'part', 'bones' (k bone indices), 'neighbours' (chain
+    numbers)}] in chain number order."""
     s0 = k['prims'][0]
     pos, nrm, joints, weights = s0['pos'], s0['nrm'], s0['joints'], s0['weights']
     names, parents = list(k['bones']['names']), list(k['bones']['parents'])
@@ -292,6 +297,8 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     out, drapes = [], []
     for ci, c in enumerate(cloths):
         a = c['asset']
+        shortest = c.get('reach', REACH)
+        step = link * c['link'] / LINK if 'link' in c else link
         sim = _points(a.vertices)
         n = len(sim)
         pinned = a.max_distance <= PINNED
@@ -309,7 +316,7 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             ri, rd = _nearest(sim[source], sim[roots])
             chain = np.where(free & (rd <= 1.5 * spacing), ri, -1)
             reach = np.array([g[chain == r].max() if (chain == r).any() else 0.0 for r in range(len(roots))])
-            keep = reach >= REACH
+            keep = reach >= shortest
             if keep.all() or not keep.any():
                 break
             roots = roots[keep]
@@ -323,14 +330,14 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
         made = []
         for r, members in enumerate(chains):
             reach = float(g[members].max()) if len(members) else 0.0
-            if reach < REACH:
+            if reach < shortest:
                 made.append(None)
                 continue
-            levels = list(np.arange(0.0, reach - link / 3, link)[1:]) + [reach]
+            levels = list(np.arange(0.0, reach - step / 3, step)[1:]) + [reach]
             nodes = [sim[source[members]].mean(0)]
             for j, lv in enumerate(levels):
-                lo = lv - link / 2 if j + 1 < len(levels) else lv - link / 3
-                band = members[(g[members] >= lo) & (g[members] <= lv + link / 2)]
+                lo = lv - step / 2 if j + 1 < len(levels) else lv - step / 3
+                band = members[(g[members] >= lo) & (g[members] <= lv + step / 2)]
                 if not len(band):
                     break
                 nodes.append(sim[band].mean(0))
@@ -418,15 +425,15 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                     joints[vi, q] = j
                     weights[vi, q] = w / total
                 moved += 1
-        drapes += [(bones_of[m[0]], m[1]) for m in made if m is not None]
+        drapes += [(bones_of[m[0]], m[1], c.get('flowing', FLOWING), c.get('down')) for m in made if m is not None]
         log('  %s: %d chains (%s bones) hang from %s; %d vertices skinned to them' % (
             c['name'], len(number), '+'.join(str(len(bones_of[x])) for x in sorted(bones_of)),
             ', '.join(sorted({names[out[x]['parent']].split('@')[0] for x in bones_of})), moved))
     k['bones']['names'], k['bones']['parents'] = names, parents
     k['bones']['world'] = np.array(world)
     draped = []
-    for bones, nodes in drapes:
-        dirs = _drape(nodes, body_pos, body_nrm)
+    for bones, nodes, flowing, down in drapes:
+        dirs = _drape(nodes, body_pos, body_nrm, flowing, down)
         if dirs is not None:
             draped.append((bones, dirs))
     if draped:

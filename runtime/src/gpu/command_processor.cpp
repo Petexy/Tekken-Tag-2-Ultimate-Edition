@@ -18,6 +18,7 @@
 #include "cafe/guest.h"
 #include "cafe/runtime.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -544,13 +545,20 @@ void retire(uint64_t timestamp) {
     os::wake(os::kWaitGpu);
 }
 
+// Time the command processor waited for commands (its thread's).
+std::chrono::steady_clock::duration g_idle{};
+
 void command_processor_main() {
     pthread_setname_np(pthread_self(), "gpu");
     for (;;) {
         Submission s;
         {
             std::unique_lock lock(g_queue_mutex);
-            g_queue_cv.wait(lock, [] { return !g_queue.empty(); });
+            if (g_queue.empty()) {
+                const auto begin = std::chrono::steady_clock::now();
+                g_queue_cv.wait(lock, [] { return !g_queue.empty(); });
+                g_idle += std::chrono::steady_clock::now() - begin;
+            }
             s = g_queue.front();
             g_queue.pop_front();
         }
@@ -584,6 +592,12 @@ void start() {
         std::thread(retirement_main).detach();
         start_display();
     });
+}
+
+double take_idle_seconds() {
+    const double seconds = std::chrono::duration<double>(g_idle).count();
+    g_idle = {};
+    return seconds;
 }
 
 uint64_t submit(uint32_t buffer, uint32_t words) {

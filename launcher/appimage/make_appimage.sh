@@ -130,8 +130,13 @@ unexpected() {
             ./usr/lib/ttt2/kit/bin/ttt2-build | ./usr/lib/ttt2/kit/bin/cafe-recomp) ;;
             ./usr/lib/ttt2/kit/include/cafe/*.h) ;;
             ./usr/lib/ttt2/kit/lib/*.a | ./usr/lib/ttt2/kit/lib/generated_stub.o) ;;
-            ./usr/lib/ttt2/kit/kit.ini | ./usr/lib/ttt2/kit/VERSION | ./usr/lib/ttt2/kit/t7helper.exe) ;;
-            ./usr/share/ttt2/characters/*.py | ./usr/share/ttt2/characters/t7helper/t7helper.c) ;;
+            ./usr/lib/ttt2/kit/kit.ini | ./usr/lib/ttt2/kit/VERSION) ;;
+            ./usr/lib/ttt2/kit/t7helper.exe | ./usr/lib/ttt2/kit/t8helper.exe) ;;
+            ./usr/share/ttt2/characters/*.py) ;;
+            ./usr/share/ttt2/characters/t7helper/t7helper.c | ./usr/share/ttt2/characters/t8helper/t8helper.c) ;;
+            # (the importer's C parts, compiled on the player's PC for Tekken 8's import: ttt2char/native.py)
+            ./usr/share/ttt2/characters/ttt2char/tekken8/oodle.c) ;;
+            ./usr/share/ttt2/characters/ttt2char/convert/decimate.c) ;;
             "./usr/share/applications/$app_id.desktop") ;;
             "./usr/share/icons/hicolor/scalable/apps/$app_id.svg") ;;
             *) echo "$file" ;;
@@ -141,6 +146,15 @@ unexpected() {
 found=$(unexpected)
 [ -z "$found" ] || die "the AppDir holds files it must not: $found"
 [ -x "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" ] || die "the kit was not installed"
+# What a Tekken 8 import needs besides Python and a C compiler: the importer
+# with its C parts, and Tekken 8's helper (prebuilt when MinGW was there, as
+# Tekken 7's; else built from its source on the player's PC).
+for file in import_character.py launcher.py t8helper/t8helper.c ttt2char/tekken8/oodle.c ttt2char/convert/decimate.c; do
+    [ -f "$appdir/usr/share/ttt2/characters/$file" ] || die "the importer in the AppDir lacks $file"
+done
+if [ -f "$appdir/usr/lib/ttt2/kit/t7helper.exe" ] && [ ! -f "$appdir/usr/lib/ttt2/kit/t8helper.exe" ]; then
+    die "the kit has Tekken 7's helper but not Tekken 8's"
+fi
 
 # The kit's programs are copied as built: stripped like the launcher.
 strip=$(sed -n 's/^CMAKE_STRIP:FILEPATH=//p' "$build/CMakeCache.txt")

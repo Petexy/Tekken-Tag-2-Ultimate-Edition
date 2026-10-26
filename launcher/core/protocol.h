@@ -13,10 +13,10 @@
 namespace launcher {
 
 struct Line {
-    enum class Kind { kText, kStep, kProgress, kFolder, kError, kDone, kOk, kAdded, kRemoved, kSkipped };
+    enum class Kind { kText, kStep, kProgress, kFolder, kError, kDone, kOk, kAdded, kRemoved, kSkipped, kStandIn };
     Kind kind = Kind::kText;
-    std::string word; // kStep: the step's id; kAdded, kRemoved, kSkipped: the fighter
-    std::string text; // kStep, kSkipped: the rest; kFolder: the path; kError: the reason; kText: the line
+    std::string word; // kStep: the step's id; kAdded, kRemoved, kSkipped, kStandIn: the fighter
+    std::string text; // kStep, kSkipped, kStandIn: the rest; kFolder: the path; kError: the reason; kText: the line
     uint64_t done = 0, total = 0;
 };
 

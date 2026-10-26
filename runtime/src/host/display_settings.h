@@ -11,8 +11,11 @@
 //                   5120x2880    the size the game draws at; auto
 //   interpolation = yes | no     120 frames per second on displays of 100 Hz
 //                                and more (60 below); yes
+//   input_delay   = yes | no     the Wii U game's two frames between a button
+//                                press and the game acting on it; no
 //
-// The environment's TTT2_FULLSCREEN, TTT2_SCALE and TTT2_FPS still win.
+// The environment's TTT2_FULLSCREEN, TTT2_SCALE, TTT2_FPS and
+// TTT2_INPUT_DELAY still win.
 // No SDL here: the launcher builds this file too, so that what it writes
 // is what the game reads.
 
@@ -35,6 +38,7 @@ struct Settings {
     bool fullscreen = false;
     Resolution resolution = Resolution::kAuto;
     bool interpolation = true;
+    bool input_delay = false;
     bool operator==(const Settings&) const = default;
 };
 
@@ -101,15 +105,21 @@ struct Active {
     bool fullscreen = false;
     float scale = 0;  // 0: automatic, auto_scale() of the display
     uint32_t fps = 0; // 0: 120 on displays of 100 Hz and more, else 60
+    std::optional<uint32_t> input_delay = 0; // frames in place of the title's own 2; nullopt: its own
     bool operator==(const Active&) const = default;
 };
 
+// The most frames TTT2_INPUT_DELAY gives (the most Practice's Input Delay
+// setting gives).
+inline constexpr uint32_t kMaxInputDelay = 15;
+
 // `settings` with the environment's values (nullptr or empty: not set):
 // TTT2_FULLSCREEN=1 fullscreen (another value windowed), TTT2_SCALE=1, 1.5,
-// 2, 3 or 4, TTT2_FPS a frame rate (60, 120, 180, 240). Values that are
-// not used get a line in `log`.
+// 2, 3 or 4, TTT2_FPS a frame rate (60, 120, 180, 240), TTT2_INPUT_DELAY
+// frames (0 to kMaxInputDelay). Values that are not used get a line in
+// `log`.
 Active resolve(const Settings& settings, const char* fullscreen, const char* scale, const char* fps,
-               std::vector<std::string>& log);
+               const char* input_delay, std::vector<std::string>& log);
 
 // The window sets these before the renderer starts (defaults until then).
 const Active& active();

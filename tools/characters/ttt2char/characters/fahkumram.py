@@ -83,10 +83,9 @@ MOVESET = {
     'hitboxes': {'Nc_lp00B': (0xfe, 0, 0xfe, 11)},
     'air_reactions': {'Nc_lp00B': 'J8_jprk00',
                       'Nc_66rklkrp': (23, 'Jn_mc03s')},
-    'tag_launchers': {'Nc_66rklkrp': 'La_Stormgear'},
-    'tag_launcher_air_only': ('Nc_66rklkrp',),
-    'electric_tag_exit': True,
-    'tag_exit_name': 'Fahkumram_Hellsweep_TagExit',
+    # tag combo (convert/tagcombo.py) of f,f+4,3,2 only on an airborne opponent (until 2026-10-26 it tagged out
+    # with Heihachi's EWGF exit animation, now with its own)
+    'tag_combos': {'Nc_66rklkrp': 'air'},
     'air_reaction_reference': 40,  # Jinpachi u+4, airborne reaction
     'bounds': {'Nc_66rklp': True, 'Nc_3rplp': True},
     'name': '[FAHKUMRAM]',

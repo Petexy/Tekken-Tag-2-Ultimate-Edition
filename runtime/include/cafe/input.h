@@ -24,14 +24,14 @@ struct GamepadState {
 
 void set_gamepad_state(const GamepadState& state);
 
-// + pressed together with another button, for a mode that gives the chord a
-// meaning of its own (title/practice.cpp: Practice's position reset). The
-// mode arms it on every frame the chord can happen, saying whether the other
-// button is held. While armed, a press of + waits eight of those frames
+// - (Select) pressed together with another button, for a mode that gives the
+// chord a meaning of its own (title/practice.cpp: Practice's position reset).
+// The mode arms it on every frame the chord can happen, saying whether the
+// other button is held. While armed, a press of - waits eight of those frames
 // before the game sees it; if the other button is held by then, the press is
-// the chord's and the game never sees it. take_start_chord() is true once
+// the chord's and the game never sees it. take_select_chord() is true once
 // for each chord.
-void arm_start_chord(bool partner_held);
-bool take_start_chord();
+void arm_select_chord(bool partner_held);
+bool take_select_chord();
 
 } // namespace cafe::os

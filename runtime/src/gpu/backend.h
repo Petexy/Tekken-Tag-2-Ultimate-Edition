@@ -85,6 +85,10 @@ public:
     virtual void frame_shown() {}
 };
 
+// Seconds the command processor waited for commands since the last call
+// (on its thread: the backend's calls come from it).
+double take_idle_seconds();
+
 std::unique_ptr<Backend> make_null_backend();
 // The Vulkan renderer, presenting in the window (host/window.h).
 std::unique_ptr<Backend> make_vulkan_backend();

@@ -9,7 +9,8 @@
 // compiled shaders, the builder's work folder and the DLC answer kept, and
 // when asked the saves the game wrote (its "common" and per-user folders,
 // not anything else in a save folder the player named), and the character
-// packs with what was saved from Tekken 7 for them. Nothing is ever deleted
+// packs with what was saved from Tekken 7 and Tekken 8 for them. Nothing is
+// ever deleted
 // through a symbolic link (a link is deleted itself, not what it points
 // to), nor in another file system mounted inside a folder that is deleted,
 // nor while the game runs from that folder.
@@ -23,7 +24,7 @@ namespace launcher {
 
 struct UninstallOptions {
     bool saves = false;
-    bool characters = false; // the packs, and the movesets and files saved from Tekken 7
+    bool characters = false; // the packs, and the movesets and files saved from Tekken 7 and Tekken 8
 };
 
 // What could not be deleted, and why. (The path apart, as its bytes: the

@@ -263,6 +263,27 @@ class Colours(unittest.TestCase):
         xml = colours.palette_xml(texts[0], 61, {51: e1})
         self.assertIn('<Color id="61" palette="51" x="%d" y="%d" s="9" />' % e1[:2], xml)
 
+    def test_fit_max_error(self):
+        """White stripes changing like the purple around them (both to lime) cannot be the purple group's colour:
+        with max_error they are left out of the layer and the rest is fitted without them."""
+        c1, c2 = np.zeros((10, 10, 3)), np.zeros((10, 10, 3))
+        c1[:5], c2[:5] = (0.3, 0.2, 0.6), (0.5, 0.65, 0.05)          # purple -> lime
+        c1[5:9], c2[5:9] = (0.15, 0.15, 0.15), (0.6, 0.6, 0.6)       # dark grey -> light grey
+        c1[9], c2[9] = (0.9, 0.9, 0.9), (0.55, 0.7, 0.1)             # white stripes -> lime
+
+        def worst_1p(f):
+            (_, a, _, _), (_, b, _, _) = f['groups']
+            got = 2 * f['shade'][..., None] * (np.array(a) + (np.array(b) - a) * f['b'][..., None])
+            return np.where(f['alpha'] > 0, np.abs(np.clip(got, 0, 1) - c1).max(-1), 0).max(1)
+
+        grid = np.zeros((32, 64, 3, 3), '>f4').tobytes()
+        before = colours.fit(c1, c2, colours.Palette(grid, []))
+        self.assertGreater(worst_1p(before)[9], colours.MAX_ERROR)   # (as Tekken 7 fighters keep it)
+        f = colours.fit(c1, c2, colours.Palette(grid, []), max_error=colours.MAX_ERROR)
+        self.assertEqual(f['alpha'][9].sum(), 0)
+        self.assertTrue((f['alpha'][:9] == 1).all())
+        self.assertLess(worst_1p(f).max(), 1 / 255)
+
 
 class Lettering(unittest.TestCase):
     @staticmethod

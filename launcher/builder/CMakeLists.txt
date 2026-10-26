@@ -16,10 +16,11 @@
 # kit/kit.ini            how to compile and link (kit_ini.cmake)
 # kit/VERSION            the launcher's version and this build's commit
 # kit/t7helper.exe       the Tekken 7 helper, when MinGW is there to build it
+# kit/t8helper.exe       the Tekken 8 helper, likewise
 #
 # The same layout is installed to <prefix>/lib/ttt2/kit.
 
-set(TTT2_LAUNCHER_VERSION 0.2.0)
+set(TTT2_LAUNCHER_VERSION 0.3.1)
 set(TTT2_LAUNCHER_VERSION ${TTT2_LAUNCHER_VERSION} PARENT_SCOPE)
 set(TTT2_KIT_DIR ${CMAKE_BINARY_DIR}/launcher/kit)
 set(TTT2_KIT_DIR ${TTT2_KIT_DIR} PARENT_SCOPE)
@@ -187,18 +188,21 @@ add_custom_command(OUTPUT ${TTT2_KIT_DIR}/kit.ini ${TTT2_KIT_DIR}/lib/generated_
         ${TTT2_KIT_DIR}/bin/cafe-recomp VERBATIM)
 list(APPEND kit_files ${TTT2_KIT_DIR}/kit.ini ${TTT2_KIT_DIR}/lib/generated_stub.o)
 
-# Players need no MinGW: the helper the character importer runs inside
-# Tekken 7's Wine prefix is built here (as ttt2char/tekken7/autodump.py
-# builds it).
+# Players need no MinGW: the helpers the character importer runs inside
+# Tekken 7's and Tekken 8's Wine prefixes are built here (as
+# ttt2char/tekken7/autodump.py and ttt2char/tekken8/autodump.py build them).
 find_program(TTT2_MINGW_GCC x86_64-w64-mingw32-gcc)
 if(TTT2_MINGW_GCC)
-    set(helper ${CMAKE_SOURCE_DIR}/tools/characters/t7helper/t7helper.c)
-    add_custom_command(OUTPUT ${TTT2_KIT_DIR}/t7helper.exe
-        COMMAND ${TTT2_MINGW_GCC} -O2 -mwindows -o ${TTT2_KIT_DIR}/t7helper.exe ${helper} -lws2_32
-        DEPENDS ${helper} VERBATIM)
-    list(APPEND kit_files ${TTT2_KIT_DIR}/t7helper.exe)
+    foreach(helper t7helper t8helper)
+        set(source ${CMAKE_SOURCE_DIR}/tools/characters/${helper}/${helper}.c)
+        add_custom_command(OUTPUT ${TTT2_KIT_DIR}/${helper}.exe
+            COMMAND ${TTT2_MINGW_GCC} -O2 -mwindows -o ${TTT2_KIT_DIR}/${helper}.exe ${source} -lws2_32
+            DEPENDS ${source} VERBATIM)
+        list(APPEND kit_files ${TTT2_KIT_DIR}/${helper}.exe)
+    endforeach()
 else()
-    message(STATUS "No x86_64-w64-mingw32-gcc: the launcher's kit has no t7helper.exe (the importer builds it)")
+    message(STATUS "No x86_64-w64-mingw32-gcc: the launcher's kit has no t7helper.exe and t8helper.exe (the importer "
+                   "builds them)")
 endif()
 
 # A small program that may start other programs: ZArchive (and zstd) read

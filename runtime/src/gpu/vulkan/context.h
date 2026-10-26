@@ -58,8 +58,10 @@ struct Context {
     // Creates the instance (with the window's surface extensions) and device.
     void init(const std::vector<const char*>& instance_extensions);
 
-    uint32_t memory_type(uint32_t type_bits, VkMemoryPropertyFlags flags) const;
-    Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags);
+    // The first memory type with `flags` and `preferred`, else with `flags`.
+    uint32_t memory_type(uint32_t type_bits, VkMemoryPropertyFlags flags, VkMemoryPropertyFlags preferred = 0) const;
+    Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags,
+                         VkMemoryPropertyFlags preferred = 0);
     void destroy_buffer(Buffer& buffer);
     VkDeviceMemory allocate_image_memory(VkImage image);
     VkFormatFeatureFlags format_features(VkFormat format) const {

@@ -231,25 +231,38 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     if (stage == Stage::kVertex && fetch_address != 0) fetch = program(fetch_address, fetch_size, fetch_hash);
     const uint64_t keys[3] = {program_hash, fetch_hash, environment_key(env)};
     const uint64_t key = fnv(keys, sizeof(keys));
-    auto& entry = shaders_[key];
-    if (entry) return entry->failed ? nullptr : entry.get();
-    entry = std::make_unique<ShaderModule>();
+    if (auto it = shaders_.find(key); it != shaders_.end()) return it->second;
+    const ShaderModule*& entry = shaders_[key]; // stays null if the shader fails
     const char* kind = stage == Stage::kVertex ? "vs" : "ps";
+    TranslatedShader info;
     std::string error;
-    if (!translate(*p, fetch, env, entry->info, error)) {
+    if (!translate(*p, fetch, env, info, error)) {
         std::fprintf(stderr, "ttt2: gpu: cannot translate %s %016llx: %s\n", kind,
                      static_cast<unsigned long long>(program_hash), error.c_str());
-        entry->failed = true;
         return nullptr;
     }
     if (const char* dir = dump_directory()) {
         char name[128];
         std::snprintf(name, sizeof(name), "%s_%016llx_%016llx.glsl", kind, static_cast<unsigned long long>(program_hash),
                       static_cast<unsigned long long>(key));
-        std::ofstream(std::filesystem::path(dir) / name) << entry->info.glsl;
+        std::ofstream(std::filesystem::path(dir) / name) << info.glsl;
+    }
+    // Environments that translate alike share a module, and so pipelines:
+    // the key also covers state a shader does not depend on (textures the
+    // title left bound to slots it does not sample, other stages' links).
+    const uint64_t glsl_hash = fnv(info.glsl.data(), info.glsl.size());
+    const auto same = [&](const TranslatedShader& o) {
+        return o.glsl == info.glsl && o.texture_mask == info.texture_mask && o.shadow_mask == info.shadow_mask &&
+               o.uses_registers == info.uses_registers && o.constant_bank_mask == info.constant_bank_mask &&
+               std::equal(std::begin(o.constant_bank_extent), std::end(o.constant_bank_extent),
+                          std::begin(info.constant_bank_extent)) &&
+               o.buffer_mask == info.buffer_mask;
+    };
+    uint64_t code = glsl_hash;
+    for (auto it = modules_.find(code); it != modules_.end(); it = modules_.find(++code)) {
+        if (same(it->second->info)) return entry = it->second.get();
     }
     // SPIR-V is cached on disk by the GLSL it came from.
-    const uint64_t glsl_hash = fnv(entry->info.glsl.data(), entry->info.glsl.size());
     std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash);
     if (spirv.empty()) {
         shaderc_compile_options_t options = shaderc_compile_options_initialize();
@@ -257,26 +270,29 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
         // The driver optimises; SPIR-V optimisation only costs compile time.
         shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_zero);
         shaderc_compilation_result_t result = shaderc_compile_into_spv(
-            compiler_, entry->info.glsl.data(), entry->info.glsl.size(),
+            compiler_, info.glsl.data(), info.glsl.size(),
             stage == Stage::kVertex ? shaderc_vertex_shader : shaderc_fragment_shader, kind, "main", options);
         shaderc_compile_options_release(options);
         if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
             std::fprintf(stderr, "ttt2: gpu: cannot compile %s %016llx:\n%s\n", kind,
                          static_cast<unsigned long long>(program_hash), shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            entry->failed = true;
             return nullptr;
         }
-        const auto* code = reinterpret_cast<const uint32_t*>(shaderc_result_get_bytes(result));
-        spirv.assign(code, code + shaderc_result_get_length(result) / 4);
+        const auto* bytes = reinterpret_cast<const uint32_t*>(shaderc_result_get_bytes(result));
+        spirv.assign(bytes, bytes + shaderc_result_get_length(result) / 4);
         shaderc_result_release(result);
         store_cached_spirv(glsl_hash, spirv);
     }
+    auto module = std::make_unique<ShaderModule>();
+    module->info = std::move(info);
     VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     mci.codeSize = spirv.size() * 4;
     mci.pCode = spirv.data();
-    VK_CHECK(vkCreateShaderModule(ctx_.device, &mci, nullptr, &entry->module));
-    return entry.get();
+    VK_CHECK(vkCreateShaderModule(ctx_.device, &mci, nullptr, &module->module));
+    entry = module.get();
+    modules_.emplace(code, std::move(module));
+    return entry;
 }
 
 // -------------------------------------------------------------- pipelines
@@ -811,19 +827,19 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     }
 
     // Descriptors.
-    std::vector<VkWriteDescriptorSet> writes;
+    VkWriteDescriptorSet writes[3 + 2 * abi::kTextureSlots];
+    uint32_t write_count = 0;
     VkDescriptorBufferInfo buffers[3];
     VkDescriptorImageInfo images[2 * abi::kTextureSlots];
-    writes.reserve(3 + 2 * abi::kTextureSlots);
     const auto write_buffer = [&](uint32_t binding, VkDeviceSize offset, VkDeviceSize range) {
-        VkDescriptorBufferInfo& b = buffers[writes.size()];
+        VkDescriptorBufferInfo& b = buffers[write_count];
         b = {ring_.buffer(), offset, range};
-        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet& w = writes[write_count++];
+        w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         w.dstBinding = binding;
         w.descriptorCount = 1;
         w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         w.pBufferInfo = &b;
-        writes.push_back(w);
     };
     write_buffer(abi::kDrawConstantsBinding, dc_offset, sizeof(dc));
     if (vs->info.uses_registers) write_buffer(abi::kVsRegistersBinding, reg_offset[0], 4096);
@@ -834,18 +850,17 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
             if (!(s->info.texture_mask & (1u << slot))) continue;
             VkDescriptorImageInfo& ii = images[image_count++];
             ii = {bound[slot].sampler, bound[slot].view, VK_IMAGE_LAYOUT_GENERAL};
-            VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            VkWriteDescriptorSet& w = writes[write_count++];
+            w = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
             w.dstBinding = binding_base + slot;
             w.descriptorCount = 1;
             w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             w.pImageInfo = &ii;
-            writes.push_back(w);
         }
     };
     write_textures(vs, vs_textures, abi::kVsTextureBinding);
     write_textures(ps, ps_textures, abi::kPsTextureBinding);
-    ctx_.cmd_push_descriptor_set(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layout, 0,
-                                 static_cast<uint32_t>(writes.size()), writes.data());
+    ctx_.cmd_push_descriptor_set(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layout, 0, write_count, writes);
 
     // Viewport: the Latte transform as is (negative heights flip y).
     const float xscale = std::bit_cast<float>(r(reg::PA_CL_VPORT_XSCALE_0));

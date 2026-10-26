@@ -600,7 +600,8 @@ void Launcher::ask_uninstall() {
                                                  "small dim"));
     }
     gtk_box_append(GTK_BOX(checks), where);
-    GtkWidget* characters = gtk_check_button_new_with_label("Also delete added characters and saved Tekken 7 data");
+    GtkWidget* characters =
+        gtk_check_button_new_with_label("Also delete added characters and what was saved from Tekken 7 and Tekken 8");
     gtk_box_append(GTK_BOX(checks), characters);
     gtk_box_append(GTK_BOX(content), checks);
 
@@ -678,11 +679,11 @@ void Launcher::start_uninstall(UninstallOptions options) {
         }
         if (detail.empty()) {
             const UninstallOptions& o = job->options;
-            detail = o.saves && o.characters ? "Your saves, the added characters and the saved Tekken 7 data are "
-                                               "deleted too."
+            detail = o.saves && o.characters ? "Your saves, the added characters and what was saved from Tekken 7 "
+                                               "and Tekken 8 are deleted too."
                      : o.saves               ? "Your saves are deleted too; the added characters are kept."
-                     : o.characters          ? "The added characters and the saved Tekken 7 data are deleted too; "
-                                               "your saves are kept."
+                     : o.characters          ? "The added characters and what was saved from Tekken 7 and Tekken 8 "
+                                               "are deleted too; your saves are kept."
                                              : "Your saves and the added characters are kept.";
         }
         self->finish_task(r.problems.empty(), r.problems.empty() ? "Uninstalled" : "Uninstalled, but not everything",

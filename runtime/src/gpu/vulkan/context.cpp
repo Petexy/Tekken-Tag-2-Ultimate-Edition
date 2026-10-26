@@ -253,14 +253,19 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     }
 }
 
-uint32_t Context::memory_type(uint32_t type_bits, VkMemoryPropertyFlags flags) const {
+uint32_t Context::memory_type(uint32_t type_bits, VkMemoryPropertyFlags flags, VkMemoryPropertyFlags preferred) const {
+    for (uint32_t i = 0; i < memory.memoryTypeCount && preferred != 0; ++i) {
+        const VkMemoryPropertyFlags wanted = flags | preferred;
+        if ((type_bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & wanted) == wanted) return i;
+    }
     for (uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
         if ((type_bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & flags) == flags) return i;
     }
     fatal("Vulkan: no memory type 0x%X with properties 0x%X", type_bits, flags);
 }
 
-Buffer Context::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags) {
+Buffer Context::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags,
+                              VkMemoryPropertyFlags preferred) {
     Buffer b;
     b.size = size;
     VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -274,7 +279,7 @@ Buffer Context::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMem
     VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     mai.pNext = &flags_info;
     mai.allocationSize = req.size;
-    mai.memoryTypeIndex = memory_type(req.memoryTypeBits, flags);
+    mai.memoryTypeIndex = memory_type(req.memoryTypeBits, flags, preferred);
     VK_CHECK(vkAllocateMemory(device, &mai, nullptr, &b.memory));
     VK_CHECK(vkBindBufferMemory(device, b.buffer, b.memory, 0));
     if (flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {

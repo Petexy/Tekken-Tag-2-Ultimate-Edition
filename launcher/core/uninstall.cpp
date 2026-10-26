@@ -292,6 +292,12 @@ UninstallReport uninstall(const Places& places, const fs::path& folder_path, con
         // $XDG_CACHE_HOME kept it.
         deleter.remove(places.shader_cache() / "tekken7");
         deleter.remove(places.home / ".cache/ttt2/tekken7");
+        // Tekken 8's: its movesets, then its helper with its runs' logs and
+        // what was read of its program, and the two small parts of the
+        // importer it compiles for Tekken 8.
+        deleter.remove(places.tekken8_data);
+        deleter.remove(places.shader_cache() / "tekken8");
+        deleter.remove(places.shader_cache() / "native");
     }
     remove_if_empty(places.shader_cache());
     remove_if_empty(places.home / ".cache/ttt2");

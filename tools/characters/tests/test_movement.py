@@ -174,7 +174,8 @@ class Alignment(unittest.TestCase):
         self.assertEqual(ev['req'].pairs[(0, 0)], 1)                   # the neutral rows into sKAM
 
     def test_806_false(self):
-        self.assertIn(806, moveset.REQ_FALSE)
+        self.assertIn(806, moveset.REQ_FALSE['t7'])
+        self.assertIn(1018, moveset.REQ_FALSE['t8'])    # Tekken 8's 806
 
 
 if __name__ == '__main__':

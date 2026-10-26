@@ -302,7 +302,7 @@ void Launcher::close_settings() {
 // ---------------------------------------------------------------- display
 
 void Launcher::build_display() {
-    gtk_box_append(GTK_BOX(settings_content_), ui::label("Display", "section-title"));
+    gtk_box_append(GTK_BOX(settings_content_), ui::label("Game", "section-title"));
     gtk_box_append(GTK_BOX(settings_content_), ui::label("The game uses these when it starts.", "dim small"));
     GtkWidget* card = ui::box(GTK_ORIENTATION_VERTICAL, 18, "card");
     gtk_widget_set_margin_top(card, 4);
@@ -343,10 +343,17 @@ void Launcher::build_display() {
     gtk_widget_set_visible(refresh_note_, FALSE);
     gtk_box_append(GTK_BOX(fps.texts), refresh_note_);
 
+    input_delay_switch_ = gtk_switch_new();
+    setting_row(list, "Input delay",
+                "Two frames between a button press and the game acting on it, as on the Wii U. Practice's own "
+                "Input Delay works either way.",
+                input_delay_switch_, "input-delay");
+
     const auto changed = +[](GObject*, GParamSpec*, gpointer data) { static_cast<Launcher*>(data)->display_changed(); };
     g_signal_connect(fullscreen_switch_, "notify::active", G_CALLBACK(changed), this);
     g_signal_connect(resolution_list_, "notify::selected", G_CALLBACK(changed), this);
     g_signal_connect(interpolation_switch_, "notify::active", G_CALLBACK(changed), this);
+    g_signal_connect(input_delay_switch_, "notify::active", G_CALLBACK(changed), this);
     gtk_box_append(GTK_BOX(card), list);
     gtk_box_append(GTK_BOX(settings_content_), card);
     show_display();
@@ -388,6 +395,7 @@ void Launcher::show_display() {
     gtk_switch_set_active(GTK_SWITCH(fullscreen_switch_), display_.fullscreen);
     gtk_drop_down_set_selected(GTK_DROP_DOWN(resolution_list_), resolution_index(display_.resolution));
     gtk_switch_set_active(GTK_SWITCH(interpolation_switch_), display_.interpolation);
+    gtk_switch_set_active(GTK_SWITCH(input_delay_switch_), display_.input_delay);
     showing_display_ = false;
 }
 
@@ -433,6 +441,7 @@ void Launcher::display_changed() {
     const guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(resolution_list_));
     if (selected < std::size(display::kResolutions)) settings.resolution = display::kResolutions[selected];
     settings.interpolation = gtk_switch_get_active(GTK_SWITCH(interpolation_switch_));
+    settings.input_delay = gtk_switch_get_active(GTK_SWITCH(input_delay_switch_));
     // Nothing to save while the controls are set from display_, nor when
     // they show it: a control put back from inside its own handler (below)
     // notifies again once the handler returns (notify does not recurse), when

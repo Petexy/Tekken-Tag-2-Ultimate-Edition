@@ -62,5 +62,47 @@ class InFront(unittest.TestCase):
         self.assertEqual(model.in_front(points, cover).tolist(), [True, False])
 
 
+class Hair(unittest.TestCase):
+    def test_tips_first(self):
+        import numpy as np
+        # one card hanging from y = 1700 (its root) to 1500: Tekken 8 puts the tip at v = 0, TTT2 the root
+        pos = np.array([[0, 1700, 0], [10, 1700, 0], [0, 1500, 0], [10, 1500, 0]], np.float64)
+        tris = np.array([[0, 1, 2], [1, 3, 2]])
+        tekken8 = np.array([[0, 1], [1, 1], [0, 0], [1, 0]], np.float64)
+        self.assertTrue(model.tips_first(dict(pos=pos, uv=tekken8, tris=tris)))
+        self.assertFalse(model.tips_first(dict(pos=pos, uv=1 - tekken8, tris=tris)))
+
+    def test_kept_textures_halved_last(self):
+        import numpy as np
+        bank = model.TextureBank()
+        img = np.zeros((128, 128, 4), np.uint8)
+        hair = bank.add(('img', 'hair', 2, True), img, 2)
+        other = bank.add(('img', 'b', 0, False), img, 0)                # (BC1: half the hair's BC3)
+        bank.kept.add(hair - bank.first)
+        size = sum(len(m) for t in bank.textures for m in t['mips'])
+        self.assertEqual(bank.fit(size - 1), 1)                  # the smaller one: the kept one is spared
+        self.assertEqual(bank.textures[hair - bank.first]['w'], 128)
+        self.assertEqual(bank.textures[other - bank.first]['w'], 64)
+        self.assertEqual(bank.fit(0), 1)                         # then the kept one
+        bank.keep([hair])
+        self.assertEqual(bank.kept, {0})
+
+
+class Slots(unittest.TestCase):
+    def test_normal_slot(self):
+        """A template slot holds a normal map: its mean near a flat normal's (strict), or any BC3 texture with R and B
+        empty (loose: Jun's jacket's normal map averages G 117, the cloth template Tekken 8 fighters take)."""
+        import numpy as np
+        jacket = dict(fmt=2, mean=np.array([0, 117, 0, 129]))
+        self.assertFalse(model.normal_slot(jacket))
+        self.assertTrue(model.normal_slot(jacket, strict=False))
+        self.assertTrue(model.normal_slot(dict(fmt=2, mean=np.array([0, 127, 0, 128]))))
+        shine = dict(fmt=2, mean=np.array([74, 37, 0, 190]))             # the jacket's shine: not a normal map
+        self.assertFalse(model.normal_slot(shine))
+        self.assertFalse(model.normal_slot(shine, strict=False))
+        self.assertFalse(model.normal_slot(dict(fmt=0, mean=np.array([0, 117, 0, 129])), strict=False))   # BC1
+        self.assertFalse(model.normal_slot(dict(fmt=2, mean=None), strict=False))
+
+
 if __name__ == '__main__':
     unittest.main()

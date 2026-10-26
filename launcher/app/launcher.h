@@ -1,8 +1,9 @@
 #pragma once
 
 // The launcher's window: the game (install from the player's .wua, play,
-// update, uninstall) above the characters (Tekken 7's, added through the
-// importer), with the task that runs (one at a time) at the bottom; and its
+// update, uninstall) above the characters (Tekken 7's and Tekken 8's, added
+// through the importer), with the task that runs (one at a time) at the
+// bottom; and its
 // Settings, a page of its own (the game's display settings and keyboard keys).
 //
 // launcher.cpp   the window, finding things, refreshing the state, tests
@@ -33,6 +34,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace launcher {
@@ -120,20 +122,47 @@ private:
 
     // ------------------------------------------------ characters.cpp
     enum class Owned { kUnknown, kChecking, kKnown, kFailed };
+    // What stops a Tekken 8 character's own moves being saved now (Tekken 8
+    // runs hidden for that): nothing, a build its helper does not know, it
+    // cannot run hidden (run_error), what runs it is missing, Steam.
+    enum class MovesBlock { kNone, kBuild, kRun, kTools, kSteam };
     void show_characters();
+    // A game's part of the section (kTekken7, kTekken8): its heading, notes
+    // and characters; Tekken 7's DLC characters in a list that opens.
+    void game_section(GtkWidget* card, const std::string& game);
+    void dlc_section(GtkWidget* card, bool usable);
     GtkWidget* fighter_row(const Fighter& fighter, bool usable);
     void start_import(const std::vector<std::string>& names);
     void start_remove(const std::vector<std::string>& names);
+    void ask_remove_all(const std::string& game);
     bool addable(const Fighter& fighter) const;
-    std::vector<std::string> base_to_add() const;
-    std::vector<std::string> owned_to_add() const;
-    std::vector<std::string> to_update() const;
+    std::string not_addable_why(const Fighter& fighter) const; // (a fighter addable() refuses, owned)
+    // Why removing that character cannot work now (a game gone that those
+    // left need), empty when it can.
+    std::string removable(const Fighter& fighter) const;
+    std::vector<std::string> base_to_add(const std::string& game) const;
+    std::vector<std::string> owned_to_add() const; // (Tekken 7's DLC)
+    // A game's characters to update: made by an older version, or (stand_ins)
+    // fighting with a stand-in's moves.
+    std::vector<std::string> to_update(const std::string& game, bool stand_ins = false) const;
+    // A game's characters, when that game is gone and only all of them at
+    // once can be removed; else none.
+    std::vector<std::string> to_remove_all(const std::string& game) const;
+    // What every import needs (the importer, Python's packages, the game).
     bool can_import(std::string* why = nullptr) const;
+    // What importing a game's characters needs besides: that game, and the
+    // other game when its characters are in the game (shared_blocker).
+    bool game_usable(const std::string& game, std::string* why = nullptr) const;
+    // The other game, when it is gone and its characters are in the game:
+    // what they all share is made again from each one's own game whenever
+    // one of `game`'s is added. Empty when nothing stops it.
+    std::string shared_blocker(const std::string& game) const;
+    MovesBlock moves_block() const;
     std::optional<bool> owns(const Fighter& fighter) const;
 
     // ------------------------------------------------ settings.cpp
     GtkWidget* build_settings(); // the page (in the window's stack)
-    void build_display();        // its Display section
+    void build_display();        // its Game section (display.ini)
     void open_settings();
     void close_settings();
     bool in_settings() const;
@@ -219,7 +248,9 @@ private:
         std::string error;                // from @error
         std::vector<std::string> added;   // @added, @removed: the fighters done
         std::vector<std::string> skipped; // @skipped: "<fighter>: <why>"
+        std::vector<std::pair<std::string, std::string>> stand_ins; // @stand-in: the fighter, why
         bool update = false;              // an import of added characters an older version made
+        std::string hidden;               // the game an import may run hidden: "Tekken 7", "Tekken 8" or both
         std::function<void(Task&, int code)> ended; // before the task's result is shown
         bool shot_running = false;      // the test picture half-way is taken
     };
@@ -274,6 +305,7 @@ private:
     bool owned_answer_ = false;           // owned_ holds one
     std::string owned_error_;             // why asking failed
     bool dlc_expanded_ = false;
+    std::string remove_all_game_; // the game whose Remove All is being asked
 
     std::unique_ptr<Task> task_;
     bool quit_after_task_ = false;
@@ -294,6 +326,7 @@ private:
     GtkWidget* fullscreen_switch_ = nullptr;
     GtkWidget* resolution_list_ = nullptr; // display::kResolutions, in that order
     GtkWidget* interpolation_switch_ = nullptr;
+    GtkWidget* input_delay_switch_ = nullptr;
     GtkWidget* automatic_note_ = nullptr; // what Automatic draws at
     GtkWidget* refresh_note_ = nullptr;   // displays below 100 Hz: the game stays at 60 fps
     GtkWidget* display_error_ = nullptr;

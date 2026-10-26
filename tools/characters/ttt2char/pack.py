@@ -5,7 +5,10 @@ $XDG_DATA_HOME/ttt2/characters, else ~/.local/share/ttt2/characters, as the port
     character.ini              format = PACK_FORMAT, code = <three letters>, donor = <a TTT2 fighter's code>,
                                sex = female | male, slot = its number k (place(k): select id 64 + k, its motion
                                row and grid cell), chr_tones = its voice bank's shout tones (the win quotes' come
-                               after), revision = revision(d) (the port ignores it)
+                               after), revision = revision(d) (the port ignores it), and stand_in = <a TTT2
+                               fighter's code> when the fighter fights with that one's moveset because its own could
+                               not be had when it was imported (importer.with_stand_in; the launcher offers to update
+                               the pack once it can be had; the port ignores this too)
     <code>.xml                 item database (BXML)
     <code>.nud .nut .bon       body model, textures, skeleton
     <code>.mop                 spring entries of its extra bones (Kazumi's tiger)
@@ -25,7 +28,9 @@ The packs share `shared/keys/` (made for all of them together, shared.py): chang
 (2D layouts with every added fighter's pictures, the big portraits' container, the costume palettes and colour grid,
 the select screen's name calls; `<key>.bin`) and texture pages to add to its texture containers (`<key>.add`).
 Files a pack leaves out (<code>.mop, .havok.xml: spring bones and cloth collision; <code>.mvl: the practice
-command list; the sound banks) are the donor's. A pack holds the other game's assets: it is for the player's own use only.
+command list; the sound banks) are the donor's (a fighter fighting with its donor's moveset for now, MOVESET_SOURCE
+'donor', has no .mvl: the donor's command list). A pack holds the other game's assets: it is for the player's own
+use only.
 
 A pack is current when its `format` is PACK_FORMAT. The port loads current packs only, and shared/ is made for them
 only: an older importer's pack keeps its place, unloaded, until its fighter is imported again (the launcher offers it:
@@ -46,11 +51,13 @@ import subprocess
 import sys
 
 from . import InputError, signals
+from .characters import GAMES, game_of
 
 FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
-REVISION = 1                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes)
+REVISION = 2                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
+                                # 2: tag combos; Reina's throws, bounds and icon)
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24). A cell is
@@ -193,9 +200,11 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=()):
     def item(k, parent, points, summon):
         return '%d:%d:%s' % (k, parent, ','.join('%d' % n if n == slot else '%d>%d' % (n, slot) for n, slot in points)) \
             + (':%d' % summon if summon is not None else '')
-    return ('# %s, from Tekken 7 (made on this machine from the player\'s own copy)\n'
+    return ('# %s, from %s (made on this machine from the player\'s own copy)\n'
             'format = %d\ncode = %s\ndonor = %s\nsex = %s\nslot = %d\nchr_tones = %d\nrevision = %d\n'
-            % (d.NAME.split(' (')[0], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones, revision(d))
+            % (d.NAME.split(' (')[0], GAMES[game_of(d)], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones,
+               revision(d))
+            + ('stand_in = %s\n' % d.DONOR if getattr(d, 'WITHOUT_OWN_MOVESET', False) else '')
             + ('voice_extra = %s\n' % ' '.join(map(str, voice_extra)) if voice_extra else '')
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
             + ('outfits = %s\n' % ' '.join(outfits) if outfits else ''))
@@ -221,8 +230,9 @@ def number(value):
 
 def installed(folder):
     """The packs in the characters folder: [{'path', 'code', 'donor', 'slot' (None if it names none), 'format' (0:
-    an older importer's; see above), 'revision' (0 without one), 'valid' (the port takes it: a three-letter code and a
-    donor), 'current' (valid and of PACK_FORMAT: the port loads it), 'newer' (valid and of a later format)}], by
+    an older importer's; see above), 'revision' (0 without one), 'stand_in' (the code of the fighter whose moveset
+    it fights with because its own could not be had, '' for none), 'valid' (the port takes it: a three-letter code
+    and a donor), 'current' (valid and of PACK_FORMAT: the port loads it), 'newer' (valid and of a later format)}], by
     folder name. A folder whose
     name starts with a dot is none (write()'s pack being made, or the one it replaces; the port skips them too)."""
     out = []
@@ -240,8 +250,8 @@ def installed(folder):
             form = 0 if os.path.isdir(os.path.join(path, 'keys')) else 1
         valid = bool(CODE.fullmatch(v.get('code', ''))) and v.get('donor', '') != ''
         out.append(dict(path=path, code=v.get('code', ''), donor=v.get('donor', ''), slot=number(v.get('slot', '')),
-                        format=form, revision=number(v.get('revision', '')) or 0, valid=valid,
-                        current=valid and form == PACK_FORMAT, newer=valid and form > PACK_FORMAT))
+                        format=form, revision=number(v.get('revision', '')) or 0, stand_in=v.get('stand_in', ''),
+                        valid=valid, current=valid and form == PACK_FORMAT, newer=valid and form > PACK_FORMAT))
     return out
 
 

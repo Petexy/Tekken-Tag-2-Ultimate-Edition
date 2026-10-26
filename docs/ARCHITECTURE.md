@@ -240,7 +240,9 @@ attachment formats and blend state.
   64 KiB, stored as in guest memory) are copied to staging memory at the
   end of each submission that wrote them (before a frame's replays) and
   tiled into guest memory by the retirement thread once it finished,
-  before the CPU can see that it has.
+  before the CPU can see that it has. The staging memory is CPU-cached
+  where the driver has such memory: read element by element from
+  write-combined memory, the tiling kept that thread ~12% busy.
 - Detiling (`gpu/tiling.cpp`) uses addrlib once per 8×8 micro tile: in
   thin single-sample modes every micro tile has the same internal layout
   (verified against per-element addrlib, `TTT2_CHECK_TILING=1`).
@@ -328,7 +330,16 @@ attachment formats and blend state.
   a frame is done only after its replays, so on a shared or overloaded GPU
   they would slow the game itself (measured: a fight on a desktop
   compositor taking ~80% of the GPU went from 46-51 to 55-60 title frames a
-  second; the statistics line counts the extra frames skipped).
+  second; the statistics line counts the extra frames skipped). Nor does
+  one while the command processor has no time for them: it renders them
+  too, on its one CPU thread, so a slower CPU kept it busy all the time and
+  the game slowed down (issue #15; a fight with 16 µs more per draw, as a
+  slower CPU: 46 title frames a second, now 59-60 with the extra frames
+  left out of heavy scenes only). It goes by averages over 16 frames of its
+  time without commands and of the replays' time per second of the frame's
+  own work (which holds when a scene changes), keeping them while a
+  millisecond would be left and taking them up again at three; the
+  statistics line shows how busy it is.
 - Presentation (`gpu/vulkan/present.cpp`) runs on its own thread and on a
   compute queue (AMD's asynchronous compute, `TTT2_PRESENT_BLIT=1` for
   the rendering queue): a present there waits only for its own frame, not
@@ -377,7 +388,12 @@ attachment formats and blend state.
   interpolation the real image is shown half a frame later than
   without.
 - Compiled SPIR-V and the Vulkan pipeline cache persist in
-  `~/.cache/ttt2` (`$XDG_CACHE_HOME/ttt2`).
+  `~/.cache/ttt2` (`$XDG_CACHE_HOME/ttt2`). A shader's key covers state its
+  translation may not depend on (textures the title left bound to slots it
+  does not sample, the other stage's links), so shaders that translate
+  alike share a module, and with it their pipelines: a 40-second fight
+  made 1,124 modules of 182 different translations and 1,115 pipelines,
+  each compiled by the driver on a first run (now 182 and 168).
 
 ## Presentation on a computer
 
@@ -465,13 +481,19 @@ The lettering is black ink inside a rough white shape that runs round each
 word; the port finds the white (bright, near grey, connected to the
 subtitle), the shape it goes round (closed and filled), and in it the ink
 (dark) and windows onto the logo behind (the rest, where wide enough to
-have an inside). "ULTIMATE" is put together from the ink at EDITION's size:
-T, I and E are EDITION's own strokes (ends cut from a neighbour rounded
-off), U is WiiU's, smaller; L is an I upside down with E's bottom arm, M
-the W upside down, and A the W's right arm with its mirror image and E's
-middle arm across. Its white is the ink closed over small gaps (a disc of
-four texels), holes filled, then widened by four texels give or take two
-of smooth noise, for a brushy edge. EDITION and the underline are pasted
+have an inside). "ULTIMATE" follows Excentrian's design for this logo
+(issue #9): its letters' boxes and spacing, and the outlines of its M and
+A. It is drawn finely (4x4 subtexels to a texel, averaged down for smooth,
+anti-aliased edges): U is WiiU's ink, T, I and E are EDITION's (ends cut
+from a neighbour rounded off) and L is EDITION's I with its E's bottom arm,
+each stretched over its box, set where mostly black and cleaned up (only
+its largest part, small holes and notches up to a texel wide filled); M
+and A are filled from the outlines, their edge roughened by smooth noise.
+Letters stay a texel apart. Its white is five texels wide round the ink
+without its whiskers (an opening by a disc of 1.5 texels), give or take
+half a texel of noise, at least two round the whiskers, and fills the
+shape's holes (distances: an exact Euclidean distance transform).
+EDITION and the underline are pasted
 back from the Wii U still (the shape's large solid parts and what lies
 close to them, so that highlight specks of the logo touching it stay
 behind), the line centred where the old one was: EDITION moves right, and
@@ -487,8 +509,9 @@ EDITION" before "& (C) 2012 …") and are centred again.
 
 ## Practice: position reset
 
-In Practice, 3 and + pressed together put both fighters back where the
-stage put them, as Tekken 8's position reset does (`title/practice.cpp`).
+In Practice, 3 and − (Select) pressed together put both fighters back
+where the stage put them, as Tekken 8's position reset does
+(`title/practice.cpp`).
 The reset is the title's own start of a Practice round: the mode manager's
 kind (+444) is 4 or 5 (`sub_06ECB3CC`), and a round starts
 (`GameMode::Impl::state_game_preinitbattle`, `sub_0726BDA0`) with the
@@ -510,14 +533,37 @@ which stay 0 for the training dummy; the fighter a side has in play is its
 first member at `0x1087FB60 + 4 * side`, or that one's partner (+172) when
 +7808 is 0 (`sub_05C5EF14`). The battle state keeps running while the pause
 menu is open; the fighters' frame (`sub_03ADB118`) stops. That frame arms
-the chord in the input layer (`cafe::os::arm_start_chord`, with whether the
-GamePad's fighter holds 3): while it is armed, VPADRead holds a press of +
+the chord in the input layer (`cafe::os::arm_select_chord`, with whether the
+GamePad's fighter holds 3): while it is armed, VPADRead holds a press of −
 back for eight of those frames (the fighter sees a button two or three
 frames after the pad has it), and if 3 is held by then the press is the
-chord's: the game never sees it, so the pause menu stays closed, and the
-battle state takes it (`take_start_chord`). Otherwise the press reaches the
-game late, also when it was let go meanwhile. 3 and + in either order
-reset, and + alone still opens the pause menu.
+chord's: the game never sees it, and the battle state takes it
+(`take_select_chord`). Otherwise the press reaches the game late, also
+when it was let go meanwhile. 3 and − in either order reset, and − alone
+still reaches the game.
+
+## Input delay
+
+The Wii U game acts on a fighter's buttons two frames after it reads them,
+in every mode; Cemu's "Reduce input lag" graphic pack takes that away by
+loading 0 in its place (`li r7, 0` at `0x02EF885C`). The port leaves it
+out by default (`title/input_delay.cpp`). Each frame a fighter's input
+(`sub_03F536C8`) puts the pad's buttons at the front of its side's queue
+in the object at `*0x107B391C` (`sub_02EF7DC8`; per side a deque of
+words at +4 + 24 * side) and takes the buttons of as many frames back as
+the object's first word says (`sub_02EF8828`: it drops the oldest until
+that many and one are left and takes the oldest). That word is set by
+`sub_02EF9010` when a mode starts (`sub_06ECC76C`, `sub_06EDCD8C`) to the
+title's default, which only `sub_05C5D7B0` reads (the word at
+`0x107CDE3C`, 2 in the game's data), and by Practice's Input Delay setting
+(`sub_04F24EFC`: 1 to 5 bars give 15, 10, 8, 5 and 3 frames from the
+bytes at `0x1031C658`, off the default). The port replaces what
+`sub_05C5D7B0` returns with display.ini's `input_delay` (no: 0 frames;
+yes: the game's own) or `TTT2_INPUT_DELAY`, so with 0 a fighter acts on
+the buttons of the frame they are read in, and Practice's bars still
+delay as they say. The game logs `ttt2: input delay: 0 frames in place of
+the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
+delay the queues get.
 
 ## Added fighters
 
@@ -827,7 +873,9 @@ a fight, which turn the moveset's offsets and indices into pointers and the
 command list's offsets into the form it keeps. The helper knows those six
 functions (and the two below) and checks their first bytes before calling
 any, so another build of the game is refused, not crashed; no address comes
-from the connection.
+from the connection. Its addresses are the ones at the exe's preferred base,
+moved to where the game is loaded (Wine Staging's builds, Proton-GE's among
+them, load the exe elsewhere).
 Nothing is pressed and no screen is read, so key bindings, settings,
 language and pop-ups play no part. The dumper then reads the result from
 the game's memory: the moveset is one buffer (header with the aliases, 19
@@ -963,7 +1011,7 @@ compiler.
   `lib/libttt2_runtime.a` (the objects the ttt2 target links; they must be
   position-independent) with the archives it uses, `lib/generated_stub.o`,
   `kit.ini`, `VERSION` (the launcher's version and the commit) and
-  `t7helper.exe` when MinGW is there. `kit.ini` holds the generated code's
+  `t7helper.exe` and `t8helper.exe` when MinGW is there. `kit.ini` holds the generated code's
   compile flags (the ttt2 build's own, `TTT2_GENERATED_OPTIONS`) and the
   link: the runtime archive whole (its imports must replace the generated
   weak defaults and its export registrations stay), then the other
@@ -1007,16 +1055,25 @@ compiler.
   `@progress` (at most ten a second) and `@error`.
 - **The importer's side** (`tools/characters/launcher.py`): `status` is one
   JSON object, in about 0.1 s and without numpy, with what adding fighters
-  needs (numpy and Pillow, gamescope, pactl, the helper, Steam, Tekken 7's
-  folder or why it cannot be used, the packs folder, and per fighter its
+  needs (numpy and Pillow, gamescope, pactl, each game's helper, a C
+  compiler, Steam, Tekken 7's folder or why it cannot be used and whether
+  its files can be read (`readable`: what `shared/` needs even when it
+  cannot run), Tekken 8's folder, whether it is the build its helper knows
+  (`build_known`, read from the exe only while a fighter's own moveset is
+  not saved) and why it cannot run hidden (`run_error`), the packs folder,
+  and per fighter its game (`"game": "tekken8"`), its
   DLC's app id, whether it is added, whether its pack is outdated (an older
   importer's: the game skips it) or newer (a newer importer's: skipped too,
   and never replaced by this importer), whether the pack the game loads is
-  to update (an older revision) and whether its moveset is saved);
+  to update (an older revision, or a Tekken 8 fighter's `stand_in` pack
+  once its own moveset can be had) and whether its moveset is saved);
   `owned` asks Steam through the hidden helper which DLC fighters the
   account owns (Steam is never started). `import_character.py --progress`
-  adds `@step dump|fighter|shared`, `@added`, `@removed`, `@skipped`,
-  `@error` and `@done` lines, and `--remove` deletes packs again (numpy only
+  adds `@step dump|fighter|shared`, `@added`, `@stand-in` (a Tekken 8
+  fighter added with Heihachi's moves, and why), `@removed`, `@skipped`,
+  `@error` and `@done` lines (a game the packs there need for `shared/` and
+  that is gone fails before anything is saved or written), and `--remove`
+  deletes packs again (numpy only
   when what the packs left share is made again; not at all when only packs
   the game does not load go, as `shared/` never held them). A pack is made
   whole in a hidden folder beside its place (`.<code>.part`, `character.ini`
@@ -1034,7 +1091,15 @@ compiler.
   the build and source trees it was built from (unless built with
   `TTT2_LAUNCHER_BUILD_TREE_PATHS=OFF`, as for the AppImage, whose program
   names no folder of the build machine), else `python3` in PATH, and
-  passes the kit's `t7helper.exe` to the importer as `TTT2_T7HELPER`. It
+  passes the kit's `t7helper.exe` and `t8helper.exe` to the importer as
+  `TTT2_T7HELPER` and `TTT2_T8HELPER`. Its characters have a part per game
+  (the installed one first); neither game needs the other, but while one
+  is gone with its fighters added (they need it for `shared/`), the other's
+  adds are refused with a note, removing one of them alone is too, and
+  **Remove All** (asked first) removes all of them at once. A Tekken 8
+  fighter's Add needs Steam only when its moveset can be saved (its build
+  known, it can run hidden); else it is added with Heihachi's moves as the
+  importer does, and the part says why. It
   checks the processor, the compiler and free space before an install, to
   name what is missing with the distribution's install command (on an
   image-based system, by the builder's rule and words, where it must come
@@ -1042,7 +1107,7 @@ compiler.
   its lines as they come, each in a process group of its own that gets
   SIGTERM if the launcher dies. Cancel sends SIGTERM to the program alone
   (it stops what it started in order: the importer closes the hidden
-  Tekken 7), kills what is left of the group once it has ended, and the
+  Tekken 7 or Tekken 8), kills what is left of the group once it has ended, and the
   whole group with SIGKILL when it has not ended within 45 s. The game runs
   in a session of its own; it counts as running when any `/proc/<pid>/exe`
   is the install's program (also "(deleted)"), whoever started it, and
@@ -1078,7 +1143,7 @@ folder) for Release with Clang and Ninja, with
 runtime's messages name are relative; it builds `ttt2-launcher` and
 `ttt2_kit`, installs them with `cmake --install --prefix AppDir/usr --strip`,
 refuses an AppDir holding anything but the launcher, the kit, the importer's
-scripts, the desktop entry and the icon (nothing of the game, no tests, no
+scripts and C sources (and checks that what a Tekken 8 import needs is there), the desktop entry and the icon (nothing of the game, no tests, no
 Python caches), adds `AppRun` (it only starts `usr/bin/ttt2-launcher`: no
 `LD_LIBRARY_PATH`, as the compiler, Python, gamescope, Proton and the game
 it starts must not load anything of the AppImage), the desktop entry, the
@@ -1207,26 +1272,29 @@ auto`, `1280x720`, `1920x1080`, `2560x1440`, `3840x2160` or `5120x2880`
 the primary display's height in pixels) and `interpolation = yes` or `no`
 (default yes: 120 frames a second when the primary display or the one the
 window opens on refreshes at 100 Hz or more, compared exactly, 60 below;
-no: 60 always).
+no: 60 always) and `input_delay = yes` or `no` (default no: fighters act on
+a button in the frame the game reads it; yes: two frames later, as the Wii
+U game does; see [Input delay](#input-delay)).
 Booleans also take `true`/`false`, `on`/`off` and `1`/`0`, and values (not
 names) may be in any case; an unknown name or a bad value is left out with
 a warning, keeping that setting's default, and of a name given twice the
 later line counts. Only a regular file of at most 64 KiB is read; one that
 cannot be means the defaults. `TTT2_FULLSCREEN` (`1` fullscreen, another
-value windowed), `TTT2_SCALE` (1, 1.5, 2, 3 or 4) and `TTT2_FPS` win over
-the file when set and not empty, and a value they cannot use is left out
-with a line in the log. The window opens at the render size (in the
+value windowed), `TTT2_SCALE` (1, 1.5, 2, 3 or 4), `TTT2_FPS` and
+`TTT2_INPUT_DELAY` (0 to 15 frames) win over the file when set and not
+empty, and a value they cannot use is left out with a line in the log.
+The window opens at the render size (in the
 desktop's units: pixels over its scale) when that leaves at least 64 units
 across and 128 down free on the primary display, otherwise at the largest
 multiple of 640x360 that does (at least 640x360; Automatic always so). The
-game logs `ttt2: display: fullscreen no, resolution auto, interpolation yes
-(from <file>)` (or `display: defaults (no <file>)`), a line per variable
-set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU: rendering at
-<w>x<h> (scale <s>)`. The launcher's Settings show the three above the
-keys, in a Display section: Fullscreen and 120 fps switches and a
+game logs `ttt2: display: fullscreen no, resolution auto, interpolation yes,
+input delay no (from <file>)` (or `display: defaults (no <file>)`), a line
+per variable set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU:
+rendering at <w>x<h> (scale <s>)`. The launcher's Settings show the four
+above the keys, in a Game section: Fullscreen and 120 fps switches, a
 Resolution list (Automatic, 1280 × 720 ... 5120 × 2880, as wide as its
-widest item whichever is chosen). Under them it says what the game will
-do only as far as it can be sure, since GTK cannot name the primary
+widest item whichever is chosen) and an Input delay switch. Under them it
+says what the game will do only as far as it can be sure, since GTK cannot name the primary
 display on Wayland (`automatic_note` and `refresh_note` in
 `launcher/core/display.h`). With one monitor: the size Automatic gives on
 it (its height in pixels from GTK 4.14's fractional scale; before 4.14
@@ -1294,6 +1362,7 @@ ignores. Renderer debugging:
 | `TTT2_PRESENT_QUEUE=1..4` | presents kept ahead of the screen when presenting every refresh (default about 8 ms of refreshes) |
 | `TTT2_DISPLAY_HZ=<hz>` | report this refresh rate for the window's display (tests the rate check) |
 | `TTT2_FULLSCREEN=1` | start fullscreen (another value: windowed; over display.ini) |
+| `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
 | `TTT2_VK_VALIDATION=1` | Khronos validation layer, if installed (synchronization checks: `khronos_validation.validate_sync = true` in a file named by `VK_LAYER_SETTINGS_PATH`) |
@@ -1303,6 +1372,7 @@ ignores. Renderer debugging:
 | `TTT2_TRACE_TEXTURES=1` | every texture loaded from memory once, with the MD5 a replacement names |
 | `TTT2_TRACE_PRESENTATION=1` | how long the icons, texts and logo took to prepare |
 | `TTT2_TRACE_PRACTICE=1` | each position reset in Practice |
+| `TTT2_TRACE_INPUT_DELAY=1` | each input delay the fighters' queues get (a mode's start, Practice's Input Delay) |
 | `TTT2_CONTROLLER=playstation/nintendo/xbox` | icons and menu buttons for this kind of controller |
 
 The launcher (`launcher/app`, `ttt2-launcher`) runs by itself for tests,
@@ -1312,12 +1382,12 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display section `fullscreen:yes`/`no`, `interpolation:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |
 | `TTT2_LAUNCHER_TEST_CANCEL=<0..1>` | press Cancel once a task's progress is that far (`-1`: at its first step), saving `NN-<action>-stopping.png` |
-| `TTT2_LAUNCHER_TEST_CANCEL_FILE=<file>` | press Cancel once that file exists (a script watching the task makes it, e.g. once the hidden Tekken 7 runs), saving `NN-<action>-stopping.png` |
+| `TTT2_LAUNCHER_TEST_CANCEL_FILE=<file>` | press Cancel once that file exists (a script watching the task makes it, e.g. once the hidden Tekken 7 or Tekken 8 runs), saving `NN-<action>-stopping.png` |
 | `TTT2_KIT`, `TTT2_IMPORTER`, `TTT2_PYTHON` | the builder's kit, the importer (`tools/characters`) and Python the launcher uses (default: installed beside it, else the build and source trees it was built from unless `TTT2_LAUNCHER_BUILD_TREE_PATHS=OFF`, and `python3`) |
 
 ## Verification

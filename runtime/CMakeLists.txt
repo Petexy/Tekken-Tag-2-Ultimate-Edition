@@ -57,6 +57,7 @@ set(cafe_runtime_sources
     src/gx2/state.cpp
     src/gx2/surface.cpp
     src/gx2/texture.cpp
+    src/title/input_delay.cpp
     src/title/practice.cpp
     src/title/presentation.cpp
     src/title/roster.cpp)

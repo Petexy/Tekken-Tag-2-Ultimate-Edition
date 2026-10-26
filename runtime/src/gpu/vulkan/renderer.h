@@ -103,6 +103,10 @@ struct Texture {
     Image image;
     VkImageView view = VK_NULL_HANDLE; // with the resource's component selects
     uint32_t memory[2][2] = {}; // guest ranges [begin, end): base levels, mip levels
+    // Where its levels are, as render targets holding them are found (the
+    // swizzle bits of macro-tiled ones cleared); from the resource words,
+    // whose surface layout costs too much to work out at every draw.
+    std::array<uint32_t, 14> level_address{};
     uint64_t loaded = 0;     // event stamp the contents correspond to
     uint64_t hash = 0;       // of the guest data last loaded
     bool dirty = true;       // the CPU wrote its memory since it was loaded
@@ -119,7 +123,6 @@ struct Texture {
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
     latte::TranslatedShader info;
-    bool failed = false;
 };
 
 struct Pipeline {
@@ -315,8 +318,19 @@ private:
     void note_target_read(const Target* t);
     void copy_image(const Image& src, const Image& dst);
     std::vector<Target*> carried_; // this frame's carried targets
-    uint64_t replays_ = 0, blended_replays_ = 0, skipped_replays_ = 0;
+    uint64_t replays_ = 0, blended_replays_ = 0, skipped_replays_ = 0, busy_skipped_replays_ = 0;
     double match_seconds_ = 0, replay_seconds_ = 0;
+    // The command processor's time without commands: in the statistics'
+    // window, and in the frame just swapped (and that frame's time).
+    double idle_seconds_ = 0, frame_idle_seconds_ = 0, frame_seconds_ = 0;
+    std::chrono::steady_clock::time_point last_swap_{};
+    // Whether it has the time for the replays (want_replays), from averages
+    // over frames: its time to spare per frame without them, the frame's own
+    // work, and their time for each second of that work (which holds when a
+    // scene grows or shrinks). Then the last frame's replay time, and
+    // whether they are left out.
+    double spare_seconds_ = 1.0 / 60, work_seconds_ = 0, replay_ratio_ = 1.0, frame_replay_seconds_ = 0;
+    bool busy_skipping_ = false;
     std::chrono::steady_clock::time_point replay_started_;
 
     // ----------------------------------------------- presentation (present.cpp)
@@ -469,7 +483,10 @@ private:
         bool ok;
     };
     std::unordered_map<uint64_t, ProgramEntry> programs_;  // by address/size
-    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> shaders_;
+    // By program and environment (null: the shader failed), and by
+    // translation (shared by the environments that translate alike).
+    std::unordered_map<uint64_t, const ShaderModule*> shaders_;
+    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> modules_;
     std::unordered_map<uint64_t, VkPipelineLayout> layouts_;
     std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> pipelines_;
     VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;

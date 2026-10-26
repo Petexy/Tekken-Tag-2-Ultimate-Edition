@@ -12,7 +12,8 @@
 // expand-dlc (opens the DLC list), expand-log (the last task's log),
 // show-uninstall (the uninstall dialog, closed again after its picture),
 // wait:<seconds>, focus:<id> (the keyboard focus on a button: "play",
-// "add:kazumi", ...) and refresh (as the window's Check Again button; the
+// "add:kazumi", ...), add-all:<game> and remove-all:<game> (a game's section's
+// Add All and Remove All: tekken7 or tekken8) and refresh (as the window's Check Again button; the
 // widget focused once it is done is logged). update-launcher is the header
 // bar's Update (the AppImage replaced by the newest release's and opened:
 // its test actions run again there). For the Settings page:
@@ -22,8 +23,9 @@
 // through the window's key handler: bind:face_bottom:38, Left Alt alone
 // bind:zl:64, Alt+Tab bind:zl:64+23), reset-keys (its Restore Defaults), and
 // fullscreen:yes|no, resolution:<auto|1280x720|1920x1080|2560x1440|3840x2160|
-// 5120x2880> and interpolation:yes|no (that display setting's switch or list
-// set, which saves display.ini, then the file read back).
+// 5120x2880>, interpolation:yes|no and input-delay:yes|no (that display.ini
+// setting's switch or list set, which saves the file, then the file read
+// back).
 
 #include <optional>
 #include <string>
@@ -36,7 +38,8 @@ struct TestAction {
     std::string name;              // "install", "add", ...
     std::vector<std::string> args; // install: GAME, FOLDER; add: names; remove: the name; uninstall: keep/all;
                                    // wait: the seconds; focus: the widget's id; bind: the input, the keycode;
-                                   // fullscreen, interpolation: yes/no; resolution: as display.ini names it
+                                   // fullscreen, interpolation, input-delay: yes/no; resolution: as
+                                   // display.ini names it
     std::string text;              // as given
 
     // For the picture's file name: the name and short arguments

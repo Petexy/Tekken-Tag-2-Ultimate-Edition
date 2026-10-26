@@ -5,8 +5,9 @@ grid cell), the big portraits' container, the fights' HUD pictures, the costume 
 player 2 colours) and the select screen's announcer bank (its name call). Packs made one by one would each carry a
 copy and the last would win, so these are made here for all installed packs together, each fighter in its place
 (pack.place): after an import, from the player's own files again (the pictures and name calls), and from each
-pack's `colours.json` (its player 2 colours). Only current packs (pack.PACK_FORMAT) are in it: the port loads no
-other, and these are the only copies of the title's entries it reads (never a pack's own `keys/`).
+pack's `colours.json` (its player 2 colours); each fighter's pictures and name call come from its own game (Tekken
+7 or Tekken 8: source.py). Only current packs (pack.PACK_FORMAT) are in it: the port loads no other, and these are
+the only copies of the title's entries it reads (never a pack's own `keys/`).
 """
 import json
 import os
@@ -54,12 +55,13 @@ def palettes(archives, fighters):
             'keys/%08x.bin' % colours.KEY_2P: texts[1].encode('utf-8')}
 
 
-def name_calls(paks, archives, fighters, log=None):
-    """The select screen's announcer bank with every fighter's name call: {file name: bytes}, or {}."""
+def name_calls(source_of, archives, fighters, log=None):
+    """The select screen's announcer bank with every fighter's name call: {file name: bytes}, or {}. source_of(d):
+    fighter d's source (source.py: its clips)."""
     bank = archives.raw(key_of(voice.SELECT_BANK))
     changed = False
     for slot, d, folder in fighters:
-        clips = voice.Clips(paks, d.TEKKEN7_CODE, d.VOICE_PREFIX)
+        clips = source_of(d).clips(d)
         made = voice.name_call(clips, bank, d.DONOR, d.CODE)
         if made is not None:
             bank, changed = made, True
@@ -68,14 +70,16 @@ def name_calls(paks, archives, fighters, log=None):
     return {'keys/%08x.bin' % key_of(voice.SELECT_BANK): bank} if changed else {}
 
 
-def build(paks, archives, rpx, folder, definitions, log=None):
-    """Writes <folder>/shared/ for the installed packs; definitions: {code: definition}. -> the fighters it has."""
+def build(source_of, archives, rpx, folder, definitions, log=None):
+    """Writes <folder>/shared/ for the installed packs; definitions: {code: definition}; source_of(d): fighter d's
+    source (source.Sources: a Tekken 7 and a Tekken 8 fighter are read from their own games). -> the fighters it
+    has."""
     fighters = fighters_of(folder, definitions)
     files = {}
     if fighters:
-        files.update(art.shared_files(paks, archives, rpx, [(slot, d) for slot, d, _ in fighters], log=log))
+        files.update(art.shared_files(source_of, archives, rpx, [(slot, d) for slot, d, _ in fighters], log=log))
         files.update(palettes(archives, fighters))
-        files.update(name_calls(paks, archives, fighters, log=log))
+        files.update(name_calls(source_of, archives, fighters, log=log))
     # (A link put there goes, not what it leads to: shared/ is made anew each time, here.)
     target = os.path.join(folder, pack.SHARED)
     part, old = target + '.part', target + '.old'

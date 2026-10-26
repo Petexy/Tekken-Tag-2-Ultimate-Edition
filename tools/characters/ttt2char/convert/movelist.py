@@ -19,6 +19,9 @@ are pad inputs played through the fighter's own moveset, so they need no move id
 
 Left out: Tekken 7's drills, entries whose demo needs Rage (Rage Arts and Drives), and title lines left empty.
 Screws are bounds in the converted moveset; Tekken 7's screw hit number becomes TTT2's bound icon.
+
+tekken8/movelist.py converts Tekken 8's command lists with the TTT2 side here (title_strings, drop_empty_titles,
+summary, write).
 """
 import struct
 
@@ -67,13 +70,7 @@ def convert(m, log=print):
             dropped['needs Rage'] += 1
             continue
         commands = [s[k].replace(' ' + ARROW + ' ', ARROW) for k in T7_COMMAND_FOR_TTT2]
-        if x['kind'] == KIND_TITLE:                      # TTT2 frames a title line and puts it in the name too
-            def framed(t):
-                return '    ■ ' + t + ' ■'
-            names = [framed(commands[0]), framed(commands[1]), framed(commands[0])]
-            commands = ['', ''] + [framed(c) for c in commands[2:]]
-        else:
-            names = s[:3]
+        strings = title_strings(commands) if x['kind'] == KIND_TITLE else s[:3] + commands
         first = len(out_demos) if own else 0xFFFF
         for d in own:
             setup = list(d['setup'])
@@ -83,17 +80,33 @@ def convert(m, log=print):
                 r = inputs[d['first'] + k]
                 out_inputs.append(bytes([r[1], r[0], r[2], r[3]]))
         screw = (x['icons'] >> 8) & 0xFF
-        out.append(dict(strings=names + commands, demo=first, count=len(own), kind=x['kind'],
-                        demo_kind=x['demo_kind'], icons=(0, screw << 8)))
-    kept = []
-    for j, x in enumerate(out):
-        if x['kind'] == KIND_TITLE and (j + 1 >= len(out) or out[j + 1]['kind'] == KIND_TITLE):
-            dropped['empty title lines'] += 1
-            continue
-        kept.append(x)
-    log('command list: %d entries, %d demos (left out: %s)' % (
-        len(kept), len(out_demos), ', '.join('%d %s' % (n, k) for k, n in dropped.items() if n) or 'none'))
+        out.append(dict(strings=strings, demo=first, count=len(own), kind=x['kind'], demo_kind=x['demo_kind'],
+                        icons=(0, screw << 8)))
+    kept, dropped['empty title lines'] = drop_empty_titles(out)
+    log(summary(kept, out_demos, dropped))
     return write(kept, out_demos, out_inputs)
+
+
+def title_strings(commands):
+    """A title line's 12 TTT2 strings from its text in TTT2's command languages (jp, en, fr, ...): TTT2 frames a
+    title line and puts it in the name too."""
+    def framed(t):
+        return '    ■ ' + t + ' ■'
+    return [framed(commands[0]), framed(commands[1]), framed(commands[0]), '', ''] + [framed(c) for c in commands[2:]]
+
+
+def drop_empty_titles(entries):
+    """-> (the entries without the title lines that head nothing: followed by another title line, or last; how
+    many those were)."""
+    kept = [x for j, x in enumerate(entries)
+            if not (x['kind'] == KIND_TITLE and (j + 1 >= len(entries) or entries[j + 1]['kind'] == KIND_TITLE))]
+    return kept, len(entries) - len(kept)
+
+
+def summary(entries, demos, dropped):
+    """The log line of a converted command list; dropped: {reason: entries left out}."""
+    return 'command list: %d entries, %d demos (left out: %s)' % (
+        len(entries), len(demos), ', '.join('%d %s' % (n, k) for k, n in dropped.items() if n) or 'none')
 
 
 def write(entries, demos, inputs):

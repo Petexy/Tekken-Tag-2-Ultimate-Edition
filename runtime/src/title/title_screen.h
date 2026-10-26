@@ -3,8 +3,9 @@
 // The title screen's pictures with "Ultimate Edition" for "Wii U Edition",
 // made from the Wii U ones (the first textures of the title screen's set,
 // entry 76C7E3CF of data007): the logo's brush-lettered subtitle reads
-// "ULTIMATE EDITION", its letters put together from strokes of "Wii U
-// EDITION"; the copyright lines lose the words.
+// "ULTIMATE EDITION" after Excentrian's design, its letters made from
+// strokes of "Wii U EDITION" and Excentrian's M and A; the copyright lines
+// lose the words.
 
 #include "title/image.h"
 

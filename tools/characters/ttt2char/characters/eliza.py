@@ -130,7 +130,9 @@ MOVESET = {
     # Her low kick exists, but the imported neutral dispatcher omits d+4.
     'jump_special_inputs': ('Vp_jp214lk', 'Vp_jp214rk', 'Vp_jp214wk'),
     'neutral_inputs': {'Jn_syark00': (4, 0x40000008)},
-    'tag_launchers': {'Vp_66lklk': 'Ju_s_tlk'},  # Moon Glide 3,3; Jun's native tag exit
+    # tag combos (convert/tagcombo.py) besides her launchers: Moon Glide 3,3 (its hit on a standing opponent is no
+    # launch; until 2026-10-26 it tagged out with Jun's Ju_s_tlkChg animation, now with its own)
+    'tag_combos': {'Vp_66lklk': True},
     'bounds': {'Vp_6rklkrk': False, 'Vp_rk00': False, 'Vp_shoryulprk': False},  # Moon Glide 3,4 (Helical Flow)
     # Replace T7 extended-point references with native arm capsules. The
     # original 0x8213 parameters identify hand 13 (Storm) / 9 (Tempest).

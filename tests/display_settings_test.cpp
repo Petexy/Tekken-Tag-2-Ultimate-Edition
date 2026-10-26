@@ -47,13 +47,15 @@ std::string joined(const std::vector<std::string>& lines) {
 
 std::string text_of(const display::Settings& s) {
     return std::string(s.fullscreen ? "fullscreen" : "windowed") + ", " + std::string(display::name_of(s.resolution)) +
-           (s.interpolation ? ", interpolation" : ", no interpolation");
+           (s.interpolation ? ", interpolation" : ", no interpolation") +
+           (s.input_delay ? ", input delay" : ", no input delay");
 }
 
 std::string text_of(const display::Active& a) {
-    char text[64];
-    std::snprintf(text, sizeof(text), "%s, scale %g, %u fps", a.fullscreen ? "fullscreen" : "windowed",
-                  static_cast<double>(a.scale), static_cast<unsigned>(a.fps));
+    char text[96];
+    std::snprintf(text, sizeof(text), "%s, scale %g, %u fps, input delay %s", a.fullscreen ? "fullscreen" : "windowed",
+                  static_cast<double>(a.scale), static_cast<unsigned>(a.fps),
+                  a.input_delay ? std::to_string(*a.input_delay).c_str() : "the game's");
     return text;
 }
 
@@ -178,10 +180,11 @@ void test_parse_good() {
                                                   "fullscreen = yes\n"
                                                   "\n"
                                                   "resolution=1920x1080   # comment\n"
-                                                  "\tinterpolation\t=\tno\t\n");
+                                                  "\tinterpolation\t=\tno\t\n"
+                                                  "input_delay = yes\n");
     check(parsed.warnings.empty(), "good file: no warnings");
-    check(parsed.given == 3, "good file: 3 given");
-    check(parsed.settings == display::Settings{true, Resolution::k1080, false},
+    check(parsed.given == 4, "good file: 4 given");
+    check(parsed.settings == display::Settings{true, Resolution::k1080, false, true},
           "good file: " + text_of(parsed.settings));
 
     // Every value, in either case.
@@ -203,6 +206,10 @@ void test_parse_good() {
                   interpolation.settings.interpolation == v.on && !interpolation.settings.fullscreen &&
                   interpolation.settings.resolution == Resolution::kAuto,
               std::string("interpolation = ") + v.value);
+        const display::Parsed delay = display::parse(std::string("input_delay = ") + v.value + "\n");
+        check(delay.warnings.empty() && delay.given == 1 && delay.settings.input_delay == v.on &&
+                  !delay.settings.fullscreen && delay.settings.interpolation,
+              std::string("input_delay = ") + v.value);
     }
     for (const Resolution r : display::kResolutions) {
         std::string name(display::name_of(r));
@@ -327,24 +334,27 @@ void test_format() {
         start = end == std::string::npos ? text.size() : end + 1;
     }
     check(!text.empty() && text.back() == '\n', "the text ends with a newline");
-    check(lines.size() == 5, "a header of two lines and three settings: " + std::to_string(lines.size()) + " lines");
-    if (lines.size() == 5) {
+    check(lines.size() == 6, "a header of two lines and four settings: " + std::to_string(lines.size()) + " lines");
+    if (lines.size() == 6) {
         check(lines[0].starts_with("# ") && lines[1].starts_with("# "), "the header is a comment");
         check(text.find("Tekken Tag Tournament 2") != std::string::npos && text.find("ttt2") == std::string::npos,
               "the header names the game as players know it");
         check(lines[2].starts_with("fullscreen = no  # "), "fullscreen line: " + lines[2]);
         check(lines[3].starts_with("resolution = auto  # "), "resolution line: " + lines[3]);
         check(lines[4].starts_with("interpolation = yes  # "), "interpolation line: " + lines[4]);
+        check(lines[5].starts_with("input_delay = no  # "), "input delay line: " + lines[5]);
     }
 
     // Everything the launcher can write is read back as it was meant.
     for (const bool fullscreen : {false, true}) {
         for (const Resolution resolution : display::kResolutions) {
             for (const bool interpolation : {false, true}) {
-                const display::Settings settings{fullscreen, resolution, interpolation};
-                const display::Parsed parsed = display::parse(display::format(settings));
-                check(parsed.settings == settings && parsed.given == 3 && parsed.warnings.empty(),
-                      "round trip of " + text_of(settings));
+                for (const bool input_delay : {false, true}) {
+                    const display::Settings settings{fullscreen, resolution, interpolation, input_delay};
+                    const display::Parsed parsed = display::parse(display::format(settings));
+                    check(parsed.settings == settings && parsed.given == 4 && parsed.warnings.empty(),
+                          "round trip of " + text_of(settings));
+                }
             }
         }
     }
@@ -374,7 +384,7 @@ void test_path(const fs::path& scratch) {
 void test_load(const fs::path& scratch) {
     const fs::path file = scratch / "display.ini";
     const std::string name = file.string();
-    const std::string defaults = "fullscreen no, resolution auto, interpolation yes";
+    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no";
     fs::remove(file);
     const display::Loaded missing = display::load(file);
     check(missing.settings == display::Settings{} && missing.error.empty(), "missing file: defaults, no error");
@@ -394,15 +404,15 @@ void test_load(const fs::path& scratch) {
           "file: " + text_of(loaded.settings));
     const std::vector<std::string> log{
         "display: " + name + ":2: unknown setting \"vsync\", line ignored",
-        "display: fullscreen yes, resolution 2560x1440, interpolation yes (from " + name + ")"};
+        "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no (from " + name + ")"};
     check(loaded.log == log, "file: log " + joined(loaded.log));
 
-    const display::Settings written{true, Resolution::k1080, false};
+    const display::Settings written{true, Resolution::k1080, false, true};
     write(file, display::format(written));
     const display::Loaded launcher = display::load(file);
     check(launcher.settings == written && launcher.error.empty() &&
               launcher.log == std::vector<std::string>{"display: fullscreen yes, resolution 1920x1080, "
-                                                       "interpolation no (from " + name + ")"},
+                                                       "interpolation no, input delay yes (from " + name + ")"},
           "the launcher's file: " + joined(launcher.log));
 
     const fs::path link = scratch / "link.ini";
@@ -474,9 +484,10 @@ void test_resolve() {
     const display::Settings windowed{};
     const display::Settings chosen{true, Resolution::k1080, false};
     std::vector<std::string> log;
-    const auto resolved = [&](const display::Settings& s, const char* fullscreen, const char* scale, const char* fps) {
+    const auto resolved = [&](const display::Settings& s, const char* fullscreen, const char* scale, const char* fps,
+                              const char* input_delay = nullptr) {
         log.clear();
-        return display::resolve(s, fullscreen, scale, fps, log);
+        return display::resolve(s, fullscreen, scale, fps, input_delay, log);
     };
 
     // The file's settings when the environment says nothing.
@@ -489,8 +500,11 @@ void test_resolve() {
         check(active == display::Active{false, display::scale_of(r), 0},
               "resolution " + std::string(display::name_of(r)) + ": " + text_of(active));
     }
-    active = resolved(chosen, "", "", "");
+    active = resolved(chosen, "", "", "", "");
     check(active == display::Active{true, 1.5f, 60} && log.empty(), "empty values are not set: " + text_of(active));
+    active = resolved({false, Resolution::kAuto, true, true}, nullptr, nullptr, nullptr);
+    check(active == display::Active{false, 0.0f, 0, std::nullopt} && log.empty(),
+          "input_delay = yes: the game's own: " + text_of(active));
 
     // TTT2_FULLSCREEN: 1 is fullscreen, anything else windowed.
     active = resolved(windowed, "1", nullptr, nullptr);
@@ -547,22 +561,44 @@ void test_resolve() {
         check(active.fps == 0, std::string("TTT2_FPS=") + bad + " over interpolation = yes: " + text_of(active));
     }
 
-    // All three, in that order in the log, after what it had.
+    // TTT2_INPUT_DELAY: 0 to 15 frames, over input_delay either way.
+    const display::Settings delayed{false, Resolution::kAuto, true, true};
+    active = resolved(delayed, nullptr, nullptr, nullptr, "0");
+    check(active.input_delay == 0u && log == std::vector<std::string>{"display: TTT2_INPUT_DELAY=0"},
+          "TTT2_INPUT_DELAY=0 over input_delay = yes: " + text_of(active) + ", " + joined(log));
+    active = resolved(windowed, nullptr, nullptr, nullptr, "2");
+    check(active.input_delay == 2u && log == std::vector<std::string>{"display: TTT2_INPUT_DELAY=2"},
+          "TTT2_INPUT_DELAY=2 over input_delay = no: " + text_of(active));
+    active = resolved(windowed, nullptr, nullptr, nullptr, "15");
+    check(active.input_delay == display::kMaxInputDelay, "TTT2_INPUT_DELAY=15: " + text_of(active));
+    for (const char* bad : {"16", "-1", "abc", "2f", "1.5", "99999999999"}) {
+        active = resolved(delayed, nullptr, nullptr, nullptr, bad);
+        check(!active.input_delay && log == std::vector<std::string>{std::string("display: TTT2_INPUT_DELAY=") + bad +
+                                                                     " is not 0 to 15 frames, ignored"},
+              std::string("TTT2_INPUT_DELAY=") + bad + " over input_delay = yes: " + text_of(active) + ", " +
+                  joined(log));
+        active = resolved(windowed, nullptr, nullptr, nullptr, bad);
+        check(active.input_delay == 0u, std::string("TTT2_INPUT_DELAY=") + bad + " over input_delay = no: " +
+                                            text_of(active));
+    }
+
+    // All four, in that order in the log, after what it had.
     log = {"display: earlier"};
-    active = display::resolve({false, Resolution::k720, false}, "1", "3", "240", log);
-    check(active == display::Active{true, 3.0f, 240}, "all three: " + text_of(active));
+    active = display::resolve({false, Resolution::k720, false, false}, "1", "3", "240", "1", log);
+    check(active == display::Active{true, 3.0f, 240, 1}, "all four: " + text_of(active));
     check(log == std::vector<std::string>{"display: earlier", "display: TTT2_FULLSCREEN=1: fullscreen",
-                                          "display: TTT2_SCALE=3: 3840x2160", "display: TTT2_FPS=240"},
-          "all three: log " + joined(log));
-    active = resolved({true, Resolution::k1080, true}, "0", "8", "fast");
-    check(active == display::Active{false, 1.5f, 0} && log.size() == 3, "all three, two of them bad: " +
+                                          "display: TTT2_SCALE=3: 3840x2160", "display: TTT2_FPS=240",
+                                          "display: TTT2_INPUT_DELAY=1"},
+          "all four: log " + joined(log));
+    active = resolved({true, Resolution::k1080, true}, "0", "8", "fast", "slow");
+    check(active == display::Active{false, 1.5f, 0} && log.size() == 4, "all four, three of them bad: " +
                                                                            text_of(active) + ", " + joined(log));
 }
 
 void test_active() {
     check(display::active() == display::Active{}, "before the window sets it: defaults");
-    display::set_active({true, 1.5f, 120});
-    check(display::active() == display::Active{true, 1.5f, 120}, "what the window set");
+    display::set_active({true, 1.5f, 120, std::nullopt});
+    check(display::active() == display::Active{true, 1.5f, 120, std::nullopt}, "what the window set");
     display::set_active({});
     check(display::active() == display::Active{}, "set again");
 }

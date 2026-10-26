@@ -12,7 +12,11 @@ A Tekken 7 costume changes some texels between 1P and 2P and keeps the others (r
 fighter keeps its 1P materials as they are and gets, over each cloth polygon that changes, a second polygon on the
 same vertices (pushed out by a hair) with a colourable material that is alpha-tested to the changing texels: its
 texels are split into two groups (k-means over their 1P and 2P colours), each group a palette number whose 1P and 2P
-colours are the group's, and each texel's shade the brightness that best gives both.
+colours are the group's, and each texel's shade the brightness that best gives both. Two groups cannot give every
+change (a texel can only be its group's colour, at most twice as bright): with a max_error, the texels whose 1P colour
+the layer would miss by more are left out of it (player 1 sees them as they are; player 2 as player 1 does there) and
+the groups are fitted again without them (Tekken 8 fighters: Reina's white stripes, purple in a group of purple ->
+lime texels, came out purple in her 1P colours).
 """
 import re
 
@@ -22,6 +26,8 @@ KEY_1P, KEY_2P, KEY_GRID = 0x9CDCD24F, 0xA6E0A5E2, 0x05ADD6D5
 CHANGED = 20 / 255.0               # a texel changes when a channel differs by more than this between 1P and 2P
 FIRST_PALETTE = 51                 # the palette numbers the added fighter's colourable materials use, from here on
 ID_BASE = 500                      # NU_vReg_04.w / 07.w = ID_BASE + palette number (as the game's own costumes)
+MAX_ERROR = 30 / 255.0             # fit(max_error): how far a texel's 1P colour in the layer may be from its own
+PASSES = 3                         # fit(max_error): fits, each without the texels the one before missed
 
 
 class Palette:
@@ -62,27 +68,42 @@ def _kmeans2(x, iters=20):
     return lab
 
 
-def fit(c1, c2, palette):
+def fit(c1, c2, palette, max_error=None):
     """1P and 2P colours (H, W, 3) in 0..1 (the texture's own encoding) -> None when nothing changes, else
-    dict(alpha (H, W) 0/1, shade (H, W), b (H, W) 0/1, groups [((x, y, s) 1P, rgb 1P, (x, y, s) 2P, rgb 2P)] x 2)."""
+    dict(alpha (H, W) 0/1, shade (H, W), b (H, W) 0/1, groups [((x, y, s) 1P, rgb 1P, (x, y, s) 2P, rgb 2P)] x 2).
+    max_error: leave out the texels whose 1P colour the layer misses by more than this in a channel (PASSES fits)."""
     changed = np.abs(c1 - c2).max(-1) > CHANGED
     if changed.mean() < 0.002:
         return None
-    x = np.concatenate([c1[changed], c2[changed]], 1)
-    lab = _kmeans2(x) if len(x) > 16 else np.zeros(len(x), np.int64)
-    groups, shade = [], np.zeros(changed.sum())
-    for k in range(2):
-        m = lab == k
-        if not m.any():
-            groups.append(groups[0])
-            continue
-        # the group's colours at shade 0.5 (colour = 2 * shade * palette colour): its mean colours
-        q1, q2 = np.clip(x[m, :3].mean(0), 0, 1), np.clip(x[m, 3:].mean(0), 0, 1)
-        groups.append((palette.place(q1), q1, palette.place(q2), q2))
-        # each texel's shade: least squares over both players' colours
-        num = (x[m, :3] * q1).sum(1) + (x[m, 3:] * q2).sum(1)
-        den = 2.0 * ((q1 * q1).sum() + (q2 * q2).sum())
-        shade[m] = np.clip(num / max(den, 1e-6), 0, 1)
+    for _ in range(PASSES if max_error is not None else 1):
+        x = np.concatenate([c1[changed], c2[changed]], 1)
+        lab = _kmeans2(x) if len(x) > 16 else np.zeros(len(x), np.int64)
+        means, shade = [], np.zeros(changed.sum())
+        for k in range(2):
+            m = lab == k
+            if not m.any():
+                means.append(None)
+                continue
+            # the group's colours at shade 0.5 (colour = 2 * shade * palette colour): its mean colours
+            q1, q2 = np.clip(x[m, :3].mean(0), 0, 1), np.clip(x[m, 3:].mean(0), 0, 1)
+            means.append((q1, q2))
+            # each texel's shade: least squares over both players' colours
+            num = (x[m, :3] * q1).sum(1) + (x[m, 3:] * q2).sum(1)
+            den = 2.0 * ((q1 * q1).sum() + (q2 * q2).sum())
+            shade[m] = np.clip(num / max(den, 1e-6), 0, 1)
+        if max_error is None:
+            break
+        q1 = np.stack([q[0] if q is not None else np.zeros(3) for q in means])[lab]
+        missed = np.abs(np.clip(2 * shade[:, None] * q1, 0, 1) - x[:, :3]).max(1) > max_error
+        if not missed.any():
+            break
+        kept = changed.copy()
+        kept[changed] = ~missed
+        changed, lab, shade = kept, lab[~missed], shade[~missed]
+        if changed.mean() < 0.002:
+            return None
+    groups = [(palette.place(q[0]), q[0], palette.place(q[1]), q[1]) for q in means if q is not None]
+    groups += groups[:1] * (2 - len(groups))        # (one group: both its; no texel takes the empty one)
     out_shade = np.zeros(changed.shape)
     out_shade[changed] = shade
     b = np.zeros(changed.shape)

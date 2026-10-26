@@ -394,9 +394,12 @@ void Renderer::copy_write_backs() {
         if (!guest_memory_committed(t->address, t->pitch * t->height * bytes)) continue;
         if (write_back_free_.empty()) {
             write_back_free_.push_back(static_cast<uint32_t>(write_back_staging_.size()));
+            // Cached where the driver has such memory: the retirement thread
+            // reads it element by element (write-combined memory reads slowly).
             write_back_staging_.push_back(ctx_.create_buffer(
                 kWriteBackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT));
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                VK_MEMORY_PROPERTY_HOST_CACHED_BIT));
         }
         const uint32_t staging = write_back_free_.back();
         write_back_free_.pop_back();

@@ -80,7 +80,8 @@ const Named& named(Resolution resolution) {
 
 std::string summary(const Settings& s) {
     return std::string("fullscreen ") + (s.fullscreen ? "yes" : "no") + ", resolution " +
-           std::string(name_of(s.resolution)) + ", interpolation " + (s.interpolation ? "yes" : "no");
+           std::string(name_of(s.resolution)) + ", interpolation " + (s.interpolation ? "yes" : "no") +
+           ", input delay " + (s.input_delay ? "yes" : "no");
 }
 
 bool set(const char* value) { return value != nullptr && *value != '\0'; }
@@ -132,8 +133,9 @@ std::pair<int, int> window_size(int desktop_width, int desktop_height, float den
 }
 
 Parsed parse(std::string_view text) {
-    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kNames };
-    static constexpr std::array<std::string_view, kNames> kIds{"fullscreen", "resolution", "interpolation"};
+    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kInputDelay, kNames };
+    static constexpr std::array<std::string_view, kNames> kIds{"fullscreen", "resolution", "interpolation",
+                                                               "input_delay"};
     Parsed parsed;
     std::array<size_t, kNames> set_on{}; // the line that gave each setting its value
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3); // a byte order mark from an editor
@@ -173,7 +175,9 @@ Parsed parse(std::string_view text) {
                 parsed.warnings.push_back({number, std::string(id) + ": " + quoted(value) + " is not yes or no"});
                 continue;
             }
-            (which == kFullscreen ? parsed.settings.fullscreen : parsed.settings.interpolation) = *on;
+            (which == kFullscreen      ? parsed.settings.fullscreen
+             : which == kInterpolation ? parsed.settings.interpolation
+                                       : parsed.settings.input_delay) = *on;
         }
         // The earlier line is the one left out.
         if (set_on[which] != 0) {
@@ -198,6 +202,8 @@ std::string format(const Settings& settings) {
             "  # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or 5120x2880\n";
     text += std::string("interpolation = ") + (settings.interpolation ? "yes" : "no") +
             "  # yes: 120 frames per second on displays of 100 Hz and more\n";
+    text += std::string("input_delay = ") + (settings.input_delay ? "yes" : "no") +
+            "  # yes: two frames between a button press and the game acting on it, as on the Wii U\n";
     return text;
 }
 
@@ -251,8 +257,9 @@ Loaded load(const fs::path& file) {
 }
 
 Active resolve(const Settings& settings, const char* fullscreen, const char* scale, const char* fps,
-               std::vector<std::string>& log) {
-    Active active{settings.fullscreen, scale_of(settings.resolution), settings.interpolation ? 0u : 60u};
+               const char* input_delay, std::vector<std::string>& log) {
+    Active active{settings.fullscreen, scale_of(settings.resolution), settings.interpolation ? 0u : 60u,
+                  settings.input_delay ? std::nullopt : std::optional<uint32_t>(0)};
     if (set(fullscreen)) {
         active.fullscreen = std::string_view(fullscreen) == "1";
         log.push_back(std::string("display: TTT2_FULLSCREEN=") + fullscreen + ": " +
@@ -275,6 +282,18 @@ Active resolve(const Settings& settings, const char* fullscreen, const char* sca
             log.push_back(std::string("display: TTT2_FPS=") + fps);
         } else {
             log.push_back(std::string("display: TTT2_FPS=") + fps + " is not a frame rate, ignored");
+        }
+    }
+    if (set(input_delay)) {
+        const std::string_view text = input_delay;
+        unsigned value = 0;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (error == std::errc{} && end == text.data() + text.size() && value <= kMaxInputDelay) {
+            active.input_delay = value;
+            log.push_back(std::string("display: TTT2_INPUT_DELAY=") + input_delay);
+        } else {
+            log.push_back(std::string("display: TTT2_INPUT_DELAY=") + input_delay + " is not 0 to " +
+                          std::to_string(kMaxInputDelay) + " frames, ignored");
         }
     }
     return active;

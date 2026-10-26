@@ -82,6 +82,11 @@ Line parse_line(std::string_view text) {
         out.kind = Line::Kind::kSkipped;
         out.word = std::string(word(rest));
         out.text = std::string(rest);
+    } else if (w == "stand-in" && !rest.empty()) {
+        // (A Tekken 8 fighter added with a stand-in's moves, and why.)
+        out.kind = Line::Kind::kStandIn;
+        out.word = std::string(word(rest));
+        out.text = std::string(rest);
     } else {
         return line;
     }

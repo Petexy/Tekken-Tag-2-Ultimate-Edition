@@ -425,8 +425,8 @@ class NoShared(unittest.TestCase):
         from ttt2char import importer
         made = []
         scratch = os.path.join(folder, '.scratch')
-        args = mock.Mock(tekken7='t7', movesets=os.path.join(scratch, 'movesets'), files=os.path.join(scratch, 'files'),
-                         game='g', out=folder, no_shared=True)
+        args = mock.Mock(tekken7='t7', tekken8=None, movesets=os.path.join(scratch, 'movesets'),
+                         files=os.path.join(scratch, 'files'), game='g', out=folder, no_shared=True)
         with mock.patch.object(import_character, 'needs_packages'), \
                 mock.patch.object(autodump, 'dump', side_effect=AssertionError('Tekken 7 would run')), \
                 mock.patch.object(autodump, 'unowned', return_value={}), \

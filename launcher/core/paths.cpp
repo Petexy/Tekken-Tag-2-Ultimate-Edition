@@ -69,6 +69,7 @@ Places Places::from_environment() {
     else if (data) p.packs = fs::path(data) / "ttt2/characters";
     else p.packs = p.home / ".local/share/ttt2/characters";
     p.tekken7_data = p.home / ".local/share/ttt2/tekken7";
+    p.tekken8_data = p.home / ".local/share/ttt2/tekken8";
     return p;
 }
 

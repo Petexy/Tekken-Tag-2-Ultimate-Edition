@@ -1,5 +1,5 @@
 """Body animations of TTT2 (Wii U, big-endian) and Tekken 7 (PC, little-endian): decoded to per-frame channel values,
-and written back as raw animations.
+and written back as raw (encode_raw) or compressed (encode_compressed) animations.
 
 An animation starts with u16 type and u16 channel count (nch). Each channel carries 3 values a frame; its descriptor
 says what they are:
@@ -64,6 +64,15 @@ Type 0x64, compressed:
     bit for bit against the running game). Some callers decode only the first 2 or 3 channels (root motion). The
     frame is clamped to 0 .. frames - 1. Between whole frames the sampler decodes both neighbours and blends them
     (sub_0358A90C, not modelled here).
+
+Writing 0x64 (encode_compressed, the inverse of the decoder): each component's states quantised (rotations in steps
+of 2^shift units, translations in steps of their channel's scale), each block's chunk the shortest of: the values as
+they come, runs of 3 or more values with one code sent as code 14 + count, and an end code where the state holds to
+the block's end. No chunk starts with code 14 (the game's own data never does: 0 of 98,862 chunks), so no chunk
+depends on the code its predecessor left; blocks follow each other with no gaps, the offset table where the frame-0
+values end (as in the game's files). With the quantisation of an existing animation (compression_params) the
+decoded values are the original's bit for bit (all 2447 compressed animations of Jun's pack and data004[0]: body,
+face, camera, extra bones), the streams 0.994 times the game's size.
 
 Written for this project from the game's code and data (no third-party code).
 """
@@ -431,3 +440,262 @@ def to_raw(descriptors, values, typ=COMPRESSED):
             mats = local_rotation(out[:, c], COMPRESSED)
             out[:, c] = [euler_from_matrix(m) for m in mats]
     return out.astype(np.float32)
+
+
+# ------------------------------------------------------------------------------------------------ writing 0x64
+# rotation steps of 2^4 units = 0.088 degrees: the game's own usual choice (it saves bits; a rotation never needs the
+# range)
+ROTATION_SHIFT = 4
+# a translation channel's scale = its largest distance from its frame-0 value / this (the game's own scales are the
+# range / 32767: channel 0 of a 12.4 m move 0.378, the hips 0.0101; the difference is headroom for the rounding)
+TRANSLATION_STEPS = 32760.0
+MAX_CHUNK = 63                      # bytes: what the chunk's 6-bit length field holds
+# (code, field width, bias) of the values, the smallest field first (the decoder's table without the i16 code)
+_FIELDS = [(c, w, b) for c, (w, b) in sorted(_CODES.items()) if c != 13]
+
+
+def _wrap16(x):
+    return (np.asarray(x, np.int64) + 0x8000) % 0x10000 - 0x8000
+
+
+def _wrap16i(x):
+    """_wrap16 of one Python int."""
+    return ((x + 0x8000) & 0xFFFF) - 0x8000
+
+
+def _field(v):
+    """(code, field width, bias) of the smallest field that holds the value v (an i16)."""
+    if v == 0:
+        return 0, 0, 0
+    for c, w, b in _FIELDS:
+        if b <= v < b + (1 << w):
+            return c, w, b
+    return 13, 16, 0
+
+
+def _encode_chunk(values, end_at=None):
+    """A chunk of `values` (the first value, then second differences); end_at: the index at which an end code
+    replaces the rest (None: no end code)."""
+    vals = list(values if end_at is None else values[:end_at])
+    acc, n = 0, 6                                   # the length field's 6 bits, filled in last
+    i = 0
+    while i < len(vals):
+        c, w, b = _field(vals[i])
+        mask = (1 << w) - 1
+        acc = (acc << (4 + w)) | (c << w) | ((vals[i] - b) & mask)
+        n += 4 + w
+        run = 0                                     # the values after it with the same code
+        while i + 1 + run < len(vals) and run < 15 and _field(vals[i + 1 + run])[0] == c:
+            run += 1
+        if run >= 2:                                # code 14 + count (8 bits) instead of their 4-bit codes
+            acc = (acc << 8) | (14 << 4) | run
+            n += 8
+            for v in vals[i + 1:i + 1 + run]:
+                acc = (acc << w) | ((v - b) & mask)
+                n += w
+            i += 1 + run
+        else:
+            i += 1
+    if end_at is not None:
+        acc = (acc << 4) | 15
+        n += 4
+    pad = -n % 8
+    size = (n + pad) // 8
+    if size > MAX_CHUNK:
+        raise ValueError('a chunk of %d bytes (its length field holds at most %d)' % (size, MAX_CHUNK))
+    acc = (acc << pad) | (size << (n + pad - 6))
+    return acc.to_bytes(size, 'big')
+
+
+def _component_chunk(states, start):
+    """The shortest chunk of one component's integer states over a block (1..16 of them), from state `start`."""
+    s = [int(x) for x in states]
+    vals = [_wrap16i(s[0] - start)]
+    prev = 0
+    for k in range(1, len(s)):
+        d = _wrap16i(s[k] - s[k - 1])
+        vals.append(_wrap16i(d - prev))
+        prev = d
+    best = _encode_chunk(vals)
+    k = len(s)                                      # an end code at k (>= 1) holds frame k - 1's state
+    while k > 1 and s[k - 1] == s[k - 2]:
+        k -= 1
+    if k < len(s):
+        alt = _encode_chunk(vals, k)
+        if len(alt) <= len(best):
+            best = alt
+    return best
+
+
+def compression_params(buf, endian='>', offset=0):
+    """The quantisation of a 0x64 animation (shifts, the rotation flag, scales, frame-0 values as stored), for
+    encode_compressed: re-encoding its decoded values with them gives the same values bit for bit."""
+    h = header(bytes(buf), endian, offset)
+    if h['type'] != COMPRESSED:
+        raise ValueError('not a compressed animation')
+    return dict(rotation_shift=h['rotation_shift'], rotation_flag=h['rotation_flag'],
+                translation_shift=h['translation_shift'], scales=list(h['scales']), first=h['first'])
+
+
+def _translation_value(state, shift, scale, base):
+    return np.float32(float(np.float32(int(_wrap16(state)) << shift)) * float(np.float32(scale)) +
+                      float(np.float32(base)))
+
+
+def _quantise(descriptors, v, params, rotation_shift):
+    """-> (params, states (frames - 1, nch, 3) int64, frame-0 values as stored)."""
+    F, nch = v.shape[0], v.shape[1]
+    exact = params is not None
+    if not exact:
+        params = dict(rotation_shift=rotation_shift, rotation_flag=0, translation_shift=0, scales=[], first=[])
+    shr, shf = params['rotation_shift'], params['translation_shift']
+    states = np.zeros((max(F - 1, 0), nch, 3), np.int64)
+    first, scales = [], []
+    t = 0
+    for c in range(nch):
+        col = v[:, c].copy()
+        if is_rotation(descriptors[c]):
+            if exact:
+                q0 = [int(x) for x in params['first'][c]]
+                if F > 1:
+                    states[:, c] = _wrap16(np.round(col[1:] / float(ROTATION_UNIT)).astype(np.int64) >> shr)
+            else:
+                col -= 2 * np.pi * np.round(col[0] / (2 * np.pi))[None, :]   # frame 0 within a half turn
+                q0 = [int(_wrap16(np.round(x / float(ROTATION_UNIT)))) for x in col[0]]    # (+pi -> -pi)
+                if F > 1:
+                    # a state beyond the i16 wraps by 2 pi 2^shift: whole turns, the same rotation
+                    states[:, c] = _wrap16(np.round(col[1:] / (float(ROTATION_UNIT) * (1 << shr))).astype(np.int64))
+            first.append(q0)
+            continue
+        if exact:
+            base = [float(x) for x in params['first'][c]]
+            scale = float(params['scales'][t])
+        else:
+            base = [float(np.float32(x)) for x in col[0]]
+            rng = float(np.abs(col[1:] - np.array(base)).max()) if F > 1 else 0.0
+            scale = float(np.float32(rng / TRANSLATION_STEPS)) if rng > 0 else 0.0
+        first.append(base)
+        scales.append(scale)
+        t += 1
+        if F < 2 or scale == 0:
+            continue
+        unit = scale * (1 << shf)
+        for k in range(3):
+            st = np.round((col[1:, k] - base[k]) / unit).astype(np.int64)
+            if exact:                               # the state whose single-precision result is the value
+                for f in range(len(st)):
+                    want = np.float32(col[1 + f, k])
+                    if _translation_value(st[f], shf, scale, base[k]) != want:
+                        for d in (-1, 1, -2, 2, -3, 3):
+                            if _translation_value(st[f] + d, shf, scale, base[k]) == want:
+                                st[f] += d
+                                break
+            states[:, c, k] = _wrap16(st)
+    if not exact:
+        params = dict(params, scales=scales, first=first)
+    return params, states, first
+
+
+def encode_compressed(descriptors, values, endian='>', params=None, rotation_shift=ROTATION_SHIFT):
+    """A type 0x64 animation: descriptors (nch ints), values (frames, nch, 3): rotations as the axis-angle triples
+    the decoder gives (axis_angles() makes them of rotation matrices), other channels as they are (millimetres).
+    params: None = our own quantisation (rotations in steps of 2^rotation_shift units, translation scales from each
+    channel's range); compression_params(x) = an existing animation's (decode(x) re-encodes to itself)."""
+    v = np.asarray(values, np.float64)
+    if v.ndim != 3 or v.shape[2] != 3 or v.shape[1] != len(descriptors):
+        raise ValueError('values must be (frames, %d, 3), not %s' % (len(descriptors), v.shape))
+    F, nch = v.shape[0], v.shape[1]
+    if not 1 <= F <= 0xFFFF:
+        raise ValueError('a compressed animation has 1 to 65535 frames, not %d' % F)
+    params, states, first = _quantise(descriptors, v, params, rotation_shift)
+    rot = [is_rotation(d) for d in descriptors]
+    shr, e = params['rotation_shift'], endian
+    scales = params['scales']
+    out = bytearray(struct.pack(e + 'HH', COMPRESSED, nch))
+    out += struct.pack(e + '%dH' % nch, *descriptors)
+    out += struct.pack(e + 'HBBH', F, shr | (params.get('rotation_flag', 0) << 7), params['translation_shift'],
+                       len(scales))
+    out += struct.pack(e + '%df' % len(scales), *scales)
+    init = []
+    for c in range(nch):
+        if rot[c]:
+            out += struct.pack(e + '3h', *first[c])
+            init.append([q >> shr for q in first[c]])
+        else:
+            out += struct.pack(e + '3f', *first[c])
+            init.append([0, 0, 0])
+    blocks = []
+    for b in range((F + 14) >> 4):
+        rows = states[16 * b:16 * b + 16]
+        blocks.append(b''.join(_component_chunk(rows[:, c, k], init[c][k]) for c in range(nch) for k in range(3)))
+    at, table = 4 * len(blocks), []
+    for blk in blocks:
+        table.append(at)
+        at += len(blk)
+    out += struct.pack(e + '%dI' % len(blocks), *table)
+    return bytes(out) + b''.join(blocks)
+
+
+def _axis_angle(m):
+    """Vectorised axis_angle_from_matrix: (..., 3, 3) -> (..., 3), the angle in [0, pi], the identity (0, 0, 0)."""
+    g = np.swapaxes(np.asarray(m, np.float64), -1, -2)          # the game's rotation: +angle about the axis
+    angle = np.arccos(np.clip((np.trace(g, axis1=-2, axis2=-1) - 1) / 2, -1, 1))
+    axis = np.stack([g[..., 2, 1] - g[..., 1, 2], g[..., 0, 2] - g[..., 2, 0], g[..., 1, 0] - g[..., 0, 1]], -1)
+    norm = np.linalg.norm(axis, axis=-1)
+    half = (norm < 1e-6) & (angle > 1e-9)                       # a half turn: the axis from the symmetric part
+    if half.any():
+        s = (g[half] + np.eye(3)) / 2
+        d = np.sqrt(np.clip(np.diagonal(s, axis1=-2, axis2=-1), 0, None))
+        k = np.argmax(d, -1)
+        r = np.arange(len(k))
+        axis[half] = s[r, k] / d[r, k][:, None]
+    axis /= np.maximum(np.linalg.norm(axis, axis=-1, keepdims=True), 1e-300)
+    out = np.stack([-np.arcsin(np.clip(axis[..., 1], -1, 1)), np.arctan2(axis[..., 0], axis[..., 2]), angle], -1)
+    out[angle < 1e-9] = 0.0
+    return out
+
+
+def _wrap_pi(a):
+    return (a + np.pi) % (2 * np.pi) - np.pi
+
+
+def axis_angles(rot, prev=None):
+    """0x64 rotation values (frames, ..., 3) of local rotation matrices (frames, ..., 3, 3) (local_rotation()'s
+    convention), each frame's triple the equivalent one nearest the previous frame's: (x, y, z), (pi - x, y + pi, z),
+    (-x, y + pi, -z), (x - pi, y, -z) (the same axis, or the opposite one with the angle negated), z + 2 pi k (the
+    same rotation) and x, y moved by whole turns. A channel so moves smoothly (small second differences: short
+    streams), and frame 0 starts within half a turn (what its i16 values hold). With `prev` (..., 3): the values of
+    the frame before the first, which the first continues instead."""
+    R = np.asarray(rot, np.float64)
+    F, shape = R.shape[0], R.shape[1:-2]
+    aa = _axis_angle(R.reshape(F, -1, 3, 3))
+    x, y, z = aa[..., 0], aa[..., 1], aa[..., 2]
+    cands = []
+    for xx, yy, zz in ((x, y, z), (np.pi - x, y + np.pi, z), (-x, y + np.pi, -z), (x - np.pi, y, -z)):
+        for t in 2 * np.pi * np.arange(-2, 3):
+            cands.append(np.stack([xx, yy, zz + t], -1))
+    cands = np.stack(cands, 2)                                  # (frames, channels, 20, 3)
+    rows = np.arange(aa.shape[1])
+    seeded = prev is not None
+    if seeded:                                                  # continue a channel: frame 0 is a later frame too
+        seed = np.asarray(prev, np.float64).reshape(1, -1, 3)
+        aa = np.concatenate([seed, aa])
+        cands = np.concatenate([cands[:1], cands])
+        z = np.concatenate([np.ones((1, seed.shape[1])), z])
+    out = np.empty_like(aa)
+    out[0] = aa[0]
+    for f in range(1, len(aa)):
+        prev = out[f - 1]
+        c = cands[f].copy()
+        c[..., :2] = prev[:, None, :2] + _wrap_pi(c[..., :2] - prev[:, None, :2])
+        w = np.minimum(1.0, np.abs(np.sin(prev[:, 2] / 2)) + 0.05)[:, None]   # the axis matters less near angle 0
+        d = ((c[..., :2] - prev[:, None, :2]) ** 2).sum(-1) * w + (c[..., 2] - prev[:, None, 2]) ** 2
+        best = c[rows, np.argmin(d, 1)]
+        ident = z[f] < 1e-6                                     # the identity: the axis kept, the angle a whole turn
+        best[ident] = np.stack([prev[ident, 0], prev[ident, 1],
+                                2 * np.pi * np.round(prev[ident, 2] / (2 * np.pi))], -1)
+        out[f] = best
+    if seeded:
+        return out[1:].reshape((F,) + shape + (3,))
+    out -= 2 * np.pi * np.round(out[:1] / (2 * np.pi))
+    return out.reshape((F,) + shape + (3,))

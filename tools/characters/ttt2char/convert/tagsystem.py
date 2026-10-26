@@ -529,9 +529,69 @@ class TagStates:
                     self.exact[n][i in yes] += 1
             common.update({state_name(m.move_name(i)) for i in yes})
         self.common = {s for s, n in common.items() if n * STATE_SHARE >= len(movesets)}
+        self.movesets = movesets        # (TTT2's movesets: tagcombo.tagged_stems reads its tag combos from them)
 
     def __call__(self, name):
         e = self.exact.get(name)
         if e:
             return e[True] > 0 and e[True] >= e[False]
         return state_name(name) in self.common
+
+
+# ------------------------------------------------------------------------------------------------ idle variants
+STANCES = (0x8001, 0x8002)          # alias slots of the stance and the crouch
+
+
+def row_key(tables, aliases, c):
+    """What a cancel row does, whatever lists it sits in: direction, buttons, requirements, extradata value, frames,
+    target (a group by its index), option."""
+    extra = None if c['extradata'] is None else tables['cancel_extras'][c['extradata']]['value']
+    target = c['move_id'] if c['direction'] == M.GROUP else resolve(aliases, c['move_id'])
+    return (c['direction'], c['button'], tuple(reqs(tables, c['req'])), extra, c['win_start'], c['win_end'],
+            c['start_frame'], target, c['option'])
+
+
+def idle_variants(tables, aliases, first):
+    """{stance: [its idle variants]}: converted moves (index >= first) a stance (STANCES) goes to by itself (an
+    automatic row) that attack nothing, go back to it, and whose cancels are the stance's own (some, each of them in
+    the stance's list): Tekken 8's idle animations (Reina's Zbr_sKAM00_1 / _2, after two seconds and more of standing),
+    whose lists lack the donor's rows the stance got (its tag out, tag throws, CPU moves, ...)."""
+    moves = tables['moves']
+    out = {}
+    for slot in STANCES:
+        s = resolve(aliases, slot)
+        if s is None or s >= len(moves) or moves[s]['cancel'] is None:
+            continue
+        own = collections.Counter(row_key(tables, aliases, c) for c in cancels(tables, moves[s]['cancel']))
+        found = []
+        for c in cancels(tables, moves[s]['cancel']):
+            v = resolve(aliases, c['move_id']) if c['direction'] < M.LIST_END and c['direction'] != M.GROUP else None
+            if v is None or not is_automatic(c) or v < first or v >= len(moves) or v == s or v in found:
+                continue
+            x = moves[v]
+            if x['first_active'] or x['cancel'] is None or resolve(aliases, x['transition']) != s:
+                continue
+            rows = collections.Counter(row_key(tables, aliases, r) for r in cancels(tables, x['cancel'])
+                                       if r['direction'] != M.LIST_END)
+            if rows and not rows - own:         # (a list of the stance's rows: not an empty one, Claudio's
+                found.append(v)                 # It_practice_KAM_CS7 behind a row never taken)
+        if found:
+            out[s] = found
+    return out
+
+
+def share_stance(tables, aliases, first):
+    """Each idle variant (idle_variants) gets its stance's list, less the stance's rows into its idle variants (a
+    new list; the stance's own stays). -> how many moves changed."""
+    changed = 0
+    made = {}
+    for s, found in idle_variants(tables, aliases, first).items():
+        rows = [dict(c) for c in cancels(tables, tables['moves'][s]['cancel'])
+                if not (c['direction'] < M.LIST_END and c['direction'] != M.GROUP
+                        and resolve(aliases, c['move_id']) in found)]
+        if s not in made:
+            made[s] = write(tables, 'cancels', rows)
+        for v in found:
+            tables['moves'][v]['cancel'] = made[s]
+            changed += 1
+    return changed

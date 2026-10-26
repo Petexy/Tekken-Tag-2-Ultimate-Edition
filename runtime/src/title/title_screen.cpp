@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -138,58 +139,74 @@ void fill_holes(Mask& m) {
     for (size_t i = 0; i < m.bits.size(); ++i) m.bits[i] = !outside.bits[i];
 }
 
-// Offsets within a disc of radius `r`, nearest first.
-std::vector<std::pair<int, int>> disc(int r) {
-    std::vector<std::pair<int, int>> out;
-    for (int dy = -r; dy <= r; ++dy) {
-        for (int dx = -r; dx <= r; ++dx) {
-            if (dx * dx + dy * dy <= r * r + r) out.push_back({dx, dy});
-        }
+// Only the holes of up to `largest` pixels filled.
+void fill_small_holes(Mask& m, size_t largest) {
+    Mask holes = m;
+    fill_holes(holes);
+    for (size_t i = 0; i < m.bits.size(); ++i) holes.bits[i] = holes.bits[i] && !m.bits[i];
+    for (const std::vector<size_t>& part : parts(holes)) {
+        if (part.size() > largest) continue;
+        for (const size_t i : part) m.bits[i] = 1;
     }
-    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return a.first * a.first + a.second * a.second < b.first * b.first + b.second * b.second;
-    });
+}
+
+// Each pixel's distance to the nearest set one (Euclidean, exact: the lower
+// envelope of parabolas, Felzenszwalb and Huttenlocher's method, along rows
+// then columns); huge where none is set.
+std::vector<float> distance(const Mask& m) {
+    constexpr double kFar = 1e20;
+    const size_t w = m.width, h = m.height, longest = std::max(w, h);
+    std::vector<double> d(w * h), f(longest), z(longest + 1);
+    std::vector<size_t> v(longest);
+    for (size_t i = 0; i < d.size(); ++i) d[i] = m.bits[i] ? 0 : kFar;
+    const auto pass = [&](size_t count, size_t length, size_t step, size_t stride) {
+        for (size_t c = 0; c < count; ++c) {
+            double* line = d.data() + c * stride;
+            for (size_t i = 0; i < length; ++i) f[i] = line[i * step];
+            // Parabola v[k] is lowest from z[k] to z[k + 1]. Where two
+            // meet lies within (-kFar / 2, kFar / 2), so z[0] is never
+            // passed.
+            size_t k = 0;
+            v[0] = 0;
+            z[0] = -kFar;
+            z[1] = kFar;
+            for (size_t q = 1; q < length; ++q) {
+                const auto meet = [&](size_t p) {
+                    const double qd = static_cast<double>(q), pd = static_cast<double>(p);
+                    return (f[q] + qd * qd - f[p] - pd * pd) / (2 * qd - 2 * pd);
+                };
+                double s = meet(v[k]);
+                while (s <= z[k]) s = meet(v[--k]);
+                ++k;
+                v[k] = q;
+                z[k] = s;
+                z[k + 1] = kFar;
+            }
+            k = 0;
+            for (size_t q = 0; q < length; ++q) {
+                while (z[k + 1] < static_cast<double>(q)) ++k;
+                const double dq = static_cast<double>(q) - static_cast<double>(v[k]);
+                line[q * step] = dq * dq + f[v[k]];
+            }
+        }
+    };
+    pass(h, w, 1, w); // rows
+    pass(w, h, w, 1); // columns
+    std::vector<float> out(d.size());
+    for (size_t i = 0; i < d.size(); ++i) out[i] = static_cast<float>(std::sqrt(d[i]));
     return out;
 }
 
-// Dilation (or erosion) by a disc; outside counts as clear.
-Mask spread_disc(const Mask& m, int radius, bool erode) {
-    const auto offsets = disc(radius);
+// Dilation by a disc of radius `r`, or, eroding, what lies farther than `r`
+// from a clear pixel (the edge of `m` does not count as clear).
+Mask within(const Mask& m, float r, bool erode) {
+    Mask from = m;
+    if (erode) {
+        for (uint8_t& b : from.bits) b = !b;
+    }
+    const std::vector<float> d = distance(from);
     Mask out(m.width, m.height);
-    for (uint32_t y = 0; y < m.height; ++y) {
-        for (uint32_t x = 0; x < m.width; ++x) {
-            bool all = true, any = false;
-            for (const auto& [dx, dy] : offsets) {
-                const int64_t nx = int64_t{x} + dx, ny = int64_t{y} + dy;
-                const bool v = nx >= 0 && ny >= 0 && nx < m.width && ny < m.height &&
-                               m(static_cast<uint32_t>(nx), static_cast<uint32_t>(ny));
-                all = all && v;
-                any = any || v;
-                if (erode ? !all : any) break;
-            }
-            out(x, y) = erode ? all : any;
-        }
-    }
-    return out;
-}
-
-// Each pixel's distance to the nearest set one, up to `limit` (beyond it,
-// `limit` + 1).
-std::vector<float> distance(const Mask& m, int limit) {
-    const auto offsets = disc(limit);
-    std::vector<float> out(m.bits.size(), static_cast<float>(limit + 1));
-    for (uint32_t y = 0; y < m.height; ++y) {
-        for (uint32_t x = 0; x < m.width; ++x) {
-            for (const auto& [dx, dy] : offsets) {
-                const int64_t nx = int64_t{x} + dx, ny = int64_t{y} + dy;
-                if (nx >= 0 && ny >= 0 && nx < m.width && ny < m.height &&
-                    m(static_cast<uint32_t>(nx), static_cast<uint32_t>(ny))) {
-                    out[size_t{y} * m.width + x] = std::sqrt(static_cast<float>(dx * dx + dy * dy));
-                    break;
-                }
-            }
-        }
-    }
+    for (size_t i = 0; i < d.size(); ++i) out.bits[i] = erode ? d[i] > r : d[i] <= r;
     return out;
 }
 
@@ -217,7 +234,6 @@ float noise(uint32_t x, uint32_t y, uint32_t cell, uint32_t seed) {
 // edge that runs round each word as one shape (counters and gaps between
 // touching letters white too), over a brushed underline. "WiiU" is large;
 // EDITION's letters are 62 rows high, their ink from row 438 to 500.
-constexpr int kCapTop = 438, kBaseline = 500, kCap = kBaseline - kCapTop;
 
 // Ink, 0 (none) to 1 (black), of a width x height rectangle whose top row
 // is `top` in the still.
@@ -264,21 +280,8 @@ Ink cut(const Ink& still, Rect r, bool trimmed = true) {
     return trimmed ? trim(out) : out;
 }
 
-// Upside down (`rows`) or mirrored.
-Ink flip(const Ink& p, bool rows) {
-    Ink out(p.width, p.height, p.top);
-    for (uint32_t y = 0; y < p.height; ++y) {
-        for (uint32_t x = 0; x < p.width; ++x) {
-            out(x, y) = rows ? p(x, p.height - 1 - y) : p(p.width - 1 - x, y);
-        }
-    }
-    return out;
-}
-
-// Resized (bilinear, corners on corners) with its top at `top`; strokes
-// then widen by `bold` columns each side, keeping their weight where a
-// letter narrows.
-Ink scaled(const Ink& p, uint32_t width, uint32_t height, int top, int bold) {
+// Resized (bilinear, corners on corners) with its top at `top`.
+Ink scaled(const Ink& p, uint32_t width, uint32_t height, int top) {
     Ink out(width, height, top);
     const auto source = [](uint32_t i, uint32_t from, uint32_t to) {
         return to > 1 ? static_cast<double>(i) * (from - 1) / (to - 1) : 0.0;
@@ -297,17 +300,7 @@ Ink scaled(const Ink& p, uint32_t width, uint32_t height, int top, int bold) {
                                            (p(x0, y1) * (1 - fx) + p(x1, y1) * fx) * fy);
         }
     }
-    if (bold == 0) return out;
-    Ink wide = out;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            for (int k = -bold; k <= bold; ++k) {
-                const int64_t sx = int64_t{x} + k;
-                if (sx >= 0 && sx < width) wide(x, y) = std::max(wide(x, y), out(static_cast<uint32_t>(sx), y));
-            }
-        }
-    }
-    return wide;
+    return out;
 }
 
 // `p` over `into`, its left column at column `x` of `into` and its top at
@@ -365,43 +358,158 @@ void round_end(Ink& p, bool right) {
     }
 }
 
-// The letters of "ULTIMATE" at EDITION's size, from the still's ink: T, I
-// and E are EDITION's; U is WiiU's, smaller; L is an I upside down with
-// E's bottom arm; M is the W upside down; A is the W's right arm with its
-// mirror image and E's middle arm across them. None if a stroke is missing.
-std::vector<Ink> ultimate(const Ink& still) {
-    constexpr Rect kU{505, 606, 418, 504}, kW{323, 452, 410, 504}, kWArm{404, 448, 418, 502};
-    constexpr Rect kE{638, 684, 405, 503}, kI{733, 745, 405, 503}, kTI{745, 797, 405, 503}, kT{745, 787, 405, 503};
-    constexpr Rect kEBottom{657, 689, 482, 502}, kEMiddle{662, 684, 458, 478};
-    constexpr double kWiiU = static_cast<double>(kCap) / (502 - 418); // WiiU's letters to EDITION's size
+// ULTIMATE is drawn finely, kFine subtexels to a texel each way, then
+// averaged down to smooth, anti-aliased edges. Its letters, each set in a
+// fine mask over its box and kMargin texels round it.
+constexpr int kFine = 4, kMargin = 4;
 
-    const Ink u = cut(still, kU), w = cut(still, kW), arm = cut(still, kWArm), e = cut(still, kE), i = cut(still, kI);
-    const Ink bottom = cut(still, kEBottom, false), bar = cut(still, kEMiddle);
-    Ink ti = cut(still, kTI), t = cut(still, kT);
-    for (const Ink* p : std::initializer_list<const Ink*>{&u, &w, &arm, &e, &i, &ti, &t, &bar}) {
+struct Letter {
+    Mask fine;
+    int left = 0, top = 0; // the still's texel at fine (0, 0)
+    Letter(int l, int t, int right, int bottom)
+        : fine(static_cast<uint32_t>((right - l) * kFine), static_cast<uint32_t>((bottom - t) * kFine)), left(l), top(t) {}
+    // Where the subtexel's centre is in the still.
+    double x(uint32_t fx) const { return left + (fx + 0.5) / kFine; }
+    double y(uint32_t fy) const { return top + (fy + 0.5) / kFine; }
+};
+
+Letter around(double x0, double y0, double x1, double y1) {
+    return Letter(static_cast<int>(std::floor(x0)) - kMargin, static_cast<int>(std::floor(y0)) - kMargin,
+                  static_cast<int>(std::ceil(x1)) + kMargin, static_cast<int>(std::ceil(y1)) + kMargin);
+}
+
+// `p` stretched over the box from (x0, y0) to (x1, y1) of the still, set
+// where more black than not, then cleaned up: only its largest part, its
+// small holes (flecks of white, windows onto the logo) filled and notches
+// up to a texel wide closed; then widened by `bold` texels (within the
+// box).
+Letter stretched(const Ink& p, double x0, double y0, double x1, double y1, float bold = 0) {
+    Letter out = around(x0, y0, x1, y1);
+    x0 += bold;
+    y0 += bold;
+    x1 -= bold;
+    y1 -= bold;
+    const auto at = [&](int64_t x, int64_t y) {
+        return x >= 0 && y >= 0 && x < p.width && y < p.height ? p(static_cast<uint32_t>(x), static_cast<uint32_t>(y))
+                                                                : 0.0f;
+    };
+    for (uint32_t fy = 0; fy < out.fine.height; ++fy) {
+        const double sy = (out.y(fy) - y0) / (y1 - y0) * p.height - 0.5;
+        const auto iy = static_cast<int64_t>(std::floor(sy));
+        const double ty = sy - iy;
+        for (uint32_t fx = 0; fx < out.fine.width; ++fx) {
+            const double sx = (out.x(fx) - x0) / (x1 - x0) * p.width - 0.5;
+            const auto ix = static_cast<int64_t>(std::floor(sx));
+            const double tx = sx - ix;
+            const double v = (at(ix, iy) * (1 - tx) + at(ix + 1, iy) * tx) * (1 - ty) +
+                             (at(ix, iy + 1) * (1 - tx) + at(ix + 1, iy + 1) * tx) * ty;
+            out.fine(fx, fy) = v > 0.5;
+        }
+    }
+    Mask& m = out.fine;
+    const std::vector<std::vector<size_t>> all = parts(m);
+    const auto largest = std::max_element(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.size() < b.size(); });
+    std::fill(m.bits.begin(), m.bits.end(), 0);
+    if (largest != all.end()) {
+        for (const size_t i : *largest) m.bits[i] = 1;
+    }
+    m = within(within(m, kFine / 2.0f, false), kFine / 2.0f, true);
+    fill_small_holes(m, 20 * kFine * kFine);
+    if (bold > 0) m = within(m, bold * kFine, false);
+    return out;
+}
+
+struct Point {
+    float x, y;
+};
+
+// Excentrian's M and A for this logo, as outlines (texels, from the
+// letter's left and up from the baseline; the A's counter second).
+constexpr Point kM[] = {
+    {17.1f, -49.6f}, {23.8f, -49.2f}, {27.9f, -44.1f}, {30.7f, -48.0f}, {34.9f, -49.4f}, {43.2f, -49.2f}, {47.4f, -46.9f},
+    {57.8f, -35.3f}, {66.1f, -23.3f}, {68.8f, -21.9f}, {69.5f, -18.4f}, {67.9f, -16.4f}, {68.1f, -12.7f}, {63.7f, -6.7f},
+    {59.4f, -3.4f},  {57.7f, 0.0f},   {53.6f, 0.0f},   {51.3f, -4.3f},  {48.0f, -7.4f},  {48.0f, -9.4f},  {46.4f, -11.0f},
+    {47.8f, -22.2f}, {43.4f, -31.8f}, {41.4f, -33.9f}, {40.2f, -32.6f}, {38.6f, -24.7f}, {38.6f, -19.1f}, {33.3f, -15.9f},
+    {28.6f, -15.9f}, {27.7f, -16.4f}, {27.7f, -20.1f}, {25.0f, -26.5f}, {20.8f, -33.4f}, {19.0f, -34.1f}, {18.0f, -31.6f},
+    {17.3f, -21.7f}, {18.0f, -15.7f}, {19.2f, -13.6f}, {17.8f, -10.6f}, {15.9f, -9.0f},  {15.7f, -7.4f},  {12.9f, -5.7f},
+    {13.2f, -3.0f},  {11.3f, -1.4f},  {5.3f, -1.4f},   {2.5f, -2.3f},   {0.9f, -4.1f},   {0.0f, -7.3f},   {1.9f, -26.7f},
+    {6.5f, -43.8f},  {9.0f, -48.5f},  {11.3f, -49.4f}};
+constexpr Point kA[] = {
+    {21.0f, -53.3f}, {22.6f, -52.8f}, {26.5f, -47.6f}, {31.2f, -46.9f}, {34.0f, -41.5f}, {43.9f, -27.4f}, {50.6f, -26.8f},
+    {50.6f, -25.8f}, {47.3f, -22.6f}, {50.3f, -17.1f}, {57.5f, -7.4f},  {57.3f, -4.4f},  {55.6f, -2.5f},  {51.7f, -1.4f},
+    {45.5f, -5.5f},  {40.7f, -14.1f}, {36.9f, -18.9f}, {18.5f, -13.2f}, {9.3f, -0.5f},   {7.1f, -0.2f},   {4.8f, -1.1f},
+    {3.5f, -3.0f},   {1.9f, -3.7f},   {0.2f, -9.7f},   {6.0f, -14.0f},  {14.8f, -29.6f}, {18.3f, -40.4f}, {19.8f, -51.9f}};
+constexpr Point kACounter[] = {{27.9f, -32.1f}, {30.7f, -28.6f}, {30.3f, -27.2f}, {25.9f, -27.5f}, {26.8f, -31.4f}};
+
+// A letter filled from outlines (even-odd) with its left at `x` and its
+// baseline at `baseline`, the edge roughened like brush ink.
+Letter outlined(std::initializer_list<std::span<const Point>> rings, double x, double baseline, uint32_t seed) {
+    double right = 0, high = 0;
+    for (const auto& ring : rings) {
+        for (const Point& p : ring) {
+            right = std::max<double>(right, p.x);
+            high = std::min<double>(high, p.y);
+        }
+    }
+    Letter out = around(x, baseline + high, x + right, baseline);
+    for (uint32_t fy = 0; fy < out.fine.height; ++fy) {
+        const double py = out.y(fy) - baseline;
+        for (uint32_t fx = 0; fx < out.fine.width; ++fx) {
+            const double px = out.x(fx) - x;
+            bool inside = false;
+            double nearest = 1e9;
+            for (const auto& ring : rings) {
+                for (size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+                    const Point& a = ring[j];
+                    const Point& b = ring[i];
+                    if ((a.y > py) != (b.y > py) && px < a.x + (py - a.y) * (b.x - a.x) / (b.y - a.y)) inside = !inside;
+                    const double ex = b.x - a.x, ey = b.y - a.y;
+                    const double t = std::clamp(((px - a.x) * ex + (py - a.y) * ey) / (ex * ex + ey * ey), 0.0, 1.0);
+                    const double dx = px - a.x - t * ex, dy = py - a.y - t * ey;
+                    nearest = std::min(nearest, dx * dx + dy * dy);
+                }
+            }
+            const auto gx = static_cast<uint32_t>(out.left * kFine + static_cast<int>(fx));
+            const auto gy = static_cast<uint32_t>(out.top * kFine + static_cast<int>(fy));
+            const double rough = 0.45 * noise(gx, gy, 2 * kFine, seed) + 0.25 * noise(gx, gy, kFine - 1, seed + 1);
+            nearest = std::sqrt(nearest);
+            out.fine(fx, fy) = (inside ? nearest : -nearest) + rough > 0;
+        }
+    }
+    return out;
+}
+
+// The letters of "ULTIMATE", laid out after Excentrian's design for this
+// logo (boxes in texels from the word's left at `x`): U is WiiU's; L is
+// EDITION's first I with its E's bottom arm; T, I and E are EDITION's; M
+// and A are Excentrian's outlines. None if a stroke is missing.
+std::vector<Letter> ultimate(const Ink& still, double x) {
+    constexpr Rect kU{505, 606, 418, 504}, kE{638, 684, 405, 503}, kI{733, 745, 405, 503}, kT{745, 787, 405, 503};
+    constexpr Rect kEBottom{657, 689, 482, 502};
+    const Ink u = cut(still, kU), e = cut(still, kE), i = cut(still, kI), bottom = cut(still, kEBottom, false);
+    Ink t = cut(still, kT);
+    for (const Ink* p : std::initializer_list<const Ink*>{&u, &e, &i, &t}) {
         if (p->width == 0) return {};
     }
-    std::vector<Ink> letters;
-    letters.push_back(scaled(u, 56, kCap, kCapTop, 1));
-    Ink l = join({{flip(i, true), 0, i.top}, {bottom, 6, bottom.top}});
+    Ink l = join({{scaled(i, 16, 53, 0), 0, 0}, {bottom, 4, 53 - static_cast<int>(bottom.height)}});
     round_end(l, true);
-    letters.push_back(trim(l));
-    round_end(ti, false);
-    letters.push_back(trim(ti));
-    letters.push_back(scaled(flip(w, true), 72, kCap, kCapTop, 2));
-    const Ink leg = scaled(arm, static_cast<uint32_t>(std::lround(arm.width * kWiiU)),
-                           static_cast<uint32_t>(std::lround(arm.height * kWiiU)), 0, 0);
-    const int legs = kBaseline - static_cast<int>(leg.height), across = static_cast<int>(leg.width);
-    letters.push_back(join({{leg, 0, legs}, {flip(leg, false), across - 12, legs}, {bar, across / 2 - 6, kCapTop + 30}}));
+    l = trim(l);
     round_end(t, false);
     round_end(t, true);
-    letters.push_back(trim(t));
+    t = trim(t);
     Ink end = e;
     round_end(end, true);
-    letters.push_back(trim(end));
-    for (const Ink& letter : letters) {
-        if (letter.width == 0) return {};
-    }
+    end = trim(end);
+
+    std::vector<Letter> letters;
+    letters.push_back(stretched(u, x, 445.7, x + 55.4, 502.2, 0.75f));
+    letters.push_back(stretched(l, x + 55.4, 448.0, x + 90.1, 501.1));
+    letters.push_back(stretched(t, x + 82.9, 450.1, x + 123.5, 501.8));
+    letters.push_back(stretched(i, x + 116.6, 457.7, x + 134.6, 502.5));
+    letters.push_back(outlined({kM}, x + 134.1, 502, 3));
+    letters.push_back(outlined({kA, kACounter}, x + 201.6, 502, 4));
+    letters.push_back(stretched(t, x + 252.6, 452.2, x + 290.5, 500.0));
+    letters.push_back(stretched(end, x + 290.5, 440.8, x + 330.5, 500.7));
     return letters;
 }
 
@@ -477,7 +585,14 @@ std::optional<Rgba> logo(const Rgba& wiiu) {
     for (size_t i = 0; i < ink.v.size(); ++i) {
         if (shape.bits[i] && !window.bits[i]) ink.v[i] = std::clamp((0.85f - luma[i] / 255) / 0.7f, 0.0f, 1.0f);
     }
-    const std::vector<Ink> letters = ultimate(ink);
+    // "ULTIMATE" (spaced as Excentrian's design has it), then a word space
+    // and EDITION, the line centred where the old one was: EDITION moves
+    // right.
+    constexpr int kOldLeft = 327, kEditionLeft = 640, kEditionRight = 945;
+    constexpr double kWord = 330.5, kSpace = 49.8;
+    const double left = (kOldLeft + kEditionRight - (kWord + kSpace + kEditionRight - kEditionLeft)) / 2;
+    const auto moved = static_cast<int>(std::lround(left + kWord + kSpace - kEditionLeft));
+    const std::vector<Letter> letters = ultimate(ink, left);
     if (letters.empty()) return std::nullopt;
 
     // The old subtitle as coverage and grey: inside the shape as it is
@@ -505,16 +620,6 @@ std::optional<Rgba> logo(const Rgba& wiiu) {
     for (size_t i = 0; i < kept.bits.size(); ++i) kept.bits[i] = kept.bits[i] && shape.bits[i];
     kept = grow(kept, 1);
 
-    // "ULTIMATE", its letters touching as EDITION's do (M and A just
-    // apart), then a word space and EDITION, the line centred where the
-    // old one was: EDITION moves right.
-    constexpr int kOldLeft = 327, kEditionLeft = 638, kEditionRight = 945, kSpace = 36, kTouch = -3;
-    const auto after = [&](size_t k) { return k + 1 == letters.size() ? 0 : k == 3 ? 0 : kTouch; };
-    int word = 0;
-    for (size_t k = 0; k < letters.size(); ++k) word += static_cast<int>(letters[k].width) + after(k);
-    const int line = word + kSpace + kEditionRight - kEditionLeft;
-    const int left = static_cast<int>(std::lround((kOldLeft + kEditionRight - line) / 2.0));
-    const int moved = left + word + kSpace - kEditionLeft;
     const auto over = [&](int x, uint32_t y, float c, float v) {
         if (x < 0 || x >= static_cast<int>(kStill)) return;
         uint8_t* p = out.at(static_cast<uint32_t>(x), y);
@@ -525,7 +630,7 @@ std::optional<Rgba> logo(const Rgba& wiiu) {
     // grew: its left part moves with ULTIMATE's start, the rest with
     // EDITION, and the stretch before `kSplit` fills the gap twice.
     constexpr int kUnderline = 504, kUnderlineLeft = 250, kUnderlineRight = 1000, kSplit = 620;
-    const int start_moved = left - kOldLeft;
+    const auto start_moved = static_cast<int>(std::lround(left - kOldLeft));
     for (int x = kUnderlineLeft + start_moved; x < kUnderlineRight + moved; ++x) {
         const int from = x - (x < kSplit + start_moved ? start_moved : moved);
         if (from < kUnderlineLeft || from >= kUnderlineRight) continue;
@@ -542,29 +647,61 @@ std::optional<Rgba> logo(const Rgba& wiiu) {
             if (cover[i] > 0 && kept.bits[i]) over(x + moved, y, cover[i], grey[i]);
         }
     }
-    // ULTIMATE's ink with white round it: the ink closed over small gaps
-    // and its holes filled, then widened by four texels, give or take a
-    // rough, brushy two.
-    constexpr int kBoxLeft = 200, kBoxTop = 380;
-    constexpr uint32_t kBoxWidth = 880, kBoxHeight = 160;
-    Ink drawn(kBoxWidth, kBoxHeight, kBoxTop);
-    for (size_t k = 0, x = static_cast<size_t>(left - kBoxLeft); k < letters.size(); ++k) {
-        draw(drawn, letters[k], static_cast<int>(x), letters[k].top);
-        x += letters[k].width + after(k);
+    // ULTIMATE's ink with white round it, as Excentrian drew it: five
+    // texels wide (give or take a brushy half) round the ink without its
+    // whiskers, two at least round them, the shape's holes and gaps filled.
+    int x0 = INT32_MAX, y0 = INT32_MAX, x1 = INT32_MIN, y1 = INT32_MIN;
+    for (const Letter& l : letters) {
+        x0 = std::min(x0, l.left);
+        y0 = std::min(y0, l.top);
+        x1 = std::max(x1, l.left + static_cast<int>(l.fine.width / kFine));
+        y1 = std::max(y1, l.top + static_cast<int>(l.fine.height / kFine));
     }
-    Mask inked(kBoxWidth, kBoxHeight);
-    for (size_t i = 0; i < drawn.v.size(); ++i) inked.bits[i] = drawn.v[i] > 0.5f;
-    Mask closed = spread_disc(spread_disc(inked, 4, false), 4, true);
-    for (size_t i = 0; i < closed.bits.size(); ++i) closed.bits[i] = closed.bits[i] || inked.bits[i];
-    fill_holes(closed);
-    const std::vector<float> away = distance(closed, 8);
-    for (uint32_t y = 0; y < kBoxHeight; ++y) {
-        for (uint32_t x = 0; x < kBoxWidth; ++x) {
-            const size_t i = size_t{y} * kBoxWidth + x;
-            const float reach = 4 + 1.5f * noise(x, y, 8, 1) + 0.8f * noise(x, y, 3, 2);
-            const float white_here = std::clamp(reach - away[i] + 0.5f, 0.0f, 1.0f), black = drawn.v[i];
-            const float c = std::max(white_here, black);
-            if (c > 0) over(kBoxLeft + static_cast<int>(x), kBoxTop + y, c, 255 * std::min(white_here, 1 - black) / c);
+    constexpr float kRim = 5.0f * kFine, kRimLeast = 2.0f * kFine, kWhiskers = 1.5f * kFine;
+    x0 -= 4;
+    y0 -= 4;
+    x1 += 4;
+    y1 += 4;
+    // Letters stay apart, a texel of white between them: each loses what
+    // comes that close to the ones before.
+    Mask word(static_cast<uint32_t>((x1 - x0) * kFine), static_cast<uint32_t>((y1 - y0) * kFine));
+    for (const Letter& l : letters) {
+        const uint32_t ox = static_cast<uint32_t>((l.left - x0) * kFine), oy = static_cast<uint32_t>((l.top - y0) * kFine);
+        Mask here(l.fine.width, l.fine.height); // the word so far where the letter goes
+        for (uint32_t fy = 0; fy < l.fine.height; ++fy) {
+            for (uint32_t fx = 0; fx < l.fine.width; ++fx) here(fx, fy) = word(ox + fx, oy + fy);
+        }
+        const std::vector<float> before = distance(here);
+        for (uint32_t fy = 0; fy < l.fine.height; ++fy) {
+            for (uint32_t fx = 0; fx < l.fine.width; ++fx) {
+                if (l.fine(fx, fy) && before[size_t{fy} * l.fine.width + fx] > kFine) word(ox + fx, oy + fy) = 1;
+            }
+        }
+    }
+    const Mask body = within(within(word, kWhiskers, true), kWhiskers, false);
+    const std::vector<float> from_body = distance(body), from_ink = distance(word);
+    Mask rim(word.width, word.height);
+    for (uint32_t fy = 0; fy < word.height; ++fy) {
+        for (uint32_t fx = 0; fx < word.width; ++fx) {
+            const size_t i = size_t{fy} * word.width + fx;
+            const float reach = kRim + 0.5f * kFine * noise(fx, fy, 3 * kFine, 1);
+            rim.bits[i] = from_body[i] <= reach || from_ink[i] <= kRimLeast;
+        }
+    }
+    fill_holes(rim);
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            int black = 0, covered = 0;
+            for (uint32_t fy = 0; fy < kFine; ++fy) {
+                for (uint32_t fx = 0; fx < kFine; ++fx) {
+                    const uint32_t wx = static_cast<uint32_t>((x - x0) * kFine) + fx, wy = static_cast<uint32_t>((y - y0) * kFine) + fy;
+                    black += word(wx, wy);
+                    covered += rim(wx, wy) || word(wx, wy);
+                }
+            }
+            if (covered == 0 || y < 0 || y >= static_cast<int>(kStillHeight)) continue;
+            over(x, static_cast<uint32_t>(y), covered / static_cast<float>(kFine * kFine),
+                 255.0f * (covered - black) / covered);
         }
     }
     return out;

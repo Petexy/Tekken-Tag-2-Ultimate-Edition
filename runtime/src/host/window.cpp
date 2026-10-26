@@ -230,7 +230,7 @@ bool open_window(const char* title) {
     const display::Loaded loaded = display::load(display::file_path());
     std::vector<std::string> log = loaded.log;
     display::set_active(display::resolve(loaded.settings, std::getenv("TTT2_FULLSCREEN"), std::getenv("TTT2_SCALE"),
-                                         std::getenv("TTT2_FPS"), log));
+                                         std::getenv("TTT2_FPS"), std::getenv("TTT2_INPUT_DELAY"), log));
     for (const std::string& line : log) std::fprintf(stderr, "ttt2: %s\n", line.c_str());
     const display::Active& active = display::active();
     // The window starts at the render size when that fits on the desktop

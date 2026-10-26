@@ -1,5 +1,5 @@
-// Practice: 3 and + pressed together put both fighters back where the stage
-// put them, as Tekken 8's position reset does.
+// Practice: 3 and - (Select) pressed together put both fighters back where
+// the stage put them, as Tekken 8's position reset does.
 //
 // The title starts a Practice round (mode kinds 4 and 5) with its situation
 // set-up sub_039C2DB0 for kind 15: its Practice positioner (sub_04F21428)
@@ -13,9 +13,10 @@
 // 3 is the title's own button, after the Controller Setup: the fighter's
 // buttons at +2032 (1 to 4 = 0x200 to 0x1000), read from the fighter the
 // GamePad drives (its raw buttons at +2052; the training dummy's stay 0).
-// The input layer holds + back a moment so that it can join 3
-// (cafe::os::arm_start_chord), armed only on the fighters' frames, which
-// stop while the pause menu is open; a + that is the chord's never opens it.
+// The input layer holds - back a moment so that it can join 3
+// (cafe::os::arm_select_chord), armed only on the fighters' frames, which
+// stop while the pause menu is open; a - that is the chord's never reaches
+// the game.
 
 #include "cafe/input.h"
 #include "cafe/ppc_ops.h"
@@ -92,13 +93,13 @@ PPC_FUNC(sub_05FBC0A4); // the camera (r3) of a side (r4 = 2: 2P; f1 = 1, r5 = 1
 // The fighters' frame (not while the pause menu is open): the chord can happen.
 PPC_FUNC(sub_03ADB118_orig);
 PPC_FUNC(sub_03ADB118) {
-    if (practice(base)) os::arm_start_chord(three_held(base));
+    if (practice(base)) os::arm_select_chord(three_held(base));
     sub_03ADB118_orig(ctx, base);
 }
 
 PPC_FUNC(sub_0726DF8C_orig);
 PPC_FUNC(sub_0726DF8C) {
-    if (os::take_start_chord() && practice(base)) {
+    if (os::take_select_chord() && practice(base)) {
         const bool reverse = load(base, kPracticeSettings + kReverse) == 1;
         if (std::getenv("TTT2_TRACE_PRACTICE")) {
             std::fprintf(stderr, "ttt2: practice: position reset%s\n", reverse ? " (reversed)" : "");

@@ -23,7 +23,7 @@ inline constexpr const char* kBuildRecord = ".ttt2-build";  // "kit <version>": 
 // The user's folders. Each follows the rule of the code that uses it: the
 // installer takes $XDG_CONFIG_HOME and $XDG_DATA_HOME only when absolute,
 // the shader cache and the character packs take any that is set, saves and
-// Tekken 7's saved data are always below the home folder.
+// what is saved from Tekken 7 and Tekken 8 are always below the home folder.
 struct Places {
     fs::path home;
     fs::path config;       // $XDG_CONFIG_HOME, else ~/.config
@@ -32,6 +32,7 @@ struct Places {
     fs::path saves;        // $TTT2_SAVE_DIR, else default_saves()
     fs::path packs;        // $TTT2_CHARACTERS, else $XDG_DATA_HOME/ttt2/characters, else ~/.local/share/...
     fs::path tekken7_data; // ~/.local/share/ttt2/tekken7: movesets and files saved from Tekken 7
+    fs::path tekken8_data; // ~/.local/share/ttt2/tekken8: movesets saved from Tekken 8
 
     fs::path record() const { return config / "ttt2" / "installed"; }
     // The launcher's own record of an install it started that has not

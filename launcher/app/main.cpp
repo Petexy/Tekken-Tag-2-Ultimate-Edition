@@ -37,7 +37,7 @@ void open(GtkApplication* app, GFile** files, int count, const char*, gpointer d
 void usage() {
     std::printf("usage: ttt2-launcher [GAME.wua] [--screenshot FILE] | --version\n"
                 "  Installs Tekken Tag Tournament 2 from your own .wua (the game program is built on this PC),\n"
-                "  starts it, and adds Tekken 7's characters from your own Tekken 7.\n"
+                "  starts it, and adds Tekken 7's and Tekken 8's characters from your own copies of them.\n"
                 "  --screenshot FILE  saves the window as a PNG once it has loaded, then quits (for tests)\n"
                 "  --version          prints its version (\"ttt2-launcher " TTT2_LAUNCHER_VERSION "\")\n");
 }

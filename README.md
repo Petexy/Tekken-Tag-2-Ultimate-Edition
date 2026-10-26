@@ -48,8 +48,13 @@ and shaders are translated to Vulkan as it runs.
   title screen's logo says "Ultimate Edition" where it said "Wii U
   Edition", in the same brush lettering. All of it is made by the port
   from the Wii U game's own files.
-- **Position reset in Practice**, as in Tekken 8: 3 and + (Start) pressed
+- **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
   together put both fighters back where the stage put them.
+- **No forced input delay**: the Wii U game waits two frames (33 ms) after
+  reading a button before acting on it, in every mode (Cemu's "Reduce input
+  lag" graphic pack removes it too). The port leaves that wait out; the
+  launcher's Settings can put it back. Practice's own Input Delay setting
+  works either way.
 - **Installs like any other program**: `ttt2 --install` copies the game into
   a folder you choose and adds it to the application menu.
 - **Made to be modified**: every function of the game is a C++ function that
@@ -94,7 +99,7 @@ refuse a game whose executable is not the one they were built from.
   headers recent enough to define `VK_KHR_present_wait2` (mid-2025 or
   newer), OpenSSL 3, zstd and zlib; for the launcher also GTK 4.10 or newer
   (without it the launcher is left out) and MinGW (optional: the Tekken 7
-  helper is then built in).
+  and Tekken 8 helpers are then built in).
 
 On Arch Linux:
 
@@ -265,10 +270,17 @@ tick them; of a save folder you chose with `TTT2_SAVE_DIR`, only the game's
 own saves go). While the game runs, however it was started, Play, Update and
 Uninstall wait for it to end. The gear next to Play opens its **Settings**:
 whether the game starts fullscreen, the resolution it draws at, its 120
-frames per second, and its keyboard keys ([Playing](#playing)). Its
-Characters section shows where Steam has Tekken 7, or why it cannot be used, with **Add** per fighter and **Add All**, and Tekken 7's DLC
+frames per second, whether fighters wait the Wii U version's two frames
+before acting on a button, and its keyboard keys ([Playing](#playing)). Its
+Characters section shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a part for each game's
+fighters (the installed game's first), with **Add** per fighter: Tekken 7's with **Add All** and its DLC
 fighters in a list that opens, with those your Steam account owns and **Add
-All Owned**; **Remove** takes one out again.
+All Owned**; Tekken 8's (Reina) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
+Tekken 8 fighter whose moves could not be saved from Tekken 8 (a game update its helper does not know yet, or
+nothing to run it hidden) is added with Heihachi's moves, says so and why, and is offered as an update once
+their own can be saved. What all added fighters share is made from each one's own game, so while one game is
+uninstalled its fighters stay in the game but no other can be added: the launcher says so, and offers to
+remove that game's fighters all at once.
 
 ```bash
 cmake --build build --target ttt2-launcher ttt2_kit
@@ -384,15 +396,17 @@ still opens the pause menu, a few frames later than before.
 
 The launcher's **Settings** also choose how the game starts: fullscreen or
 in a window, the resolution it draws at (Automatic, the default, is enough
-to cover your main display) and whether it shows 120 frames per second on
-displays of 100 Hz and more (on by default). They are kept in
-`~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which can be
-edited by hand too:
+to cover your main display), whether it shows 120 frames per second on
+displays of 100 Hz and more (on by default) and whether fighters wait the
+Wii U game's two frames before acting on a button (off by default). They
+are kept in `~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which
+can be edited by hand too:
 
 ```ini
 fullscreen = no             # yes or no
 resolution = auto           # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or 5120x2880
 interpolation = yes         # yes or no (no: 60 frames per second)
+input_delay = no            # yes: two frames between a button press and the game acting on it, as on the Wii U
 ```
 
 The game reads it when it starts, so a change applies the next time. The
@@ -406,6 +420,7 @@ variables below win over it.
 | `TTT2_SCALE=1/1.5/2/3/4` | render scale: 1280x720 times this (default from `display.ini`, else from the display) |
 | `TTT2_FPS=60/120/180/240` | frames shown per second (default 120 on displays of 100 Hz and more, unless `display.ini` turns it off) |
 | `TTT2_FULLSCREEN=1` | start fullscreen (another value: in a window) |
+| `TTT2_INPUT_DELAY=0..15` | frames between a button press and the game acting on it (the Wii U game's own: 2; default from `display.ini`: 0) |
 | `TTT2_AUDIO=0` | no sound |
 | `TTT2_AUDIO_VOLUME=0..100` | volume in percent (default 100) |
 | `TTT2_SAVE_DIR=<folder>` | where saves go |
@@ -647,3 +662,8 @@ built into the `ttt2` program). The port also links SDL3 (zlib), shaderc
   [UE Viewer](https://github.com/gildor2/UEViewer) and
   [CUE4Parse](https://github.com/FabianFG/CUE4Parse), for Tekken 7's Unreal
   Engine 4.14 packages. The importer's code is its own.
+- [Excentrian](https://github.com/Excentrian), who designed the title
+  screen's "ULTIMATE EDITION" subtitle
+  ([#9](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/9)):
+  the port letters it after that design, its M and A from Excentrian's
+  outlines.

@@ -11,6 +11,8 @@ and which TTT2 bone each Tekken 7 bone's skin weights go to.
   into the face).
 * Scale = the Tekken 7 BASE joint's height / 1150 (TTT2 puts HARA_ROT1 at 1150 x scale); body bone scales follow it,
   hand and face scales stay the donor's.
+* Since build keeps the donor's rest rotations, the model must be bound in the donor's pose (TTT2 skeletons and
+  Tekken 7 meshes: a T-pose). A model bound otherwise (Tekken 8's A-pose) is turned into it first: repose().
 TTT2 units are millimetres, Y up, the fighter facing +Z with its left at +X.
 """
 import numpy as np
@@ -199,4 +201,176 @@ def build(t7bones, donor):
     s[body] = s[body] * (scale / donor['scale'])
     out['s'] = s
     out['names_raw'] = None
+    return out
+
+
+# ------------------------------------------------------------------------------------------------ re-pose
+# Limb segments (Tekken 7 joint -> its child) that turn to point the way the donor's (the TTT2 bones ANCHOR puts
+# there) do, from the body out: a turned upper arm carries the forearm, hand and fingers along before they turn.
+# The hand turns as a whole: towards the middle finger's base and with its knuckle line (index -> little finger
+# base) as the donor's. The last finger joints keep their turn to the one before (no tips to aim with).
+REPOSE = [('Spine1', 'Spine2'), ('Spine2', 'Neck'), ('Neck', 'Head')]
+for s in 'RL':
+    REPOSE += [('%s_Shoulder' % s, '%s_Arm' % s), ('%s_Arm' % s, '%s_ForeArm' % s), ('%s_ForeArm' % s, '%s_Hand' % s),
+               ('%s_Hand' % s, '%s_Middle1' % s, '%s_Index1' % s, '%s_Pinky1' % s),
+               ('%s_UpLeg' % s, '%s_Leg' % s), ('%s_Leg' % s, '%s_Foot' % s)]
+    for f in ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky'):
+        REPOSE += [('%s_%s1' % (s, f), '%s_%s2' % (s, f)), ('%s_%s2' % (s, f), '%s_%s3' % (s, f))]
+# joints that keep their world orientation whatever their parents did: the feet (soles flat on the floor, as the
+# donor's: aimed at the toes they would tilt by the difference of the two feet's arches) and the head (looking ahead)
+LEVEL = ('Head', 'L_Foot', 'R_Foot')
+TTT2_OF = {}                                      # Tekken 7 joint -> the TTT2 bone at it (ANCHOR, first one)
+for _b, _t in ANCHOR.items():
+    TTT2_OF.setdefault(_t, _b)
+
+
+def _turn(a, b):
+    """The smallest rotation (3x3) turning direction a to direction b."""
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    v, c = np.cross(a, b), float(a @ b)
+    s = float(np.linalg.norm(v))
+    if s < 1e-12:
+        if c > 0:
+            return np.eye(3)
+        axis = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
+        return _rotation(axis / np.linalg.norm(axis), np.pi)
+    return _rotation(v / s, np.arctan2(s, c))
+
+
+def _frame_turn(a1, a2, b1, b2):
+    """The rotation turning a1 to b1 and the plane of (a1, a2) to that of (b1, b2)."""
+    def frame(x, y):
+        x = x / np.linalg.norm(x)
+        y = y - x * (x @ y)
+        y = y / np.linalg.norm(y)
+        return np.stack([x, y, np.cross(x, y)], 1)
+    return frame(b1, b2) @ frame(a1, a2).T
+
+
+def _rotation(axis, angle):
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    return np.eye(3) + np.sin(angle) * k + (1 - np.cos(angle)) * (k @ k)
+
+
+def _share(r, f):
+    """Rotation r turned by the share f of its angle (same axis)."""
+    angle = np.arccos(np.clip((np.trace(r) - 1) / 2, -1, 1))
+    if angle < 1e-9:
+        return np.eye(3)
+    axis = np.array([r[2, 1] - r[1, 2], r[0, 2] - r[2, 0], r[1, 0] - r[0, 1]])
+    n = np.linalg.norm(axis)
+    if n < 1e-9:                                  # 180 degrees: the axis from the symmetric part
+        w, v = np.linalg.eigh((r + np.eye(3)) / 2)
+        axis = v[:, np.argmax(w)]
+    else:
+        axis = axis / n
+    return _rotation(axis, f * angle)
+
+
+def _about(r, pivot):
+    m = np.eye(4)
+    m[:3, :3] = r
+    m[:3, 3] = pivot - r @ pivot
+    return m
+
+
+def repose(model, donor, log=print):
+    """model: model.load_tekken7_model's dict (bind pose and all), bound in another pose than the donor's (Tekken
+    8's A-pose); donor: bone.read() of the donor's skeleton. -> the model turned into the donor's bind pose: each
+    REPOSE segment points the way the donor's does (LEVEL joints keep their orientation), the vertices follow their
+    joints as skinning moves them (each joint carried by its parent, or by model['bones']['follow'][i] = (joint,
+    share): it turns with that joint, by that share of its turn), normals and tangents turned with them, bind
+    matrices too. Joints the model lacks are left as they are; a model without any is returned unchanged."""
+    bones = model['bones']
+    nm, parents = bones['names'], bones['parents']
+    W = np.asarray(bones['world'], np.float64)
+    P = W[:, :3, 3]
+    n = len(nm)
+    idx = {x: i for i, x in enumerate(nm)}
+    dnames = [_strip(x) for x in donor['names']]
+    didx = {x: i for i, x in enumerate(dnames)}
+    DP = bone.world_matrices(donor)[:, :3, 3]
+    specs = {}
+    for seg in REPOSE:
+        bones_here = [seg[0], seg[1]] + list(seg[2:])
+        if all(b in idx and TTT2_OF.get(b) in didx for b in bones_here):
+            specs[idx[seg[0]]] = [(idx[b], didx[TTT2_OF[b]]) for b in bones_here]
+    for j in LEVEL:
+        if j in idx:
+            specs[idx[j]] = 'level'
+    if not any(v != 'level' for v in specs.values()):
+        return model
+    follow = bones.get('follow') or [None] * n
+    # each joint's change D (world, 4x4): first the REPOSE / LEVEL joints from the body out, each carried by its
+    # parent, then the joints that follow another
+    D = np.zeros((n, 4, 4))
+    own = {}                                      # joint -> (its own turn, its pivot)
+    turned = {}
+    for i in range(n):
+        p = parents[i]
+        dp = D[p] if p >= 0 else np.eye(4)
+        spec = specs.get(i)
+        if spec is None:
+            D[i] = dp
+            continue
+        pivot = dp[:3, :3] @ P[i] + dp[:3, 3]
+        if spec == 'level':
+            r = dp[:3, :3].T
+        else:
+            (a, da), (b, db) = spec[0], spec[1]
+            cur, goal = dp[:3, :3] @ (P[b] - P[a]), DP[db] - DP[da]
+            if len(spec) > 2:
+                (c, dc), (e, de) = spec[2], spec[3]
+                r = _frame_turn(cur, dp[:3, :3] @ (P[e] - P[c]), goal, DP[de] - DP[dc])
+            else:
+                r = _turn(cur, goal)
+            turned[nm[i]] = np.degrees(np.arccos(np.clip((np.trace(r) - 1) / 2, -1, 1)))
+        own[i] = (r, pivot)
+        D[i] = _about(r, pivot) @ dp
+    # (a joint carrying REPOSE joints keeps the change it got from its parent: they were turned from it)
+    carries = np.zeros(n, bool)
+    for i in specs:
+        j = parents[i]
+        while j >= 0 and not carries[j]:
+            carries[j] = True
+            j = parents[j]
+    for i in range(n):
+        f = follow[i] if i < len(follow) else None
+        if i in specs or carries[i]:
+            continue
+        if f is not None:
+            j, share = f
+            pj = parents[j]
+            dpj = D[pj] if pj >= 0 else np.eye(4)
+            r, pivot = own.get(j, (np.eye(3), dpj[:3, :3] @ P[j] + dpj[:3, 3]))
+            D[i] = _about(_share(r, share), pivot) @ dpj
+        elif parents[i] >= 0:
+            D[i] = D[parents[i]]
+    # skinning: each vertex by its joints' changes, blended by its weights (as the game skins it)
+    out = dict(model)
+    out['bones'] = dict(bones, world=D @ W)
+    prims = []
+    done = {}
+    for prim in model['prims']:
+        key = id(prim['pos'])
+        if key not in done:
+            w = prim['weights'] / np.maximum(prim['weights'].sum(1, keepdims=True), 1e-12)
+            M = np.einsum('vk,vkij->vij', w, D[prim['joints']])
+            pos = np.einsum('vij,vj->vi', M[:, :3, :3], prim['pos']) + M[:, :3, 3]
+            nrm = np.einsum('vij,vj->vi', M[:, :3, :3], prim['nrm'])
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            tan = prim['tan'].copy()
+            tan[:, :3] = np.einsum('vij,vj->vi', M[:, :3, :3], prim['tan'][:, :3])
+            tan[:, :3] /= np.maximum(np.linalg.norm(tan[:, :3], axis=1, keepdims=True), 1e-12)
+            done[key] = dict(pos=pos, nrm=nrm, tan=tan)
+        prims.append(dict(prim, **done[key]))
+    out['prims'] = prims
+    groups = {}
+    for name, angle in turned.items():
+        g = name[2:] if name[1] == '_' else name
+        g = g.rstrip('123') if any(g.startswith(f) for f in ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky')) else g
+        groups[g] = max(groups.get(g, 0.0), angle)
+    log('  re-posed to the donor\'s bind pose (largest turn, degrees): %s' % ', '.join(
+        '%s %.0f' % (g, a) for g, a in groups.items()))
     return out

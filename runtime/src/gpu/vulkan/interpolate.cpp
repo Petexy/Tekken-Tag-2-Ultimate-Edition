@@ -552,19 +552,46 @@ void Renderer::begin_replay(uint32_t n) {
 // With the GPU still on the previous frame (other programs share it, or the
 // frames cost more than a frame's time), the frame goes out without extra
 // frames, the previous image staying up through their part of its slot.
+// So it does when the command processor has no time for them: it renders
+// them too, on one CPU thread, and the title waits for its frames, which
+// end after their replays (a slow CPU would slow the game down).
 bool Renderer::want_replays() {
+    // Its time to spare per frame without the last frame's replays, the
+    // frame's own work, and what replays cost for it, averaged over some
+    // frames (a shader compiled now and then is no reason to stop).
+    constexpr double kWeight = 1.0 / 16;
+    const double work = std::max(0.0, frame_seconds_ - frame_idle_seconds_ - frame_replay_seconds_);
+    spare_seconds_ += (frame_idle_seconds_ + frame_replay_seconds_ - spare_seconds_) * kWeight;
+    work_seconds_ += (work - work_seconds_) * kWeight;
+    if (frame_replay_seconds_ > 0 && work > 0.0005) {
+        replay_ratio_ += (frame_replay_seconds_ / work - replay_ratio_) * kWeight;
+    }
+    frame_replay_seconds_ = 0;
+    // What would be left with them: a millisecond at least to keep them,
+    // three to take them up again.
+    const double left = spare_seconds_ - replay_ratio_ * work_seconds_;
+    busy_skipping_ = left < (busy_skipping_ ? 0.003 : 0.001);
+
     uint64_t done = 0;
     VK_CHECK(vkGetSemaphoreCounterValue(ctx_.device, timeline_, &done));
-    if (done >= previous_frame_ready_) return true;
-    ++skipped_replays_;
-    return false;
+    if (done < previous_frame_ready_) {
+        ++skipped_replays_;
+        return false;
+    }
+    if (busy_skipping_) {
+        ++busy_skipped_replays_;
+        return false;
+    }
+    return true;
 }
 
 void Renderer::end_replay() {
     end_rendering();
     replaying_ = false;
     show_extra_frame();
-    replay_seconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - replay_started_).count();
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - replay_started_).count();
+    replay_seconds_ += seconds;
+    frame_replay_seconds_ += seconds;
 }
 
 void Renderer::frame_shown() {

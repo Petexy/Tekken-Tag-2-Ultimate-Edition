@@ -25,6 +25,7 @@ sys.path.insert(0, HERE)
 import launcher                                       # noqa: E402
 from ttt2char import importer, pack, shared, signals, ttt2   # noqa: E402
 from ttt2char.tekken7 import autodump                 # noqa: E402
+from ttt2char.tekken8 import autodump as dump8        # noqa: E402
 
 spec = importlib.util.spec_from_file_location('import_character', os.path.join(HERE, 'import_character.py'))
 import_character = importlib.util.module_from_spec(spec)
@@ -99,18 +100,22 @@ class Status(unittest.TestCase):
             write(os.path.join(library, 'steamapps', 'appmanifest_389730.acf'), '"installdir"  "TEKKEN 7"\n')
             game = os.path.join(library, 'steamapps', 'common', 'TEKKEN 7')
             t7 = launcher.tekken7()                         # (listed by Steam, its folder gone)
-            self.assertEqual((t7['found'], t7['path']), (False, game))
+            self.assertEqual((t7['found'], t7['path'], t7['readable']), (False, game, False))
             self.assertIn('it is not there', t7['error'])
+            os.makedirs(game)
+            t7 = launcher.tekken7()                         # (its files gone)
+            self.assertEqual((t7['found'], t7['readable']), (True, False))
             write(os.path.join(game, 'TekkenGame', 'Content', 'Paks', 'a.pak'))
             t7 = launcher.tekken7()
             self.assertEqual((t7['found'], t7['path']), (True, game))
             self.assertIn('has not run with Proton yet', t7['error'])
+            self.assertTrue(t7['readable'])                 # (what the packs share needs its files only)
             prefix = os.path.join(library, 'steamapps', 'compatdata', '389730')
             proton = os.path.join(home, 'proton')
             write(os.path.join(proton, 'proton'))
             write(os.path.join(prefix, 'config_info'), '9.0\n%s/files/share/fonts/\n' % proton)
             os.makedirs(os.path.join(prefix, 'pfx'))
-            self.assertEqual(launcher.tekken7(), {'found': True, 'path': game, 'error': None})
+            self.assertEqual(launcher.tekken7(), {'found': True, 'path': game, 'error': None, 'readable': True})
 
     def test_packs_and_movesets(self):
         with tempfile.TemporaryDirectory() as d, \
@@ -160,6 +165,22 @@ class Helper(unittest.TestCase):
                 with self.assertRaisesRegex(autodump.DumpError, 'MinGW'):
                     autodump.build_helper(os.path.join(d, 'cache'))
 
+    def test_each_games_helper_in_the_status(self):
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, HOME=d, TTT2_CHARACTERS=os.path.join(d, 'packs')), \
+                mock.patch.object(autodump, 'CACHE', os.path.join(d, 'cache7')), \
+                mock.patch.object(dump8, 'CACHE', os.path.join(d, 'cache8')):
+            exe = os.path.join(d, 't8helper.exe')
+            write(exe)
+            with mock.patch.dict(os.environ, TTT2_T8HELPER=exe), \
+                    mock.patch.object(launcher.shutil, 'which', return_value=None):
+                tools = launcher.status(None, os.path.join(d, 'm7'), os.path.join(d, 'm8'))['tools']
+            self.assertEqual((tools['helper'], tools['tekken8_helper'], tools['cc']), (None, 'prebuilt', None))
+            with mock.patch.object(launcher.shutil, 'which', side_effect=lambda name: '/usr/bin/' + name):
+                tools = launcher.status(None, os.path.join(d, 'm7'), os.path.join(d, 'm8'))['tools']
+            self.assertEqual((tools['helper'], tools['tekken8_helper']), ('mingw', 'mingw'))
+            self.assertEqual(tools['cc'], '/usr/bin/gcc')
+
     def test_one_session_at_a_time(self):
         with tempfile.TemporaryDirectory() as d:
             first = autodump._lock(os.path.join(d, 'session.lock'))
@@ -186,7 +207,7 @@ class Owned(unittest.TestCase):
         self.assertFalse(owned['eliza'])
         self.assertNotIn('kazumi', owned)
         self.assertEqual(len(owned), sum(1 for n in importer.CHARACTERS
-                                         if importer.definition(n).TEKKEN7_ID in autodump.DLC))
+                                         if getattr(importer.definition(n), 'TEKKEN7_ID', None) in autodump.DLC))
 
 
 class Progress(unittest.TestCase):
@@ -220,6 +241,23 @@ class Progress(unittest.TestCase):
         self.assertEqual(lines, ['@step fighter kazumi 1 2', '@added kazumi', '@step fighter chloe 2 2', '@added chloe',
                                  '@step shared', '@done'])
         shared.assert_called_once()
+
+    def test_a_stand_in_says_why(self):
+        def imported(name, tekken7, movesets, game, out, make_shared=True, tekken8=None, **kw):
+            return pack.write(out, importer.with_stand_in(importer.definition(name)), {'.nud': b'nud'}, 0)
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(importer, 'tekken8_folder', return_value='/games/TEKKEN 8'), \
+                mock.patch.object(import_character, 'tekken8_ready',
+                                  return_value={'reina': 'Steam is not running: start it, then try again'}), \
+                mock.patch.object(importer, 'run', side_effect=imported), \
+                mock.patch.object(importer, 'make_shared') as shared:
+            code, lines = self.main(['reina', '--game', 'g', '--out', d, '--progress'])
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ['@step fighter reina 1 1', '@added reina',
+                                 '@stand-in reina Steam is not running: start it, then try again', '@step shared',
+                                 '@done'])
+        self.assertEqual(shared.call_args[0][0], None)              # (no Tekken 7 needed)
 
     def test_unowned_dlc_skipped(self):
         with tempfile.TemporaryDirectory() as d, \
@@ -651,7 +689,7 @@ class Places(unittest.TestCase):
             write(os.path.join(library, 'steamapps', 'compatdata', '389730', 'config_info'),
                   '9.0\n%s/files/share/fonts/\n' % proton)
             os.makedirs(os.path.join(library, 'steamapps', 'compatdata', '389730', 'pfx'))
-            self.assertEqual(launcher.tekken7(), {'found': True, 'path': game, 'error': None})
+            self.assertEqual(launcher.tekken7(), {'found': True, 'path': game, 'error': None, 'readable': True})
             self.assertEqual(importer.tekken7_paks(game), os.path.join(game, 'TekkenGame', 'Content', 'Paks'))
             made_moveset(os.path.join(home, 'movesets [1]'), 26)
             self.assertEqual(list(importer.saved_movesets(os.path.join(home, 'movesets [1]'))), [26])
@@ -685,6 +723,24 @@ class Remove(unittest.TestCase):
             self.assertEqual((code, lines), (0, ['@removed chloe', '@step shared', '@done']))
             self.assertEqual(shared.call_args[0][0], game)
             self.assertEqual(os.listdir(packs), ['kzm'])
+
+    def test_every_tekken7_fighter_at_once_needs_no_tekken7(self):
+        with tempfile.TemporaryDirectory() as d:
+            for code, slot in (('kzm', 0), ('dnc', 1), ('rei', 2)):
+                made_pack(d, code, slot)
+            with mock.patch.object(autodump, 'tekken7_library',
+                                   side_effect=autodump.DumpError('Tekken 7 is not installed in any Steam library')), \
+                    mock.patch.object(importer, 'tekken8_folder', return_value='/games/TEKKEN 8'), \
+                    mock.patch.object(importer, 'ttt2_folder'), mock.patch.object(importer, 'make_shared') as shared:
+                code, lines = Progress.main(self, ['--remove', 'chloe', '--game', 'g', '--out', d, '--progress'])
+                self.assertEqual(code, 1)                               # (Kazumi stays: she needs Tekken 7)
+                self.assertIn('nothing was removed', lines[-1])
+                code, lines = Progress.main(self, ['--remove', 'kazumi', 'chloe', '--game', 'g', '--out', d,
+                                                   '--progress'])
+            self.assertEqual((code, lines), (0, ['@removed kazumi', '@removed chloe', '@step shared', '@done']))
+            self.assertEqual(shared.call_args[0][0], None)              # (Reina's shared/ needs Tekken 8 alone)
+            self.assertEqual(shared.call_args[1]['tekken8'], '/games/TEKKEN 8')
+            self.assertEqual(os.listdir(d), ['rei'])
 
     def test_stopped_before_what_they_share_is_made_again(self):
         with tempfile.TemporaryDirectory() as d:
