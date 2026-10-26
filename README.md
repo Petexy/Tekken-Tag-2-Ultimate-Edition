@@ -424,7 +424,10 @@ when starting the game. Only processes created for the import are closed afterwa
 Proton, gamescope and pactl are not needed on Windows.
 Use `-Fighters reina` to import Reina from Tekken 8. Its native helper,
 decompressor and format conversion are covered by synthetic tests on both
-platforms; an end-to-end Tekken 8 import on Windows still needs player verification.
+platforms. An import from the player's Steam installation has also been
+verified on Windows: Reina uses her own converted Tekken 8 moveset, and the
+native runtime loads her pack alongside the existing Tekken 7 fighters.
+Visuals and gameplay still need manual verification.
 
 The fighters of Tekken 7 that Tekken Tag Tournament 2 does not have can join
 the roster beside its own (no fighter is replaced): Kazumi Mishima, Lucky
