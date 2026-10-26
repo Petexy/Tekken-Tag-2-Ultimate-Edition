@@ -2,10 +2,10 @@
 
     python3 -m unittest discover tools/characters/tests
 """
-import ctypes
 import os
 import shutil
 import sys
+import subprocess
 import tempfile
 import time
 import unittest
@@ -34,8 +34,10 @@ class Native(unittest.TestCase):
         if native.compiler() is None:
             self.skipTest('no C compiler')
         out = native.build('answer', self.src, cache=self.cache)
-        self.assertEqual(out, os.path.join(self.cache, 'answer.so'))
-        self.assertEqual(ctypes.CDLL(out).answer(), 42)
+        self.assertEqual(out, native.output_path('answer', cache=self.cache))
+        # Windows keeps a loaded DLL locked until the loading process exits.
+        subprocess.run([sys.executable, '-c', 'import ctypes, sys; assert ctypes.CDLL(sys.argv[1]).answer() == 42',
+                        out], check=True)
         stamp = os.path.getmtime(out)
         self.assertEqual(native.build('answer', self.src, cache=self.cache), out)
         self.assertEqual(os.path.getmtime(out), stamp)          # up to date: not rebuilt
@@ -58,6 +60,22 @@ class Native(unittest.TestCase):
         with mock.patch.dict(os.environ, {'TTT2_NATIVE_ANSWER': fake + '.missing'}):
             with self.assertRaises(InputError):
                 native.build('answer', self.src, cache=self.cache)
+
+    def test_header_change_rebuilds(self):
+        if native.compiler() is None:
+            self.skipTest('no C compiler')
+        header = os.path.join(self.dir, 'answer.h')
+        with open(header, 'w') as f:
+            f.write('#define ANSWER 42\n')
+        with open(self.src, 'w') as f:
+            f.write('#include "answer.h"\nint answer(void) { return ANSWER; }\n')
+        out = native.build('answer', self.src, cache=self.cache, dependencies=(header,))
+        with open(header, 'w') as f:
+            f.write('#define ANSWER 7\n')
+        os.utime(header, (os.path.getmtime(out) + 10,) * 2)
+        native.build('answer', self.src, cache=self.cache, dependencies=(header,))
+        subprocess.run([sys.executable, '-c', 'import ctypes, sys; assert ctypes.CDLL(sys.argv[1]).answer() == 7',
+                        out], check=True)
 
     def test_no_compiler(self):
         env = dict(os.environ)

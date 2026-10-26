@@ -137,7 +137,18 @@ def build_helper(cache):
 
 
 class Session:
+    @property
+    def common(self):
+        return common
+
+    def game_running(self, game):
+        return tekken7_running(game)
+
+    game_exe = 'TekkenGame/Binaries/Win64/TekkenGame-Win64-Shipping.exe'
+    mutex_prefix = 'Local\\TTT2Tekken7-'
+
     def __init__(self, t7, helper_exe, run, with_game):
+        common = self.common
         self.t7, self.run, self.closed = t7, run, False
         self.helper = self.mutex = self.job = self.desktop = None
         self.locked = False
@@ -146,11 +157,11 @@ class Session:
         try:
             os.makedirs(run, exist_ok=True)
             name = hashlib.sha256(os.path.normcase(os.path.realpath(t7.game)).encode()).hexdigest()[:24]
-            self.mutex = checked(create_mutex(None, False, 'Local\\TTT2Tekken7-' + name), 'cannot create importer mutex')
+            self.mutex = checked(create_mutex(None, False, self.mutex_prefix + name), 'cannot create importer mutex')
             if wait(self.mutex, 300000) not in (0, 0x80):
                 raise common.DumpError(common.BUSY)
             self.locked = True
-            if tekken7_running(t7):
+            if self.game_running(t7):
                 raise common.DumpError(common.RUNNING)
             self.job = checked(create_job(None, None), 'cannot create import process job')
             limits = ExtendedLimits()
@@ -160,7 +171,7 @@ class Session:
             if with_game:
                 self.desktop_name = 'TTT2Import-' + secrets.token_hex(10)
                 self.desktop = checked(create_desktop(self.desktop_name, None, None, 0, 0x1ff, None), 'cannot create hidden desktop')
-                binary = os.path.join(t7.game, 'TekkenGame', 'Binaries', 'Win64', 'TekkenGame-Win64-Shipping.exe')
+                binary = os.path.join(t7.game, self.game_exe)
                 self.game = self._spawn([binary, '-windowed', '-ResX=1280', '-ResY=720', '-nosound', '-NoSplash'],
                                         'game.log', self.desktop_name)
             self.port, self.secret = common._free_port(), secrets.token_hex(16)
@@ -170,6 +181,7 @@ class Session:
             raise
 
     def _spawn(self, command, log_name, desktop):
+        common = self.common
         env = dict(os.environ, SteamAppId=str(common.APP_ID), SteamGameId=str(common.APP_ID))
         environment = C.create_unicode_buffer('\0'.join('%s=%s' % item for item in sorted(env.items())) + '\0\0')
         line = C.create_unicode_buffer(subprocess.list2cmdline(command))
@@ -197,15 +209,17 @@ class Session:
     def wait_game(self, timeout=240):
         if self.game and wait(self.game.process, 500) == 0x102:
             return self.game.pid
-        raise common.DumpError('Tekken 7 stopped while starting; see ' + os.path.join(self.run, 'game.log'))
+        raise common.DumpError('The game stopped while starting; see ' + os.path.join(self.run, 'game.log'))
 
     def connect(self):
+        common = self.common
         self.helper = common.Helper(self.port, self.secret)
         if self.game:
             self.helper.target_pid = self.game.pid
         return self.helper
 
     def close(self):
+        common = self.common
         if self.closed:
             return
         self.closed = True

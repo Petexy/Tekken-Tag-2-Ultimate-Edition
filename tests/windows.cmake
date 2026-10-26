@@ -32,7 +32,10 @@ if(Python3_Interpreter_FOUND)
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy, PIL"
         RESULT_VARIABLE character_modules OUTPUT_QUIET ERROR_QUIET)
     if(character_modules EQUAL 0)
-        foreach(pattern "test_autodump*.py" "test_memdump.py" "test_formats.py" "test_import_slots.py")
+        foreach(pattern "test_autodump*.py" "test_memdump.py" "test_formats.py" "test_import_slots.py"
+                        "test_tekken8*.py" "test_native.py" "test_decimate.py" "test_face.py"
+                        "test_bounds.py" "test_source.py" "test_tagcombo.py" "test_retarget.py"
+                        "test_art_sources.py" "test_animation_encode.py")
             string(REPLACE ".py" "" name "${pattern}")
             string(REPLACE "*" "" name "${name}")
             add_test(NAME character_${name}

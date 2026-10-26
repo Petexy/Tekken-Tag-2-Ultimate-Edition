@@ -2,7 +2,8 @@
 
 Some steps call code that has to run natively (Tekken 8's own Oodle decompressor, tekken8/oodle.c) or would be too
 slow in Python (the mesh decimator, convert/decimate.c). They are shipped as C source and built with the system's C
-compiler (gcc, else cc, else clang, else $CC) into the cache: $XDG_CACHE_HOME/ttt2/native/<name>.so (~/.cache when
+compiler (Clang first on Windows; gcc, cc, clang on Linux, then $CC) into the cache:
+$XDG_CACHE_HOME/ttt2/native/<name>.so (.dll on Windows; ~/.cache when
 XDG_CACHE_HOME is not set). A build is redone when it is missing, older than its source or was made with other
 compiler options (its .cmd file records them); it is written under a temporary name and renamed into place, so two
 importers starting at once do not see half a file.
@@ -20,10 +21,10 @@ from . import InputError
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))       # ttt2char/: sources are below it
 CACHE = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'ttt2', 'native')
-COMPILERS = ('gcc', 'cc', 'clang')          # tried in this order, then $CC (Clang alone builds the game too)
+COMPILERS = ('clang', 'gcc', 'cc') if os.name == 'nt' else ('gcc', 'cc', 'clang')
 FLAGS = ('-O2', '-std=gnu11', '-Wall')      # every build; a kind's and the caller's flags follow
-KINDS = {'shared': ('.so', ('-shared', '-fPIC')),
-         'executable': ('', ())}
+KINDS = {'shared': ('.dll', ('-shared',)) if os.name == 'nt' else ('.so', ('-shared', '-fPIC')),
+         'executable': ('.exe' if os.name == 'nt' else '', ())}
 OUTPUT_TAIL = 2000                          # characters of the compiler's output an error message quotes
 
 
@@ -57,11 +58,12 @@ def _stamp(cmd, out):
     return ' '.join(c for c in cmd[1:] if c != out)
 
 
-def build(name, source, kind='shared', flags=(), libs=(), cache=None):
+def build(name, source, kind='shared', flags=(), libs=(), cache=None, dependencies=()):
     """The path of a built `source` (a C file; relative paths are below ttt2char/), building it when needed.
 
     kind: 'shared' (a library for ctypes) or 'executable'; flags: extra compiler options (e.g. '-O3'); libs: linker
-    arguments after the source (e.g. '-lm'). $TTT2_NATIVE_<NAME> names a prebuilt file to use instead."""
+    arguments after the source (e.g. '-lm'); dependencies: additional source headers to check for changes.
+    $TTT2_NATIVE_<NAME> names a prebuilt file to use instead."""
     if kind not in KINDS:
         raise ValueError('unknown native build kind %r' % kind)
     prebuilt = os.environ.get('TTT2_NATIVE_' + name.upper())
@@ -77,7 +79,8 @@ def build(name, source, kind='shared', flags=(), libs=(), cache=None):
     stamp_file = out + '.cmd'
     cc = compiler()
     wanted = _stamp(_command(cc or 'cc', src, out, kind, flags, libs), out)
-    if os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src):
+    newest = max(os.path.getmtime(p) for p in [src] + [_source_path(p) for p in dependencies])
+    if os.path.isfile(out) and os.path.getmtime(out) >= newest:
         try:
             with open(stamp_file) as f:
                 if f.read() == wanted:
@@ -90,7 +93,7 @@ def build(name, source, kind='shared', flags=(), libs=(), cache=None):
                          'again' % name)
     folder = os.path.dirname(out)
     os.makedirs(folder, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix='.%s.' % name, dir=folder)
+    fd, tmp = tempfile.mkstemp(prefix='.%s.' % name, suffix=KINDS[kind][0], dir=folder)
     os.close(fd)
     try:
         cmd = _command(cc, src, tmp, kind, flags, libs)

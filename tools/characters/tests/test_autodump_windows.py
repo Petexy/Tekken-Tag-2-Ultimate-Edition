@@ -13,10 +13,46 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 if os.name == 'nt':
     from ttt2char.tekken7 import autodump, autodump_windows as windows
+    from ttt2char.tekken8 import autodump as dump8, autodump_windows as windows8
 
 
 @unittest.skipUnless(os.name == 'nt', 'native Windows host')
 class WindowsHost(unittest.TestCase):
+    def test_both_helpers_build_and_refuse_an_unrelated_process(self):
+        # Compile the actual helper sources and exercise their wire protocol,
+        # without Steam or either game. A Python process is never a game image.
+        with tempfile.TemporaryDirectory() as folder:
+            for module, session_type in ((autodump, windows.Session), (dump8, windows8.Session)):
+                with self.subTest(game=module.APP_ID):
+                    helper = module.build_helper(folder)
+                    with mock.patch.object(session_type, 'game_running', return_value=False):
+                        session = session_type(SimpleNamespace(game=folder), helper, folder, False)
+                    try:
+                        connection = session.connect()
+                        connection.target_pid = os.getpid()
+                        with self.assertRaisesRegex(autodump.DumpError, 'not loaded yet'):
+                            connection.attach()
+                    finally:
+                        session.close()
+
+    def test_tekken8_uses_native_session_and_target_pid(self):
+        self.assertIs(dump8.Session, windows8.Session)
+        helper = dump8.Helper.__new__(dump8.Helper)
+        helper.target_pid = 5678
+        helper._answer = mock.Mock(return_value='ok')
+        self.assertEqual(helper.attach(), 'ok')
+        helper._answer.assert_called_once_with('attach 5678')
+
+    def test_existing_tekken8_is_refused_without_starting_children(self):
+        with tempfile.TemporaryDirectory() as folder:
+            before = list(dump8._open)
+            with mock.patch.object(windows8, 'tekken8_running', return_value=True), \
+                    mock.patch.object(windows8.Session, '_spawn') as spawn:
+                with self.assertRaisesRegex(autodump.DumpError, 'close it first'):
+                    windows8.Session(SimpleNamespace(game=folder), 'unused', folder, True)
+                spawn.assert_not_called()
+            self.assertEqual(dump8._open, before)
+
     def test_attach_targets_only_the_session_process(self):
         helper = autodump.Helper.__new__(autodump.Helper)
         helper.target_pid = 1234

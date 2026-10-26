@@ -199,9 +199,16 @@ class Game(unittest.TestCase):
         with mock.patch.object(autodump, 'steams', return_value=[(self.steam, None)]):
             t8 = autodump.find_tekken8()
             self.assertEqual(autodump.tekken8_library(), (self.steam, self.lib, self.game))
-        self.assertEqual((t8.game, t8.prefix, t8.proton, t8.library), (self.game, self.prefix, self.proton, self.lib))
+        prefix, proton = (self.game, 'Windows') if os.name == 'nt' else (self.prefix, self.proton)
+        self.assertEqual((t8.game, t8.prefix, t8.proton, t8.library), (self.game, prefix, proton, self.lib))
 
     def test_not_usable(self):
+        if os.name == 'nt':
+            os.remove(os.path.join(self.game, autodump.EXE))
+            with mock.patch.object(autodump, 'steams', return_value=[(self.steam, None)]):
+                with self.assertRaisesRegex(autodump.DumpError, 'shipping executable is missing'):
+                    autodump.find_tekken8()
+            return
         with mock.patch.object(autodump, 'steams', return_value=[(self.steam, 'flatpak')]):
             with self.assertRaisesRegex(autodump.DumpError, 'Flatpak'):
                 autodump.find_tekken8()
@@ -229,13 +236,14 @@ class Game(unittest.TestCase):
         with mock.patch.dict(os.environ, TTT2_T8HELPER=''), \
                 mock.patch.object(autodump.shutil, 'which', return_value=None):
             self.assertIsNone(autodump.ready_helper(cache))
-            with self.assertRaisesRegex(autodump.DumpError, 'MinGW'):
+            with self.assertRaisesRegex(autodump.DumpError, 'CLANG64' if os.name == 'nt' else 'MinGW'):
                 autodump.build_helper(cache)
             write(os.path.join(cache, 't8helper.exe'))                    # (newer than its source: no MinGW)
             self.assertEqual(autodump.build_helper(cache), os.path.join(cache, 't8helper.exe'))
             os.utime(os.path.join(cache, 't8helper.exe'), (0, 0))         # (older: built again)
             self.assertIsNone(autodump.ready_helper(cache))
 
+    @unittest.skipIf(os.name == 'nt', 'Linux file lock; Windows sessions use a named mutex')
     def test_one_session_at_a_time(self):
         lock = os.path.join(self.tmp.name, 'session.lock')
         first = autodump._lock(lock)

@@ -104,10 +104,10 @@ def _core():
     if _lib is None:
         lib = ctypes.CDLL(_build())
         f64, i32 = np.ctypeslib.ndpointer(np.float64, flags='C'), np.ctypeslib.ndpointer(np.int32, flags='C')
-        lib.ttt2_decimate.restype = ctypes.c_long
+        lib.ttt2_decimate.restype = ctypes.c_int64
         lib.ttt2_decimate.argtypes = [ctypes.c_int, f64, ctypes.c_int, i32, ctypes.c_int, f64, i32, f64, f64, f64,
                                       np.ctypeslib.ndpointer(np.uint8, flags='C'), ctypes.c_int, i32, i32,
-                                      ctypes.c_int, np.ctypeslib.ndpointer(np.int64, flags='C'), f64, ctypes.c_long,
+                                      ctypes.c_int, np.ctypeslib.ndpointer(np.int64, flags='C'), f64, ctypes.c_int64,
                                       f64]
         _lib = lib
     return _lib

@@ -6,7 +6,7 @@
  *                                      line, each answered on the connection:
  *     dlc <steam_api64.dll path>       the game's DLC as the game asks Steam (SteamAppId=1778820, Steam running):
  *                                      "<appid> <owned 0/1> <name>" lines, then "end" ("error ..." without Steam)
- *     attach                           finds the game (Polaris-Win64-Shipping.exe) and where it is loaded, and checks
+ *     attach [pid]                     finds the game (or uses the session's pid), locates its image and checks
  *                                      that it is the build whose functions this helper knows (by hashes of their
  *                                      first bytes): "ok", or "error ..."
  *     ready                            whether the game has opened its moveset archive and made its task manager:
@@ -245,9 +245,9 @@ static int matches(const struct Function* f) {
     return h == f->hash;
 }
 
-static void attach(void) {
+static void attach(DWORD requested_pid) {
     g_checked = g_ready = 0;
-    const DWORD pid = game_pid();
+    const DWORD pid = requested_pid ? requested_pid : game_pid();
     if (!pid) {
         out_printf("error Tekken 8 is not running\n");
         return;
@@ -605,13 +605,18 @@ static int serve(int port, const char* secret) {
             continue;
         }
         char cmd[32] = {0}, arg[300] = {0};
+        unsigned long long a = 0;
         if (sscanf(line, "%31s", cmd) != 1) continue;
         if (!strcmp(cmd, "quit")) {
             quit = 1;
         } else if (!strcmp(cmd, "dlc") && sscanf(line, "%*s %299[^\n]", arg) == 1) {
             dlc(arg);
         } else if (!strcmp(cmd, "attach")) {
-            attach();
+            if (sscanf(line, "%*s %llu", &a) == 1 && a > 0xffffffffull) {
+                out_printf("error invalid game process id\n");
+            } else {
+                attach((DWORD)a);
+            }
         } else if (!strcmp(cmd, "ready")) {
             ready();
         } else if (!strcmp(cmd, "want") && sscanf(line, "%*s %299[^\n]", arg) == 1) {

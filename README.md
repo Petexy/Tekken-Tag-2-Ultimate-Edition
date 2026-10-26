@@ -412,16 +412,19 @@ On Windows, with Steam running and Tekken Tag 2 installed using
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/import_characters_windows.ps1 -GameDirectory "C:\Users\YOUR_USER\Games\TekkenTag2Ultimate"
 ```
 
-It installs native Python, numpy and Pillow if needed, finds Tekken 7 in
-Steam's Windows libraries, checks your DLC ownership, runs Tekken 7 without
+It installs native Python, numpy and Pillow if needed, finds Tekken 7 and
+Tekken 8 in Steam's Windows libraries, checks your DLC ownership, runs the source game without
 sound on a private desktop while saving the required files, and converts all
-owned supported fighters. `-Fighters kazumi,chloe` selects particular
+owned supported fighters from the installed games. `-Fighters kazumi,chloe` selects particular
 fighters when invoking the script from PowerShell; `-OutDirectory PATH`
 changes where the packs go. The default is
 `%USERPROFILE%\.local\share\ttt2\characters`, also found by the Windows
 runtime. When using `-OutDirectory`, set `TTT2_CHARACTERS` to that same path
 when starting the game. Only processes created for the import are closed afterwards.
 Proton, gamescope and pactl are not needed on Windows.
+Use `-Fighters reina` to import Reina from Tekken 8. Its native helper,
+decompressor and format conversion are covered by synthetic tests on both
+platforms; an end-to-end Tekken 8 import on Windows still needs player verification.
 
 The fighters of Tekken 7 that Tekken Tag Tournament 2 does not have can join
 the roster beside its own (no fighter is replaced): Kazumi Mishima, Lucky

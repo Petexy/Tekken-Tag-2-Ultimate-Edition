@@ -1,5 +1,5 @@
 /*
- * Tekken 8's own Oodle decompressor, called natively on Linux (a shared library for ctypes; tekken8/store.py).
+ * Tekken 8's own Oodle decompressor, called natively on Linux and Windows (ctypes; tekken8/store.py).
  *
  * Tekken 8 compresses its IoStore containers and pak files with Oodle (Kraken), which is statically linked into
  * its exe (Polaris/Binaries/Win64/Polaris-Win64-Shipping.exe, plain x64 code). Rather than reimplementing the
@@ -30,12 +30,19 @@
  *   ones restored after it (a fault jumps back out with siglongjmp). The arguments of OodleLZ_Decompress are
  *   (comp, compLen, raw, rawLen, fuzzSafe 1, checkCRC 0, verbosity 0, decBufBase NULL, decBufSize 0, callback
  *   NULL, callback data NULL, decoderMemory, decoderMemorySize, threadPhase 3 (all)); the decoder memory is this
- *   library's, so Oodle allocates nothing.
+ *   library's, so Oodle allocates nothing. Windows uses VirtualAlloc/VirtualProtect, its real thread block with
+ *   the image's TLS template temporarily substituted, and a thread-filtered vectored exception handler.
  *
  * Written for this project (no third-party code).
  */
 #define _GNU_SOURCE
+#ifdef _WIN32
+#include "oodle_windows.h"
+#else
 #include <asm/prctl.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#endif
 #include <fcntl.h>
 #include <pthread.h>
 #include <setjmp.h>
@@ -45,9 +52,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 #ifndef MAP_FIXED_NOREPLACE
@@ -84,23 +89,34 @@ static size_t g_thunks_size;
 static char **g_import_names;
 static unsigned g_imports;
 static uint8_t *g_decoder;
+#ifndef _WIN32
 static uint64_t g_teb[TEB_SIZE / 8];
 static uint64_t g_peb[PEB_SIZE / 8];
+#endif
 static uint64_t g_tls_array[TLS_SLOTS];
 static uint8_t *g_tls_block;
 static uint64_t g_function_rva;
 
 static char g_error[512];
-static sigjmp_buf g_jump;
 static volatile sig_atomic_t g_in_call;
+#ifdef _WIN32
+static jmp_buf g_jump;
+static DWORD g_caller;
+#define jump_out(how) longjmp(g_jump, how)
+#else
+static sigjmp_buf g_jump;
 static pthread_t g_caller;
+#define jump_out(how) siglongjmp(g_jump, how)
+#endif
 static volatile uint64_t g_trap_index;
 static volatile int g_signal;
 static void *volatile g_fault_address;
 static volatile uint64_t g_fault_ip;
+#ifndef _WIN32
 static const int g_signals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP};
 #define NSIGNALS (int)(sizeof g_signals / sizeof g_signals[0])
 static struct sigaction g_old[NSIGNALS];
+#endif
 
 static void set_error(const char *fmt, ...) {
     va_list ap;
@@ -123,9 +139,24 @@ __attribute__((ms_abi)) static int w_memcmp(const void *a, const void *b, size_t
    the import's number as the first (System V) argument and the stack aligned again, whatever the caller left */
 __attribute__((noreturn, used)) static void trap(uint64_t index) {
     g_trap_index = index;
-    siglongjmp(g_jump, 1);
+    jump_out(1);
 }
 
+#ifdef _WIN32
+static LONG CALLBACK on_exception(EXCEPTION_POINTERS *info) {
+    if (g_in_call && __readgsdword(0x48) == g_caller) {
+        DWORD code = info->ExceptionRecord->ExceptionCode;
+        if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+            code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_IN_PAGE_ERROR &&
+            code != EXCEPTION_BREAKPOINT) return EXCEPTION_CONTINUE_SEARCH;
+        g_signal = (int)code;
+        g_fault_address = info->ExceptionRecord->ExceptionAddress;
+        g_fault_ip = info->ContextRecord->Rip;
+        jump_out(2);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#else
 static void on_signal(int sig, siginfo_t *info, void *context) {
     if (g_in_call && pthread_equal(pthread_self(), g_caller)) {
         g_signal = sig;
@@ -138,6 +169,7 @@ static void on_signal(int sig, siginfo_t *info, void *context) {
         if (g_signals[i] == sig)
             sigaction(sig, &g_old[i], NULL);
 }
+#endif
 
 /* ------------------------------------------------------------------------------------------- the PE image */
 typedef struct {
@@ -328,6 +360,11 @@ static int bind_imports(const Pe *pe) {
                 th[10] = 0x48; th[11] = 0x83; th[12] = 0xe4; th[13] = 0xf0; /* and rsp, -16 */
                 th[14] = 0x48; th[15] = 0xb8; memcpy(th + 16, &to, 8);      /* mov rax, trap */
                 th[24] = 0xff; th[25] = 0xd0;                               /* call rax (never returns) */
+#ifdef _WIN32
+                th[1] = 0xb9;                                            /* mov rcx, index (Windows ABI) */
+                th[24] = 0x48; th[25] = 0x83; th[26] = 0xec; th[27] = 0x20; /* shadow space */
+                th[28] = 0xff; th[29] = 0xd0;
+#endif
                 target = th;
             }
             if (!in_image(iat, 8))
@@ -528,6 +565,7 @@ int oodle8_open(const char *exe, char *error, int error_size) {
     return rc;
 }
 
+#ifndef _WIN32
 static void stack_bounds(uint64_t sp, uint64_t *base, uint64_t *limit) {
     pthread_attr_t attr;
     void *addr;
@@ -543,6 +581,7 @@ static void stack_bounds(uint64_t sp, uint64_t *base, uint64_t *limit) {
         pthread_attr_destroy(&attr);
     }
 }
+#endif
 
 intptr_t oodle8_decompress(const void *comp, intptr_t comp_size, void *raw, intptr_t raw_size) {
     if (!comp || !raw || comp_size <= 0 || raw_size <= 0)
@@ -552,6 +591,17 @@ intptr_t oodle8_decompress(const void *comp, intptr_t comp_size, void *raw, intp
         pthread_mutex_unlock(&g_lock);
         return set_error("oodle8_open has not succeeded"), OODLE8_NOT_OPEN;
     }
+#ifdef _WIN32
+    /* Keep Windows' real thread block and stack bounds. Only the image's
+       static TLS template is substituted during the foreign call. */
+    uint64_t old_tls = __readgsqword(0x58);
+    PVOID handler = AddVectoredExceptionHandler(1, on_exception);
+    if (!handler) {
+        pthread_mutex_unlock(&g_lock);
+        return set_error("cannot install the decompressor's exception handler"), OODLE8_FAULT;
+    }
+    g_caller = GetCurrentThreadId();
+#else
     uint64_t sp = (uint64_t)(uintptr_t)__builtin_frame_address(0), base, limit, old_gs = 0;
     stack_bounds(sp, &base, &limit);
     memset(g_teb, 0, sizeof g_teb);
@@ -569,21 +619,37 @@ intptr_t oodle8_decompress(const void *comp, intptr_t comp_size, void *raw, intp
     for (int i = 0; i < NSIGNALS; i++)
         sigaction(g_signals[i], &sa, &g_old[i]);
     syscall(SYS_arch_prctl, ARCH_GET_GS, &old_gs);
+    g_caller = pthread_self();
+#endif
 
     volatile intptr_t got = 0;
-    g_caller = pthread_self();
     g_trap_index = 0;
     g_signal = 0;
+#ifdef _WIN32
+    /* NULL disables SEH unwinding through the privately mapped PE frames,
+       while retaining all the Windows ABI's nonvolatile registers. */
+    int how = _setjmp(g_jump, NULL);
+#else
     int how = sigsetjmp(g_jump, 1);
+#endif
     if (how == 0) {
         g_in_call = 1;
+#ifdef _WIN32
+        if (g_tls_block) __writegsqword(0x58, (uint64_t)(uintptr_t)g_tls_array);
+#else
         syscall(SYS_arch_prctl, ARCH_SET_GS, (uint64_t)(uintptr_t)g_teb);
+#endif
         got = g_fn(comp, comp_size, raw, raw_size, 1, 0, 0, NULL, 0, NULL, NULL, g_decoder, DECODER_MEMORY, 3);
     }
     g_in_call = 0;
+#ifdef _WIN32
+    __writegsqword(0x58, old_tls);
+    RemoveVectoredExceptionHandler(handler);
+#else
     syscall(SYS_arch_prctl, ARCH_SET_GS, old_gs);
     for (int i = 0; i < NSIGNALS; i++)
         sigaction(g_signals[i], &g_old[i], NULL);
+#endif
     if (how == 1) {
         uint64_t i = g_trap_index;
         set_error("the game's decompressor called %s, which is not available here",
@@ -591,7 +657,12 @@ intptr_t oodle8_decompress(const void *comp, intptr_t comp_size, void *raw, intp
         got = OODLE8_IMPORT;
     } else if (how == 2) {
         uint64_t ip = g_fault_ip, img = (uint64_t)(uintptr_t)g_image;
-        set_error("the game's decompressor stopped with signal %d (address %p, code at image offset %#llx)",
+#ifdef _WIN32
+        const char *fault_format = "the game's decompressor stopped with exception %#x (address %p, code at image offset %#llx)";
+#else
+        const char *fault_format = "the game's decompressor stopped with signal %d (address %p, code at image offset %#llx)";
+#endif
+        set_error(fault_format,
                   g_signal, g_fault_address,
                   (unsigned long long)(ip >= img && ip < img + g_image_size ? ip - img : ip));
         got = OODLE8_FAULT;

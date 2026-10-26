@@ -73,7 +73,8 @@ class Oodle:
         if not os.path.isfile(exe):
             raise InputError('Tekken 8\'s program %s is missing, and it is needed to unpack the game\'s files: '
                              'verify the integrity of Tekken 8\'s files in Steam' % exe)
-        lib = ctypes.CDLL(native.build('oodle', os.path.join('tekken8', 'oodle.c'), libs=('-lpthread',)))
+        lib = ctypes.CDLL(native.build('oodle', os.path.join('tekken8', 'oodle.c'), libs=('-lpthread',),
+                                      dependencies=(os.path.join('tekken8', 'oodle_windows.h'),)))
         lib.oodle8_open.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
         lib.oodle8_open.restype = ctypes.c_int
         lib.oodle8_decompress.argtypes = [ctypes.c_void_p, ctypes.c_ssize_t, ctypes.c_void_p, ctypes.c_ssize_t]
@@ -179,6 +180,7 @@ class Toc:
         if self.flags & TOC_INDEXED and dir_size and not self.flags & TOC_ENCRYPTED:
             self._directory(b, p, dir_size)
         self._ucas = {}
+        self._read_lock = threading.Lock()
         self.header = None                      # its container header ({package id: store entry}), when read
 
     def _directory(self, b, p, size):
@@ -225,7 +227,8 @@ class Toc:
         if fd is None:
             base = os.path.splitext(self.path)[0]
             name = base + ('.ucas' if partition == 0 else '_s%d.ucas' % partition)
-            fd = self._ucas[partition] = os.open(name, os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0))
+            fd = self._ucas[partition] = os.open(name, os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0) |
+                                               getattr(os, 'O_BINARY', 0))
         return fd
 
     def read(self, entry, inflate, offset=0, size=None):
@@ -251,7 +254,18 @@ class Toc:
             lo = blocks[i][0]
             hi = blocks[j - 1][0] + blocks[j - 1][1]
             span = bytearray(hi - lo)
-            got = os.preadv(self._fd(part), [span], lo - part * self.partition_size if self.partitions > 1 else lo)
+            position = lo - part * self.partition_size if self.partitions > 1 else lo
+            if hasattr(os, 'preadv'):
+                got = os.preadv(self._fd(part), [span], position)
+            else:
+                # Windows has no preadv; protect the seek/read pair so parallel
+                # reads of different chunks cannot move each other's cursor.
+                with self._read_lock:
+                    fd = self._fd(part)
+                    os.lseek(fd, position, os.SEEK_SET)
+                    data = os.read(fd, len(span))
+                got = len(data)
+                span[:got] = data
             if got != len(span):
                 raise IOError('%s: short read' % self.path)
             for boff, csize, usize, method in blocks[i:j]:
@@ -272,6 +286,10 @@ class Toc:
         for fd in self._ucas.values():
             os.close(fd)
         self._ucas = {}
+        # These arrays reference the mapping. Release them before closing it;
+        # Windows otherwise keeps the TOC file locked even after Store.close().
+        self.chunk_ids = self.chunk_index = self.chunk_type = None
+        self.raw.close()
 
 
 def _padded(n):

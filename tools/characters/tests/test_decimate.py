@@ -404,7 +404,7 @@ class Build(unittest.TestCase):
     def test_built_once_into_the_cache(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {'TTT2_NATIVE_DECIMATE': ''}):
             lib = decimate._build(tmp)
-            self.assertEqual(lib, os.path.join(tmp, 'decimate.so'))
+            self.assertEqual(lib, native.output_path('decimate', cache=tmp))
             stamp = os.path.getmtime(lib)
             self.assertEqual(decimate._build(tmp), lib)
             self.assertEqual(os.path.getmtime(lib), stamp)

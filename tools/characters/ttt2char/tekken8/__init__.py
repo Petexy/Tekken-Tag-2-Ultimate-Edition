@@ -27,6 +27,7 @@ The moveset (the files autodump.py saves):
     autodump.py   the movesets (in tkdata.bin) as the running game's own reader hands them over: Tekken 8 run
                   hidden by dump_tekken8.py and import_character.py (t8helper next to it), the files saved under
                   ~/.local/share/ttt2
+    autodump_windows.py  native Windows host: private desktop and session-owned process cleanup
     motbin.py     a fighter's moveset (.motbin) -> the common moveset form (movesets.py), in Tekken 8's numbering
     city32.py     CityHash32: the hash the moves and animations are named by
     movenames.py  the moves' names, found on the player's machine (the moveset keeps only their hashes)

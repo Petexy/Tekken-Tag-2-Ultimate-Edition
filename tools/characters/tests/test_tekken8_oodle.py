@@ -24,7 +24,7 @@ BASE = 0x200000000                                    # the made-up program's pr
 TEXT, RDATA, DATA, PDATA, RELOC = 0x1000, 0x2000, 0x3000, 0x4000, 0x5000
 NEEDLE = b'oo2::OodleLZ_Decompress\0'
 CHILD = r'''
-import ctypes, json, sys
+import ctypes, json, sys, os
 lib = ctypes.CDLL(sys.argv[1])
 lib.oodle8_open.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
 lib.oodle8_decompress.restype = ctypes.c_ssize_t
@@ -34,10 +34,16 @@ lib.oodle8_function_rva.restype = ctypes.c_uint64
 lib.oodle8_image_base.restype = ctypes.c_uint64
 out = {}
 if sys.argv[3] == 'blocked':
-    libc = ctypes.CDLL(None)
-    libc.mmap.restype = ctypes.c_void_p
-    libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-    out['blocker'] = libc.mmap(int(sys.argv[4]), 4096, 3, 0x22 | 0x100000, -1, 0)
+    if os.name == 'nt':
+        alloc = ctypes.WinDLL('kernel32').VirtualAlloc
+        alloc.restype = ctypes.c_void_p
+        alloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong, ctypes.c_ulong]
+        out['blocker'] = alloc(int(sys.argv[4]), 4096, 0x3000, 4)
+    else:
+        libc = ctypes.CDLL(None)
+        libc.mmap.restype = ctypes.c_void_p
+        libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+        out['blocker'] = libc.mmap(int(sys.argv[4]), 4096, 3, 0x22 | 0x100000, -1, 0)
 err = ctypes.create_string_buffer(256)
 out['open'] = lib.oodle8_open(sys.argv[2].encode(), err, 256)
 out['open_error'] = err.value.decode()
@@ -60,7 +66,7 @@ def _rel32(at, target, size):
     return struct.pack('<i', target - (at + size))
 
 
-def program():
+def program(tls=False):
     """The made-up PE image (bytes) and the RVA its decompressor starts at."""
     needle = RDATA
     rdata = bytearray(NEEDLE)
@@ -68,7 +74,7 @@ def program():
     unwind_a = RDATA + len(rdata)
     rdata += b'\x01\x00\x00\x00'
     unwind_b = RDATA + len(rdata)
-    rdata += bytes([0x01 | (4 << 3), 0, 0, 0]) + struct.pack('<III', TEXT, TEXT + 0x60, unwind_a)  # chained
+    rdata += bytes([0x01 | (4 << 3), 0, 0, 0]) + struct.pack('<III', TEXT, TEXT + 0x100, unwind_a)  # chained
     rdata += bytes(-len(rdata) % 8)
     hint_memcpy = RDATA + len(rdata)
     rdata += b'\0\0memcpy\0\0'
@@ -84,12 +90,23 @@ def program():
     descriptors = RDATA + len(rdata)
     rdata += struct.pack('<IIIII', ilt, 0, 0, dll, iat) + bytes(20)
     data = struct.pack('<Q', BASE + needle)               # an absolute pointer: fixed by the relocation
-    pdata = struct.pack('<6I', TEXT, TEXT + 0x60, unwind_a, TEXT + 0x60, TEXT + 0x68, unwind_b)
+    pdata = struct.pack('<6I', TEXT, TEXT + 0x100, unwind_a, TEXT + 0x100, TEXT + 0x108, unwind_b)
     reloc = struct.pack('<IIHH', DATA, 12, 0xA000, 0)
+    directories = {1: (descriptors, 40), 3: (PDATA, len(pdata)), 5: (RELOC, len(reloc))}
+    if tls:
+        data += bytes(0x20 - len(data)) + b'B'
+        data += bytes(0x40 - len(data))
+        data += struct.pack('<4Q2I', BASE + DATA + 0x20, BASE + DATA + 0x21, BASE + DATA + 0x30, 0, 8, 0)
+        reloc = struct.pack('<II4H', DATA, 16, 0xA000, 0xA040, 0xA048, 0xA050)
+        directories.update({5: (RELOC, len(reloc)), 9: (DATA + 0x40, 40)})
     code = bytearray()
 
     def emit(b):
         code.extend(b)
+    if tls:
+        emit(b'\x65\x48\x8b\x04\x25\x58\x00\x00\x00')  # mov rax, gs:[TLS array]
+        emit(b'\x48\x8b\x00\x80\x38\x42\x74\x08')      # slot 0, template byte B, else fault
+        emit(b'\x48\x8b\x04\x25\x00\x00\x00\x00')
     emit(b'\x48\x83\xfa\x01\x75\x06')                     # cmp rdx, 1; jne +6
     emit(b'\xff\x15' + _rel32(TEXT + len(code), iat + 8, 6))      # call [Sleep]: the trap
     emit(b'\x48\x83\xfa\x02\x75\x08')                     # cmp rdx, 2; jne +8
@@ -100,13 +117,13 @@ def program():
     emit(b'\x48\x89\xc8\x4c\x89\xc1\x49\x89\xd0\x48\x89\xc2')     # memcpy(raw, comp, compLen)
     emit(b'\xff\x15' + _rel32(TEXT + len(code), iat, 6))          # call [memcpy]
     emit(b'\x48\x89\xd8\x48\x83\xc4\x20\x5b\xc3')         # return rawLen
-    assert len(code) <= 0x60
-    code += b'\xcc' * (0x60 - len(code))
+    assert len(code) <= 0x100
+    code += b'\xcc' * (0x100 - len(code))
     emit(b'\x48\x8d\x05' + _rel32(TEXT + len(code), needle, 7) + b'\xc3')     # the fragment naming the function
     image = synth.pe_image(BASE, [('.text', TEXT, bytes(code), 0x60000020), ('.rdata', RDATA, bytes(rdata), 0x40000040),
                                   ('.data', DATA, data, 0xC0000040), ('.pdata', PDATA, pdata, 0x40000040),
                                   ('.reloc', RELOC, reloc, 0x42000040)],
-                           {1: (descriptors, 40), 3: (PDATA, len(pdata)), 5: (RELOC, len(reloc))})
+                           directories)
     return image, TEXT
 
 
@@ -141,7 +158,7 @@ class Oodle(unittest.TestCase):
         self.assertEqual(out['trap'], -3)                      # OODLE8_IMPORT, not the end of the process
         self.assertIn('TEST.dll!Sleep', out['trap_error'])
         self.assertEqual(out['fault'], -4)                     # OODLE8_FAULT
-        self.assertIn('signal 11', out['fault_error'])
+        self.assertIn('exception 0xc0000005' if os.name == 'nt' else 'signal 11', out['fault_error'])
         self.assertEqual(out['again'], 24)
 
     def test_preferred_base(self):
@@ -164,6 +181,13 @@ class Oodle(unittest.TestCase):
         self.assertEqual(out['open'], -1)
         self.assertIn('no Oodle decompressor', out['open_error'])
         self.assertEqual(out['copy'], -1)                      # OODLE8_NOT_OPEN
+
+    def test_tls_and_unicode_path(self):
+        path = os.path.join(self.dir, 'Prueba-\u00f1-\u65e5.exe')
+        with open(path, 'wb') as f:
+            f.write(program(tls=True)[0])
+        self.check(self.run_child('free', path))
+        self.check(self.run_child('blocked', path))
 
 
 if __name__ == '__main__':

@@ -21,6 +21,7 @@
  * Written for this project (no third-party code).
  */
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,7 +38,7 @@ typedef struct {
     int npos, nw, ntri, k, aq;
     const double *pos, *attr, *sw, *pfactor, *wnrm;
     const int *wpos, *sj, *wpart;
-    const long *quota;
+    const int64_t *quota;        /* numpy.int64 on both LP64 Linux and LLP64 Windows */
     int *tri;
     double *q, *aqd, *warea;
     int *wref;
@@ -709,10 +710,10 @@ static int setup(D *d, const unsigned char *lock_in, double *stats)
  * in place (a removed triangle gets -1 in all three); wpart (nw) in 0..nparts-1, quota (nparts); params[P_COUNT];
  * stats[S_COUNT] out.
  * Returns the count, -1 on no memory. */
-long ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int k, const double *attr, const int *sj,
+int64_t ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int k, const double *attr, const int *sj,
                    const double *sw, const double *wnrm, const double *pfactor, const unsigned char *lock_in,
-                   int ntri, int *tri, const int *wpart, int nparts, const long *quota, const double *params,
-                   long target, double *stats)
+                   int ntri, int *tri, const int *wpart, int nparts, const int64_t *quota, const double *params,
+                   int64_t target, double *stats)
 {
     D d;
     long result = -1;

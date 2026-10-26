@@ -875,7 +875,7 @@ def dump(fighters, out=None, log=print, cache=None, references=(), force=False):
     cache = cache or CACHE
     run = os.path.join(cache, 'run')
     helper_exe = build_helper(cache)
-    log('Tekken 8: %s (Proton: %s)' % (t8.game, os.path.basename(t8.proton)))
+    log('Tekken 8: %s (%s)' % (t8.game, os.path.basename(t8.proton)))
     if any(fid in DLC for fid, _ in todo):
         owned = owned_dlc(t8, helper_exe, run)
         for fid, _ in todo:
@@ -948,3 +948,7 @@ def dump(fighters, out=None, log=print, cache=None, references=(), force=False):
         s.close()
     log('Done in %.0f s.' % (time.time() - started))
     return saved, skipped
+
+
+if os.name == 'nt':
+    from .autodump_windows import Session, build_helper, find_tekken8, owned_dlc, tekken8_running
