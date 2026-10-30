@@ -8,6 +8,8 @@ import unittest
 from unittest import mock
 from backend import Settings, write_json
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/characters'))
+
 class LauncherBackend(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)

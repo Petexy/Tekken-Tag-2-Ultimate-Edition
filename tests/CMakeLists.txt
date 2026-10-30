@@ -177,6 +177,13 @@ target_compile_features(noctis_assault_test PRIVATE cxx_std_20)
 target_compile_options(noctis_assault_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME noctis_assault_test COMMAND noctis_assault_test)
 
+# Original CPU setup iterates every fighter, including imported opponents.
+add_executable(cpu_identity_test cpu_identity_test.cpp)
+target_include_directories(cpu_identity_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(cpu_identity_test PRIVATE cxx_std_20)
+target_compile_options(cpu_identity_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME cpu_identity_test COMMAND cpu_identity_test)
+
 add_executable(practice_checkpoint_test practice_checkpoint_test.cpp)
 target_include_directories(practice_checkpoint_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 target_compile_features(practice_checkpoint_test PRIVATE cxx_std_20)

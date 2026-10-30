@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,24 @@ namespace cafe::gpu::vk {
 namespace {
 
 using namespace latte;
+
+// Opt-in host stall measurements, without per-draw logging.
+struct PerfStall {
+    const char* operation;
+    bool enabled;
+    std::chrono::steady_clock::time_point start{};
+    explicit PerfStall(const char* label) : operation(label) {
+        static const bool profile = std::getenv("TTT2_PERF") != nullptr;
+        enabled = profile;
+        if (enabled) start = std::chrono::steady_clock::now();
+    }
+    ~PerfStall() {
+        if (!enabled) return;
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count();
+        if (ms >= 4.0) std::fprintf(stderr, "perf-stall operation=%s ms=%.3f\n", operation, ms);
+    }
+};
+
 
 uint64_t fnv(const void* data, size_t size, uint64_t h = 0xCBF29CE484222325ull) {
     const auto* p = static_cast<const uint8_t*>(data);
@@ -189,6 +208,7 @@ void Renderer::load_pipeline_cache() {
 
 void Renderer::save_pipeline_cache() {
     if (new_pipelines_ == 0 || cache_directory().empty()) return;
+    const PerfStall timing("pipeline-cache-save");
     new_pipelines_ = 0;
     size_t size = 0;
     if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
@@ -270,6 +290,7 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     // SPIR-V is cached on disk by the GLSL it came from.
     std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash);
     if (spirv.empty()) {
+        const PerfStall timing("shader-compile-and-save");
         shaderc_compile_options_t options = shaderc_compile_options_initialize();
         shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
         // The driver optimises; SPIR-V optimisation only costs compile time.
@@ -448,6 +469,7 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
     gci.pColorBlendState = &cb;
     gci.pDynamicState = &dyn;
     gci.layout = entry->layout;
+    const PerfStall timing("graphics-pipeline-create");
     const VkResult r = vkCreateGraphicsPipelines(ctx_.device, pipeline_cache_, 1, &gci, nullptr, &entry->pipeline);
     ++new_pipelines_;
     if (r != VK_SUCCESS) {
