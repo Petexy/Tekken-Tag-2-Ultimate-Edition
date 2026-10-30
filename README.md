@@ -72,6 +72,13 @@ and shaders are translated to Vulkan as it runs.
   the start of each Practice session) shows the player's inputs in a column
   on the left, newest on top, each with the frames it was held, in place of
   the game's bar along the bottom.
+- **Experimental Practice checkpoints**: set `TTT2_PRACTICE_CHECKPOINT=1`
+  before launching the game. **F5** saves one in-memory checkpoint and **F8**
+  reloads it; the window title reports the result. The slot is limited to the
+  current practice session and is cleared by position/situation resets.
+  This first version supports native roster slots; additional imported
+  fighters and stage wall/floor breaks are not supported. Save/load requests
+  made while paused execute when fighter simulation resumes.
 - **No forced input delay**: the Wii U game waits two frames (33 ms) after
   reading a button before acting on it, in every mode (Cemu's "Reduce input
   lag" graphic pack removes it too). The port leaves that wait out; the

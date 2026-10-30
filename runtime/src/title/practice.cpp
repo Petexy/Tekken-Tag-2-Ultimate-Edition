@@ -25,6 +25,7 @@
 #include "title/gauge.h"
 
 #include "cafe/input.h"
+#include "title/practice_checkpoint.h"
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
 #include "cafe/sysmem.h"
@@ -32,17 +33,46 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
+#include <array>
+#include <vector>
 #include <cstring>
+#include <atomic>
+#include <mutex>
+#include <cstdlib>
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 PPC_FUNC(sub_04F9FB6C); // a select value's cursor set (r3 the cursor, r4 the value's name)
 PPC_FUNC(sub_04F9FB8C_orig); // a select value's cursor (r3 the value's name) -> r3 (as it is: see the hook)
 PPC_FUNC(sub_04545920); // the menu's entity by name (r3 the menus + 4, r4 the name) -> r3
 PPC_FUNC(sub_045590E0); // a select value entry's text (r3 the entry) -> r3
+
+PPC_FUNC(sub_03A45CA4);
+PPC_FUNC(sub_03A472A4);
+
+namespace cafe::title::checkpoint {
+namespace {
+std::atomic<Request> pending{Request::None};
+std::atomic<bool> notice_ready{false};
+std::mutex notice_mutex;
+std::string notice;
+}
+bool enabled() {
+    static const bool on=std::getenv("TTT2_PRACTICE_CHECKPOINT")!=nullptr;
+    return on;
+}
+void request(Request command) { if(enabled()) pending.store(command); }
+void status(const char* text) {
+    { std::lock_guard lock(notice_mutex); notice=text; }
+    notice_ready.store(true);
+    std::fprintf(stderr,"checkpoint: %s\n",text);
+}
+bool take_notice(std::string& text) {
+    if(!notice_ready.exchange(false)) return false;
+    std::lock_guard lock(notice_mutex); text=notice; return true;
+}
+} // namespace cafe::title::checkpoint
 
 namespace {
 
@@ -548,9 +578,108 @@ uint32_t added_slots(uint32_t id) {
     return table + 4 * ((id - kEasyInputFighters) % kAddedSlots);
 }
 
+namespace checkpoint=cafe::title::checkpoint;
+checkpoint::Slot checkpoint_slot;
+uint64_t checkpoint_generation=0;
+
+checkpoint::Identity checkpoint_identity(uint8_t* base) {
+    checkpoint::Identity id{}; id.generation=checkpoint_generation;
+    const uint32_t object=load(base,kMatchObject);
+    const uint32_t match=object ? load(base,object+228) : 0;
+    id.mode=match ? load(base,match+228) : 0;
+    id.kind=id.mode ? load(base,id.mode+kModeKind) : 0;
+    for(uint32_t i=0;i<12;++i) {
+        const uint32_t p=load(base,kSidePlayers+4*i);
+        if(!p || !guest_memory_committed(p,0x2960)) { id.mode=0;return id; }
+        const uint32_t animator=load(base,p+7944);
+        if(!animator || !guest_memory_committed(animator,20)) { id.mode=0;return id; }
+        id.objects[i]={p,load(base,p+84),load(base,p+80),load(base,p+88),
+                       load(base,p+172),animator,load(base,animator+8)};
+        if(i<4) id.floors[i]=load(base,p+72);
+    }
+    return id;
+}
+
+// Executes only on the fighter simulation thread, never in the SDL input thread.
+void process_checkpoint(PPCContext& ctx,uint8_t* base) {
+    if(!checkpoint::enabled()) return;
+    const auto command=checkpoint::pending.exchange(checkpoint::Request::None);
+    if(!practice(base)) {
+        checkpoint_slot.clear();
+        if(command!=checkpoint::Request::None) checkpoint::status("Checkpoints are available in Practice only");
+        return;
+    }
+    if(command==checkpoint::Request::None) return;
+    const auto id=checkpoint_identity(base);
+    if(!id.supported()) {
+        checkpoint::status("Prototype supports native roster slots only");
+        return;
+    }
+    if(!guest_memory_committed(checkpoint::kScratchBegin,checkpoint::kScratchBytes)) {
+        checkpoint::status("Checkpoint recording buffer unavailable");return;
+    }
+    std::span<uint8_t> scratch(base+checkpoint::kScratchBegin,checkpoint::kScratchBytes);
+    if(command==checkpoint::Request::Save) {
+        std::vector<uint8_t> before(12*0x2960);
+        for(size_t i=0;i<12;++i) std::memcpy(before.data()+i*0x2960,base+id.objects[i].address,0x2960);
+        bool changed=false;
+        checkpoint::preserve_scratch(scratch,[&] {
+            call(ctx,base,sub_03A45CA4,{});
+            for(size_t i=0;i<12;++i) changed |= std::memcmp(before.data()+i*0x2960,base+id.objects[i].address,0x2960)!=0;
+            if(!changed) checkpoint_slot.save(id,scratch);
+        });
+        if(changed) { checkpoint_slot.clear();checkpoint::status("Capture rejected: combat objects changed during copying"); }
+        else checkpoint::status("Checkpoint saved - F8 to load");
+    } else {
+        if(!checkpoint_slot.matches(id)) {
+            checkpoint::status("No matching checkpoint - F5 to save again");return;
+        }
+        checkpoint::preserve_scratch(scratch,[&] {
+            std::copy(checkpoint_slot.bytes().begin(),checkpoint_slot.bytes().end(),scratch.begin());
+            call(ctx,base,sub_03A472A4,{});
+        });
+        title::framedata::reset(); // discard HUD history from the timeline we just left
+        checkpoint::status("Checkpoint loaded - F5 to replace, F8 to repeat");
+    }
+}
+
+// Investigation-only observer for the title's OWN combat copy/restore pair.
+// It reads combat state and logs only when TTT2_CHECKPOINT_OBSERVE is set.
+constexpr uint32_t kCombatObjects = 12, kCombatObjectBytes = 0x2960;
+bool checkpoint_observing() {
+    static const bool enabled = std::getenv("TTT2_CHECKPOINT_OBSERVE") != nullptr;
+    return enabled;
+}
+void observe_combat(const char* event, uint8_t* base) {
+    if (!checkpoint_observing() || !practice(base)) return;
+    for (uint32_t i = 0; i < kCombatObjects; ++i) {
+        const uint32_t p = load(base, kSidePlayers + 4*i);
+        if (!p || !guest_memory_committed(p, kCombatObjectBytes)) {
+            std::fprintf(stderr,"checkpoint-observe event=%s object=%u unavailable=%08X\n",event,i,p);
+            continue;
+        }
+        const uint32_t move = load(base,p+280), animator=load(base,p+7944);
+        uint32_t motion=0;
+        if (animator && guest_memory_committed(animator,20)) motion=load(base,animator+12);
+        std::fprintf(stderr,
+            "checkpoint-observe event=%s object=%u player=%08X id=%u row=%u record=%08X partner=%08X move=%08X frame=%u active=%u owner=%u assist=%u animator=%08X motion=%08X pos=%08X/%08X/%08X floor=%08X damage=%u/%u combo=%u\n",
+            event,i,p,load(base,p+84),load(base,p+80),load(base,p+88),load(base,p+172),
+            move,load(base,p+212),load(base,p+7808),load(base,p+7808),load(base,p+7816),
+            animator,motion,load(base,p),load(base,p+4),load(base,p+8),load(base,p+72),
+            load(base,p+1176),load(base,p+1180),load(base,p+0x1cc));
+    }
+}
+
+
 } // namespace
 
-PPC_FUNC(sub_039C2DB0); // the situation set-up (r3: the situation)
+PPC_FUNC(sub_039C2DB0_orig);
+PPC_FUNC(sub_039C2DB0) { // Any native situation reset starts a new checkpoint generation.
+    ++checkpoint_generation;
+    const bool had_slot=checkpoint_slot.valid();checkpoint_slot.clear();
+    if(had_slot && checkpoint::enabled()) checkpoint::status("Checkpoint cleared by practice reset");
+    sub_039C2DB0_orig(ctx,base);
+}
 PPC_FUNC(sub_05FBD4C8); // -> the camera
 PPC_FUNC(sub_05FBB480); // the camera (r3) as at a round's start (r4 = 0)
 PPC_FUNC(sub_05FBC0A4); // the camera (r3) of a side (r4 = 2: 2P; f1 = 1, r5 = 1)
@@ -564,6 +693,11 @@ PPC_FUNC(sub_03ADB118) {
     const bool in_practice = practice(base);
     g_fighters_ran = true;
     if (in_practice) os::arm_select_chord(three_held(base));
+    process_checkpoint(ctx,base);
+    if (checkpoint_observing() && practice(base)) {
+        static uint64_t ticks=0;
+        if (++ticks % 120 == 1) observe_combat("fighter-frame",base);
+    }
     sub_03ADB118_orig(ctx, base);
     close_submenu(ctx, base); // (left by closing the pause menu)
     update_texts(base, in_practice);
@@ -757,4 +891,39 @@ PPC_FUNC(sub_04F1EDAC) {
     ppc::st32(base, ctx.r[3] + 4, load(base, ctx.r[3] + 4) & ~1u);
     ctx.r[4] = 0;
     sub_04F1EDAC_orig(ctx, base);
+}
+
+// Preserve normal engine behavior. Trace the native demonstration save/restore
+// paths so their object lifetimes and animation resync can be validated live.
+PPC_FUNC(sub_03A45CA4_orig);
+PPC_FUNC(sub_03A45CA4) {
+    std::array<uint32_t,kCombatObjects> objects{};
+    std::vector<uint8_t> before;
+    if (checkpoint_observing() && practice(base)) {
+        bool valid=true;
+        for (uint32_t i=0;i<kCombatObjects;++i) {
+            objects[i]=load(base,kSidePlayers+4*i);
+            valid &= objects[i] && guest_memory_committed(objects[i],kCombatObjectBytes);
+        }
+        if (valid) {
+            before.resize(kCombatObjects*kCombatObjectBytes);
+            for (uint32_t i=0;i<kCombatObjects;++i)
+                std::memcpy(before.data()+i*kCombatObjectBytes,base+objects[i],kCombatObjectBytes);
+            observe_combat("native-save-before",base);
+        }
+    }
+    sub_03A45CA4_orig(ctx,base);
+    if (!before.empty()) {
+        unsigned changed=0;
+        for (uint32_t i=0;i<kCombatObjects;++i)
+            for (uint32_t b=0;b<kCombatObjectBytes;++b)
+                changed += before[i*kCombatObjectBytes+b] != base[objects[i]+b];
+        std::fprintf(stderr,"checkpoint-observe native-save source_bytes_changed=%u scratch=108A3C08-108C2E90\n",changed);
+    }
+}
+PPC_FUNC(sub_03A472A4_orig);
+PPC_FUNC(sub_03A472A4) {
+    observe_combat("native-restore-before",base);
+    sub_03A472A4_orig(ctx,base);
+    observe_combat("native-restore-after",base);
 }

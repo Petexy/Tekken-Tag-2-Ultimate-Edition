@@ -147,3 +147,6 @@ WEAPON_HOLD = r'^Mz_(rp01F|rush03C|t_slpF_RP|s_tlk01|WPF2_EX)_HIT$'
 # the Rage Art's and the Sword of the Father's weapons (not drawn) hit with the right hand's weapon's tip
 # 0xfc selects the spare point refreshed only during df4,2's second hit.
 HIT_LOCATIONS = {0x67: 0x46, 0x69: 0x46, 0xfc: 71}
+
+# Retain the locally tested non-Bound exclusions for these d+4 continuations.
+MOVESET['bounds'].update({'Mz_t_srk02Easy': False, 'Mz_t_srk02': False})

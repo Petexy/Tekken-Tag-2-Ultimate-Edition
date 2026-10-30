@@ -1,4 +1,5 @@
 #include "title/roster.h"
+#include "title/cpu_identity.h"
 #include "title/eliza_assist.h"
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
@@ -19,6 +20,7 @@
 #include <bit>
 #include <charconv>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1761,7 +1763,11 @@ PPC_FUNC(sub_033D512C) {
 // Whether a fighter can be picked; never for ids above 58.
 PPC_FUNC(sub_033D52B4_orig);
 PPC_FUNC(sub_033D52B4) {
-    if (slot_of_id(ctx.r[3]) >= 0) {
+    // Personal desktop-launch option: Unknown's native select id (uju),
+    // without changing profile data or any other fighter's unlock state.
+    const char* unlock_unknown = std::getenv("TTT2_UNLOCK_UNKNOWN");
+    if (slot_of_id(ctx.r[3]) >= 0 ||
+        (ctx.r[3] == 44 && unlock_unknown && std::string_view(unlock_unknown) == "1")) {
         ctx.r[3] = 1;
         return;
     }
@@ -2404,7 +2410,24 @@ void with_donor_id(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PP
 PPC_FUNC(sub_03D6B9F4_orig);
 PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); }
 PPC_FUNC(sub_0399221C_orig);
-PPC_FUNC(sub_0399221C) { with_donor_id(ctx, base, load(0x10874864), sub_0399221C_orig); }
+PPC_FUNC(sub_0399221C) {
+    // The original changes 0x10874864 as it loops through all four entries
+    // at 0x1087FB60, reading each fighter AND its opponent by id and row.
+    // Mapping just the stale current-player pointer leaves the others outside
+    // the original AI tables and initializes invalid move-selection data.
+    std::array<uint32_t, 4> players{};
+    for (uint32_t i = 0; i < players.size(); ++i) players[i] = load(0x1087FB60 + 4 * i);
+    cpu_identity::with_donors(players, [](uint32_t at) { return load(at); },
+        [](uint32_t at, uint32_t value) { store(at, value); },
+        [](uint32_t id, uint32_t row) -> std::optional<cpu_identity::Donor> {
+            const int k = slot_of_id(id);
+            if (k < 0 || row != g_added[k].row) return std::nullopt;
+            if (std::getenv("TTT2_TRACE_CPU"))
+                std::fprintf(stderr, "cpu-compat init id=%u row=%u donor=%u/%u\n",
+                    id, row, g_added[k].donor, g_added[k].donor_row);
+            return cpu_identity::Donor{g_added[k].donor, g_added[k].donor_row};
+        }, [&] { sub_0399221C_orig(ctx, base); });
+}
 // The CPU's play (sub_039A6214, for the player at 0x10874864) reads a table of
 // 67 fighters (0x101B9E70, 16-byte rows) by the player's motion row (+80) with
 // no bound: added fighters from place 5 on have rows 69 and up, and the
@@ -2421,7 +2444,20 @@ void with_donor_row(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(P
     if (load(player + kPlayerRow) == g_added[k].donor_row) store(player + kPlayerRow, g_added[k].row);
 }
 PPC_FUNC(sub_039A6214_orig);
-PPC_FUNC(sub_039A6214) { with_donor_row(ctx, base, load(0x10874864), sub_039A6214_orig); }
+PPC_FUNC(sub_039A6214) {
+    const uint32_t player = load(0x10874864);
+    with_donor_row(ctx, base, player, sub_039A6214_orig);
+    if (player && std::getenv("TTT2_TRACE_CPU") && slot_of_id(load(player + kPlayerSelectId)) >= 0) {
+        static std::map<uint32_t, unsigned> samples;
+        if (++samples[player] % 60 == 1) {
+            const uint32_t move = load(player + 280);
+            const char* name = move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "?";
+            std::fprintf(stderr, "cpu-compat play player=%08X id=%u row=%u controller=%u move=%s input=%08X direction=%08X owner=%u\n",
+                player, load(player + kPlayerSelectId), load(player + kPlayerRow), load(player + 0x408),
+                name, load(player + 0x7f0), load(player + 0x7f4), load(player + 0x1e80));
+        }
+    }
+}
 // The select strip's labels by select id (kProfiles), read with a bound (Paul's
 // row past it) or none (sub_0294C400, id r4): the added fighter's row lent to
 // Paul's, and Paul's id asked.
@@ -3478,6 +3514,8 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
 // part-3 animation, and the last frame of one that has just ended.
 PPC_FUNC(sub_069D8B30_orig);
 PPC_FUNC(sub_069D8B30) {
+    static const bool profile = std::getenv("TTT2_PERF") != nullptr;
+    const auto started = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const uint32_t model = ctx.r[3];
     sub_069D8B30_orig(ctx, base);
     if (!g_active) return;
@@ -3515,6 +3553,20 @@ PPC_FUNC(sub_069D8B30) {
             }
         }
         pose_weapons(ctx, base, model, player, g_added[slot_of_id(load(player + kPlayerSelectId))].weapons);
+    }
+    if (profile && player) {
+        struct Sample { unsigned calls = 0; double total = 0, maximum = 0; };
+        static std::map<uint32_t, Sample> samples;
+        const uint32_t id = load(player + kPlayerSelectId);
+        auto& sample = samples[id];
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count();
+        ++sample.calls; sample.total += ms; sample.maximum = std::max(sample.maximum, ms);
+        if (sample.calls >= 600) {
+            const int k = slot_of_id(id);
+            std::fprintf(stderr, "perf-pose id=%u code=%s calls=%u avg_ms=%.4f max_ms=%.4f\n",
+                id, k >= 0 ? g_added[k].code.c_str() : "native", sample.calls, sample.total/sample.calls, sample.maximum);
+            sample = {};
+        }
     }
     ctx.r[3] = r3;
     ctx.lr = lr;
