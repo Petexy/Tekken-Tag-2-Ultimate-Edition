@@ -36,7 +36,7 @@ add_custom_command(TARGET ttt2-ultimate POST_BUILD
         "${TTT2_COMPILER_BIN}/libwinpthread-1.dll" "$<TARGET_FILE_DIR:ttt2-ultimate>")
 
 # Gameplay regression tests from the merged branch, built natively.
-foreach(game_test damage_scaling_test outfit_menu_test eliza_assist_test noctis_assault_test memory_model_test)
+foreach(game_test damage_scaling_test outfit_menu_test eliza_assist_test noctis_assault_test practice_checkpoint_test memory_model_test)
     add_executable(${game_test} tests/${game_test}.cpp)
     target_include_directories(${game_test} PRIVATE runtime/src runtime/include)
     target_compile_features(${game_test} PRIVATE cxx_std_20)

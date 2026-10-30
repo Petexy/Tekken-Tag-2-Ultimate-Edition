@@ -1,6 +1,7 @@
 #include "host/window.h"
 
 #include "cafe/input.h"
+#include "title/practice_checkpoint.h"
 #include "cafe/runtime.h"
 #include "host/display_settings.h"
 #include "host/keymap.h"
@@ -308,6 +309,12 @@ bool run_event_loop(const std::function<bool()>& finished) {
             case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
             case SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED: update_window_refresh(); break;
             case SDL_EVENT_KEY_DOWN:
+                if(!event.key.repeat && !controller_keyboard(event.key.which)) {
+                    if(event.key.scancode==SDL_SCANCODE_F5)
+                        title::checkpoint::request(title::checkpoint::Request::Save);
+                    if(event.key.scancode==SDL_SCANCODE_F8)
+                        title::checkpoint::request(title::checkpoint::Request::Load);
+                }
                 // (F11 held repeats its press: the first one toggles, once.)
                 if (event.key.scancode == SDL_SCANCODE_F11 && !event.key.repeat &&
                     !controller_keyboard(event.key.which)) {
@@ -317,6 +324,11 @@ bool run_event_loop(const std::function<bool()>& finished) {
                 break;
             default: break;
             }
+        }
+        std::string checkpoint_notice;
+        if(title::checkpoint::take_notice(checkpoint_notice)) {
+            const std::string title="Tekken Tag Tournament 2 - "+checkpoint_notice;
+            SDL_SetWindowTitle(g_window,title.c_str());
         }
         update_input();
         std::this_thread::sleep_for(4ms);
