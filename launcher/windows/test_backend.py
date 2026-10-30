@@ -10,6 +10,8 @@ from backend import Settings, write_json
 # T8Extraction patches ttt2char before worker() puts tools/characters on the path.
 sys.path.append(str(Path(__file__).resolve().parents[2] / 'tools/characters'))
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tools/characters'))
+
 class LauncherBackend(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
