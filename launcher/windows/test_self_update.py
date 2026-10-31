@@ -16,13 +16,15 @@ import zipfile
 import self_update
 from self_update import Cancelled, UpdateError, compare_versions, parse_release, version_in
 
-def fake_exe(body=b'', files=True, after=b''):
-    """A 64-bit Windows program's header, then `body`, then files with their trailer when `files`, then `after`
-    (files in a resource: more of the program follows)."""
+def fake_exe(body=b'', files=True, after=b'', version='99.0.0'):
+    """A 64-bit Windows program's header, then `body`, then files (of launcher `version`, when one) with their
+    trailer when `files`, then `after` (files in a resource: more of the program follows)."""
     head = bytearray(0x80); head[:2] = b'MZ'; struct.pack_into('<I', head, 0x3C, 0x40)
     head[0x40:0x46] = b'PE\0\0\x64\x86'
-    stored = b'some files'
-    trailer = self_update.TRAILER.pack(len(stored), 1, hashlib.sha256(stored).digest(), self_update.MAGIC)
+    named = {'launcher/windows/main.py': b'some files'}
+    if version: named['launcher/builder/CMakeLists.txt'] = b'set(TTT2_LAUNCHER_VERSION %s)\n' % version.encode()
+    stored = b''.join(struct.pack('<I', len(p)) + p.encode() + struct.pack('<Q', len(d)) + d for p, d in named.items())
+    trailer = self_update.TRAILER.pack(len(stored), len(named), hashlib.sha256(stored).digest(), self_update.MAGIC)
     return bytes(head) + body + (stored + trailer if files else b'') + after
 
 class Release(unittest.TestCase):
@@ -64,6 +66,12 @@ class Release(unittest.TestCase):
             exe.write_bytes(fake_exe(b'program').replace(b'some files', b'sOme files'))
             self.assertFalse(self_update.is_launcher_exe(exe))
             exe.write_bytes(b'<html>not found</html>'); self.assertFalse(self_update.is_launcher_exe(exe))
+            # (Its version as its files say, read: as its --version says it, built from them.)
+            exe.write_bytes(fake_exe(b'program', after=b'resources', version='0.4.3'))
+            self.assertEqual(self_update.files_version(self_update.stored_files(exe)), '0.4.3')
+            self.assertEqual(self_update.stored_files(exe)['launcher/windows/main.py'], b'some files')
+            exe.write_bytes(fake_exe(b'program', version=None))
+            self.assertEqual(self_update.files_version(self_update.stored_files(exe)), '')
         self.assertEqual(version_in('ttt2-launcher 0.4.0\r\n'), '0.4.0')
         self.assertEqual(version_in('Python 3.13'), '')
 
@@ -97,8 +105,9 @@ class Update(unittest.TestCase):
                      digest='sha256:' + (sha256 or hashlib.sha256(self.new).hexdigest()))
         self.handler.answer = json.dumps(dict(tag_name='v' + version, html_url=self.base, assets=[asset])).encode()
         self.handler.status = status
-    def update(self, said='99.0.0', cancelled=lambda: False):
-        with mock.patch.object(self_update, 'said_version', return_value=(0, said)):
+    def update(self, cancelled=lambda: False):
+        # (Nothing is started for it: what was downloaded is read.)
+        with mock.patch('subprocess.Popen', side_effect=AssertionError('a program was started')):
             return self_update.update(self.exe, cancelled, self.lines.append)
     def assertUnchanged(self):
         self.assertEqual(self.exe.read_bytes(), fake_exe(b'old'))
@@ -116,13 +125,14 @@ class Update(unittest.TestCase):
         self.handler.answer, self.handler.status = b'{"message": "Not Found"}', 404
         self.assertIsNone(self.update()); self.assertUnchanged()
     def test_damaged_or_wrong_download_changes_nothing(self):
-        for release, said, why in [(dict(sha256='0' * 64), '99.0.0', 'damaged'),
-                                   (dict(size=len(self.new) + 1), '99.0.0', 'incomplete'),
-                                   ({}, '98.0.0', 'is version 98.0.0'),
-                                   ({}, '', 'does not start')]:
+        for release, version, why in [(dict(sha256='0' * 64), '99.0.0', 'damaged'),
+                                      (dict(size=len(self.new) + 1), '99.0.0', 'incomplete'),
+                                      ({}, '98.0.0', 'is version 98.0.0'),
+                                      ({}, None, 'names no version')]:
             with self.subTest(why):
+                self.new = self.handler.files['/new.exe'] = fake_exe(b'new' * 100000, version=version)
                 self.release(**release)
-                with self.assertRaisesRegex(UpdateError, why): self.update(said)
+                with self.assertRaisesRegex(UpdateError, why): self.update()
                 self.assertUnchanged()
         self.handler.files = {'/new.exe': b'<html>'}; self.release(sha256=hashlib.sha256(b'<html>').hexdigest(), size=6)
         with self.assertRaisesRegex(UpdateError, 'not a Windows launcher'): self.update()

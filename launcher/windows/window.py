@@ -917,14 +917,28 @@ class Window:
         action, names = task['action'], task['names']
         shown = ', '.join(self.display(n) for n in names) if len(names) < 3 else '%d characters' % len(names)
         mine = action in ('launcher', 'files')     # (the launcher's own update)
+        if mine and ok and task['updated'] and 'opened' not in task:
+            # The new launcher opened (it waits for this one to end), from a thread: a virus scanner can hold the
+            # start of a program it has not seen before, and this window says what it waits for meanwhile, instead
+            # of hanging. (Then this again, with what came of it.)
+            task.update(running=True, opening=True)
+            self.task_title.configure(text='Updated to ' + task['updated'])
+            self.task_detail.configure(text='Opening it…')
+            self.task_button.configure(state='disabled')
+            def open_it():
+                try:
+                    self_update.open_updated(self.exe); task['opened'] = None
+                except OSError as error:
+                    task['opened'] = error
+                self.events.put(('done', code))
+            threading.Thread(target=open_it, daemon=True).start()
+            return
+        if mine and ok and task['updated'] and not task['opened']:
+            self.root.destroy()
+            return
         if mine and ok and task['updated']:
-            try:
-                self_update.open_updated(self.exe)
-                self.root.destroy()
-                return
-            except OSError as error:
-                title, detail, ok = ('Updated to %s, but it cannot be opened' % task['updated'],
-                                     self_update.reason(error) + '. Start the launcher again.', False)
+            title, detail, ok = ('Updated to %s, but it cannot be opened' % task['updated'],
+                                 self_update.reason(task['opened']) + '. Start the launcher again.', False)
         elif code == 130:
             title, detail = ('Update cancelled' if mine else 'Cancelled'), (
                 'The launcher is as it was.' if mine else 'Completed extraction data is kept.')
@@ -1001,15 +1015,20 @@ class Window:
                 elif kind == 'main': self.main_known(payload)
         except queue.Empty:
             pass
-        except tk.TclError:
-            return                  # (the window is gone: an update opened the new launcher)
+        except Exception:
+            try:
+                if not self.root.winfo_exists(): return
+            except tk.TclError:
+                return              # (the window is gone: an update opened the new launcher)
+            # (Said, and the events after it still shown: a task's end among them, else its panel waits for good.)
+            self.callback_failed(*sys.exc_info())
         self.root.after(100, self.pump)
 
     def error(self, error):
         messagebox.showerror(NAME, str(error), parent=self.root)
 
     def close(self):
-        if self.busy():
+        if self.busy() and not self.task.get('opening'):    # (the new launcher is opening: this one can go)
             messagebox.showinfo('Task running', 'Wait for this task to finish, or cancel it first. The launcher stays '
                                 'open so that cleaning up and logging can finish.', parent=self.root)
         else:
