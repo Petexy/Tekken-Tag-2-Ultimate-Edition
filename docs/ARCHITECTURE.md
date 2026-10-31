@@ -863,6 +863,81 @@ delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
 
+## Solo Ghost Battle
+
+The Offline menu has SOLO GHOST BATTLE below GHOST BATTLE: Ghost Battle
+(mode kind 12) fought one on one (`title/solo_ghost.cpp`,
+`title/menudata.cpp`).
+
+**The row.** The title's menus are MenuToolKit files read once at start-up
+(entry `4615C394`, the update's copy in data100 winning over data000's):
+BX01, a binary XML (a header with the offsets of the tag and attribute
+name tables at its end; per element a tag, a text, attributes {name's
+number, text} and children), whose event handlers are children holding
+compiled Xtal scripts. The Offline menu is frame FrameMode002-01 with menu
+MenuMode002-01: eight rows MenuItemMode002-01..08 (ARCADE BATTLE, GHOST
+BATTLE, ... PAIR PLAY), each with an OnEnter script that asks the mode
+manager for a mode, and per row a description StaticMode002-0N and an empty
+value StaticValueMode002-0N, which the menu's scripts find by the cursor's
+place ("StaticMode002-0" + place + 1), as they find the rows' icons in two
+arrays its OnLoad script fills (an append each: `02 02 00 VV` loads the
+icon's number, `43 01 02` appends it). At start-up the port writes the file
+again with a ninth row, MenuItemMode002-09, at place 2: a copy of GHOST
+BATTLE's (the same OnEnter script) with its own label (the `text`
+attribute, without GHOST BATTLE's `textid`), an append more after GHOST
+BATTLE's in both icon arrays (the script's code size, at +8, and the word
+holding the code's size less one, 66 bytes after the code, grow by 14), and
+a description and a value at place 2 (the later ones renamed a number on),
+the description with its own text. A file not as expected is left as it is.
+
+**The session.** The rows' scripts call `ModeManager::Impl::requestChangeMode`
+(`sub_0738E098`: r4 the mode, r5 its argument; the Offline entry is 17,
+whose flags GHOST BATTLE's row gives as 9, bit 8 making Ghost Battle,
+`sub_028A28D4`, in `sub_02E50960`; the main menu is 16). The menus stay
+made, with their cursors (a container's children at +160/+164, the cursor
+at +172; entities by name through `sub_04545920` from
+`*(*0x1084FEBC + 744) + 4`), so a request for the Offline entry with flags 9
+is a Solo Ghost Battle when the Offline menu's focused row is the new one;
+the pause menu's CHARACTER SELECT asks for the Offline entry with the same
+flags, the row still focused. Every request for the Offline entry or the
+main menu sets the port's flag anew; hooks act while it is set and the mode
+manager's kind is 12.
+
+**The player.** The select screen's Tag/Solo popup (states 1 and 2 of the
+select's cursor, `sub_033E3DC8`) asks whether the mode is Mushroom Battle
+(`sub_02C23554`, from `0x033E3EA0` or `0x033E3EC4`); if so it gives the
+cursor SOLO (`sub_033E1010(cursor, 2)`: its style at +0x821C) and is done
+in the frame it opens, before the popup draws (only in states 2 and 32,
+`sub_0298E654`), and each pick is then committed twice, the game's solo
+team (`sub_033E265C`). The select's help bar asks the same
+(`0x033E5E44`) before offering PRESET TAG. In Solo Ghost Battle the port
+answers yes at those three calls.
+
+**The ghosts.** A ghost is a band file's record of two GOST blocks, its
+fighter's and its partner's (fighter +20, rank +24, the player's name
++0x1118, the recorded inputs). Before the fight `sub_06EEF064` copies them
+into the CPU side's member blocks (`sub_04DCAD34`, `sub_04DCAE7C`), puts
+the first member's fighter in the partner's place when the partner's
+fighter is not available (`sub_06EE94D0`, called at `0x06EEFA98`), and
+writes the side's second record (mm+428[side + 2]) from the partner's
+member copy, over the stage set-up's solo pair. The ghost cards
+(`sub_028A2B8C`) show the ghost's fighter alone under the same rule
+(`sub_06EE94D0` through the thunk `0x028AA478`, return address
+`0x028A2BE0`). In Solo Ghost Battle `sub_06EE94D0` answers "not available"
+at both places (the strong ghosts' draw, `sub_028A2DA8`, asks too and keeps
+its answer), and the partner's block is a copy of the first member's
+(`sub_04DCAE7C` runs `sub_04DCAD34`), so the second member's rank, which
+the side's rank uses, is the ghost's own. Name, record, rank and recorded
+play are the ghost's; records, ranks and rewards are Ghost Battle's.
+
+**The name.** The title's texts come from `sub_04D49F5C` (r4 the bank's
+number << 24 | the text's), looked up every frame. The fight's corner asks
+for common 144, GHOST BATTLE (`sub_033DB714` at `0x033DBFE0`,
+`sub_033DAEAC` at `0x033DAF6C`); in Solo Ghost Battle it gets SOLO GHOST
+BATTLE (in the bank's form: its length in characters before it). The
+select screen's GHOST BATTLE title is a picture and stays.
+`TTT2_TRACE_SOLO_GHOST=1` logs the session's start and end.
+
 ## Added fighters
 
 `runtime/src/title/roster.*` adds fighters from character packs (folders in
