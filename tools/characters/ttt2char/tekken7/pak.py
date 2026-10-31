@@ -27,7 +27,8 @@ PLAIN_START = {'.uasset': b'\xc1\x83\x2a\x9e', '.umap': b'\xc1\x83\x2a\x9e', '.b
 
 
 class EncryptedError(Exception):
-    """A file Tekken 7 keeps encrypted, not saved from the running game yet (the message is its pak path)."""
+    """A file Tekken 7 keeps encrypted, not saved from the running game (yet, or the game did not read it: autodump's
+    `unread`; the message is its pak path)."""
 
 
 def plain(path, data):
@@ -92,6 +93,17 @@ def pak_names(pak_dir):
     except OSError:
         return []
     return sorted(names, key=lambda n: (n.endswith('_P.pak'), n))
+
+
+def nested_paks(pak_dir):
+    """The pak files in the folders below a Paks folder (a mod's, in ~mods say), by path: the game mounts them too,
+    but Paks reads only the ones at the top (pak_names)."""
+    out = []
+    for folder, subfolders, names in os.walk(pak_dir):
+        subfolders.sort()
+        if folder != pak_dir:
+            out += [os.path.join(folder, n) for n in sorted(names) if n.lower().endswith('.pak')]
+    return out
 
 
 class Paks:
@@ -162,7 +174,7 @@ class Paks:
         if saved and os.path.isfile(saved):
             with open(saved, 'rb') as f:
                 d = f.read()
-            if plain(e.path, d):
+            if len(d) == e.usize and plain(e.path, d):    # (whole, as autodump.unsaved_files counts it saved)
                 return d
         raise EncryptedError(e.path)
 

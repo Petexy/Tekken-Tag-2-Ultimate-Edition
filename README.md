@@ -578,7 +578,12 @@ Noctis's costumes (and Noctis's voice) encrypted in its files: in the same
 run the game reads those files with its own file reader, the one its loading
 uses, which hands them over decoded, and they are saved to
 `~/.local/share/ttt2/tekken7/files/` (about 670 MB for both) for the
-importer. `tools/characters/dump_tekken7.py` does that step alone (the
+importer. A file the game does not hand over plain and whole (a mod's pak
+in a folder below `TekkenGame/Content/Paks` can replace it) is named in the
+log, with why, and asked for again on the next import of that fighter: the
+import fails only when it needs that file, saying which, and a preset outfit
+that needs it is left out.
+`tools/characters/dump_tekken7.py` does that step alone (the
 movesets go to `~/.local/share/ttt2/tekken7/movesets/`); movesets saved with
 [TKMovesets2](https://github.com/Kiloutre/TKMovesets) work too
 (`--movesets FOLDER`).

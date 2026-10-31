@@ -1218,9 +1218,18 @@ of paths at a time on one thread of its own (the pak layer keeps a reader
 per thread), copies the buffers out and frees them with the game's
 `FMemory::Free`; paths must be relative ones under the game's content. The
 dumper saves them under their pak paths in `~/.local/share/ttt2/tekken7/files/`,
-and the importer's pak reader takes a file from there whenever the pak's
-copy is encrypted. No key is looked for or used: the game reads its own
-files, as it does when it loads the fighter.
+and the importer's pak reader takes a file from there (only one of the pak
+entry's size) whenever the pak's copy is encrypted. No key is looked for or
+used: the game reads its own files, as it does when it loads the fighter. A
+file the game does not hand over plain and of its pak entry's size is not
+saved and is named in a warning, with why (a pak in a folder below `Paks`,
+such as a mod's in `~mods`, which the game mounts too but the importer's
+reader skips, may replace it: that is warned of too); being unsaved, it is
+asked for again on the fighter's next import, which runs Tekken 7 hidden
+again (and saves it once the mod is gone). The movesets are dumped all the
+same, and the importer fails only on a file it reads, naming it; a preset
+outfit whose files are missing is left out (its code is not listed, the
+others keep theirs).
 
 **The importer** (`tools/characters/`, Python with numpy and Pillow) reads
 Tekken 7's pak files (version 3; every entry is flagged encrypted but
