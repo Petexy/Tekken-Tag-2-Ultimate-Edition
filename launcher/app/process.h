@@ -32,12 +32,14 @@ public:
     // Starts `argv` with these variables added to the launcher's own; none,
     // with the reason, when it cannot start. With `pipes` (the builder, the
     // importer) it runs in a process group of its own, with what it starts,
-    // and gets SIGTERM if the launcher ends before it. `pipes` false: its
-    // output goes where the launcher's goes (the game), and it gets a
-    // session of its own, so that it keeps running when the launcher is
-    // closed.
+    // and gets SIGTERM if the launcher ends before it. `pipes` false (the
+    // game): it gets a session of its own, so that it keeps running when the
+    // launcher is closed, and its output (standard output and error) goes
+    // into the file `output`, made anew, else (none given, or it cannot be
+    // made) where the launcher's goes.
     static std::shared_ptr<Process> start(const std::vector<std::string>& argv, const Environment& environment,
-                                          Handlers handlers, std::string* error, bool pipes = true);
+                                          Handlers handlers, std::string* error, bool pipes = true,
+                                          const std::string& output = {});
 
     // How long a program asked to stop may take to clean up: the importer
     // first closes the hidden Tekken 7 (its helper, Wine's server, gamescope,

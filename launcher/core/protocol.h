@@ -3,12 +3,14 @@
 // The lines the builder (ttt2-build) and the importer (import_character.py
 // --progress) print about their progress, and the progress bar they make.
 // A line starting with '@' and a known word is the protocol; anything else
-// is log text for the user.
+// is log text for the user. And the game's last lines, when it stops with
+// an error.
 
 #include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace launcher {
 
@@ -50,6 +52,13 @@ private:
     std::string step_id_, step_, detail_;
     double fraction_ = -1, step_start_ = 0, step_weight_ = 0;
 };
+
+// What the game said last in its output (the end of its log is enough), to
+// show why it stopped: up to `count` lines in their order, without blank
+// lines, the indented ones (registers and return addresses after a crash's
+// reason, an X error's details) and its reports of frame rates and
+// presentation every 10 s.
+std::vector<std::string> last_words(std::string_view output, size_t count);
 
 // "1,203" and "4.2 GB".
 std::string thousands(uint64_t n);
