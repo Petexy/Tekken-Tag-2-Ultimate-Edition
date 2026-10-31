@@ -1,4 +1,5 @@
 #include "title/roster.h"
+#include "title/solo_ghost.h"
 #include "title/eliza_assist.h"
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
@@ -2236,6 +2237,8 @@ PPC_FUNC(sub_04DC9F20) {
 // recorded inputs are buttons and directions, any fighter's), with the
 // donor's ghost's partner, or none when that ghost fights alone. Other modes
 // (Arcade's CPU) keep the refusal: their fighters are drawn, not a ghost's.
+// In Solo Ghost Battle the partner's block is the first member's again, so
+// that the ghost's second member (in the side's ranks) is the ghost itself.
 constexpr uint32_t kGhostEntry = 20, kBlockFighter = 20;
 void trace_ghost_block(const char* member, uint32_t block) {
     if (!traces().roster || !block) return;
@@ -2259,6 +2262,10 @@ PPC_FUNC(sub_04DCAD34) {
 }
 PPC_FUNC(sub_04DCAE7C_orig);
 PPC_FUNC(sub_04DCAE7C) {
+    if (solo_ghost_battle()) {
+        sub_04DCAD34(ctx, base);
+        return;
+    }
     const uint32_t ghosts = ctx.r[3], block = ctx.r[4];
     const int k = slot_of_id(ctx.r[5]);
     if (k < 0 || !ghost_battle()) {

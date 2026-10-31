@@ -74,7 +74,8 @@ add_library(cafe_runtime OBJECT
     src/title/controllers.cpp
     src/title/practice.cpp
     src/title/presentation.cpp
-    src/title/roster.cpp)
+    src/title/roster.cpp
+    src/title/solo_ghost.cpp)
 target_include_directories(cafe_runtime PUBLIC include PRIVATE src)
 target_compile_features(cafe_runtime PUBLIC cxx_std_20)
 find_package(Vulkan REQUIRED)
@@ -99,6 +100,7 @@ add_library(cafe_title STATIC
     src/title/draw.cpp
     src/title/font.cpp
     src/title/image.cpp
+    src/title/menudata.cpp
     src/title/pictures.cpp
     src/title/text.cpp
     src/title/title_screen.cpp)

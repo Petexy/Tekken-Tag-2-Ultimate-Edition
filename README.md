@@ -53,6 +53,10 @@ and shaders are translated to Vulkan as it runs.
   to five, and the player entry screen pictures the keyboard, PlayStation,
   Xbox-style or Nintendo controller each player holds, drawn in the game's
   style. Everywhere else every device plays as the one player.
+- **Solo Ghost Battle**: a new Offline mode, below GHOST BATTLE: Ghost
+  Battle fought one on one. The player picks one fighter (no Tag or Solo
+  choice) and every ghost fights alone, with its own name, rank, record
+  and recorded play; wins, ranks and rewards count as Ghost Battle's.
 - **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
   together put both fighters back where the stage put them; a hint at the
   bottom right of the screen says so, in the look of the game's own.
