@@ -6,9 +6,9 @@ files in it, make_launcher_exe.py) opens this launcher with
 TTT2_LAUNCHER_EXE naming it. Only then is GitHub asked for this repository's
 newest release; when that one is newer, Update downloads its .exe beside the
 one that was started, checks it (its size, the SHA-256 GitHub gives, that it
-is a 64-bit Windows program with its files, and that it says it is the
-version it was released as), puts it in that one's place and opens it as this
-launcher closes. Anything failing leaves the .exe as it was.
+is a 64-bit Windows program with its files, and that they are the version it
+was released as), puts it in that one's place and opens it as this launcher
+closes. Anything failing leaves the .exe as it was.
 
 A test build's .exe (one made from a branch other than main) updates its files
 instead: when its branch has newer commits on GitHub, Update downloads the
@@ -45,8 +45,6 @@ REPLACES_VARIABLE = 'TTT2_LAUNCHER_AFTER'
 # entry.cpp's trailer after its files: their size, count, SHA-256, magic.
 TRAILER = struct.Struct('<QQ32s8s')
 MAGIC = b'TTT2PAY1'
-# How long the new .exe may take to say its version.
-VERSION_SECONDS = 60
 # How long between two quiet questions to GitHub, while the window stays open.
 CHECK_SECONDS = 6 * 3600
 # The commit the release .exe was made from (make_launcher_exe.py writes it into its files).
@@ -66,13 +64,18 @@ class Cancelled(Exception):
     pass
 
 
+def version_of(text):
+    """The version launcher/builder/CMakeLists.txt's text names (TTT2_LAUNCHER_VERSION), or ''."""
+    found = re.search(r'^set\(TTT2_LAUNCHER_VERSION ([0-9.]+)\)', text, re.M)
+    return found.group(1) if found else ''
+
+
 @lru_cache(maxsize=None)
 def version(root=ROOT):
     """This launcher's version: the Linux launcher's (one release has both)."""
-    text = (Path(root) / 'launcher/builder/CMakeLists.txt').read_text(encoding='utf-8')
-    found = re.search(r'^set\(TTT2_LAUNCHER_VERSION ([0-9.]+)\)', text, re.M)
-    if not found: raise ValueError('launcher/builder/CMakeLists.txt names no TTT2_LAUNCHER_VERSION')
-    return found.group(1)
+    number = version_of((Path(root) / 'launcher/builder/CMakeLists.txt').read_text(encoding='utf-8'))
+    if not number: raise ValueError('launcher/builder/CMakeLists.txt names no TTT2_LAUNCHER_VERSION')
+    return number
 
 
 def build_commit(root=ROOT):
@@ -278,22 +281,44 @@ def cannot_replace(exe):
     return ''
 
 
-def is_launcher_exe(file):
-    """Whether `file` is a 64-bit Windows program holding a launcher's files: entry.cpp's trailer after them (in
-    its resource, or appended), with the SHA-256 of those files. (The word alone is in the launcher's code too.)"""
+def stored_files(file):
+    """The launcher's files in `file`, {path: bytes}, when it is a 64-bit Windows program holding them: entry.cpp's
+    trailer after them (in its resource, or appended), with the SHA-256 of those files; else None. (The word alone
+    is in the launcher's code too.)"""
     try:
         data = Path(file).read_bytes()
     except OSError:
-        return False
-    if len(data) < 64 or data[:2] != b'MZ': return False
+        return None
+    if len(data) < 64 or data[:2] != b'MZ': return None
     pe = struct.unpack_from('<I', data, 0x3C)[0]
-    if data[pe:pe + 6] != b'PE\0\0\x64\x86': return False
+    if data[pe:pe + 6] != b'PE\0\0\x64\x86': return None
     at = len(data)
     while (at := data.rfind(MAGIC, 0, at)) >= TRAILER.size - len(MAGIC):
         start = at + len(MAGIC) - TRAILER.size
-        size, _, digest, _ = TRAILER.unpack_from(data, start)
-        if size <= start and hashlib.sha256(data[start - size:start]).digest() == digest: return True
-    return False
+        size, count, digest, _ = TRAILER.unpack_from(data, start)
+        if size <= start and hashlib.sha256(data[start - size:start]).digest() == digest: break
+    else:
+        return None
+    # (As entry.cpp reads them: each one's path after its length, then its size and bytes; just those.)
+    files, at = {}, start - size
+    try:
+        for _ in range(count):
+            n, = struct.unpack_from('<I', data, at); path = data[at + 4:at + 4 + n].decode('utf-8'); at += 4 + n
+            n, = struct.unpack_from('<Q', data, at); files[path] = data[at + 8:at + 8 + n]; at += 8 + n
+    except (struct.error, UnicodeDecodeError):
+        return None
+    return files if at == start else None
+
+
+def is_launcher_exe(file):
+    """Whether `file` is a 64-bit Windows program holding a launcher's files (stored_files)."""
+    return stored_files(file) is not None
+
+
+def files_version(files):
+    """The version of a launcher .exe's files (stored_files): the one its --version says, built from their
+    launcher/builder/CMakeLists.txt; '' when they name none."""
+    return version_of(files.get('launcher/builder/CMakeLists.txt', b'').decode('utf-8', 'replace'))
 
 
 def version_in(output):
@@ -321,23 +346,6 @@ def download(release, file, cancelled, say):
             done += len(chunk)
             if total and (time.monotonic() - shown > 0.25 or done == total):
                 say('@progress %d %d' % (done, total)); shown = time.monotonic()
-
-
-def said_version(file, cancelled):
-    """What the .exe says its version is, asked as the launcher asks it."""
-    process = subprocess.Popen([str(file), '--version'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                               stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-    try:
-        end = time.monotonic() + VERSION_SECONDS
-        while process.poll() is None:
-            if cancelled(): raise Cancelled()
-            if time.monotonic() > end:
-                raise UpdateError('It does not start: it did not answer within %d seconds.' % VERSION_SECONDS)
-            time.sleep(0.1)
-        return process.returncode, version_in(process.stdout.read().decode('utf-8', 'replace'))
-    finally:
-        if process.poll() is None: process.kill(); process.wait()
-        process.stdout.close()
 
 
 def replace(update, exe):
@@ -388,21 +396,19 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
                               % (release.version, size, release.size))
         if release.sha256 and sha256_of(file) != release.sha256:
             raise UpdateError("The download of version %s is damaged: its SHA-256 is not GitHub's." % release.version)
-        if not is_launcher_exe(file):
+        files = stored_files(file)
+        if files is None:
             raise UpdateError('What was downloaded for version %s is not a Windows launcher.' % release.version)
-        # It runs on this PC, and is the version it was released as (else each
-        # update would download it again).
-        say('@step update Checking version ' + release.version)
-        try:
-            code, said = said_version(file, cancelled)
-        except OSError as error:
-            raise UpdateError('Version %s does not start on this PC: %s.' % (release.version, reason(error)))
-        except UpdateError as error:
-            raise UpdateError('Version %s does not start on this PC. %s' % (release.version, error))
-        if code != 0 or not said:
-            raise UpdateError('Version %s does not start on this PC (code %d).' % (release.version, code))
+        # It is the version it was released as (else each update would download it again), as its files say.
+        # (Not by starting it, as the Linux launcher asks the new AppImage: on Windows, a program never seen
+        # before is where virus scanners step in, and its start can wait on them for as long as they take, with
+        # this update stuck behind it.)
+        said = files_version(files)
+        if not said:
+            raise UpdateError('What was downloaded for version %s names no version.' % release.version)
         if compare_versions(said, release.version) != 0:
             raise UpdateError('The launcher released as version %s is version %s.' % (release.version, said))
+        if cancelled(): raise Cancelled()
         try:
             replace(file, exe)
         except OSError as error:
