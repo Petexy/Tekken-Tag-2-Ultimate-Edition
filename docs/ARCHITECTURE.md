@@ -45,7 +45,13 @@ the reachability bound sound.
 - Guest state: `PPCContext` (r0–r31, f0–f31 as paired doubles, CR as eight
   fields, LR, CTR, XER, FPSCR, GQR0–7, reservation).
 - Guest memory: one 4 GiB host reservation; guest address `a` is `base + a`.
-  Data stays big-endian; loads/stores byte-swap.
+  Data stays big-endian; loads/stores byte-swap. On Linux the base is at a
+  2 MiB boundary and the reservation asks for transparent huge pages
+  (`MADV_HUGEPAGE`): the GPU imports it (below), and amdgpu walks an
+  imported range page by page at each submission; with 4 KiB pages that
+  took the "gpu" thread from 7 % to 44 % of a core in the kernel during a
+  fight. Unasked, a kernel set to "madvise" (SteamOS) gives it none and one
+  set to "always" only while whole 2 MiB blocks are free (after a boot).
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
