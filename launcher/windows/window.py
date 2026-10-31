@@ -199,6 +199,7 @@ class Window:
     def show_game(self):
         L, px = self.look, self.look.px
         card = self.game_card
+        offset = self.main.offset          # (kept, as show_characters keeps it: the game ended, say)
         clear(card)
         installed = self.settings.installed()
         busy = self.task is not None and self.task.get('running')
@@ -242,6 +243,7 @@ class Window:
         if installed:
             L.button(buttons, icon='folder', command=lambda: opened(installed),
                      tip='Open the game\'s folder').pack(side='right', padx=(0, px(8)))
+        self.main.keep(offset)
 
     def more_menu(self, button):
         """Windows' own: building and installing from a Wii U source, and the logs."""
@@ -429,6 +431,12 @@ class Window:
         return None
 
     def show_characters(self):
+        # (Made again on coming back to the launcher, among others: the page stays where the player scrolled it.)
+        offset = self.main.offset
+        self.fill_characters()
+        self.main.keep(offset)
+
+    def fill_characters(self):
         L, px = self.look, self.look.px
         card = self.characters_card
         clear(card)
@@ -808,10 +816,10 @@ class Window:
         self.log_view = tk.Text(self.log_frame, height=10, wrap='word', bg=LOG, fg='#d8d8d8', bd=0, relief='flat',
                                 font=L.fonts['log'], padx=px(10), pady=px(8), insertbackground=TEXT,
                                 highlightthickness=0, state='disabled')
-        bar = ttk.Scrollbar(self.log_frame, orient='vertical', command=self.log_view.yview)
+        bar = ttk.Scrollbar(self.log_frame, orient='vertical', command=self.log_view.yview, style='Log.Vertical.TScrollbar')
         self.log_view.configure(yscrollcommand=bar.set)
-        bar.pack(side='right', fill='y')
-        self.log_view.pack(fill='both', expand=True, padx=1, pady=1)
+        bar.pack(side='right', fill='y', padx=(0, 1), pady=1)
+        self.log_view.pack(fill='both', expand=True, padx=(1, 0), pady=1)
 
     def toggle_details(self):
         if self.log_frame.winfo_ismapped():
@@ -1090,6 +1098,7 @@ class Window:
         box = ttk.Combobox(parent, state='readonly', values=[label for _, label in RESOLUTIONS],
                            textvariable=self.resolution, width=12, font=self.look.fonts['normal'])
         box.bind('<<ComboboxSelected>>', lambda e: (box.selection_clear(), self.save_display()))
+        self.settings_page.take_wheel(box)          # (else the wheel passing over it chooses, and saves, a size)
         return box
 
     def display_file(self):
@@ -1322,6 +1331,9 @@ class Window:
             self.close_settings()
             assert rows == len(self.status['fighters']) > 0, (rows, len(self.status['fighters']))
             assert switches == 3 and len(caps) == 19 and all(caps), (switches, caps)
+            # (A bar to click and drag: clam's is 1 px wide when its thumb has no size.)
+            bar = self.main.bar.winfo_reqwidth()
+            assert bar >= self.look.px(8), bar
             self.args.ui_smoke_test.write_text(json.dumps(dict(
                 window=self.root.title(), fighters=rows, pages=2, keys=caps, paths=self.settings.values,
                 ), indent=2), encoding='utf-8')

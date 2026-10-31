@@ -408,8 +408,10 @@ class Look:
         st.configure('TEntry', fieldbackground=LOG, foreground=TEXT, insertcolor=TEXT, bordercolor=BUTTON_LINE,
                      lightcolor=LOG, darkcolor=LOG, padding=(px(8), px(5)))
         st.map('TEntry', bordercolor=[('focus', FOCUS)])
+        # (clam's thumb is -arrowsize thick, and so the bar: the layout below has no arrows.)
         st.configure('Vertical.TScrollbar', background='#4a4a4c', troughcolor=WINDOW, bordercolor=WINDOW,
-                     lightcolor='#4a4a4c', darkcolor='#4a4a4c', gripcount=0, arrowsize=0, width=px(10))
+                     lightcolor='#4a4a4c', darkcolor='#4a4a4c', gripcount=0, arrowsize=px(10))
+        st.configure('Log.Vertical.TScrollbar', troughcolor=LOG, bordercolor=LOG)     # (the task log's, in its box)
         st.map('Vertical.TScrollbar', background=[('active', '#5d5d5f')])
         st.layout('Vertical.TScrollbar', [('Vertical.Scrollbar.trough', {'sticky': 'ns', 'children': [
             ('Vertical.Scrollbar.thumb', {'expand': '1', 'sticky': 'nswe'})]})])
@@ -508,19 +510,36 @@ class Tooltip:
 class Page(tk.Frame):
     """A page of the window: a column at most `width` wide (760, as the Linux launcher's), in its
     middle, scrolling. Its contents go in `column`. The column is placed in the page and moved to
-    scroll (a frame in a canvas, Tk's usual way, lays out many times slower under Wine)."""
+    scroll (a frame in a canvas, Tk's usual way, lays out many times slower under Wine). As GTK's,
+    it scrolls by the wheel, its bar and PgUp/PgDn/Home/End (here the arrow keys too), and keeps
+    the control Tab moves to in view. It also drags by its background, with the mouse or a finger
+    (which Windows makes the mouse): GTK's drags by a finger only."""
 
     def __init__(self, master, look, width=760):
         super().__init__(master, bg=WINDOW, bd=0, highlightthickness=0)
         self.look, self.width, self.offset, self.steps, self.moving, self.painting = look, width, 0, 0, None, False
+        self.dragging = self.target = None
+        # The wheel: X11's is buttons 4 and 5 in Tk 8.6. Elsewhere those are the mouse's side buttons, back and
+        # forward (Windows' Tk, and X11's from Tk 9 on, which sends the wheel as a MouseWheel).
+        self.wheels = [('<MouseWheel>', None)]
+        if self.tk.call('tk', 'windowingsystem') == 'x11' and float(self.getvar('tk_version')) < 9:
+            self.wheels += [('<Button-4>', -1), ('<Button-5>', 1)]
         self.column = tk.Frame(self, bg=WINDOW, bd=0, highlightthickness=0)
         self.column.surface = 'window'
         self.bar = ttk.Scrollbar(self, orient='vertical', command=self.yview)
+        self.take_wheel(self.bar)
         self.bind('<Configure>', self._place)
         self.column.bind('<Configure>', self._place)
-        self.bind_all('<MouseWheel>', self._wheel, add='+')
-        self.bind_all('<Button-4>', lambda e: self._scroll(-1), add='+')
-        self.bind_all('<Button-5>', lambda e: self._scroll(1), add='+')
+        for wheel, steps in self.wheels:
+            self.bind_all(wheel, lambda e, steps=steps: self._wheel(e, steps), add='+')
+        for key, how in (('Prior', ('scroll', -1, 'pages')), ('Next', ('scroll', 1, 'pages')),
+                         ('Up', ('scroll', -1, 'units')), ('Down', ('scroll', 1, 'units')),
+                         ('Home', ('moveto', 0)), ('End', ('moveto', 1))):
+            self.bind_all('<KeyPress-%s>' % key, lambda e, how=how: self._key(e, how), add='+')
+        # (Sent by Tab and Shift+Tab only, tk::TabToWindow: a click never moves the page under the pointer.)
+        self.bind_all('<<TraverseIn>>', lambda e: self._mine(e.widget) and self.see(e.widget), add='+')
+        self.bind_all('<ButtonPress-1>', self._grab, add='+')
+        self.bind_all('<B1-Motion>', self._drag, add='+')
 
     def _total(self):
         return self.column.winfo_reqheight() + self.look.px(24 + 32)
@@ -549,6 +568,13 @@ class Page(tk.Frame):
         self._place()
         self._paint()
 
+    def keep(self, offset):
+        """Back at `offset` (as far as the column now reaches) once what was made again in it is laid out. Tk lays
+        out an emptied box before the boxes made in it are full, and the column, short for a moment, scrolls up."""
+        self.update_idletasks()
+        self.offset = offset
+        self._place()
+
     def _paint(self):
         """What a move uncovered drawn now, before more input. Tk draws when it is idle, which it
         is not while the wheel turns or the scroll bar is dragged: the uncovered stripe would show
@@ -565,27 +591,75 @@ class Page(tk.Frame):
         finally:
             self.painting = False
 
+    def _shown(self):
+        return self.winfo_ismapped() and self.bar.winfo_ismapped()
+
+    def _mine(self, widget):
+        """Whether `widget` (a name for those Tk makes itself) is in the page, and not a list's popdown."""
+        name = str(widget)
+        return (name == str(self) or name.startswith(str(self) + '.')) and '.popdown' not in name
+
     def _scroll(self, steps):
         # (The wheel's steps of a frame's time moved at once: one move a frame at most.)
-        if not (self.winfo_ismapped() and self.bar.winfo_ismapped()): return
+        if not self._shown(): return
         self.steps += steps
         if not self.moving: self.moving = self.after(16, self._move)
 
     def _move(self):
         steps, self.steps, self.moving = self.steps, 0, None
+        if self.target is not None:
+            self.offset, self.target = self.target, None
+            self._place()
+            self._paint()
         if steps: self.yview('scroll', steps * 2, 'units')
 
-    def _wheel(self, event):
-        self._scroll(-1 if event.delta > 0 else 1)
+    def _wheel(self, event, steps=None):
+        if not self._mine(event.widget): return       # (the log's, the header's: not the page's)
+        # (Tk 8.6 on Windows sends whole notches of 120, several in one when the wheel spins.)
+        notches = max(1, abs(event.delta) // 120)
+        self._scroll(steps or (-notches if event.delta > 0 else notches))
+
+    def take_wheel(self, widget):
+        """The wheel over `widget`, in the page, scrolls the page only: not the bar's own steps on top
+        of the page's, nor a list's choice, which would change as the pointer passed over it."""
+        for wheel, steps in self.wheels:
+            widget.bind(wheel, lambda e, steps=steps: self._wheel(e, steps) or 'break')
+
+    def _key(self, event, how):
+        # (Not while typing or choosing in a list, whose keys they are: a Combobox is an Entry. Nor in another window:
+        # a list's popdown, or Tk's own file dialog or message box on X11. A keycap waiting for a key takes it first.)
+        widget = event.widget
+        if (self._shown() and str(self.tk.call('winfo', 'toplevel', widget)) == str(self.winfo_toplevel())
+                and not isinstance(widget, (tk.Text, tk.Entry, ttk.Entry))):
+            self.yview(*how)
 
     def see(self, widget):
-        """Scrolls so that `widget` (in the column) is in view."""
-        self.update_idletasks()
-        top = widget.winfo_rooty() - self.column.winfo_rooty()
-        view = self.winfo_height()
-        if top < self.offset or top + widget.winfo_height() > self.offset + view:
-            self.offset = max(0, top - view // 3)
-            self._place()
+        """Scrolls so that `widget` (in the column) is in view, a little in from the page's edges."""
+        if not self._shown(): return
+        # (Where it is in the column, at the page's offset: not where the column is now, which moves once Tk is idle.
+        # A second Tab handled while the first one's move is painted would move the page twice as far.)
+        y = widget.winfo_rooty() - self.column.winfo_rooty() + self.look.px(24) - self.offset
+        height, view, margin = widget.winfo_height(), self.winfo_height(), self.look.px(12)
+        if y < margin: self.offset += y - margin
+        elif y + height > view - margin: self.offset += min(y + height - (view - margin), y - margin)
+        else: return
+        self._place()
+        self._paint()
+
+    def _grab(self, event):
+        # (On its background: a label, a box, the banner. A control keeps its own drag.)
+        widget = event.widget
+        background = isinstance(widget, (tk.Frame, tk.Label, tk.Canvas, ttk.Frame, ttk.Label))
+        self.dragging = (event.y_root, self.offset, False) if self._shown() and self._mine(widget) and background else None
+
+    def _drag(self, event):
+        if not self.dragging: return
+        y, offset, moving = self.dragging
+        # (From a few pixels away only, as GTK's: a click on a label that wobbles a pixel is not a drag.)
+        if not moving and abs(event.y_root - y) <= self.look.px(4): return
+        self.dragging = y, offset, True
+        self.target = offset - (event.y_root - y)
+        if not self.moving: self.moving = self.after(16, self._move)     # (as the wheel's: a move a frame)
 
 
 class Banner(tk.Canvas):
