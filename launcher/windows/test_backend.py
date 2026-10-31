@@ -82,6 +82,12 @@ class LauncherBackend(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Set up the game first'):
             worker(self.settings, 'upgrade', [])
         self.assertEqual(installed_by(self.settings), '')
+    def test_build_needs_the_libraries_set_up_prepares(self):
+        from backend import worker
+        cmake=Path(self.settings.values['tools'])/'python/cmake/data/bin/cmake.exe'
+        cmake.parent.mkdir(parents=True);cmake.touch()
+        with self.assertRaisesRegex(ValueError, 'Use Set Up Game'):
+            worker(self.settings, 'build', [])
     def test_only_release_exe_updates_itself(self):
         from backend import worker
         with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'release .exe'):
