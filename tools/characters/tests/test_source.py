@@ -288,7 +288,8 @@ class RunStandIn(unittest.TestCase):
         with_presets.PRESETS = (('DefaultCos1P', 'Default'), ('cos2', 'Second'))
         for asked in (True, False):
             with mock.patch.object(importer, 'definition', return_value=with_presets), \
-                    mock.patch.object(importer.outfits, 'build', return_value={'raa.nud': b'outfit'}) as made, \
+                    mock.patch.object(importer.outfits, 'build',
+                                      return_value={'raa.nud': b'outfit', 'rab.nud': b'outfit'}) as made, \
                     mock.patch.object(importer.outfits, 'codes', return_value=['raa', 'rab']), \
                     self.reina(outfits=asked) as (target, *_):
                 ini = pack.read_ini(os.path.join(target, 'character.ini'))

@@ -639,9 +639,17 @@ class EncryptedFiles(unittest.TestCase):
             self.assertEqual([e.path.rsplit('/', 1)[1] for e in autodump.unsaved_files(paks, 'abc')],
                              ['CS_ABC_2.uasset', 'AkBankVoiceABC.bnk'])
             self.assertEqual(autodump.unsaved_files(paks, 'xyz'), [])
-            # the game's reading of it, saved below its pak path
+            # a plain copy of another size (a mod's, say) is not the file: still encrypted, still asked for
             target = os.path.join(saved, 'TekkenGame', 'Content', 'Character', 'Item', 'Sets', 'ABC', 'CS_ABC_2.uasset')
             os.makedirs(os.path.dirname(target))
+            for other in (package[:8], package + b'more'):
+                with open(target, 'wb') as f:
+                    f.write(other)
+                with self.assertRaises(pak.EncryptedError):
+                    paks.read('/Game/Character/Item/Sets/ABC/CS_ABC_2')
+                self.assertEqual([e.path.rsplit('/', 1)[1] for e in autodump.unsaved_files(paks, 'abc')],
+                                 ['CS_ABC_2.uasset', 'AkBankVoiceABC.bnk'])
+            # the game's reading of it, saved below its pak path
             with open(target, 'wb') as f:
                 f.write(package)
             self.assertEqual(paks.read('/Game/Character/Item/Sets/ABC/CS_ABC_2'), package)

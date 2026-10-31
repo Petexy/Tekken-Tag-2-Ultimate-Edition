@@ -8,6 +8,7 @@ import numpy as np
 
 from . import art, chains, face, model, tiger, weapons
 from ..tekken7.material import short_ref
+from ..tekken7.pak import EncryptedError
 from ..ttt2 import bone, nud, nut
 from ..ttt2.archive import key_of
 
@@ -152,6 +153,7 @@ def build(paks, archives, rpx, base, slot, xml, springs, body, standing=None, lo
     springs(bon, cloth springs) -> a body's spring entries (.mop) or None (importer.spring_file); body: the base
     fighter's (nud, nut, bon, mop), the preset of its own costume (its 2P colours' palette entries are the base
     fighter's: the presets made here have none); standing: the pose the cloth rests in (cloth.standing).
+    A preset needing an encrypted file Tekken 7 did not hand over is left out with a warning (no files of its code).
     No installed pack is changed here. Caller writes the returned files atomically.
     """
     files, previews = {}, []
@@ -160,21 +162,33 @@ def build(paks, archives, rpx, base, slot, xml, springs, body, standing=None, lo
         log('preset %d/%d: %s' % (i + 1, len(base.PRESETS), label))
         source_code = base.TEKKEN7_CODE.upper()
         costume = '/Game/Character/Item/Sets/%s/CS_%s_%s' % (source_code, source_code, preset)
-        if cached is not None:
-            d = definition(paks, base, costume)
-            folder = Path(cached) / preset
-            mesh, textures, skeleton = [(folder / (base.CODE + ext)).read_bytes()
-                                       for ext in ('.nud', '.nut', '.bon')]
-            saved_springs = folder / (base.CODE + '.mop')
-            mop = saved_springs.read_bytes() if saved_springs.is_file() else springs(skeleton, None)
-        elif costume == base.TEKKEN7['costume']:
-            d = types.SimpleNamespace(**{key: value for key, value in vars(base).items() if key.isupper()})
-            mesh, textures, skeleton, mop = body
-        else:
-            d = definition(paks, base, costume)
-            mesh, textures, skeleton, _, cloth_springs = model.convert(paks, archives, d, slot, log=log,
-                                                                       standing=standing)
-            mop = springs(skeleton, cloth_springs)
+        try:
+            if cached is not None:
+                d = definition(paks, base, costume)
+                folder = Path(cached) / preset
+                mesh, textures, skeleton = [(folder / (base.CODE + ext)).read_bytes()
+                                           for ext in ('.nud', '.nut', '.bon')]
+                saved_springs = folder / (base.CODE + '.mop')
+                mop = saved_springs.read_bytes() if saved_springs.is_file() else springs(skeleton, None)
+            elif costume == base.TEKKEN7['costume']:
+                d = types.SimpleNamespace(**{key: value for key, value in vars(base).items() if key.isupper()})
+                mesh, textures, skeleton, mop = body
+            else:
+                d = definition(paks, base, costume)
+                mesh, textures, skeleton, _, cloth_springs = model.convert(paks, archives, d, slot, log=log,
+                                                                           standing=standing)
+                mop = springs(skeleton, cloth_springs)
+            d.ART = dict(base.ART, costume=base.ART['costume'].rsplit('_', 1)[0] + '_' +
+                         preview_suffixes.get(preset, getattr(base, 'PRESET_PREVIEWS', {}).get(preset, preset.upper())))
+            picture = art.costume_previews(paks, archives, rpx, d, slot)
+        except EncryptedError as error:
+            # Codes are per preset and the chooser follows character.ini's list, so a gap is fine (nothing of this
+            # preset is kept yet: one preview per outfit listed).
+            log('WARNING: preset %s left out: Tekken 7 keeps %s encrypted and it is not saved (add the fighter again '
+                'once Tekken 7 reads it)' % (label, error.args[0]))
+            continue
+        if picture is None:
+            raise ValueError('missing preset preview: %s' % preset)
         if reference_bon is not None:
             skeleton = face.same_joints(skeleton, reference_bon)
         mesh, textures = relocate(mesh, textures, 0x10500000 + (slot * TEXTURE_STRIDE + i) * 0x1000)
@@ -189,11 +203,6 @@ def build(paks, archives, rpx, base, slot, xml, springs, body, standing=None, lo
             mop = (archives.read_name(base.DONOR + '.mop') if archives.has(key_of(base.DONOR + '.mop')) else
                    chains.empty_spring_file(archives.read_name(tiger.SPRING_TEMPLATE[0] + '.mop')))
         files[code + '.mop'] = mop
-        d.ART = dict(base.ART, costume=base.ART['costume'].rsplit('_', 1)[0] + '_' +
-                     preview_suffixes.get(preset, getattr(base, 'PRESET_PREVIEWS', {}).get(preset, preset.upper())))
-        picture = art.costume_previews(paks, archives, rpx, d, slot)
-        if picture is None:
-            raise ValueError('missing preset preview: %s' % preset)
         texture = nut.read(picture)['textures'][0]
         texture['gidx'] += 128 + slot * TEXTURE_STRIDE + i
         texture.pop('ext', None)
