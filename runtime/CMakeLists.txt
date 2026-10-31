@@ -51,6 +51,7 @@ add_library(cafe_runtime OBJECT
     src/gpu/vulkan/present.cpp
     src/gpu/vulkan/png.cpp
     src/gpu/vulkan/renderer.cpp
+    src/gpu/vulkan/shadows.cpp
     src/gpu/vulkan/targets.cpp
     src/gpu/vulkan/textures.cpp
     src/host/audio.cpp

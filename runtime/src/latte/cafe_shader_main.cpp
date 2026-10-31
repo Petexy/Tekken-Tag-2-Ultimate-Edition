@@ -143,7 +143,21 @@ int translate_all(const std::filesystem::path& directory, const char* out_dir) {
             const bool translated = cafe::latte::translate(programs[stage], stage == 0 ? &programs[2] : nullptr, env, shader, error);
             const std::string label = files[stage] + " (" + name + ")";
             if (out_dir) {
-                std::ofstream(std::filesystem::path(out_dir) / (files[stage] + "_" + name.substr(5, 50) + ".glsl")) << shader.glsl;
+                // (What the renderer predicts of the vertex shader's reads and
+                // writes, as a comment before the GLSL.)
+                std::string info;
+                for (int n = 0; n < 16 && stage == 0; ++n) {
+                    if (shader.vb_extent[n] == UINT32_MAX) info += " vb" + std::to_string(n) + ":any";
+                    else if (shader.vb_extent[n]) info += " vb" + std::to_string(n) + ":" + std::to_string(shader.vb_extent[n]);
+                }
+                if (env.stream_out_mask) {
+                    char so[64];
+                    std::snprintf(so, sizeof(so), " stream-out 0x%X complete 0x%X", env.stream_out_mask,
+                                  shader.stream_out_complete);
+                    info += so;
+                }
+                std::ofstream(std::filesystem::path(out_dir) / (files[stage] + "_" + name.substr(5, 50) + ".glsl"))
+                    << (info.empty() ? "" : "//" + info + "\n") << shader.glsl;
             }
             if (!translated) {
                 std::printf("%s: translate: %s\n", label.c_str(), error.c_str());

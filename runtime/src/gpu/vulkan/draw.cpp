@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <type_traits>
 
 namespace cafe::gpu::vk {
 namespace {
@@ -261,7 +262,9 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
                o.uses_registers == info.uses_registers && o.constant_bank_mask == info.constant_bank_mask &&
                std::equal(std::begin(o.constant_bank_extent), std::end(o.constant_bank_extent),
                           std::begin(info.constant_bank_extent)) &&
-               o.buffer_mask == info.buffer_mask;
+               o.buffer_mask == info.buffer_mask &&
+               std::equal(std::begin(o.vb_extent), std::end(o.vb_extent), std::begin(info.vb_extent)) &&
+               o.stream_out_complete == info.stream_out_complete;
     };
     uint64_t code = glsl_hash;
     for (auto it = modules_.find(code); it != modules_.end(); it = modules_.find(++code)) {
@@ -480,6 +483,7 @@ uint32_t read_extent(uint32_t size, uint32_t extent) {
 void Renderer::draw(const Registers& regs, const Draw& d) {
     if (!replaying_) ++draws_;
     const auto r = [&](uint32_t address) { return regs[address]; };
+    draw_video_chunks_ = 0;
     // Interpolation: every draw of a frame and of its replays, in order.
     const uint32_t draw_index = logging_ ? begin_draw_record(regs, d) : 0;
     const uint32_t instances = std::max<uint32_t>(d.num_instances, 1);
@@ -509,6 +513,11 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         return;
     }
     if (d.count == 0) return;
+    const bool indexed = d.source != Draw::kAuto || convert != Convert::kNone;
+    const bool restart = indexed && (r(reg::VGT_MULTI_PRIM_IB_RESET_EN) & 1) && d.source != Draw::kAuto;
+    // (Vulkan restarts strips and fans only: lists draw the marker as a vertex.)
+    const bool restart_enabled = restart && topology_class != 0 && topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
+                                 topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 
     // Render targets.
     std::array<const Target*, 8> colors{};
@@ -606,6 +615,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     abi::DrawConstants dc{};
     const bool record = logging_ && !replaying_;
     ConstantSources sources;
+    uint32_t vb_address[16] = {}; // (guest addresses: video-memory copies replace some)
     for (uint32_t i = 0; i < 16; ++i) {
         if (const uint32_t a = r(reg::SQ_ALU_CONST_CACHE_VS_0 + i * 4)) {
             const uint32_t size = r(reg::SQ_ALU_CONST_BUFFER_SIZE_VS_0 + i * 4) << 8;
@@ -634,16 +644,25 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         dc.vs_buf[i] = buffer(resource::kVsBuffer + i, 0, vs->info.buffer_mask);
         dc.ps_buf[i] = buffer(resource::kPsBuffer + i, 1, ps->info.buffer_mask);
         dc.vb[i] = buffer(resource::kVsAttrib + i, -1, 0);
+        if (dc.vb[i].size != 0) vb_address[i] = r(kResourceBase + (resource::kVsAttrib + i) * resource::kWords * 4);
     }
     // Stream-out writes guest memory, which a replay must not touch (the
     // draws that read it use what the frame wrote): a replayed draw keeps
-    // its rasterised output, its stream-out buffers are empty.
+    // its rasterised output, its stream-out buffers are empty. With
+    // shadows, some write video memory instead (shadows.cpp).
+    StreamWrites so_writes;
     if (stream_out && !replaying_) {
         for (uint32_t i = 0; i < 4; ++i) {
             const uint32_t base = r(reg::VGT_STRMOUT_BUFFER_BASE_0 + i * 16) << 8;
             const uint32_t offset = r(reg::VGT_STRMOUT_BUFFER_OFFSET_0 + i * 16) * 4;
             const uint32_t size = r(reg::VGT_STRMOUT_BUFFER_SIZE_0 + i * 16) * 4;
-            if (base != 0 && size > offset) dc.so[i] = buffer_descriptor(base + offset, size - offset, 0);
+            if (base == 0 || size <= offset) continue;
+            dc.so[i] = buffer_descriptor(base + offset, size - offset, 0);
+            if (shadows_on_ && (vs_env.stream_out_mask >> i) & 1 && dc.so[i].size != 0) {
+                stream_out_target(i, base, offset, size, vs_env.stream_out_stride[i],
+                                  (vs->info.stream_out_complete >> i) & 1, indexed || instances > 1 ? 0 : d.count,
+                                  dc.so[i], so_writes);
+            }
         }
     }
     dc.base_vertex = r(reg::SQ_VTX_BASE_VTX_LOC);
@@ -675,27 +694,55 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     }
     if (record) record_constants(draw_index, sources, dc);
     if (replaying_) replace_constants(draw_index, dc);
-    const VkDeviceSize ubo_align = std::max<VkDeviceSize>(ctx_.properties.limits.minUniformBufferOffsetAlignment, 16);
-    VkDeviceSize dc_offset = 0;
-    std::memcpy(upload(sizeof(dc), ubo_align, dc_offset), &dc, sizeof(dc));
-    VkDeviceSize reg_offset[2] = {};
-    if (vs->info.uses_registers) {
-        std::memcpy(upload(4096, ubo_align, reg_offset[0]), &regs.value[reg::SQ_ALU_CONSTANT0_256 >> 2], 4096);
+    // TTT2_SHADOW_CHECK=2: the draw as it was, writing guest memory.
+    const bool check_draw = shadow_check_ == 2 && so_writes.video_count != 0;
+    abi::DrawConstants reference{};
+    if (check_draw) {
+        reference = dc;
+        for (uint32_t i = 0; i < so_writes.video_count; ++i) {
+            reference.so[so_writes.video[i].index] = so_writes.video[i].guest;
+        }
     }
-    if (ps->info.uses_registers) {
-        std::memcpy(upload(4096, ubo_align, reg_offset[1]), &regs.value[reg::SQ_ALU_CONSTANT0_0 >> 2], 4096);
+    if (video_constants_on_ && so_writes.video_count != 0) video_constants(regs, vs, dc);
+
+    // Vertex buffers that may be read from video memory need the vertex
+    // indices' range (a replayed stream-out draw writes nothing: left alone).
+    bool track = false;
+    if (!shadows_.empty() && !(replaying_ && stream_out && rasterizer_discard)) {
+        track = stream_out && !replaying_;
+        for (uint32_t n = 0; n < 16 && !track; ++n) {
+            track = vs->info.vb_extent[n] != 0 && dc.vb[n].size != 0 &&
+                    touches_shadow(vb_address[n], uint64_t{vb_address[n]} + dc.vb[n].size);
+        }
     }
+    uint32_t first_index = UINT32_MAX, last_index = 0;
+    // (A replay has its frame's range: the indices cannot have changed.)
+    DrawRecord* range_record = nullptr;
+    if (track && logging_ && draw_index < frame_records_[current_record_].draws.size()) {
+        range_record = &frame_records_[current_record_].draws[draw_index];
+        if (replaying_ && range_record->has_range) {
+            first_index = range_record->first_index;
+            last_index = range_record->last_index;
+            range_record = nullptr;
+            track = false;
+        }
+    }
+    const bool redirect = track || first_index <= last_index;
+    const auto note_index = [&](uint32_t v) {
+        if (track) {
+            first_index = std::min(first_index, v);
+            if (v != 0xFFFFFFFFu || !restart_enabled) last_index = std::max(last_index, v);
+        }
+        return v;
+    };
 
     // Indices, converted to 32-bit host order (and to triangles for quads).
-    bool indexed = d.source != Draw::kAuto || convert != Convert::kNone;
     uint32_t index_count = d.count;
     VkDeviceSize index_offset = 0;
-    bool restart = false;
     if (indexed) {
         const uint32_t type = r(reg::VGT_DMA_INDEX_TYPE);
         const bool wide = type & 1;
         const uint32_t swap = (type >> 2) & 3;
-        restart = (r(reg::VGT_MULTI_PRIM_IB_RESET_EN) & 1) && d.source != Draw::kAuto;
         const uint32_t restart_index = r(reg::VGT_MULTI_PRIM_IB_RESET_INDX);
         const uint8_t* source = nullptr;
         if (d.source != Draw::kAuto) {
@@ -739,96 +786,171 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         switch (convert) {
         case Convert::kNone:
             if (d.source == Draw::kIndexBuffer && (wide ? swap == 2 || swap == 0 : true)) {
-                // The common case, in loops the compiler vectorises.
+                // The common case, in loops the compiler vectorises (the
+                // range of indices kept in loops of their own).
                 const uint32_t marker = restart ? restart_index : 0xFFFFFFFFu;
-                if (wide) {
-                    const uint32_t* in = reinterpret_cast<const uint32_t*>(source);
-                    for (uint32_t i = 0; i < index_count; ++i) {
-                        uint32_t v;
-                        std::memcpy(&v, in + i, 4);
-                        v = swap == 2 ? __builtin_bswap32(v) : v;
-                        out[i] = v == marker ? 0xFFFFFFFFu : v;
+                const auto convert_indices = [&](auto tracking) {
+                    // (Locals: the stores could alias what the lambda refers to.)
+                    const uint32_t count = index_count, mark = marker;
+                    const bool restarts = restart_enabled;
+                    uint32_t* to = out;
+                    uint32_t lo = UINT32_MAX, hi = 0;
+                    if (wide) {
+                        const uint32_t* in = reinterpret_cast<const uint32_t*>(source);
+                        for (uint32_t i = 0; i < count; ++i) {
+                            uint32_t v;
+                            std::memcpy(&v, in + i, 4);
+                            v = swap == 2 ? __builtin_bswap32(v) : v;
+                            const uint32_t x = v == mark ? 0xFFFFFFFFu : v;
+                            to[i] = x;
+                            if constexpr (decltype(tracking)::value) {
+                                lo = std::min(lo, x);
+                                hi = std::max(hi, restarts && x == 0xFFFFFFFFu ? 0u : x);
+                            }
+                        }
+                    } else {
+                        const uint16_t* in = reinterpret_cast<const uint16_t*>(source);
+                        for (uint32_t i = 0; i < count; ++i) {
+                            uint16_t h;
+                            std::memcpy(&h, in + i, 2);
+                            const uint32_t v = swap != 0 ? static_cast<uint16_t>((h >> 8) | (h << 8)) : h;
+                            const uint32_t x = v == mark ? 0xFFFFFFFFu : v;
+                            to[i] = x;
+                            if constexpr (decltype(tracking)::value) {
+                                lo = std::min(lo, x);
+                                hi = std::max(hi, restarts && x == 0xFFFFFFFFu ? 0u : x);
+                            }
+                        }
                     }
-                } else {
-                    const uint16_t* in = reinterpret_cast<const uint16_t*>(source);
-                    for (uint32_t i = 0; i < index_count; ++i) {
-                        uint16_t h;
-                        std::memcpy(&h, in + i, 2);
-                        const uint32_t v = swap != 0 ? static_cast<uint16_t>((h >> 8) | (h << 8)) : h;
-                        out[i] = v == marker ? 0xFFFFFFFFu : v;
+                    if constexpr (decltype(tracking)::value) {
+                        first_index = lo;
+                        last_index = hi;
                     }
-                }
+                };
+                if (track) convert_indices(std::true_type{});
+                else convert_indices(std::false_type{});
                 break;
             }
-            for (uint32_t i = 0; i < index_count; ++i) out[i] = index(i);
+            for (uint32_t i = 0; i < index_count; ++i) out[i] = note_index(index(i));
             break;
         case Convert::kQuads:
             for (uint32_t q = 0; q < d.count / 4; ++q) {
                 static constexpr uint32_t kOrder[6] = {0, 1, 2, 0, 2, 3};
-                for (int k = 0; k < 6; ++k) out[q * 6 + k] = index(q * 4 + kOrder[k]);
+                for (int k = 0; k < 6; ++k) out[q * 6 + k] = note_index(index(q * 4 + kOrder[k]));
             }
             break;
         case Convert::kQuadStrip:
             for (uint32_t q = 0; q < (d.count - 2) / 2; ++q) {
                 static constexpr uint32_t kOrder[6] = {0, 1, 3, 0, 3, 2};
-                for (int k = 0; k < 6; ++k) out[q * 6 + k] = index(q * 2 + kOrder[k]);
+                for (int k = 0; k < 6; ++k) out[q * 6 + k] = note_index(index(q * 2 + kOrder[k]));
             }
             break;
         case Convert::kLoop:
-            for (uint32_t i = 0; i < d.count; ++i) out[i] = index(i);
+            for (uint32_t i = 0; i < d.count; ++i) out[i] = note_index(index(i));
             out[d.count] = index(0);
             break;
         }
+    } else {
+        first_index = 0;
+        last_index = d.count - 1;
+    }
+    if (range_record != nullptr && !replaying_) {
+        range_record->has_range = true;
+        range_record->first_index = first_index;
+        range_record->last_index = last_index;
+    }
+
+    // Vertex buffers stream-out wrote, read from video memory where it can.
+    GuestRanges guest_reads;
+    if (redirect) {
+        redirect_vertex_buffers(vs, dc, vb_address, first_index, last_index, stream_out && !replaying_, guest_reads);
+    }
+
+    const VkDeviceSize ubo_align = std::max<VkDeviceSize>(ctx_.properties.limits.minUniformBufferOffsetAlignment, 16);
+    VkDeviceSize dc_offset = 0, check_offset = 0;
+    std::memcpy(upload(sizeof(dc), ubo_align, dc_offset), &dc, sizeof(dc));
+    if (check_draw) std::memcpy(upload(sizeof(reference), ubo_align, check_offset), &reference, sizeof(reference));
+    VkDeviceSize reg_offset[2] = {};
+    if (vs->info.uses_registers) {
+        std::memcpy(upload(4096, ubo_align, reg_offset[0]), &regs.value[reg::SQ_ALU_CONSTANT0_256 >> 2], 4096);
+    }
+    if (ps->info.uses_registers) {
+        std::memcpy(upload(4096, ubo_align, reg_offset[1]), &regs.value[reg::SQ_ALU_CONSTANT0_0 >> 2], 4096);
     }
 
     // Stream-out data a run of stream-out draws wrote, read by the draws
     // after it (skinned vertices, text): a barrier first, outside the pass.
+    // Its copies back to guest memory are recorded there and finished by
+    // the next barrier: a draw using guest memory under them waits first.
     const bool writes_stream_out = stream_out && !replaying_;
-    if (stream_out_pending_ && !writes_stream_out) {
+    int pending = 0;
+    if (!copy_backs_.empty() || !unsynced_.empty()) {
+        for (uint32_t i = 0; i < 16; ++i) {
+            const auto block = [&](uint32_t cache, uint32_t size_reg, uint32_t mask) {
+                const uint32_t a = r(cache + i * 4) << 8;
+                if ((mask >> i) & 1 && a != 0) guest_reads.add(a, uint64_t{a} + (r(size_reg + i * 4) << 8));
+            };
+            block(reg::SQ_ALU_CONST_CACHE_VS_0, reg::SQ_ALU_CONST_BUFFER_SIZE_VS_0, vs->info.constant_bank_mask);
+            block(reg::SQ_ALU_CONST_CACHE_PS_0, reg::SQ_ALU_CONST_BUFFER_SIZE_PS_0, ps->info.constant_bank_mask);
+            const auto resource = [&](uint32_t slot, uint32_t mask) {
+                const uint32_t base = kResourceBase + slot * resource::kWords * 4;
+                if ((mask >> i) & 1) guest_reads.add(r(base), uint64_t{r(base)} + r(base + 4) + 1);
+            };
+            resource(resource::kVsBuffer + i, vs->info.buffer_mask);
+            resource(resource::kPsBuffer + i, ps->info.buffer_mask);
+        }
+        pending = copies_back_pending(guest_reads, so_writes);
+        if (pending) ++shadow_stats_.flushes;
+    }
+    if ((stream_out_pending_ && !writes_stream_out) || pending) {
         if (rendering_) end_rendering();
         else barrier();
+        if (pending == 2) barrier(); // (the copies just recorded)
     }
 
     // The rendering pass.
-    if (!rendering_ || pass_depth_ != depth ||
-        !std::equal(colors.begin(), colors.end(), pass_colors_.begin())) {
-        end_rendering();
-        uint32_t width = UINT32_MAX, height = UINT32_MAX;
-        VkRenderingAttachmentInfo ca[8]{};
-        for (uint32_t i = 0; i < color_count; ++i) {
-            ca[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-            if (colors[i] == nullptr) continue;
-            ca[i].imageView = colors[i]->image.view;
-            ca[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            width = std::min(width, colors[i]->image.width);
-            height = std::min(height, colors[i]->image.height);
+    const auto begin_pass = [&] {
+        if (!rendering_ || pass_depth_ != depth ||
+            !std::equal(colors.begin(), colors.end(), pass_colors_.begin())) {
+            end_rendering();
+            uint32_t width = UINT32_MAX, height = UINT32_MAX;
+            VkRenderingAttachmentInfo ca[8]{};
+            for (uint32_t i = 0; i < color_count; ++i) {
+                ca[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                if (colors[i] == nullptr) continue;
+                ca[i].imageView = colors[i]->image.view;
+                ca[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                width = std::min(width, colors[i]->image.width);
+                height = std::min(height, colors[i]->image.height);
+            }
+            VkRenderingAttachmentInfo da{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+            if (depth) {
+                da.imageView = depth->image.view;
+                da.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                width = std::min(width, depth->image.width);
+                height = std::min(height, depth->image.height);
+            }
+            if (width == UINT32_MAX) width = height = 1;
+            VkRenderingInfo info{VK_STRUCTURE_TYPE_RENDERING_INFO};
+            info.renderArea = {{0, 0}, {width, height}};
+            info.layerCount = 1;
+            info.colorAttachmentCount = color_count;
+            info.pColorAttachments = ca;
+            info.pDepthAttachment = depth ? &da : nullptr;
+            info.pStencilAttachment = depth && has_stencil(depth->image.format) ? &da : nullptr;
+            vkCmdBeginRendering(cmd(), &info);
+            rendering_ = true;
+            pass_colors_ = colors;
+            pass_depth_ = depth;
+            pass_width_ = width;
+            pass_height_ = height;
         }
-        VkRenderingAttachmentInfo da{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-        if (depth) {
-            da.imageView = depth->image.view;
-            da.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            width = std::min(width, depth->image.width);
-            height = std::min(height, depth->image.height);
-        }
-        if (width == UINT32_MAX) width = height = 1;
-        VkRenderingInfo info{VK_STRUCTURE_TYPE_RENDERING_INFO};
-        info.renderArea = {{0, 0}, {width, height}};
-        info.layerCount = 1;
-        info.colorAttachmentCount = color_count;
-        info.pColorAttachments = ca;
-        info.pDepthAttachment = depth ? &da : nullptr;
-        info.pStencilAttachment = depth && has_stencil(depth->image.format) ? &da : nullptr;
-        vkCmdBeginRendering(cmd(), &info);
-        rendering_ = true;
-        pass_colors_ = colors;
-        pass_depth_ = depth;
-        pass_width_ = width;
-        pass_height_ = height;
-    }
+    };
+    begin_pass();
     VkCommandBuffer c = cmd();
     if (bound_pipeline_ != pipe) {
         vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->pipeline);
@@ -924,8 +1046,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     // FACE: 0 counter-clockwise front, in the y-down window space Vulkan uses too.
     vkCmdSetFrontFace(c, (mode >> 2) & 1 ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(c, topology);
-    vkCmdSetPrimitiveRestartEnable(c, restart && topology_class != 0 && topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST &&
-                                          topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST);
+    vkCmdSetPrimitiveRestartEnable(c, restart_enabled);
     vkCmdSetRasterizerDiscardEnable(c, rasterizer_discard);
     vkCmdSetLineWidth(c, 1.0f);
     const bool offset_enable = (mode >> 11) & 1;
@@ -1009,13 +1130,33 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
                      viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth, scissor.offset.x,
                      scissor.offset.y, scissor.extent.width, scissor.extent.height, mode & 7);
     }
-    if (indexed) {
-        vkCmdBindIndexBuffer(c, ring_.buffer(), index_offset, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(c, index_count, instances, 0, 0, 0);
-    } else {
-        vkCmdDraw(c, d.count, instances, 0, 0);
+    const auto record_draw = [&] {
+        if (indexed) {
+            vkCmdBindIndexBuffer(c, ring_.buffer(), index_offset, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(c, index_count, instances, 0, 0, 0);
+        } else {
+            vkCmdDraw(c, d.count, instances, 0, 0);
+        }
+    };
+    if (check_draw) {
+        // The old path first, finished before the new one (whose reads of
+        // guest memory then see its output).
+        buffers[0].offset = check_offset;
+        ctx_.cmd_push_descriptor_set(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layout, 0, write_count, writes);
+        record_draw();
+        end_rendering();
+        begin_pass();
+        vkCmdBindPipeline(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->pipeline);
+        bound_pipeline_ = pipe;
+        buffers[0].offset = dc_offset;
+        ctx_.cmd_push_descriptor_set(c, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe->layout, 0, write_count, writes);
     }
-    if (writes_stream_out) stream_out_pending_ = true;
+    record_draw();
+    if (writes_stream_out) {
+        stream_out_pending_ = true;
+        note_stream_writes(so_writes);
+    }
+    video_chunks_touched_ |= draw_video_chunks_; // (an upload may have submitted since the copies)
     if (profiling_) {
         profile_mark("draw", colors[0] ? colors[0]->address : depth ? depth->address : 0,
                      (colors[0] ? scaled(colors[0]->pitch, colors[0]->scale) : 0) << 16 |
