@@ -9,7 +9,7 @@ NAME = 'Noctis'
 SHORT_NAME = 'NOCTIS'
 TEKKEN7_ID = 44
 TEKKEN7_CODE = 'mrz'
-REVISION = 5
+REVISION = 6
 CODE = 'mrz'
 SEX = 'male'
 
@@ -136,10 +136,15 @@ WEAPONS = [
     {'mesh': _WEAPONS_MESH, 'bone': 'ATH_L_weapon_shield', 'parent': 'UDE_L_jnt', 'pair': None, 'summon': 6,
      'part': 12},
 ]
-# his weapons take about 37,000 vertices (all eight are in the model; one or two show at a time), his trousers and
-# boots 17,000 more (89,000 in all): the port's skinning buffers have room for two of him and two others in a tag
-# match (roster.cpp, skinning room)
-VERTEX_BUDGET = 90000
+# His model as Tekken 7 has it held 89,000 vertices (his weapons 39,000: all eight are in it, one or two shown at a
+# time, the others collapsed; his trousers and boots 20,000), Kazumi's 35,500, the title's fighters' 20-34,000: the
+# game skins and draws every vertex of a fighter on screen every frame, so he took three times the GPU time of
+# another added fighter (a fight with two of him 4.9 ms a frame on an RX 9060 XT, with two Kazumis 2.8) and slowed
+# the game on smaller GPUs. So his body is decimated to DECIMATE['body'] vertices (decimate.py, as Tekken 8's models
+# are: the face and hair give up less, model.PART_WEIGHTS) and each weapon to DECIMATE['weapons'] of its vertices or
+# as far as its hard edges let it (about half): 48,600 with his 2P colour layers (3.3 ms a frame for two of him)
+DECIMATE = {'body': 28000, 'weapons': 0.3}
+VERTEX_BUDGET = 56000
 # Warp-Strike and its kin throw the sword (its animation flies it up to 4.8 m) and warp to it when it hits: the move
 # a hit leads to holds it where it hit until the warp takes it back (moveset.WEAPON_HOLD_PROP; Tekken 7 dismisses it
 # there with particles of its mesh, which are left out); on guard it is gone at once, as in Tekken 7
