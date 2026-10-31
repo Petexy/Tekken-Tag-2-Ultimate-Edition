@@ -10,7 +10,6 @@ using namespace latte;
 
 bool g_a4b4g4r4 = false;
 bool g_a1b5g5r5 = false;
-bool g_d24s8 = false;
 
 constexpr VkComponentSwizzle R = VK_COMPONENT_SWIZZLE_R, G = VK_COMPONENT_SWIZZLE_G, B = VK_COMPONENT_SWIZZLE_B,
                              A = VK_COMPONENT_SWIZZLE_A, I = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -38,8 +37,6 @@ void init_formats(VkPhysicalDevice physical) {
     const VkFormatFeatureFlags sampled = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
     g_a4b4g4r4 = supported(physical, VK_FORMAT_A4B4G4R4_UNORM_PACK16, sampled);
     g_a1b5g5r5 = supported(physical, VK_FORMAT_A1B5G5R5_UNORM_PACK16_KHR, sampled);
-    g_d24s8 = supported(physical, VK_FORMAT_D24_UNORM_S8_UINT,
-                        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
 }
 
 FormatInfo color_format(uint32_t gx2_format) {
@@ -183,7 +180,10 @@ FormatInfo depth_format(uint32_t gx2_format) {
         f.aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
         break;
     case gx2::surface_format::kUnormR24X8:
-        f.format = g_d24s8 ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
+        // Float on every GPU: a depth buffer the title samples is copied as
+        // it is into an R32_SFLOAT texture (copy_depth_to_texture), where
+        // D24_UNORM_S8_UINT's depth would arrive as 24-bit integers.
+        f.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
         f.bytes = 4;
         f.aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
         break;
