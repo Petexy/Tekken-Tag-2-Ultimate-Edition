@@ -88,6 +88,51 @@ def restore_native_assist_follow(c):
             c.stats['native automatic Tag Assault chase routes restored'] += 1
 
 
+def restore_native_stance_tags(c):
+    """Restore native tag-out gates and RFF's automatic TA stance switch.
+
+    Keep donor requirements, timing and priority. Never enable a tag during an
+    attack or change RFF outside the native Tag Assault conditions.
+    """
+    def expanded(tables, start):
+        for row in TS.cancels(tables, start):
+            if row['direction'] == M.GROUP:
+                yield from (q for q in TS.chain(tables['group_cancels'], row['move_id'],
+                    lambda q: q['direction'] == M.GROUP_END) if q['direction'] != M.GROUP_END)
+            elif row['direction'] != M.LIST_END:
+                yield row
+
+    def signature(tables, row):
+        return tuple(sorted((key, tuple(TS.reqs(tables, value)) if key == 'req' else value)
+                            for key, value in row.items()))
+
+    tag_targets = {index for label, index in c.dn.items() if label.startswith(TS.TAG_OUT)}
+    for name in ('Hw_sKAM00_', 'Hw_sKAMR00_'):
+        native = c.d.tables['moves'][c.dn[name]]
+        wanted = []
+        normalizes = 0
+        for row in expanded(c.d.tables, native['cancel']):
+            target = row['move_id']
+            raw_tag = row['button'] == TS.TAG_BUTTON and target in tag_targets
+            reset = (name == 'Hw_sKAMR00_' and TS.is_automatic(row)
+                     and target == c.dn['Gpe_kamRL']
+                     and TS.reqs(c.d.tables, row['req']) == [(489, 0), (484, 0)])
+            if raw_tag or reset:
+                wanted.append(dict(row))
+                normalizes += reset
+        if not any(row['button'] == TS.TAG_BUTTON for row in wanted):
+            raise InputError('native neutral tag-out routes missing: ' + name)
+        if name == 'Hw_sKAMR00_' and normalizes != 1:
+            raise InputError('native RFF Tag Assault stance switch not unique')
+        move = c.T['moves'][c.newidx[c.kn[name]]]
+        rows = [dict(q) for q in TS.cancels(c.T, move['cancel'])]
+        present = {signature(c.T, q) for q in expanded(c.T, move['cancel'])}
+        missing = [q for q in wanted if signature(c.T, q) not in present]
+        if missing:
+            move['cancel'] = TS.write(c.T, 'cancels', missing + rows)
+            c.stats['native stance tag-out and TA reset routes restored'] += len(missing)
+
+
 def restore_native_jfsr_sparks(c):
     name = 'Hw_agerkFAST'
     native = c.d.tables['moves'][c.dn[name]]
@@ -353,6 +398,7 @@ class Replacement(moveset.Converter):
                         and name.startswith('Hw_') and name != 'Hw_Direct'}
         self.aliases = redirect_native_references(self.T, self.aliases, replacements)
         restore_native_assist_follow(self)
+        restore_native_stance_tags(self)
         self.stats['native Hwoarang moves redirected to T8'] = len(replacements)
         if self.aliases[1] == self.d.aliases[1]:
             raise InputError('Hwoarang replacement did not redirect the standing stance')
@@ -529,7 +575,7 @@ def main():
         part.write_bytes(data)
         part.replace(path)
         hashes[path.name] = hashlib.sha256(data).hexdigest()
-    (args.out / 'patch.json').write_text(json.dumps({'code': 'hwo', 'revision': 12, 'files': hashes}, indent=2)+'\n')
+    (args.out / 'patch.json').write_text(json.dumps({'code': 'hwo', 'revision': 13, 'files': hashes}, indent=2)+'\n')
     print('Native Hwoarang T8 replacement built in ' + str(args.out), flush=True)
 
 

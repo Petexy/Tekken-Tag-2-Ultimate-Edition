@@ -66,6 +66,42 @@ class NativeHwoarang(unittest.TestCase):
         self.assertEqual(tables['moves'][1]['cancel'],first)
         self.assertEqual(sum(c.stats.values()),1)
 
+    def test_native_raw_tag_and_ta_stance_reset_keep_gates_and_priority(self):
+        from ttt2char import InputError
+        from ttt2char.native_hwoarang import restore_native_stance_tags
+        from ttt2char.convert import tagsystem as T
+        reqs = [dict(condition=T.TT_END,param=0), dict(condition=489,param=0),
+                dict(condition=484,param=0), dict(condition=T.TT_END,param=0),
+                dict(condition=481,param=0), dict(condition=T.TT_END,param=0)]
+        end = dict(direction=M.LIST_END,button=0,move_id=0,req=0)
+        tag = dict(direction=0,button=T.TAG_BUTTON,move_id=5,req=4,
+                   extradata=23,win_start=1,win_end=32767,start_frame=1,option=0)
+        reset = dict(direction=0,button=0,move_id=6,req=1,
+                     extradata=48,win_start=1,win_end=32767,start_frame=1,option=0)
+        attack = dict(direction=8,button=8,move_id=7,req=0)
+        group = dict(direction=M.GROUP,button=0,move_id=0,req=0)
+        donor = dict(moves=[dict(cancel=0),dict(cancel=2)],requirements=reqs,
+                     cancels=[tag,end,reset,group,end],
+                     group_cancels=[tag,dict(direction=M.GROUP_END,button=0,move_id=0,req=0)])
+        tables = dict(moves=[dict(cancel=0),dict(cancel=2)],requirements=copy.deepcopy(reqs),
+                      cancels=[dict(tag),dict(end),dict(attack),dict(end)],group_cancels=[])
+        before = copy.deepcopy(donor)
+        c = SimpleNamespace(d=SimpleNamespace(tables=donor),T=tables,
+            dn={'Hw_sKAM00_':0,'Hw_sKAMR00_':1,'Co_StChgOutF':5,'Gpe_kamRL':6},
+            kn={'Hw_sKAM00_':0,'Hw_sKAMR00_':1},newidx={0:0,1:1},stats=collections.Counter())
+        restore_native_stance_tags(c)
+        self.assertEqual(T.cancels(tables,tables['moves'][0]['cancel']),[tag,end])
+        self.assertEqual(T.cancels(tables,tables['moves'][1]['cancel']),[reset,tag,attack,end])
+        self.assertEqual(T.reqs(tables,reset['req']),[(489,0),(484,0)])
+        first=tables['moves'][1]['cancel']
+        restore_native_stance_tags(c)
+        self.assertEqual(tables['moves'][1]['cancel'],first)
+        self.assertEqual(donor,before)
+        self.assertEqual(sum(c.stats.values()),2)
+        donor['cancels'][2]=dict(reset,req=0)
+        with self.assertRaisesRegex(InputError,'stance switch'):
+            restore_native_stance_tags(c)
+
     def test_only_move_references_are_redirected(self):
         rows = [{'direction': 0, 'move_id': 3},
                 {'direction': M.GROUP, 'move_id': 3},
