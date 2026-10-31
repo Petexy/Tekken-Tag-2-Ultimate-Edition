@@ -449,6 +449,13 @@ void set_atlas() {
 
 int32_t clamp(int32_t value, int32_t max) { return std::clamp(value, 0, max); }
 
+// TTT2_TRACE_GAUGE, read once (Windows' getenv takes a lock and walks the
+// whole environment; the tests run per requirement every frame).
+bool trace_gauge() {
+    static const bool trace = std::getenv("TTT2_TRACE_GAUGE") != nullptr;
+    return trace;
+}
+
 // What a gauge holds at a match's start: none (TTT2_GAUGE_START, for tests).
 int32_t start_value() {
     const char* v = std::getenv("TTT2_GAUGE_START");
@@ -682,7 +689,7 @@ bool requirement(uint32_t address, int slot, uint32_t kind, uint32_t param, bool
     const Fighter* f = fighter_of(slot);
     const int32_t value = f ? player(address, slot).value : 0;
     result = kind == kAtLeast ? value >= static_cast<int32_t>(param) : value < static_cast<int32_t>(param);
-    if (std::getenv("TTT2_TRACE_GAUGE")) {
+    if (trace_gauge()) {
         static uint32_t last_key = 0;
         const uint32_t key = address ^ (kind << 20) ^ param ^ (result << 31) ^ uint32_t(value) << 8;
         if (key != last_key)
@@ -703,7 +710,7 @@ bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
         g_stop.attacker = address, g_stop.total = g_stop.frames;
         for (int i = 0; i < 3; ++i) g_stop.place[i] = ppc::ld32(base, g_stop.fighter + 4 * i);
         for (int k = 0; k < 2; ++k) g_stop.health[k] = static_cast<int16_t>(ppc::ld16(base, g_active[k] + kHealth));
-        if (std::getenv("TTT2_TRACE_GAUGE"))
+        if (trace_gauge())
             std::fprintf(stderr, "ttt2: gauge: %08X stops %08X for %d frames\n", address, g_stop.fighter, g_stop.frames);
         return true;
     }
@@ -712,11 +719,11 @@ bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
     Player& p = player(address, slot);
     if (id == kAdd) {
         p.value = clamp(p.value + static_cast<int32_t>(value), f->config.max);
-        if (std::getenv("TTT2_TRACE_GAUGE"))
+        if (trace_gauge())
             std::fprintf(stderr, "ttt2: gauge: %08X %+d -> %d\n", address, static_cast<int32_t>(value), p.value);
     } else if (id == kMaxAdd) {
         p.max_timer = std::clamp(p.max_timer + static_cast<int32_t>(value), 0, kMaxTimer);
-        if (std::getenv("TTT2_TRACE_GAUGE"))
+        if (trace_gauge())
             std::fprintf(stderr, "ttt2: gauge: %08X MAX %+d -> %d\n", address, static_cast<int32_t>(value), p.max_timer);
     } else if (id == kNoGain) {
         p.no_gain_move = value ? ppc::ld32(guest_base(), address + kMove) : 0;
@@ -734,7 +741,7 @@ void situation(uint32_t kind) {
     // 0 / 1 / 3 a match's first round (Arcade's next stage too), 12 / 15
     // Practice, 23 the fighters' load before a match, 24 the start.
     static constexpr uint32_t kKeep[] = {4, 5, 6, 7, 8, 9, 10, 16, 18, 26};
-    if (std::getenv("TTT2_TRACE_GAUGE")) std::fprintf(stderr, "ttt2: gauge: situation %u\n", kind);
+    if (trace_gauge()) std::fprintf(stderr, "ttt2: gauge: situation %u\n", kind);
     const bool keep = std::find(std::begin(kKeep), std::end(kKeep), kind) != std::end(kKeep);
     for (auto& [address, p] : g_players) {
         p.max_timer = 0; // (a round's start ends a MAX mode)
@@ -758,7 +765,7 @@ void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], 
             over |= fighters[k] && static_cast<int16_t>(ppc::ld16(base, fighters[k] + kHealth)) < g_stop.health[k];
         if (over) g_stop = {};
     }
-    if (std::getenv("TTT2_TRACE_GAUGE")) { // the moves, as they start
+    if (trace_gauge()) { // the moves, as they start
         static uint32_t shown[2] = {};
         static const auto start = std::chrono::steady_clock::now();
         for (int s = 0; s < 2; ++s) {
@@ -799,7 +806,7 @@ void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], 
                                  a.max_timer > 0;
             if (!no_gain) gains[1 - s] += damage * who[1 - s]->config.gain[blocked ? 1 : 3] / 100;
         }
-        if (std::getenv("TTT2_TRACE_GAUGE"))
+        if (trace_gauge())
             std::fprintf(stderr, "ttt2: gauge: side %d %s %d at frame %u: defender +%d, attacker +%d\n", s,
                          blocked ? "blocked" : "lost", damage, ppc::ld32(base, attacker ? attacker + 212 : defender + 212),
                          gains[s] - before[s], gains[1 - s] - before[1 - s]);
@@ -820,7 +827,7 @@ void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], 
             ctx.r[3] = static_cast<uint32_t>(n), ctx.r[4] = 1, ctx.r[5] = fighters[s];
             sub_077537D0(ctx, base);
             ctx = saved;
-            if (std::getenv("TTT2_TRACE_GAUGE"))
+            if (trace_gauge())
                 std::fprintf(stderr, "ttt2: gauge: %08X full: item sound %d\n", fighters[s], n);
         }
         p.heard = p.value;

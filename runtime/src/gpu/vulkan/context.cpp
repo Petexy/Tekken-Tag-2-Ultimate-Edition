@@ -98,16 +98,25 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     static const char* const kRequired[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
                                             VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
     int best = -1;
+    std::vector<uint32_t> usable;
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(devices[i], nullptr, &n, nullptr);
         std::vector<VkExtensionProperties> exts(n);
         vkEnumerateDeviceExtensionProperties(devices[i], nullptr, &n, exts.data());
-        bool ok = true;
-        for (const char* r : kRequired) ok &= has_extension(exts, r);
+        std::string missing;
+        for (const char* r : kRequired) {
+            if (!has_extension(exts, r)) missing += std::string(" ") + r;
+        }
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(devices[i], &p);
-        if (!ok || p.apiVersion < VK_API_VERSION_1_3) continue;
+        if (!missing.empty() || p.apiVersion < VK_API_VERSION_1_3) {
+            std::fprintf(stderr, "ttt2: GPU: %s left out: Vulkan %u.%u%s%s\n", p.deviceName,
+                         VK_API_VERSION_MAJOR(p.apiVersion), VK_API_VERSION_MINOR(p.apiVersion),
+                         missing.empty() ? "" : ", without", missing.c_str());
+            continue;
+        }
+        usable.push_back(i);
         const bool discrete = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
         if (best < 0 || (discrete && properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)) {
             best = static_cast<int>(i);
@@ -120,6 +129,13 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     physical = devices[best];
     vkGetPhysicalDeviceMemoryProperties(physical, &memory);
     std::fprintf(stderr, "ttt2: GPU: %s\n", properties.deviceName);
+    for (uint32_t i : usable) {
+        if (static_cast<int>(i) == best) continue;
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(devices[i], &p);
+        std::fprintf(stderr, "ttt2: GPU: %s usable too (a discrete GPU goes first, else the first listed)\n",
+                     p.deviceName);
+    }
 
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &family_count, nullptr);
@@ -358,7 +374,14 @@ void GuestMemory::init(Context& c) {
         bai.buffer = region.buffer.buffer;
         region.buffer.address = vkGetBufferDeviceAddress(c.device, &bai);
         region.buffer.size = size;
-        std::fprintf(stderr, "ttt2: GPU: guest memory 0x%08X-0x%08X imported\n", r.base, r.base + size - 1);
+        // (the memory the GPU reads the title's buffers through)
+        const VkMemoryType& type = c.memory.memoryTypes[mai.memoryTypeIndex];
+        const VkMemoryHeap& heap = c.memory.memoryHeaps[type.heapIndex];
+        std::fprintf(stderr,
+                     "ttt2: GPU: guest memory 0x%08X-0x%08X imported (memory type %u of 0x%X, flags 0x%X; heap %u, "
+                     "flags 0x%X, %llu MiB)\n",
+                     r.base, r.base + size - 1, mai.memoryTypeIndex, props.memoryTypeBits & req.memoryTypeBits,
+                     type.propertyFlags, type.heapIndex, heap.flags, static_cast<unsigned long long>(heap.size >> 20));
         regions_.push_back(region);
     }
 }

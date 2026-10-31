@@ -94,7 +94,12 @@ channel. With one shared condition variable every mutex unlock and every
 OSRestoreInterrupts woke all ~40 of the title's blocked threads: the title's
 allocator locks a mutex per allocation, and the boot-time loading screen
 took ~17 s of herd wake-ups for 0.9 s of work (now ~1 s; CPU use fell from
-~5 cores to a quarter of one).
+~5 cores to a quarter of one). On Windows a timed wait (OSSleepTicks, the
+alarm thread, waits with a timeout, the renderer's wait for a presentation
+image) sleeps whole milliseconds, rounded up (`host/timed_wait.h`):
+llvm-mingw's libc++ rounds a timed wait down and returns at once below a
+millisecond, so its own loop to the deadline spun on the lock (a
+1 ms OSSleepTicks took a whole core for its millisecond).
 
 System libraries the title loads with OSDynLoad are implemented the same
 way: `swkbd` (software keyboard) and `erreula` (error viewer) have no UI
@@ -317,28 +322,29 @@ attachment formats and blend state.
   (`TTT2_INTERP_2D=1` blends them too). Draws whose data mostly jumps (a
   different object, a cut) and frames where fewer than 80% of draws match
   are shown as they are. Replays skip anything that writes guest memory
-  (stream-out writes, CPU-side surface copies); render targets a frame
-  reads before writing them start replays from their start-of-frame
-  content, and the next frame sees the real frame's. With unblended replays
-  (`TTT2_INTERP_TEST=1`) every extra frame equals its real frame pixel for
-  pixel (checked through menus, character select and fights). Particles
-  whose geometry the CPU rebuilds each frame and the HUD move at 60 Hz, and
-  so do models skinned through stream-out: in fights the fighters are
-  (point draws that write their skinned vertices), so their extra frames
-  show the real frame's pose. A frame whose swap comes while the GPU has
-  yet to finish the previous frame's images gets no extra frames (the
-  previous image stays up through their part of its slot): the title learns
-  a frame is done only after its replays, so on a shared or overloaded GPU
-  they would slow the game itself (measured: a fight on a desktop
-  compositor taking ~80% of the GPU went from 46-51 to 55-60 title frames a
-  second; the statistics line counts the extra frames skipped). Nor does
-  one while the command processor has no time for them: it renders them
-  too, on its one CPU thread, so a slower CPU kept it busy all the time and
-  the game slowed down (issue #15; a fight with 16 µs more per draw, as a
-  slower CPU: 46 title frames a second, now 59-60 with the extra frames
-  left out of heavy scenes only). It goes by averages over 16 frames of its
-  time without commands and of the replays' time per second of the frame's
-  own work (which holds when a scene changes), keeping them while a
+  (stream-out writes, CPU-side surface copies; a stream-out draw that
+  rasterises nothing, the fighters' skinning, is not run at all); render
+  targets a frame reads before writing them start replays from their
+  start-of-frame content, and the next frame sees the real frame's. With
+  unblended replays (`TTT2_INTERP_TEST=1`) every extra frame equals its
+  real frame pixel for pixel (checked through menus, character select and
+  fights). Particles whose geometry the CPU rebuilds each frame and the HUD
+  move at 60 Hz, and so do models skinned through stream-out: in fights the
+  fighters are (point draws that write their skinned vertices), so their
+  extra frames show the real frame's pose. A frame whose swap comes while
+  the GPU has yet to finish the previous frame's images gets no extra
+  frames (the previous image stays up through their part of its slot): the
+  title learns a frame is done only after its replays, so on a shared or
+  overloaded GPU they would slow the game itself (measured: a fight on a
+  desktop compositor taking ~80% of the GPU went from 46-51 to 55-60 title
+  frames a second; the statistics line counts the extra frames skipped).
+  Nor does one while the command processor has no time for them: it renders
+  them too, on its one CPU thread, so a slower CPU kept it busy all the
+  time and the game slowed down (issue #15; a fight with 16 µs more per
+  draw, as a slower CPU: 46 title frames a second, now 59-60 with the extra
+  frames left out of heavy scenes only). It goes by averages over 16 frames
+  of its time without commands and of the replays' time per second of the
+  frame's own work (which holds when a scene changes), keeping them while a
   millisecond would be left and taking them up again at three; the
   statistics line shows how busy it is.
 - Presentation (`gpu/vulkan/present.cpp`) runs on its own thread and on a
@@ -1792,9 +1798,16 @@ host threads are named `<OSThread address>/<core>`. The export thunks take
 `(PPCContext&, uint8_t* base)`, so `$rsi` in any `imp_*` frame is the guest
 base address. `TTT2_TRACE_THREADS=1` logs thread creation, priorities,
 affinities and names. The GPU backends print frames per second and draws
-per frame every ten seconds. The captures, dumps and traces below hold the
-game's own images, shaders and sounds: write them under `local/`, which Git
-ignores. Renderer debugging:
+per frame every ten seconds; under it the Vulkan backend's `ttt2: cpu:` line
+gives the CPU the runtime's threads (window, present, gpu, gpu retire,
+display) and the guest threads took over the same time, with the busiest
+guest thread, which tells a CPU-bound run from a GPU-bound one in a
+player's log. Its start-up lines name the GPUs left out and why, the memory
+type the title's memory is imported with, and each swapchain it creates,
+with its present mode and why (one just like the last line at most once a
+second). The captures, dumps and traces below hold the game's own images,
+shaders and sounds: write them under `local/`, which Git ignores. Renderer
+debugging:
 
 | Variable | Effect |
 | --- | --- |

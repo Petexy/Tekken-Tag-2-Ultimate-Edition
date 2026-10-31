@@ -82,6 +82,7 @@ Renderer::Renderer() {
     init_interpolation();
     start_presenter();
     window_start_ = now_seconds();
+    thread_cpu_report(); // (the `ttt2: cpu:` line covers the same time as the statistics)
 }
 
 // ------------------------------------------------------------- commands
@@ -535,6 +536,8 @@ void Renderer::swap() {
                      frame_records_[current_record_ ^ 1].used / 1e6,
                      replay_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1), match_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1),
                      100.0 * std::max(0.0, 1.0 - idle_seconds_ / (t - window_start_)));
+        // (CPU-bound or GPU-bound: the threads' CPU over the same time)
+        std::fprintf(stderr, "ttt2: cpu: %s\n", thread_cpu_report().c_str());
         if (!swap_delays_.empty()) {
             std::sort(swap_delays_.begin(), swap_delays_.end());
             const auto pct = [&](size_t p) { return swap_delays_[std::min(swap_delays_.size() - 1, swap_delays_.size() * p / 100)]; };

@@ -10,6 +10,7 @@
 
 #include "cafe/guest.h"
 #include "cafe/ppc_context.h"
+#include "host/timed_wait.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -91,6 +92,8 @@ enum WaitKey : uint32_t {
 };
 std::condition_variable& wait_channel(uint32_t key);
 void wake(uint32_t key);
+// (Timed waits on a channel go through host::timed_wait, which sleeps on
+// Windows too.)
 
 // Blocks the calling thread until `ready()` holds; `key` names what it
 // waits for. Gives up the interrupt lock while blocked, as a context switch
@@ -136,8 +139,7 @@ bool wait_until_for(KernelLock& lock, uint32_t key, uint64_t nanoseconds, Predic
     if (ready()) return true;
     bool held = false;
     release_interrupt_lock_for_wait(self, held);
-    const bool result =
-        wait_channel(key).wait_for(lock, std::chrono::nanoseconds(nanoseconds), ready);
+    const bool result = host::timed_wait(wait_channel(key), lock, std::chrono::nanoseconds(nanoseconds), ready);
     reacquire_interrupt_lock_after_wait(lock, self, held);
     return result;
 }

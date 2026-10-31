@@ -531,6 +531,10 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         // Nothing to write (every target masked off): no effect, nothing lost.
         return;
     }
+    // A replay drops stream-out writes (below), so a stream-out draw that
+    // rasterises nothing (the fighters' skinning) is left with no effect; its
+    // index is taken, so the draws after it still match the frame's.
+    if (replaying_ && stream_out && (rasterizer_discard || (color_count == 0 && depth == nullptr))) return;
 
     // Shaders.
     ShaderEnvironment vs_env, ps_env;
