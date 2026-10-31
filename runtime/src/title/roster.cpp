@@ -2420,13 +2420,37 @@ void with_donor_id(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PP
 }
 PPC_FUNC(sub_03D6B9F4_orig);
 PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); }
+// The CPU's set-up at a round's start (sub_0399221C) goes through the four
+// players (kCpuPlayers) and copies each one's distances and its opponent's
+// (+152) from such a table (0x107BABD0, 12-byte rows): past it an added
+// fighter's are zeros and noise, every distance looks far, and its CPU never
+// attacks, only walks, stands and crouches. Every added fighter among them
+// has its donor's id meanwhile.
+constexpr uint32_t kCpuPlayers = 0x1087FB60, kPlayerOpponent = 152;
 PPC_FUNC(sub_0399221C_orig);
-PPC_FUNC(sub_0399221C) { with_donor_id(ctx, base, load(0x10874864), sub_0399221C_orig); }
-// The CPU's play (sub_039A6214, for the player at 0x10874864) reads a table of
-// 67 fighters (0x101B9E70, 16-byte rows) by the player's motion row (+80) with
-// no bound: added fighters from place 5 on have rows 69 and up, and the
-// attract demo with Lidia (row 76) read past it and crashed. The donor's row
-// meanwhile.
+PPC_FUNC(sub_0399221C) {
+    std::vector<std::pair<uint32_t, int>> lent;
+    for (uint32_t i = 0; i < 4; ++i) {
+        const uint32_t player = load(kCpuPlayers + 4 * i);
+        for (const uint32_t p : {player, player ? load(player + kPlayerOpponent) : 0}) {
+            const int k = p ? slot_of_id(load(p + kPlayerSelectId)) : -1;
+            if (k < 0) continue;
+            store(p + kPlayerSelectId, g_added[k].donor);
+            lent.emplace_back(p, k);
+        }
+    }
+    sub_0399221C_orig(ctx, base);
+    for (const auto& [p, k] : lent) {
+        if (load(p + kPlayerSelectId) == g_added[k].donor) store(p + kPlayerSelectId, g_added[k].id);
+    }
+}
+// The CPU's play (sub_039A6214) and its attacks (sub_039AFA34), for the player
+// at 0x10874864, read a table of 67 fighters (0x101B9E68, 16-byte rows) by the
+// player's motion row (+80) with no bound: added fighters from place 5 on have
+// rows 69 and up, and the attract demo with Lidia (row 76) read past it and
+// crashed. The donor's row meanwhile (the scripted attacks there name the
+// donor's own moves, never an added fighter's: its CPU attacks with what its
+// current move's cancels open).
 void with_donor_row(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PPCContext&, uint8_t*)) {
     const int k = player ? slot_of_id(load(player + kPlayerSelectId)) : -1;
     if (k < 0 || load(player + kPlayerRow) != g_added[k].row) {
@@ -2439,6 +2463,8 @@ void with_donor_row(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(P
 }
 PPC_FUNC(sub_039A6214_orig);
 PPC_FUNC(sub_039A6214) { with_donor_row(ctx, base, load(0x10874864), sub_039A6214_orig); }
+PPC_FUNC(sub_039AFA34_orig);
+PPC_FUNC(sub_039AFA34) { with_donor_row(ctx, base, load(0x10874864), sub_039AFA34_orig); }
 // The select strip's labels by select id (kProfiles), read with a bound (Paul's
 // row past it) or none (sub_0294C400, id r4): the added fighter's row lent to
 // Paul's, and Paul's id asked.
