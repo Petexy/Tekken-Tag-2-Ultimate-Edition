@@ -160,6 +160,20 @@ private:
     uint32_t buffer_mask_ = 0;        // buffer resources fetched from
     uint32_t shadow_mask_ = 0;
     bool uses_registers_ = false;
+    // What the renderer may predict (TranslatedShader::vb_extent,
+    // stream_out_complete): whether the main program has had an instruction
+    // before (CALL_FS first leaves R0.x the vertex index), whether a
+    // subroutine or the fetch shader called first is being emitted, and
+    // whether that fetch shader changed R0 already; the vertex buffers'
+    // extents; the dwords of each stream-out stride written at the top
+    // level, and the buffers written otherwise (or outside the stride).
+    bool main_cf_seen_ = false;
+    bool in_subroutine_ = false;
+    bool first_fetch_shader_ = false;
+    bool r0_changed_ = false;
+    uint32_t vb_extent_[16] = {};
+    uint64_t stream_dwords_[4] = {};
+    uint8_t stream_partial_ = 0;
 
     // The static push depth while emitting, and the depth each jump expects
     // at its target.
@@ -655,6 +669,19 @@ void Translator::emit_vertex_fetch(const VtxInstruction& v) {
     }
     const int buffer = static_cast<int>(v.buffer_id) - 160;
     const std::string b = (buffer >= 0 && buffer < 16) ? format("dc.vb[%d]", buffer) : std::string("uvec4(0)");
+    if (buffer >= 0 && buffer < 16) {
+        // Bytes read from the vertex's start: the words of the element at
+        // `offset`, and the next word when they are not aligned (gload).
+        uint32_t& extent = vb_extent_[buffer];
+        if (first_fetch_shader_ && !r0_changed_ && v.fetch_type == vtx::kVertexData && v.src_gpr == 0 && !v.src_rel &&
+            v.src_sel_x == 0) {
+            const uint32_t words = (fetch_format_bytes(v.data_format) + 3) / 4;
+            if (extent != UINT32_MAX) extent = std::max(extent, v.offset + words * 4 + (v.offset & 3 ? 4 : 0));
+        } else {
+            extent = UINT32_MAX;
+        }
+    }
+    if (first_fetch_shader_ && (dst == 0 || v.dst_rel)) r0_changed_ = true;
     std::string index;
     if (v.fetch_type == vtx::kInstanceData) {
         switch (v.src_sel_x) {
@@ -976,8 +1003,10 @@ void Translator::emit_tex_clause(const Program& program, const CfInstruction& cf
     }
 }
 
-void Translator::emit_vtx_clause(const std::vector<VtxInstruction>& clause, bool) {
+void Translator::emit_vtx_clause(const std::vector<VtxInstruction>& clause, bool fetch_shader) {
+    first_fetch_shader_ = fetch_shader && first_fetch_shader_;
     for (const VtxInstruction& v : clause) emit_vertex_fetch(v);
+    if (!fetch_shader) first_fetch_shader_ = false;
 }
 
 // ----------------------------------------------------------------- exports
@@ -1074,8 +1103,14 @@ void Translator::emit_stream_out(const CfInstruction& cf) {
     if (e.type != 0) fail("indexed stream-out write");
     const uint32_t stride = env_.stream_out_stride[buffer];
     const std::string reg = gpr(e.rw_gpr, e.rw_rel, kLoopIndex);
+    // Written by every vertex: at the top level of the main program, which
+    // has no early exit, and within the stride.
+    const bool top = !in_subroutine_ && indent_ == 1 && stride != 0 && stride % 4 == 0 && stride <= 256;
     for (int i = 0; i < 4; ++i) {
         if (!(e.comp_mask & (1u << i))) continue;
+        const uint32_t dword = e.array_base + i;
+        if (top && dword < stride / 4) stream_dwords_[buffer] |= uint64_t{1} << dword;
+        else stream_partial_ |= 1u << buffer;
         line(format("gstore(dc.so[%u], uint(gl_VertexIndex) * %uu + %uu, uint(%s.%c));", buffer, stride,
                     (e.array_base + i) * 4, reg.c_str(), kChan[i]));
     }
@@ -1084,6 +1119,8 @@ void Translator::emit_stream_out(const CfInstruction& cf) {
 // ------------------------------------------------------------ control flow
 
 void Translator::emit_cf(const Program& program, const CfInstruction& cf) {
+    const bool first = !in_subroutine_ && !main_cf_seen_;
+    if (!in_subroutine_ && !(cf.kind == CfInstruction::kNormal && cf.inst == cf::kNop)) main_cf_seen_ = true;
     if (auto it = expected_depth_.find(cf.index); it != expected_depth_.end() && it->second != depth_) {
         fail(format("CF %u: control flow stack depth %d where a jump expects %d", cf.index, depth_, it->second));
     }
@@ -1178,6 +1215,7 @@ void Translator::emit_cf(const Program& program, const CfInstruction& cf) {
             fail("CALL_FS without a fetch shader");
             break;
         }
+        first_fetch_shader_ = first;
         for (const CfInstruction& f : fetch_->cf) {
             if (f.kind != CfInstruction::kNormal) {
                 fail("fetch shader with ALU or export instructions");
@@ -1186,6 +1224,7 @@ void Translator::emit_cf(const Program& program, const CfInstruction& cf) {
             if (f.inst == cf::kVtx || f.inst == cf::kVtxTc) emit_vtx_clause(fetch_->vtx_clauses[f.clause], true);
             else if (f.inst != cf::kReturn && f.inst != cf::kNop) fail(format("fetch shader instruction %s", cf_name(f.inst)));
         }
+        first_fetch_shader_ = false;
         break;
     case cf::kPush:
         push();
@@ -1243,6 +1282,7 @@ void Translator::emit_cf(const Program& program, const CfInstruction& cf) {
 }
 
 void Translator::emit_program(const Program& program, uint32_t start, bool subroutine) {
+    in_subroutine_ = subroutine;
     depth_ = 0;
     max_depth_ = 0;
     expected_depth_.clear();
@@ -1475,6 +1515,16 @@ bool Translator::run(std::string& error) {
     out_.constant_bank_mask = constant_bank_mask_;
     std::copy(std::begin(constant_bank_extent_), std::end(constant_bank_extent_), std::begin(out_.constant_bank_extent));
     out_.buffer_mask = buffer_mask_;
+    std::copy(std::begin(vb_extent_), std::end(vb_extent_), std::begin(out_.vb_extent));
+    for (uint32_t b = 0; b < 4; ++b) {
+        const uint32_t stride = env_.stream_out_stride[b];
+        if (!(env_.stream_out_mask & (1u << b)) || (stream_partial_ & (1u << b)) || stride == 0 || stride % 4 ||
+            stride > 256) {
+            continue;
+        }
+        const uint64_t all = stride == 256 ? ~uint64_t{0} : (uint64_t{1} << (stride / 4)) - 1;
+        if (stream_dwords_[b] == all) out_.stream_out_complete |= static_cast<uint8_t>(1u << b);
+    }
     std::string globals = format("ivec4 R[%d];\nivec4 PV = ivec4(0);\nint PSv = 0;\nbool pred = false;\n"
                                  "ivec4 AR = ivec4(0);\nivec4 ARn = ivec4(0);\nint AL = 0;\n",
                                  gpr_count_);

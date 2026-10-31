@@ -94,6 +94,14 @@ struct TranslatedShader {
     uint32_t constant_bank_mask = 0; // uniform blocks (kcache banks) read
     uint32_t constant_bank_extent[16] = {}; // bytes of each read from its start (UINT32_MAX: any, relative index)
     uint32_t buffer_mask = 0;        // buffer resources fetched from (VTX_FETCH in TEX clauses)
+    // Vertex buffer n: the bytes from a vertex's start (index * stride) its
+    // fetches can read, when every fetch from it is one of the fetch
+    // shader's, called first, indexed by the vertex index (R0.x untouched,
+    // plus the base vertex); 0 not read, UINT32_MAX read otherwise.
+    uint32_t vb_extent[16] = {};
+    // Stream-out buffers every vertex writes in full: each dword of the
+    // stride, unconditionally (in the main program, outside loops).
+    uint8_t stream_out_complete = 0;
 };
 
 // The environment of a draw's `stage` shader from the GPU register file

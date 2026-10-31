@@ -379,6 +379,7 @@ void Renderer::queue_write_back(Target* t) {
     if (!t->write_back || replaying_ || t->write_back_queued) return;
     t->write_back_queued = true;
     write_back_targets_.push_back(t);
+    if (!shadows_.empty()) forget_written(t->address, t->end); // (the CPU writes it at retirement)
 }
 
 // At the end of a submission: the targets it wrote, copied to staging memory.
@@ -390,6 +391,8 @@ void Renderer::copy_write_backs() {
     std::lock_guard lock(write_back_mutex_);
     for (Target* t : write_back_targets_) {
         t->write_back_queued = false;
+        // (Again: stream-out may have written a copy of the same bytes since it was queued.)
+        if (!shadows_.empty()) forget_written(t->address, t->end);
         const uint32_t bytes = color_format(t->format).bytes;
         if (!guest_memory_committed(t->address, t->pitch * t->height * bytes)) continue;
         if (write_back_free_.empty()) {

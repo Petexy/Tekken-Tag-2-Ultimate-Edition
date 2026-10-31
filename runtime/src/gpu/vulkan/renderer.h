@@ -34,6 +34,7 @@
 #include "latte/shader_abi.h"
 #include "latte/translate.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -237,6 +238,106 @@ private:
                              const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class);
     latte::abi::Buffer buffer_descriptor(uint32_t address, uint32_t size, uint32_t stride) const;
 
+    // -------------------------------------- video-memory copies (shadows.cpp)
+    // Guest memory is system memory, which a discrete GPU reads over the bus
+    // (uncached on some), 4 bytes at a time. What it reads most is kept in
+    // video memory too: stream-out output (skinned fighters), written there
+    // and copied back to guest memory, and the constants of the stream-out
+    // draws that write it (bone palettes), copied at the draw.
+public: // (shadows.cpp's helpers use it)
+    struct StreamShadow {
+        uint32_t begin = 0, end = 0; // guest range: the lowest buffer base seen .. the buffer's end
+        Buffer buffer;               // video memory, end - begin bytes
+        uint64_t used_frame = 0;     // last frame a draw wrote or read it
+        // Ranges stream-out wrote here (disjoint, by start): with the frame
+        // and the time of the command buffer that wrote them.
+        struct Span {
+            uint32_t end;
+            uint64_t frame;
+            double time;
+        };
+        std::map<uint32_t, Span> written;
+    };
+
+private:
+    // A draw's stream-out writes: into video memory (noted and copied back
+    // once recorded), and into guest memory, which forget what video memory
+    // holds there.
+    struct StreamWrites {
+        struct Write {
+            StreamShadow* shadow;
+            uint32_t index, begin, end;   // buffer, guest range
+            latte::abi::Buffer guest;     // the descriptor writing guest memory instead
+        };
+        Write video[4];
+        uint32_t video_count = 0;
+        uint32_t guest[4][2];
+        uint32_t guest_count = 0;
+    };
+    // Guest ranges a draw reads or writes in place, for the copies back
+    // before it that have yet to finish.
+    struct GuestRanges {
+        uint32_t range[96][2]; // (vertex buffers, both stages' blocks and buffers: 80 at most)
+        uint32_t count = 0;
+        bool overflow = false; // (then taken to touch everything)
+        void add(uint32_t begin, uint64_t end) {
+            if (end <= begin) return;
+            if (count == 96) {
+                overflow = true;
+                return;
+            }
+            range[count][0] = begin;
+            range[count++][1] = static_cast<uint32_t>(std::min<uint64_t>(end, UINT32_MAX));
+        }
+    };
+    void init_shadows();
+    void stream_out_target(uint32_t index, uint32_t base, uint32_t offset, uint32_t size, uint32_t stride,
+                           bool complete, uint32_t vertices, latte::abi::Buffer& so, StreamWrites& writes);
+    void note_stream_writes(const StreamWrites& writes);
+    void redirect_vertex_buffers(const ShaderModule* vs, latte::abi::DrawConstants& dc, const uint32_t* vb_address,
+                                 uint32_t first, uint32_t last, bool stream_out_draw, GuestRanges& reads);
+    void video_constants(const Registers& regs, const ShaderModule* vs, latte::abi::DrawConstants& dc);
+    int copies_back_pending(const GuestRanges& ranges, const StreamWrites& writes) const;
+    void forget_written(uint32_t address, uint64_t end);
+    void copy_back();
+    void update_shadows();
+    void check_shadows();
+    void print_shadow_statistics(uint64_t frames);
+    bool touches_shadow(uint32_t begin, uint64_t end) const;
+    bool shadows_on_ = false;        // stream-out output in video memory
+    bool video_constants_on_ = false; // and the constants of the draws writing it
+    int shadow_check_ = 0;           // TTT2_SHADOW_CHECK: 1 copies against guest memory, 2 both paths drawn
+    std::vector<std::unique_ptr<StreamShadow>> shadows_;
+    struct StreamBuffer {
+        uint32_t begin, end;       // the lowest base seen, the end
+        uint64_t first, last;      // frames it was seen in: the first of a run without long gaps, the last
+        uint64_t retry;            // no copy before this frame (there was no video memory for it)
+    };
+    std::vector<StreamBuffer> stream_buffers_; // stream-out buffers of 1 MiB or more seen (shadow candidates)
+    struct StreamOutRange {
+        uint32_t begin, end;
+        uint64_t value; // the submission writing it
+    };
+    std::vector<StreamOutRange> stream_out_in_place_; // stream-out written in guest memory, not yet finished
+    struct CopyBack {
+        StreamShadow* shadow;
+        uint32_t begin, end;
+    };
+    std::vector<CopyBack> copy_backs_; // written since the last barrier, copied back at the next
+    std::vector<CopyBack> unsynced_;   // copied back since the last barrier (still running)
+    double recording_time_ = 0;        // when the command buffer being recorded began
+    UploadRing video_ring_;            // video memory the CPU writes (constants)
+    uint64_t video_chunk_value_[UploadRing::kChunks] = {};
+    uint32_t video_chunks_touched_ = 0;
+    uint32_t draw_video_chunks_ = 0;   // the draw being built's copies
+    Buffer check_staging_;
+    struct ShadowStats {
+        uint64_t written = 0, copied = 0, hits = 0, old = 0, partial = 0, unpredictable = 0;
+        uint64_t constants = 0, blocks = 0, in_place = 0, vertex_bytes = 0, flushes = 0;
+        uint64_t checked = 0, checked_bytes = 0, differ = 0;
+    } shadow_stats_;
+    uint64_t check_logged_ = 0;
+
     // ---------------------------------------- interpolation (interpolate.cpp)
 public: // record types, shared with interpolate.cpp's helpers
     struct ConstantSource {
@@ -265,6 +366,8 @@ public: // record types, shared with interpolate.cpp's helpers
         uint32_t first_slot, slot_count;
         uint64_t hash; // of all its constants
         bool blend;    // a depth-tested (3D) draw: its constants blend in replays
+        bool has_range = false; // its vertex indices' range is known (shadows.cpp), for replays:
+        uint32_t first_index = 0, last_index = 0;
     };
     // A frame's draws and the constant data they read, copied into
     // GPU-visible memory: the frame's own draws read it there too, so a

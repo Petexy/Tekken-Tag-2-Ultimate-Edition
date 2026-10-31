@@ -39,6 +39,7 @@ Renderer::Renderer() {
     init_formats(ctx_.physical);
     guest_.init(ctx_);
     ring_.init(ctx_, kRingSize);
+    init_shadows();
     VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VK_CHECK(vkCreateSemaphore(ctx_.device, &sci, nullptr, &acquired_));
 
@@ -100,6 +101,7 @@ VkCommandBuffer Renderer::cmd() {
             }
         }
         cmd_ = slot.cmd;
+        recording_time_ = now_seconds();
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         VK_CHECK(vkBeginCommandBuffer(cmd_, &bi));
@@ -128,6 +130,7 @@ void Renderer::wait_value(uint64_t value) {
 uint64_t Renderer::submit(bool wait) {
     if (recording_) {
         end_rendering();
+        if (!copy_backs_.empty()) barrier(); // (stream-out draws end in a pass: end_rendering copied them back)
         copy_write_backs();
         vkCmdWriteTimestamp2(cmd_, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, busy_pool_, 2 * slot_ + 1);
         VK_CHECK(vkEndCommandBuffer(cmd_));
@@ -151,6 +154,10 @@ uint64_t Renderer::submit(bool wait) {
             if (chunks_touched_ & (1u << c)) chunk_value_[c] = value;
         }
         chunks_touched_ = 0;
+        for (uint32_t c = 0; c < UploadRing::kChunks; ++c) {
+            if (video_chunks_touched_ & (1u << c)) video_chunk_value_[c] = value;
+        }
+        video_chunks_touched_ = 0;
         recording_ = false;
         bound_pipeline_ = nullptr;
     }
@@ -183,6 +190,10 @@ void Renderer::barrier() {
     di.memoryBarrierCount = 1;
     di.pMemoryBarriers = &mb;
     vkCmdPipelineBarrier2(cmd(), &di);
+    // Copies back recorded at the last barrier are done; stream-out output
+    // written in video memory since goes back now.
+    unsynced_.clear();
+    if (!copy_backs_.empty()) copy_back();
 }
 
 uint8_t* Renderer::upload(VkDeviceSize size, VkDeviceSize alignment, VkDeviceSize& offset) {
@@ -483,6 +494,7 @@ void Renderer::swap() {
     frame_idle_seconds_ = take_idle_seconds();
     idle_seconds_ += frame_idle_seconds_;
     copy_write_backs(); // the frame's, before its replays render into the same targets
+    if (shadow_check_) check_shadows();
     capture();
     show_frame();
     if (profiling_) {
@@ -518,6 +530,7 @@ void Renderer::swap() {
     if (trace_at >= 0 && trace_frame_ == UINT64_MAX && now_seconds() - started >= trace_at) {
         trace_frame_ = frame_number_ + 1;
     }
+    update_shadows();
     ++frame_number_;
     ++frames_;
     const double t = now_seconds();
@@ -535,6 +548,7 @@ void Renderer::swap() {
                      frame_records_[current_record_ ^ 1].used / 1e6,
                      replay_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1), match_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1),
                      100.0 * std::max(0.0, 1.0 - idle_seconds_ / (t - window_start_)));
+        if (shadows_on_) print_shadow_statistics(frames_);
         if (!swap_delays_.empty()) {
             std::sort(swap_delays_.begin(), swap_delays_.end());
             const auto pct = [&](size_t p) { return swap_delays_[std::min(swap_delays_.size() - 1, swap_delays_.size() * p / 100)]; };

@@ -216,6 +216,44 @@ attachment formats and blend state.
   from vertex shaders (skinned fighters, text); the first draw after a run
   of stream-out draws ends the rendering pass for a barrier, which a pass
   cannot hold, so the draws reading the output see all of it.
+- Guest memory is system memory, which a discrete GPU reads over the bus,
+  4 bytes at a time (uncached on some: NVIDIA documents pinned host memory
+  so). On RADV a fight frame takes about 3.3 ms at any resolution; slower
+  links or uncached reads multiply what skinning costs: per vertex about
+  112 dword reads of bone matrices, 28 of vertex data and 20 stores, and
+  16-20 reads for each draw of the skinned vertex (issues #45, #48). So on
+  a discrete GPU (`shadows.cpp`) the stream-out buffers of 1 MiB or more
+  in use (the title's four skinning buffers, which it writes about every
+  other frame) get copies in video memory, made at a swap. A stream-out
+  draw that writes every byte of its vertices (the translator's
+  `stream_out_complete`: each dword of the stride at the top level of the
+  main program; not indexed, one instance) writes the copy, and its range
+  goes back to guest memory with a `vkCmdCopyBuffer` at the barrier after
+  the run (finished by the next barrier, and before the submission
+  retires: the CPU and anything reading in place see the same bytes as
+  before). A vertex buffer reads the copy only when every byte the draw
+  can fetch (the index range, base vertex and stride, plus the
+  translator's `vb_extent`: what the fetch shader, called first and
+  indexed by the vertex index, reads past a vertex's start) was written
+  there in the last 4 frames (skinning reads each vertex's state from a
+  buffer it wrote 1-3 frames before) and 250 ms, and not since announced as
+  written by the CPU (`cpu_wrote`) or a render target's write-back, nor
+  overwritten by stream-out in place; anything else reads guest memory. A
+  draw using guest memory under a copy back not yet finished gets a
+  barrier first. The stream-out draws writing video memory read their
+  buffer resources and uniform blocks (bone palettes) from copies the CPU
+  writes into host-visible video memory as the draw is built (as
+  interpolation's records do). Replays (120 fps) still run each skinning
+  draw, which then reads its inputs (bone palettes, vertex data) in place:
+  leaving the stream-out draws that draw nothing out of replays removes
+  that.
+  The 10 s statistics add a `video memory:` line (copies, reads from video
+  and guest memory and why, replays' reads included, constants copied,
+  vertex data the skinning still reads in place).
+  `TTT2_SHADOWS=0` reads everything in place; `TTT2_SHADOW_CHECK=1`
+  compares every copy with guest memory once each frame finished, and `=2`
+  also draws each such stream-out draw the old way into guest memory
+  (without copies back), comparing both paths' output.
 - Submission is asynchronous: command buffers (8 in turn) and upload
   memory (8 chunks of a 256 MiB host buffer) are tracked on a timeline
   semaphore and reused once the GPU has finished with them. The command
@@ -1819,6 +1857,8 @@ ignores. Renderer debugging:
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
+| `TTT2_SHADOWS=0/1` | stream-out output and its draws' constants read in place (0) or from copies in video memory (1; the default on discrete GPUs) |
+| `TTT2_SHADOW_CHECK=1/2` | compare those copies with guest memory after each frame (2: also draw the stream-out draws the old way, into guest memory) |
 | `TTT2_VK_VALIDATION=1` | Khronos validation layer, if installed (synchronization checks: `khronos_validation.validate_sync = true` in a file named by `VK_LAYER_SETTINGS_PATH`) |
 | `TTT2_AUDIO_DUMP=<file.wav>` | everything played, as 48 kHz stereo WAV (also without a device) |
 | `TTT2_TRACE_AX=1` | voice set-up, device mixes, output level |
