@@ -1681,8 +1681,17 @@ PPC_FUNC(sub_033D504C) { // first record of id
     }
     sub_033D504C_orig(ctx, base);
 }
+// A ghost's second record (sub_06EEF064: the side's second member, mm+428
+// [side + 2], through the thunk sub_06ED64EC) comes from its partner's member
+// copy, whose fighter byte stops at 62 (sub_06EE967C): for an added fighter's
+// ghost fighting alone it is the partner's block's own fighter (r31 the
+// block), or the ghost fought with ZAKO B as its partner.
+constexpr uint32_t kGhostPartnerRecord = 0x06EF0500, kPartnerBlockFighter = 20, kCappedId = 62;
 PPC_FUNC(sub_033D5064_orig);
 PPC_FUNC(sub_033D5064) { // record i of id
+    if (ctx.lr == kGhostPartnerRecord && ctx.r[3] == kCappedId && slot_of_id(load(ctx.r[31] + kPartnerBlockFighter)) >= 0) {
+        ctx.r[3] = load(ctx.r[31] + kPartnerBlockFighter);
+    }
     if (const int k = slot_of_id(ctx.r[3]); k >= 0) {
         ctx.r[3] = g_added[k].records[ctx.r[4] < 2 ? ctx.r[4] : 0];
         return;
