@@ -1014,10 +1014,12 @@ not fit there draws black from its tag-in on. The buffers are sized for the
 title's fighters (20,000-34,000 vertices, 7 MiB each), so the port triples
 them (`sub_08977AE8`'s configuration), and the importer keeps an added fighter
 under 42,000 vertices (leaving out 2P colour layers if it must; Noctis, whose
-model holds all his summoned weapons and his trousers, 90,000: two of him and
-two others fit) and its textures at 4 MB like the title's (the largest
-halved). The effect files a match copies in (the common ones, the stage's and
-each fighter's) share the resource manager's 20 MiB pool (`sub_08A7ED8C`'s
+model holds all his summoned weapons and his trousers, is decimated from
+89,000 to about 49,000: every vertex is skinned and drawn every frame, shown
+or not, and at full size he took three times another added fighter's GPU
+time) and its textures at 4 MB like the title's (the largest halved). The
+effect files a match copies in (the common ones, the stage's and each
+fighter's) share the resource manager's 20 MiB pool (`sub_08A7ED8C`'s
 size) with textures that are loading and much else; two fighters with many
 effects filled it and the match did not load, so with added fighters it is
 twice the size. And the CPU's play (`sub_039A6214`) reads a table of 67

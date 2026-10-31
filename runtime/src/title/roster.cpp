@@ -4511,7 +4511,7 @@ PPC_FUNC(sub_08BE56E4) {
 // fighters' vertices as its state and draws black, then blotched). That first
 // frame stops at a buffer's size, made for the title's fighters (1-2.6 MB of
 // skinned vertices each); added fighters take up to 3.3 MB (Noctis with his
-// weapons 5.5 MB: two of him and two others need 17.7 MB), so the buffers'
+// weapons 3.9 MB: two of him and two others need 14.4 MB), so the buffers'
 // total in the configuration sub_08977AE8 is given (r4: u8 +16 the count, u32
 // +8 the total, 28 MiB) is tripled while it allocates them (from the title's
 // 384 MiB graphics pool).
