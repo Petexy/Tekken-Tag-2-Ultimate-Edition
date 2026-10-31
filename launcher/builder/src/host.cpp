@@ -40,6 +40,11 @@ fs::path existing(fs::path folder) {
 constexpr const char* kLibraryFolders[] = {"/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64",
                                            "/usr/lib", "/lib", "/usr/local/lib64", "/usr/local/lib"};
 
+// The kit's libraries by other names on some distributions: Debian and
+// Ubuntu name shaderc's libshaderc.so.1 (its soname too, so the game program
+// linked with that file needs libshaderc.so.1).
+constexpr std::pair<const char*, const char*> kOtherNames[] = {{"libshaderc_shared.so.1", "libshaderc.so.1"}};
+
 // ---------------------------------------------------------------- distributions
 
 // An os-release value: quoted or not, with \ escapes.
@@ -162,10 +167,13 @@ const std::map<std::string, fs::path>& loader_cache() {
     return cache;
 }
 
-std::optional<fs::path> in_folder(const fs::path& folder, const std::string& soname) {
+// The first of the names that is an x86-64 file in the folder.
+std::optional<fs::path> in_folder(const fs::path& folder, const std::vector<std::string>& names) {
     std::error_code ec;
-    const fs::path path = folder / soname;
-    if (fs::exists(path, ec) && x86_64_elf(path)) return path;
+    for (const std::string& name : names) {
+        const fs::path path = folder / name;
+        if (fs::exists(path, ec) && x86_64_elf(path)) return path;
+    }
     return std::nullopt;
 }
 
@@ -281,14 +289,22 @@ std::vector<std::string> compiler_candidates() {
 }
 
 std::optional<Library> find_library(const std::string& soname, const std::vector<fs::path>& folders) {
-    if (const auto it = loader_cache().find(soname); it != loader_cache().end() && x86_64_elf(it->second)) {
-        return Library{it->second, true};
+    std::vector<std::string> names{soname};
+    for (const auto& [name, other] : kOtherNames) {
+        if (soname == name) names.emplace_back(other);
+    }
+    // (Either name in the loader's cache before either in a folder: then the
+    // game program needs no run path.)
+    for (const std::string& name : names) {
+        if (const auto it = loader_cache().find(name); it != loader_cache().end() && x86_64_elf(it->second)) {
+            return Library{it->second, true};
+        }
     }
     for (const fs::path& folder : folders) {
-        if (const auto path = in_folder(folder, soname)) return Library{*path, false};
+        if (const auto path = in_folder(folder, names)) return Library{*path, false};
     }
     for (const char* folder : kLibraryFolders) {
-        if (const auto path = in_folder(folder, soname)) return Library{*path, false};
+        if (const auto path = in_folder(folder, names)) return Library{*path, false};
     }
     return std::nullopt;
 }
@@ -371,7 +387,7 @@ const System& this_system() {
         std::error_code ec;
         const bool usual = loader_cache().contains("libc.so.6") ||
                            std::any_of(std::begin(kLibraryFolders), std::end(kLibraryFolders),
-                                       [](const char* folder) { return in_folder(folder, "libc.so.6").has_value(); });
+                                       [](const char* folder) { return in_folder(folder, {"libc.so.6"}).has_value(); });
         return parse_system(text, fs::exists("/run/ostree-booted", ec), usual);
     }();
     return system;
