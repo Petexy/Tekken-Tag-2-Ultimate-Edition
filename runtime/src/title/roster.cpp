@@ -38,6 +38,23 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// The TTT2_TRACE_* switches, read once: Windows' getenv takes a lock and walks
+// the whole environment, and some are tested per cancel row, requirement or
+// move property every frame.
+struct Traces {
+    bool roster = std::getenv("TTT2_TRACE_ROSTER") != nullptr;
+    bool sounds = std::getenv("TTT2_TRACE_SOUNDS") != nullptr;
+    bool special_cancels = std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS");
+    bool noctis_air = std::getenv("TTT2_TRACE_NOCTIS_AIR") != nullptr;
+    bool eliza_assist = std::getenv("TTT2_TRACE_ELIZA_ASSIST") != nullptr;
+    bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
+    bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
+};
+const Traces& traces() {
+    static const Traces read;
+    return read;
+}
+
 // ------------------------------------------------------------------ the title's tables (EU v16)
 
 constexpr uint32_t kCodes = 0x107C57F4;       // 63 x char*: each fighter's three-letter code
@@ -757,7 +774,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     for (const std::string& failed : serve_raw(raw, pack.directory)) {
         if (failed == kSoundArchive) std::fill(std::begin(voice.keys), std::end(voice.keys), 0u);
     }
-    if (std::getenv("TTT2_TRACE_ROSTER")) {
+    if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: %s (donor %s, id %u): %zu entries, %zu from the pack\n",
                      pack.code.c_str(), pack.donor.c_str(), kFirstAddedId + static_cast<uint32_t>(slot), entries.size(),
                      own);
@@ -1453,7 +1470,7 @@ void prepare_roster() {
     add_shared(directory / "shared");
     patch_sounds();
     place_cells();
-    if (std::getenv("TTT2_TRACE_ROSTER") && !std::getenv("TTT2_INPUT_SCRIPT")) {
+    if (traces().roster && !std::getenv("TTT2_INPUT_SCRIPT")) {
         std::map<uint32_t, std::string> names;
         for (const auto& fighter : g_added) {
             if (!fighter.active || fighter.outfits.empty()) continue;
@@ -1531,7 +1548,7 @@ PPC_FUNC(sub_0209506C) {
     if (!fighter.active) return;
     const uint32_t alias = load(result);
     store(result, fighter.id);
-    if (std::getenv("TTT2_TRACE_ROSTER"))
+    if (traces().roster)
         std::fprintf(stderr, "ttt2: outfit: resolved body identity %u to fighter %u, row %u\n",
                      alias, fighter.id, load(result + 4));
 }
@@ -1565,7 +1582,7 @@ PPC_FUNC(sub_02091898) {
     }
     sub_02091898_orig(ctx, base);
     if (selected) {
-        if (std::getenv("TTT2_TRACE_ROSTER"))
+        if (traces().roster)
             std::fprintf(stderr, "ttt2: outfit: slot %u body recipe %s (registry %u), incoming fighter %u, stored fighter %u\n",
                          slot, selected->code.c_str(), selected->id, fighter_id, load(recipe + 24));
     }
@@ -1618,7 +1635,7 @@ void register_added(PPCContext& ctx, uint8_t* base) {
             guest_call(ctx, base, sub_065DFA4C, {code});
             guest_call(ctx, base, sub_065E8604, {code, added.code_string});
             guest_call(ctx, base, sub_06685CB8, {master, added.id, added.row, name, code});
-            if (added.code != original.code && std::getenv("TTT2_TRACE_ROSTER")) {
+            if (added.code != original.code && traces().roster) {
                 static const uint32_t found = system_alloc(80);
                 guest_call(ctx, base, sub_065DFA4C, {found + 8});
                 guest_call(ctx, base, sub_065DFA4C, {found + 40});
@@ -1630,7 +1647,7 @@ void register_added(PPCContext& ctx, uint8_t* base) {
             }
             guest_call(ctx, base, sub_065E52A4, {name, 0});
             guest_call(ctx, base, sub_065E52A4, {code, 0});
-            if (added.code != original.code && std::getenv("TTT2_TRACE_ROSTER"))
+            if (added.code != original.code && traces().roster)
                 std::fprintf(stderr, "ttt2: outfit: registered %s for %s, identity %u, motion row %u\n",
                              added.code.c_str(), original.code.c_str(), added.id, added.row);
         }
@@ -1730,7 +1747,7 @@ PPC_FUNC(sub_033D5BBC_orig);
 PPC_FUNC(sub_033D5BBC) {
     const uint32_t player = ctx.r[3];
     const int k = slot_of_record(load(player + kPlayerRecord));
-    if (std::getenv("TTT2_TRACE_ROSTER")) {
+    if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: player %08X set up: select id %u, record %08X (slot %d), row %u\n", player,
                      load(player + kPlayerSelectId), load(player + kPlayerRecord), k, load(player + kPlayerRow));
     }
@@ -1815,7 +1832,7 @@ PPC_FUNC(sub_044BE1EC) {
         if (ctx.r[3] != 0) requested_codes[request_key] = code_string;
         else if (invalidate && !load8(state + 1)) store(state + 12, record);
     }
-    if (!g_added[k].outfits.empty() && slot < 5 && std::getenv("TTT2_TRACE_ROSTER")) {
+    if (!g_added[k].outfits.empty() && slot < 5 && traces().roster) {
         // The loader retries while asynchronous work completes. Log transitions,
         // not every poll, so a stalled load leaves a useful, bounded trace.
         const uint32_t state = loader + 28 + 56 * slot;
@@ -2061,7 +2078,7 @@ std::vector<uint32_t> widen(const char* mode, const std::vector<uint32_t>& picks
             break;
         }
     }
-    if (std::getenv("TTT2_TRACE_ROSTER")) {
+    if (traces().roster) {
         std::string was, now;
         for (uint32_t id : picks) was += ' ' + std::to_string(id);
         for (uint32_t id : out) now += ' ' + std::to_string(id);
@@ -2212,7 +2229,7 @@ PPC_FUNC(sub_04DC9F20) {
 // (Arcade's CPU) keep the refusal: their fighters are drawn, not a ghost's.
 constexpr uint32_t kGhostEntry = 20, kBlockFighter = 20;
 void trace_ghost_block(const char* member, uint32_t block) {
-    if (!std::getenv("TTT2_TRACE_ROSTER") || !block) return;
+    if (!traces().roster || !block) return;
     char name[32] = {};
     std::memcpy(name, guest_pointer(block + 0x1118), sizeof name - 1);
     std::fprintf(stderr, "ttt2: roster: ghost %s: fighter %u, rank %u, %u wins %u losses, \"%s\"\n", member,
@@ -2506,7 +2523,7 @@ PPC_FUNC(sub_077537D0) {
     store(row + 4, g_voice[k].items);
     const uint32_t asked = ctx.r[3];
     with_donor_id(ctx, base, player, sub_077537D0_orig);
-    if (std::getenv("TTT2_TRACE_SOUNDS"))
+    if (traces().sounds)
         std::fprintf(stderr, "ttt2: sounds: item sound %u of added fighter %d -> %08X (%u items)\n", asked, k,
                      static_cast<uint32_t>(ctx.r[3]), g_voice[k].items);
     store(row, theirs[0]);
@@ -2574,7 +2591,7 @@ uint32_t bind_bank(PPCContext& ctx, uint8_t* base, size_t k) {
     }
     g_bound[at] = static_cast<int>(k);
     for (uint32_t sid : g_voice[k].copies) store(g_sound_table + 16 * sid + 4, kFreeBanks[at]);
-    if (std::getenv("TTT2_TRACE_ROSTER")) {
+    if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: %s's sound bank as id %u (%zu sounds)\n", g_added[k].code.c_str(),
                      kFreeBanks[at], g_voice[k].copies.size());
     }
@@ -3089,8 +3106,7 @@ PPC_FUNC(sub_033E265C) {
     // Opening and confirming use this same function. Only confirmation may
     // substitute the native equipment style; opening must keep its input.
     ctx.r[8] = outfit_menu::native_style(k >= 0 ? g_added[k].outfits.size() : 0, ctx.lr, ctx.r[8]);
-    if (k >= 0 && !g_added[k].outfits.empty() && outfit_menu::confirming(ctx.lr) &&
-        std::getenv("TTT2_TRACE_ROSTER"))
+    if (k >= 0 && !g_added[k].outfits.empty() && outfit_menu::confirming(ctx.lr) && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: confirmed menu entry %u for %s\n",
                      g_outfit_choice + 1, g_added[k].code.c_str());
     const bool lend = k >= 0 && k < 32 && cursor != 0 && g_lent < 0;
@@ -3135,7 +3151,7 @@ PPC_FUNC(sub_033E3460) {
     uint32_t kept = 0;
     while (kept < count && load(cursor + kChooserEntries + kChooserEntrySize * kept) != kChooserSlot) ++kept;
     store8(cursor + kChooserCount, static_cast<uint8_t>(kept));
-    if (!g_added[k].outfits.empty() && std::getenv("TTT2_TRACE_ROSTER"))
+    if (!g_added[k].outfits.empty() && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
                      kept, g_added[k].code.c_str());
 }
@@ -3645,7 +3661,7 @@ std::string_view damage_move_name(uint32_t player) {
     return move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
 }
 bool trace_noctis_player(uint32_t player) {
-    if (!player || !std::getenv("TTT2_TRACE_NOCTIS_AIR")) return false;
+    if (!player || !traces().noctis_air) return false;
     const int k = slot_of_id(load(player + kPlayerSelectId));
     return k >= 0 && g_added[k].code == "mrz";
 }
@@ -3754,11 +3770,10 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     if ((id == kSummonProp || id == kDismissProp || id == kHoldProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         summon_property(player, id, load(ctx.r[4] + 4));
-    const bool trace_special = (std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS")) &&
-                               (id == 0x8093 || id == 0x80a5) && ctx.r[5] == 0;
+    const bool trace_special = traces().special_cancels && (id == 0x8093 || id == 0x80a5) && ctx.r[5] == 0;
     const uint32_t trace_value = trace_special ? load(ctx.r[4] + 4) : 0;
     const uint32_t trace_frame = trace_special ? load(player + kPlayerFrame) : 0;
-    const bool noctis_trace = trace_noctis_air(player) && (id == 0x8093 || id == 0x80a5);
+    const bool noctis_trace = (id == 0x8093 || id == 0x80a5) && trace_noctis_air(player);
     const uint32_t requested = noctis_trace ? load(ctx.r[4]+4) : 0;
     const uint32_t pass = ctx.r[5];
     sub_03AE86A0_orig(ctx, base);
@@ -3779,14 +3794,15 @@ PPC_FUNC(sub_0404FF30) {
         ctx.r[3] = result;
         return;
     }
-    const bool trace = (std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS")) &&
+    const bool trace = traces().special_cancels &&
         (kind == 307 || kind == 308 || ((kind == 46 || kind == 47) && load(player + 0x63c) != 0));
     const uint32_t wanted = trace ? load(requirement + 4) : 0;
     const uint32_t stored = trace ? load(player + (kind == 308 ? 0x628 : 0x63c)) : 0;
     const uint32_t frame = trace ? load(player + kPlayerFrame) : 0;
     const uint32_t move = trace ? load(player + kPlayerMove) : 0;
-    const bool noctis_trace = trace_noctis_air(player) &&
-        (kind == 307 || kind == 308 || kind == 46 || kind == 47 || kind == 457 || kind == 0x8093 || kind == 0x80a5);
+    const bool noctis_trace =
+        (kind == 307 || kind == 308 || kind == 46 || kind == 47 || kind == 457 || kind == 0x8093 || kind == 0x80a5) &&
+        trace_noctis_air(player);
     const uint32_t noctis_wanted = noctis_trace ? load(requirement+4) : 0;
     sub_0404FF30_orig(ctx, base);
     if (noctis_trace)
@@ -3805,7 +3821,7 @@ PPC_FUNC(sub_0404FF30) {
 
 namespace {
 bool trace_eliza_assist(uint32_t player) {
-    if (!std::getenv("TTT2_TRACE_ELIZA_ASSIST") || !player) return false;
+    if (!traces().eliza_assist || !player) return false;
     const int k = slot_of_id(load(player + kPlayerSelectId));
     return k >= 0 && (g_added[k].code == "elz" || g_added[k].code == "kmi" || g_added[k].code == "mry" || g_added[k].code == "rei");
 }
@@ -3916,7 +3932,7 @@ bool special_assist_pair(uint32_t player) {
 }
 // Opt-in movement trace for comparing the imported rush with native SAV.
 void trace_assist_follow(uint32_t player) {
-    if (!player || !std::getenv("TTT2_TRACE_ASSIST_FOLLOW")) return;
+    if (!player || !traces().assist_follow) return;
     const uint32_t partner = load(player + 0xac);
     if (!partner || (!load(player + 0x1e88) && !load(partner + 0x1e88))) return;
     const std::string_view name(assist_move_name(player));
@@ -3989,7 +4005,7 @@ PPC_FUNC(sub_03F52F20) {
         sub_03F52F20_orig(ctx, base);
 }
 void trace_assist_lifetime(const char* operation, uint32_t player, bool deferred) {
-    if (!std::getenv("TTT2_TRACE_ELIZA_ASSIST") || !player) return;
+    if (!traces().eliza_assist || !player) return;
     const uint32_t partner = load(player + 0xac);
     if (!trace_eliza_assist(player) && !trace_eliza_assist(partner)) return;
     std::fprintf(stderr, "eliza-assist LIFETIME op=%s deferred=%u player=%08X name=%s frame=%u owner=%u assist=%u partner=%08X partner_name=%s partner_owner=%u partner_assist=%u timer=%u\n",
@@ -4124,7 +4140,7 @@ void end_projectiles_at_floor(uint32_t player) {
         const float radius = static_cast<float>(static_cast<int32_t>(load(row + kRowRadius)));
         if (loadf(slot + 4) - radius <= floor && static_cast<int32_t>(load(slot + kProjectileLife)) > 1) {
             store(slot + kProjectileLife, 1);
-            if (std::getenv("TTT2_TRACE_PROJECTILES"))
+            if (traces().projectiles)
                 std::fprintf(stderr, "ttt2: projectile %08X ends at the floor\n", slot);
         }
     }
@@ -4154,7 +4170,7 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
                        throws_after(s.move, static_cast<int32_t>(load(player + kPlayerFrame)));
     if (hangs) {
         storef(player + kPlayerVy, kTitleGravity * slow_motion(player));
-        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+        if (traces().projectiles)
             std::fprintf(stderr, "ttt2: %08X hangs at %.0f mm at frame %u, to throw\n", player, hang_y,
                          load(player + kPlayerFrame));
     } else if (s.mode == Arc2D::kPhysics) {
@@ -4298,7 +4314,7 @@ float effect_pitch(PPCContext& ctx, uint8_t* base, uint32_t effect) {
         const auto up = row ? static_cast<float>(static_cast<int32_t>(load(row + kRowUp))) : 0.0f;
         if (up != 0.0f) e.pitch = std::atan2(up, ahead);
         e.settled = true;
-        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+        if (traces().projectiles)
             std::fprintf(stderr, "ttt2: effect %08X thrown with %08X (%+.0f ms): pitch %.1f deg\n", effect,
                          slot->second, std::chrono::duration<double, std::milli>(thrown->second - e.start).count(),
                          e.pitch * 57.29578f);
@@ -4347,7 +4363,7 @@ bool projectile_look_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint
         const float n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         if (l.moved && n > 1e-3f && n < 500) // (a step, not its first place)
             for (int i = 0; i < 3; ++i) l.way[i] = d[i] / n;
-        if (std::getenv("TTT2_TRACE_PROJECTILES") && n > 1e-3f) {
+        if (traces().projectiles && n > 1e-3f) {
             const uint32_t player = guest_call(ctx, base, sub_05C5EF74, {owner});
             std::fprintf(stderr, "ttt2: projectile look %08X at %.0f %.0f %.0f way %.2f %.2f %.2f (its fighter at %.0f %.0f %.0f, the opponent at %.0f %.0f)\n",
                          effect, at[0], at[1], at[2], l.way[0], l.way[1], l.way[2], player ? loadf(player) : 0.0f,
@@ -4357,7 +4373,7 @@ bool projectile_look_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint
         }
         std::copy(at, at + 3, l.last);
     } else {
-        if (l.slot && std::getenv("TTT2_TRACE_PROJECTILES"))
+        if (l.slot && traces().projectiles)
             std::fprintf(stderr, "ttt2: projectile look %08X: its projectile is gone\n", effect);
         l.slot = 0; // gone: never again, even when the slot is used anew
         place[1] = kOutOfSight;
@@ -4458,7 +4474,7 @@ PPC_FUNC(sub_08BE56E4) {
                     if (const float n = std::sqrt(forward * forward + up * up); up != 0 && n > 0) {
                         for (int i = 0; i < 3; ++i)
                             a[i] = (loadf(level + 32 + 4 * i) * forward + loadf(level + 16 + 4 * i) * up) / n;
-                        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+                        if (traces().projectiles)
                             std::fprintf(stderr, "ttt2: projectile look %08X: way from its row %.2f %.2f %.2f\n",
                                          effect, a[0], a[1], a[2]);
                     }

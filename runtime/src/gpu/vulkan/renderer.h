@@ -365,7 +365,8 @@ private:
     void present_timed(float reported_hz);
     void present_every_refresh(float reported_hz);
     void note_presentation(double scheduled, double presented);
-    void create_swapchain(VkFormat image_format);
+    // `why`: for the log (the first, the window's size, out of date...).
+    void create_swapchain(VkFormat image_format, const char* why);
     // Presents image `index` once its copy (timeline value `ready`) is done;
     // `present_id` > 0 tags the present for present waits. False if the
     // swapchain had to be recreated (nothing was presented).

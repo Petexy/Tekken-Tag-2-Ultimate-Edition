@@ -314,6 +314,7 @@ void wait_for_frame(std::chrono::steady_clock::time_point& next) {
 void* ax_main(void*) {
     Thread* t = g_ax_thread;
     bind_current_thread(t);
+    track_thread_cpu(nullptr, t->guest);
     auto next = std::chrono::steady_clock::now();
     float output[2 * kOutputSamples];
     for (;;) {

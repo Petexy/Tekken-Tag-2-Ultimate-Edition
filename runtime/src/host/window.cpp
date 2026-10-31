@@ -465,6 +465,7 @@ void on_controller_devices_change(std::function<void()> callback) {
 
 bool run_event_loop(const std::function<bool()>& finished) {
     using namespace std::chrono_literals;
+    track_thread_cpu("window");
     auto keymap_check = std::chrono::steady_clock::now();
     while (!finished()) {
         // A stat about once a second; the file is read only when it changed.
