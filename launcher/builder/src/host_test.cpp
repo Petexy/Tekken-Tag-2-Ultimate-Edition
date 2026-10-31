@@ -98,15 +98,32 @@ void test_texts() {
 void test_libraries(const fs::path& scratch) {
     std::error_code ec;
     fs::remove_all(scratch, ec);
-    const fs::path folder = scratch / "lib", other = scratch / "other";
+    const fs::path folder = scratch / "lib", other = scratch / "other", debian = scratch / "debian";
     fs::create_directories(folder, ec);
     fs::create_directories(other, ec);
+    fs::create_directories(debian, ec);
+    // The loader's cache as ldconfig -p lists it on Debian, where shaderc's
+    // library is libshaderc.so.1 only (the first search reads the cache once,
+    // with the ldconfig first in PATH).
+    fs::create_directories(scratch / "bin", ec);
+    fs::copy_file("/proc/self/exe", debian / "libshaderc.so.1", ec);
+    std::ofstream(scratch / "bin/ldconfig") << "#!/bin/sh\necho '\tlibshaderc.so.1 (libc6,x86-64) => "
+                                            << (debian / "libshaderc.so.1").string() << "'\n";
+    fs::permissions(scratch / "bin/ldconfig", fs::perms::owner_all, ec);
+    const char* path = std::getenv("PATH");
+    const std::string saved_path = path ? path : "";
+    ::setenv("PATH", ((scratch / "bin").string() + ":" + saved_path).c_str(), 1);
+
     // An x86-64 file by a soname no system has, and one that is no library.
     fs::copy_file("/proc/self/exe", folder / "libttt2-host-test.so.9", ec);
     std::ofstream(other / "libttt2-host-test.so.9") << "not a library";
     check(!find_library("libttt2-host-test.so.9", {}), "library: not in the usual folders");
     std::optional<Library> found = find_library("libttt2-host-test.so.9", {other, folder});
     check(found && found->file == folder / "libttt2-host-test.so.9" && !found->cached, "library: in a folder given");
+    // The kit's libshaderc_shared.so.1 by Debian's name, in the cache before
+    // any file by the kit's name in a usual folder.
+    found = find_library("libshaderc_shared.so.1", {});
+    check(found && found->file == debian / "libshaderc.so.1" && found->cached, "library: by Debian's name");
 
     // The folders: LD_LIBRARY_PATH's, LIBRARY_PATH's, then the compiler's.
     ::setenv("LD_LIBRARY_PATH", (folder.string() + "::relative:" + folder.string()).c_str(), 1);
@@ -126,6 +143,7 @@ void test_libraries(const fs::path& scratch) {
 
     check(same_file_system(folder, other / "not yet/made"), "file system: the same");
     check(!same_file_system(folder, "/proc/self"), "file system: another");
+    ::setenv("PATH", saved_path.c_str(), 1);
     fs::remove_all(scratch, ec);
 }
 
