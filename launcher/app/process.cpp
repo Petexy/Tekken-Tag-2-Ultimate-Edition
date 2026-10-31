@@ -4,6 +4,7 @@
 
 #include "process.h"
 
+#include <fcntl.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
@@ -32,12 +33,16 @@ void own_group(gpointer launcher) {
 } // namespace
 
 std::shared_ptr<Process> Process::start(const std::vector<std::string>& argv, const Environment& environment,
-                                        Handlers handlers, std::string* error, bool pipes) {
+                                        Handlers handlers, std::string* error, bool pipes, const std::string& output) {
     std::shared_ptr<Process> p(new Process());
     p->handlers_ = std::move(handlers);
+    const int file =
+        pipes || output.empty() ? -1 : ::open(output.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     GSubprocessLauncher* launcher = g_subprocess_launcher_new(
-        pipes ? GSubprocessFlags(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE)
-              : G_SUBPROCESS_FLAGS_NONE); // (standard input: /dev/null, so nothing asks on a terminal)
+        pipes       ? GSubprocessFlags(G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE)
+        : file >= 0 ? G_SUBPROCESS_FLAGS_STDERR_MERGE
+                    : G_SUBPROCESS_FLAGS_NONE); // (standard input: /dev/null, so nothing asks on a terminal)
+    if (file >= 0) g_subprocess_launcher_take_stdout_fd(launcher, file); // (closed with the launcher)
     for (const auto& [name, value] : environment) {
         g_subprocess_launcher_setenv(launcher, name.c_str(), value.c_str(), TRUE);
     }

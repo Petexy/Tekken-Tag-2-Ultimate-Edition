@@ -7,8 +7,10 @@
 #include "system.h"
 #include "widgets.h"
 
+#include <algorithm>
 #include <cctype>
 #include <csignal>
+#include <fstream>
 
 namespace launcher {
 namespace {
@@ -26,6 +28,30 @@ bool there(const fs::path& path) {
 fs::path home() {
     const char* h = std::getenv("HOME");
     return h && *h ? fs::path(h) : fs::path("/");
+}
+
+// A file's last 64 KB, empty when it cannot be read.
+std::string file_end(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary | std::ios::ate);
+    const std::streamoff size = in ? static_cast<std::streamoff>(in.tellg()) : 0;
+    if (size <= 0) return {};
+    const std::streamoff from = std::max<std::streamoff>(0, size - 65536);
+    std::string text(static_cast<size_t>(size - from), '\0');
+    in.seekg(from);
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<size_t>(std::max<std::streamsize>(0, in.gcount())));
+    return text;
+}
+
+// The game stopped with an error: the code, its last lines and where all it
+// wrote is (see play()).
+std::string stopped_text(int code, const fs::path& log) {
+    std::string text = "The game stopped with an error (exit code " + std::to_string(code) + ").";
+    const std::vector<std::string> said = last_words(file_end(log), 3);
+    if (!said.empty()) text += " Its last lines:";
+    for (const std::string& line : said) text += "\n" + ui::valid(line);
+    if (there(log)) text += "\nAll it wrote is in " + ui::shown(log) + ".";
+    return text;
 }
 
 // The card's top: the game's name, its folder, and a pill with its state.
@@ -524,18 +550,23 @@ void Launcher::play() {
     if (game_running()) return refuse("The game is running", "Only one can run at a time.");
     const fs::path program = install_.folder / kProgramName;
     game_error_.clear();
+    // Its output goes into a log of this run (none left of the last one
+    // when it cannot be made): its last lines say why it stopped.
+    const fs::path log = places_.game_log();
+    std::error_code ec;
+    fs::remove(log, ec);
+    fs::create_directories(log.parent_path(), ec);
     std::string error;
     game_process_ = Process::start({program.string()}, {},
                                    {nullptr,
-                                    [this](int code) {
+                                    [this, log](int code) {
                                         if (code != 0 && code != 128 + SIGTERM && code != 128 + SIGINT) {
-                                            game_error_ = "The game stopped with an error (exit code " +
-                                                          std::to_string(code) + ").";
+                                            game_error_ = stopped_text(code, log);
                                         }
                                         game_process_.reset();
                                         show_game();
                                     }},
-                                   &error, false);
+                                   &error, false, log.string());
     if (!game_process_) game_error_ = "The game cannot start: " + error;
     show_game();
 }

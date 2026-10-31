@@ -1580,7 +1580,12 @@ compiler.
   (it stops what it started in order: the importer closes the hidden
   Tekken 7 or Tekken 8), kills what is left of the group once it has ended, and the
   whole group with SIGKILL when it has not ended within 45 s. The game runs
-  in a session of its own; it counts as running when any `/proc/<pid>/exe`
+  in a session of its own, its standard output and error in
+  `$XDG_CACHE_HOME/ttt2/game.log` (made anew at each Play; a file, not a pipe,
+  so that it can go on writing when the launcher is closed); when it stops
+  with an error, its last lines that are not indented (a crash's registers
+  and return addresses) or frame rate reports are shown with the exit code.
+  It counts as running when any `/proc/<pid>/exe`
   is the install's program (also "(deleted)"), whoever started it, and
   Play, Update and Uninstall wait for it. Steam's last answer of the DLC
   owned is kept in `$XDG_CACHE_HOME/ttt2/dlc-owned.json`, shown at once
@@ -1593,7 +1598,7 @@ compiler.
   through file descriptors, never following a link or crossing into
   another file system and never while the game runs, then the folder if it
   is empty (and the link to it, when it is reached through one), the menu
-  entry and the record when they are that folder's, and the shader caches;
+  entry and the record when they are that folder's, the shader caches and the game's log;
   when asked, the saves the game wrote (`common/` and the 8-digit user
   folders, nothing else of a `TTT2_SAVE_DIR` folder) and the character
   packs (with the importer's hidden `.<code>.part` and `.<code>.old`

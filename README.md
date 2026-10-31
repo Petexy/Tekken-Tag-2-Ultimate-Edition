@@ -272,7 +272,10 @@ does; then **Play**, **Update** (when the launcher's version differs from
 the program's) and **Uninstall…** (saves and added characters are kept unless you
 tick them; of a save folder you chose with `TTT2_SAVE_DIR`, only the game's
 own saves go). While the game runs, however it was started, Play, Update and
-Uninstall wait for it to end. The gear next to Play opens its **Settings**:
+Uninstall wait for it to end. What the game writes when Play starts it goes
+to `~/.cache/ttt2/game.log` (of its last start); when it stops with an error,
+its last lines are shown under Play: attach that file to a report. The gear
+next to Play opens its **Settings**:
 whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, and its keyboard keys ([Playing](#playing)). Its
