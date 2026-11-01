@@ -9,7 +9,7 @@ NAME = 'Noctis'
 SHORT_NAME = 'NOCTIS'
 TEKKEN7_ID = 44
 TEKKEN7_CODE = 'mrz'
-REVISION = 7
+REVISION = 6
 CODE = 'mrz'
 SEX = 'male'
 

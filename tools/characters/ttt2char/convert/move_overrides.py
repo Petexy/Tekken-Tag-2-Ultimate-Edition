@@ -427,9 +427,7 @@ def on_hit_followup(c, source, target):
     if any(row['move_id'] == index for row in rows[:-1]):
         raise ValueError('on-hit continuation already present: ' + source)
     req = TS.write(c.T, 'requirements', [dict(condition=47, param=0), dict(condition=TS.TT_END,param=0)])
-    # T7's option bits (0x41/0x50) are not native cancel options.
-    # Match Converter.conv_cancel_list, retaining the native input mode instead.
-    row = dict(matches[0], move_id=index, req=req, extradata=c.extradata(matches[0]['extradata']), option=0)
+    row = dict(matches[0], move_id=index, req=req, extradata=c.extradata(matches[0]['extradata']))
     rows.insert(len(rows)-1, row)
     move['cancel'] = TS.write(c.T, 'cancels', rows)
     c.stats['explicit on-hit continuations restored'] += 1
@@ -457,7 +455,7 @@ def restore_hitgrab_followups(c, source):
         req,ok=c.conv_reqs(row['req'],overrides={2:2,51:47})
         if not ok:
             raise ValueError('unmapped hit-grab gate: ' + source)
-        new=dict(row,req=req,move_id=c.newidx[target],extradata=c.extradata(row['extradata']),option=0)
+        new=dict(row,req=req,move_id=c.newidx[target],extradata=c.extradata(row['extradata']))
         if new not in rows:added.append(new)
     if not added:
         raise ValueError('no missing hit-grab continuations: ' + source)
