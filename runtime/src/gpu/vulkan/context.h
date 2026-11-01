@@ -4,8 +4,10 @@
 // and the small allocation helpers the renderer uses.
 //
 // Guest memory (MEM1, MEM2) is imported with VK_EXT_external_memory_host,
-// so shaders and transfers read the title's buffers in place and stream-out
-// writes land in guest memory: no copies, nothing to keep coherent.
+// so shaders and transfers read the title's buffers in place. It is system
+// memory: on a discrete GPU the renderer keeps what the GPU reads most
+// (stream-out output, the constants of stream-out draws) in video memory as
+// well (shadows.cpp), and copies stream-out output back.
 
 #include <vulkan/vulkan.h>
 
@@ -50,6 +52,7 @@ struct Context {
     // reaches the screen (surface support is checked separately).
     bool present_wait = false;
     bool surface_capabilities2 = false; // VK_KHR_get_surface_capabilities2
+    bool memory_budget = false;         // VK_EXT_memory_budget
     PFN_vkWaitForPresent2KHR wait_for_present = nullptr;
 
     PFN_vkGetMemoryHostPointerPropertiesEXT get_memory_host_pointer_properties = nullptr;
@@ -62,6 +65,13 @@ struct Context {
     uint32_t memory_type(uint32_t type_bits, VkMemoryPropertyFlags flags, VkMemoryPropertyFlags preferred = 0) const;
     Buffer create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags,
                          VkMemoryPropertyFlags preferred = 0);
+    // The same, but an empty Buffer if no memory type has `flags` or the
+    // allocation fails; types without `avoid` first.
+    Buffer try_create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags,
+                             VkMemoryPropertyFlags avoid = 0);
+    // Video memory the driver says is left for this process (its budget
+    // less its use, VK_EXT_memory_budget), UINT64_MAX if it cannot tell.
+    VkDeviceSize video_memory_left() const;
     void destroy_buffer(Buffer& buffer);
     VkDeviceMemory allocate_image_memory(VkImage image);
     VkFormatFeatureFlags format_features(VkFormat format) const {
@@ -81,6 +91,9 @@ public:
     // Device address of a guest address (0 if not imported) and how many bytes
     // from there are in the same region.
     VkDeviceAddress device_address(uint32_t address, uint32_t& available) const;
+    // The guest address of device address range [device, device + size),
+    // or false if it is not all in one imported region.
+    bool guest_address(VkDeviceAddress device, uint32_t size, uint32_t& address) const;
 
 private:
     struct Region {
@@ -98,6 +111,8 @@ class UploadRing {
 public:
     static constexpr uint32_t kChunks = 8;
     void init(Context& context, VkDeviceSize size);
+    // A ring in memory of a type with `flags` (host-visible); false if there is none.
+    bool init(Context& context, VkDeviceSize size, VkMemoryPropertyFlags flags);
     // Null when the current chunk is full.
     uint8_t* allocate(VkDeviceSize size, VkDeviceSize alignment, VkDeviceSize& offset);
     uint32_t chunk() const { return chunk_; }

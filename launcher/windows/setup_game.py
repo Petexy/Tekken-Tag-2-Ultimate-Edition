@@ -8,6 +8,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -91,6 +92,16 @@ def ensure_importer(settings, run):
     os.environ.update(settings.environment())   # (TTT2_HELPER_CC: the compiler now there)
 
 
+def recent_git():
+    """A Git on PATH that takes safe.directory from its command line (2.38 on), which tools/setup_deps.py gives it."""
+    found = shutil.which('git')
+    if not found: return False
+    said = subprocess.run([found, '--version'], capture_output=True, text=True,
+                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)).stdout
+    version = re.match(r'git version (\d+)\.(\d+)', said)
+    return bool(version) and (int(version[1]), int(version[2])) >= (2, 38)
+
+
 def ensure_tools(settings, run):
     lock = manifest(settings)
     tools = tools_folder(settings)
@@ -98,7 +109,7 @@ def ensure_tools(settings, run):
     downloads = settings.root / 'local/windows-downloads'
     compiler = ensure_compiler(settings, lock, tools)
     git = tools / 'git/cmd/git.exe'
-    if not git.is_file() and not shutil.which('git'):
+    if not git.is_file() and not recent_git():
         unzip(download(lock['git'], downloads / 'mingit.zip'), tools / 'git')
     if git.is_file():
         os.environ['PATH'] = str(git.parent) + os.pathsep + os.environ.get('PATH','')

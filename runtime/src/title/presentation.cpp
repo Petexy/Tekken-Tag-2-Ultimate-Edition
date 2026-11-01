@@ -479,7 +479,9 @@ void system_info_created(uint32_t info) {
     apply_confirm_button();
 }
 
-std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash) { return game_entry(archive, hash); }
+std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash, uint8_t (*flags)[8]) {
+    return game_entry(archive, hash, flags);
+}
 
 void replace_texture(const ntp3::Texture& original, std::function<const std::vector<uint8_t>*()> contents) {
     gpu::TextureReplacement r;

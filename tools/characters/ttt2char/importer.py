@@ -20,7 +20,7 @@ from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
     moveset, outfits, particles, sounds, tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
-from .tekken7.autodump import FILES
+from .tekken7.autodump import FILES, unread
 from .tekken7.pak import EncryptedError, Paks, pak_names
 from .ttt2 import bone, motbin, title_folder
 from .ttt2.archive import Archives, key_of
@@ -135,9 +135,19 @@ def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, fi
     try:
         return _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, outfits)
     except EncryptedError as error:
-        raise InputError('Tekken 7 keeps %s encrypted and it has not been saved from the running game yet: run '
-                         'dump_tekken7.py %s (or import_character.py, which runs it) with Steam running'
-                         % (error.args[0], name))
+        raise _not_saved(error.args[0], name)
+
+
+def _not_saved(path, name=None):
+    """The InputError of a file Tekken 7 keeps encrypted that is not saved (pak.py's EncryptedError), for fighter
+    `name` (None: one of the added fighters): why, when the game did not read it in this run (autodump's unread)."""
+    if path in unread:
+        return InputError('%s needs %s, which Tekken 7 did not read: %s. Let Steam verify Tekken 7\'s files (and '
+                          'move a mod\'s paks out of its Paks folder), then try again'
+                          % (definition(name).NAME if name else 'An added fighter', path, unread[path]))
+    return InputError('Tekken 7 keeps %s encrypted and it has not been saved from the running game yet: run '
+                      'dump_tekken7.py %s (or import_character.py, which runs it) with Steam running'
+                      % (path, name or 'for that fighter'))
 
 
 def make_shared(tekken7, game, out=None, log=print, files=FILES, tekken8=None):
@@ -157,9 +167,7 @@ def make_shared(tekken7, game, out=None, log=print, files=FILES, tekken8=None):
     try:
         return _shared(sources.Sources(tekken7, tekken8, files), _archives(game), _rpx(game), out, log, step)
     except EncryptedError as error:
-        raise InputError('Tekken 7 keeps %s encrypted and it has not been saved from the running game yet: run '
-                         'dump_tekken7.py for that fighter (or import_character.py, which runs it) with Steam running'
-                         % error.args[0])
+        raise _not_saved(error.args[0])
 
 
 def _installed(out):
@@ -395,7 +403,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                    lambda bon, cloth_springs: spring_file(archives, d, bon, cloth_springs),
                                    (nud, nut, bon, mop), standing=standing,
                                    log=lambda s: log('         ' + s.strip()), reference_bon=bon))
-        outfit_codes = outfits.codes(d)
+        outfit_codes = [c for c in outfits.codes(d) if c + '.nud' in contents]     # (but presets left out)
     gauge_sound = effects.number(gauge.full_sound(d)) if effects and gauge.full_sound(d) else None
     target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra, sound_extra=sound_extra,
                         gauge_sound=gauge_sound,

@@ -29,6 +29,7 @@
 #include "gpu/vulkan/renderer.h"
 
 #include "gpu/gpu.h"
+#include "host/timed_wait.h"
 #include "host/window.h"
 
 #include "cafe/runtime.h"
@@ -88,6 +89,14 @@ void Renderer::start_presenter() {
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx_.physical, surface_, &caps));
     compute_present_ = supported && ctx_.storage_without_format && (caps.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) &&
                        !std::getenv("TTT2_PRESENT_BLIT");
+    if (!compute_present_) {
+        const char* why = std::getenv("TTT2_PRESENT_BLIT")      ? "TTT2_PRESENT_BLIT"
+                          : ctx_.present_queue == VK_NULL_HANDLE ? "no compute-only queue"
+                          : !supported                           ? "the compute queue cannot present to the window"
+                          : !ctx_.storage_without_format         ? "no storage writes without a format"
+                                                                 : "the swapchain takes no storage writes";
+        std::fprintf(stderr, "ttt2: GPU: not presenting from a compute queue: %s\n", why);
+    }
     // Whether the surface tells when presents reach the screen (needed to
     // present every refresh; the mode itself is chosen by the presentation
     // thread, for the display the window is on).
@@ -196,7 +205,7 @@ uint32_t Renderer::take_present_image() {
     // None free (the display stalled: a hidden window): the oldest image
     // still waiting to be shown, which a newer one supersedes anyway.
     const auto free = [&] { return std::find(present_free_.begin(), present_free_.end(), 1) != present_free_.end(); };
-    if (!present_cv_.wait_for(lock, std::chrono::milliseconds(20), free) && !present_queue_.empty()) {
+    if (!host::timed_wait(present_cv_, lock, std::chrono::milliseconds(20), free) && !present_queue_.empty()) {
         const uint32_t i = present_queue_.front().image;
         present_queue_.pop_front();
         stolen_images_.fetch_add(1, std::memory_order_relaxed);
@@ -424,6 +433,7 @@ void Renderer::choose_presentation(double hz) {
 
 void Renderer::presenter_main() {
     pthread_setname_np(pthread_self(), "present");
+    track_thread_cpu("present");
     // The mode follows the window's display: chosen again when the window
     // moves to another display or its mode changes, or when the display
     // turns out to refresh at another rate than reported.
@@ -830,7 +840,7 @@ void Renderer::present_every_refresh(float reported_hz) {
     present_cv_.notify_all();
 }
 
-void Renderer::create_swapchain(VkFormat image_format) {
+void Renderer::create_swapchain(VkFormat image_format, const char* why) {
     VkSurfaceCapabilitiesKHR caps;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx_.physical, surface_, &caps));
     uint32_t count = 0;
@@ -916,6 +926,31 @@ void Renderer::create_swapchain(VkFormat image_format) {
     swapchain_format_ = chosen.format;
     swapchain_extent_ = sci.imageExtent;
     vkGetSwapchainImagesKHR(ctx_.device, swapchain_, &count, nullptr);
+    // Logged when its size, mode or image count differs from the last line's;
+    // one just like it at most once a second (a driver that calls every
+    // present suboptimal re-creates it each time), the ones left out counted.
+    static double logged = -1;
+    static uint32_t unlogged = 0;
+    static uint32_t logged_width = 0, logged_height = 0, logged_count = 0;
+    static VkPresentModeKHR logged_mode = VK_PRESENT_MODE_FIFO_KHR;
+    const bool repeat = logged >= 0 && width == logged_width && height == logged_height && mode == logged_mode &&
+                        count == logged_count;
+    if (const double now = now_seconds(); !repeat || now - logged >= 1.0) {
+        const char* const name = mode == VK_PRESENT_MODE_MAILBOX_KHR     ? "mailbox"
+                                 : mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate"
+                                                                         : "FIFO";
+        std::fprintf(stderr, "ttt2: GPU: swapchain %ux%u, %s, %u images (%s", width, height, name, count, why);
+        if (unlogged) std::fprintf(stderr, "; %u more like the last line", unlogged);
+        std::fprintf(stderr, ")\n");
+        logged = now;
+        unlogged = 0;
+        logged_width = width;
+        logged_height = height;
+        logged_mode = mode;
+        logged_count = count;
+    } else {
+        ++unlogged;
+    }
     swapchain_images_.resize(count);
     vkGetSwapchainImagesKHR(ctx_.device, swapchain_, &count, swapchain_images_.data());
     if (compute_present_) {
@@ -946,14 +981,22 @@ bool Renderer::present_image(uint32_t i, uint64_t ready, uint64_t present_id) {
     if (width == 0 || height == 0) return false; // minimised
     const bool srgb_image = src.format == VK_FORMAT_R8G8B8A8_SRGB || src.format == VK_FORMAT_B8G8R8A8_SRGB;
     const bool srgb_chain = swapchain_format_ == VK_FORMAT_B8G8R8A8_SRGB || swapchain_format_ == VK_FORMAT_R8G8B8A8_SRGB;
-    if (swapchain_ == VK_NULL_HANDLE || width != swapchain_extent_.width || height != swapchain_extent_.height ||
-        (!compute_present_ && srgb_image != srgb_chain) || swapchain_every_refresh_ != every_refresh_.load()) {
-        create_swapchain(src.format);
+    char why[80] = "";
+    if (swapchain_ == VK_NULL_HANDLE) {
+        std::snprintf(why, sizeof why, "the first");
+    } else if (width != swapchain_extent_.width || height != swapchain_extent_.height) {
+        std::snprintf(why, sizeof why, "window %ux%u, swapchain %ux%u", width, height, swapchain_extent_.width,
+                      swapchain_extent_.height);
+    } else if (!compute_present_ && srgb_image != srgb_chain) {
+        std::snprintf(why, sizeof why, "the image's format");
+    } else if (swapchain_every_refresh_ != every_refresh_.load()) {
+        std::snprintf(why, sizeof why, "presenting %s", every_refresh_.load() ? "every refresh" : "at times");
     }
+    if (why[0] != '\0') create_swapchain(src.format, why);
     uint32_t index = 0;
     VkResult r = vkAcquireNextImageKHR(ctx_.device, swapchain_, 100'000'000, acquired_, VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
-        create_swapchain(src.format);
+        create_swapchain(src.format, "out of date when acquired");
         return false;
     }
     if (r == VK_TIMEOUT || r == VK_NOT_READY) return false;
@@ -1077,7 +1120,8 @@ bool Renderer::present_image(uint32_t i, uint64_t ready, uint64_t present_id) {
     VK_CHECK(vkResetFences(ctx_.device, 1, &present_fence_));
     VK_CHECK(vkResetCommandPool(ctx_.device, present_pool_, 0));
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        create_swapchain(src.format);
+        create_swapchain(src.format,
+                         r == VK_SUBOPTIMAL_KHR ? "suboptimal when presented" : "out of date when presented");
         return r == VK_SUBOPTIMAL_KHR; // (presented; an id on the old swapchain is gone with it)
     }
     if (r != VK_SUCCESS) check_failed("vkQueuePresentKHR", r, __FILE__, __LINE__);

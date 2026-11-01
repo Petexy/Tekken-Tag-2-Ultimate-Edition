@@ -148,6 +148,47 @@ class OutfitTests(unittest.TestCase):
         _, other = outfits.relocate(nud.write(mesh), textures, 2000)
         self.assertNotEqual(nut.read(bank)['textures'][0]['gidx'], nut.read(other)['textures'][0]['gidx'])
 
+    def build_geese_without_houou(self, model_unread):
+        """outfits.build for Geese, Tekken 7 not having read a file of the Houou preset (its model's, or with
+        model_unread False its preview's): that preset is left out, the others made, one preview each."""
+        from ttt2char.characters import geese
+        from ttt2char.tekken7.pak import EncryptedError
+        unread = 'TekkenGame/Content/Character/Item/Sets/MRY/CS_MRY_houou.uasset'
+
+        def preset(paks, base, costume):
+            if model_unread and costume.endswith('_houou'):
+                raise EncryptedError(unread)
+            return types.SimpleNamespace(costume=costume)
+
+        def preview(paks, archives, rpx, d, slot):
+            if getattr(d, 'costume', '').endswith('_houou'):
+                raise EncryptedError(unread)
+            return b'picture'
+
+        previews, lines = [], []
+        with patch.object(outfits, 'definition', side_effect=preset), \
+             patch.object(outfits.model, 'convert', return_value=(b'nud', b'nut', b'bon', {}, None)), \
+             patch.object(outfits, 'relocate', return_value=(b'nud', b'nut')), \
+             patch.object(outfits.bone, 'read', return_value={}), \
+             patch.object(outfits.art, 'costume_previews', side_effect=preview), \
+             patch.object(outfits.nut, 'read', side_effect=lambda b: {'textures': [{'gidx': 0}]}), \
+             patch.object(outfits.nut, 'write', side_effect=lambda t: previews.append(list(t)) or b'previews'):
+            files = outfits.build(None, None, None, geese, 0, b'xml', lambda bon, springs: b'mop',
+                                  (b'nud', b'nut', b'bon', b'mop'), log=lines.append)
+        codes = outfits.codes(geese)
+        made = [c for c in codes if c + '.nud' in files]
+        self.assertEqual(made, codes[:3] + codes[4:])                      # (houou is the fourth)
+        self.assertFalse([name for name in files if name.startswith(codes[3])])
+        self.assertEqual(len(previews[-1]), len(made))                     # (one picture each, in their order)
+        self.assertIn('WARNING: preset Houou left out: Tekken 7 keeps %s encrypted and it is not saved (add the '
+                      'fighter again once Tekken 7 reads it)' % unread, lines)
+
+    def test_preset_with_an_unread_file_is_left_out(self):
+        self.build_geese_without_houou(model_unread=True)
+
+    def test_preset_with_an_unread_preview_is_left_out(self):
+        self.build_geese_without_houou(model_unread=False)
+
     def test_pack_metadata_is_opt_in(self):
         self.assertNotIn('outfits =', pack.character_ini(fahkumram, 10))
         self.assertIn('outfits = fka fkb', pack.character_ini(fahkumram, 10, outfits=('fka', 'fkb')))

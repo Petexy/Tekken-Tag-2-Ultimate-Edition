@@ -1,6 +1,7 @@
 #include "cafe/generated.h"
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
+#include "os/kernel.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -8,15 +9,20 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <pthread.h>
 #include <signal.h>
 #include <ucontext.h>
 #include <unistd.h>
 
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <mutex>
+#include <thread>
 
 namespace cafe {
 namespace {
@@ -122,6 +128,112 @@ void fatal(const char* format, ...) {
     // Not exit(): other guest threads still use the objects static
     // destructors would tear down.
     std::_Exit(70);
+}
+
+// ------------------------------------------------- CPU time per thread
+namespace {
+
+struct TrackedThread {
+    std::thread::id id;
+    std::string name;
+    uint32_t guest; // 0 for a runtime thread
+#ifdef _WIN32
+    HANDLE handle;
+#else
+    clockid_t clock;
+#endif
+    double used; // CPU seconds at the last report
+};
+std::mutex g_tracked_mutex;
+std::vector<TrackedThread> g_tracked;
+std::chrono::steady_clock::time_point g_last_report = std::chrono::steady_clock::now();
+
+// User and kernel time together; negative when it cannot be read.
+double cpu_seconds(const TrackedThread& t) {
+#ifdef _WIN32
+    FILETIME created, exited, kernel, user;
+    if (!GetThreadTimes(t.handle, &created, &exited, &kernel, &user)) return -1;
+    const auto ticks = [](FILETIME f) { return (uint64_t{f.dwHighDateTime} << 32) | f.dwLowDateTime; };
+    return static_cast<double>(ticks(kernel) + ticks(user)) * 1e-7;
+#else
+    timespec ts;
+    if (clock_gettime(t.clock, &ts) != 0) return -1;
+    return static_cast<double>(ts.tv_sec) + static_cast<double>(ts.tv_nsec) * 1e-9;
+#endif
+}
+
+std::string guest_thread_name(const TrackedThread& t) {
+    const uint32_t name = ppc::ld32(guest_base(), t.guest + os::osthread::kName);
+    std::string s;
+    for (uint32_t i = 0; name != 0 && i < 31 && guest_memory_committed(name + i, 1); ++i) {
+        const char c = static_cast<char>(*guest_pointer(name + i));
+        if (c == '\0') break;
+        s += c;
+    }
+    if (s.empty()) s = t.name;
+    return s;
+}
+
+} // namespace
+
+void track_thread_cpu(const char* name, uint32_t guest_thread) {
+    TrackedThread t{std::this_thread::get_id(), name ? name : "", guest_thread, {}, 0};
+    if (t.name.empty()) {
+        char address[16];
+        std::snprintf(address, sizeof address, "%08X", guest_thread);
+        t.name = address;
+    }
+#ifdef _WIN32
+    t.handle = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
+    if (t.handle == nullptr) return;
+#else
+    if (pthread_getcpuclockid(pthread_self(), &t.clock) != 0) return;
+#endif
+    t.used = std::max(0.0, cpu_seconds(t));
+    std::lock_guard lock(g_tracked_mutex);
+    g_tracked.push_back(t);
+}
+
+void untrack_thread_cpu() {
+    std::lock_guard lock(g_tracked_mutex);
+    const auto it = std::find_if(g_tracked.begin(), g_tracked.end(),
+                                 [](const TrackedThread& t) { return t.id == std::this_thread::get_id(); });
+    if (it == g_tracked.end()) return;
+#ifdef _WIN32
+    CloseHandle(it->handle);
+#endif
+    g_tracked.erase(it);
+}
+
+std::string thread_cpu_report() {
+    std::lock_guard lock(g_tracked_mutex);
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::max(std::chrono::duration<double>(now - g_last_report).count(), 1e-3);
+    g_last_report = now;
+    std::string out;
+    char item[96];
+    double guests = 0, busiest = -1;
+    const TrackedThread* busiest_thread = nullptr;
+    for (TrackedThread& t : g_tracked) {
+        const double used = cpu_seconds(t);
+        if (used < 0) continue;
+        const double percent = (used - t.used) * 100.0 / seconds;
+        t.used = used;
+        if (t.guest != 0) {
+            guests += percent;
+            if (percent > busiest) busiest = percent, busiest_thread = &t;
+            continue;
+        }
+        std::snprintf(item, sizeof item, "%s%s %.0f%%", out.empty() ? "" : ", ", t.name.c_str(), percent);
+        out += item;
+    }
+    std::snprintf(item, sizeof item, "; guest threads %.0f%%", guests);
+    out += item;
+    if (busiest_thread != nullptr) {
+        std::snprintf(item, sizeof item, ", busiest %s %.0f%%", guest_thread_name(*busiest_thread).c_str(), busiest);
+        out += item;
+    }
+    return out;
 }
 
 void install_fault_handler() {

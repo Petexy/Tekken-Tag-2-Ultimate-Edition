@@ -54,9 +54,13 @@ def main():
         print('error: %s' % e, file=sys.stderr)
         return 1
     print('Saved %d moveset(s) to %s.' % (len(dumped), args.out))
-    saved = [name for fid, (name, _) in files.items() if fid not in skipped]
+    unread = [name for name, entries in files.values() if any(e.path in autodump.unread for e in entries)]
+    saved = [name for fid, (name, _) in files.items() if fid not in skipped and name not in unread]
     if saved:
         print('Saved the encrypted files of %s to %s.' % (', '.join(saved), args.files))
+    if unread:
+        print('Tekken 7 did not read some encrypted files of %s (the warnings above say which, and why).'
+              % ', '.join(unread))
     for fid, why in skipped.items():
         print('Skipped %s: %s.' % (fighters.get(fid, ('', 'Heihachi'))[1], why))
     return 0

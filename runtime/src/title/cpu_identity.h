@@ -9,14 +9,14 @@ namespace cafe::title::cpu_identity {
 struct Donor { uint32_t id, row; };
 // AI initialization walks all four players and also inspects the opponent.
 // Borrow both fields for that entire walk, restoring them even on early exit.
-template<class Read, class Write, class Lookup, class Call>
-void with_donors(const std::array<uint32_t, 4>& players, Read read, Write write,
+template<std::size_t N, class Read, class Write, class Lookup, class Call>
+void with_donors(const std::array<uint32_t, N>& players, Read read, Write write,
                  Lookup lookup, Call call) {
     struct Saved { uint32_t player, id, row; Donor donor; };
-    std::array<Saved, 4> saved{};
+    std::array<Saved, N> saved{};
     std::size_t count = 0;
     struct Restore {
-        std::array<Saved, 4>& saved; std::size_t& count; Read& read; Write& write;
+        std::array<Saved, N>& saved; std::size_t& count; Read& read; Write& write;
         ~Restore() {
             while (count) {
                 const auto& s = saved[--count];

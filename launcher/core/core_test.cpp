@@ -329,6 +329,33 @@ void test_protocol() {
     download.feed(parse_line("@step update Checking version 0.2.0"));
     check(download.fraction() < 0 && download.detail().empty(), "progress: download's next step");
 
+    // The game's last lines: a crash's registers and return addresses, an X
+    // error's details and the frame rate reports left out.
+    const std::string crash = "ttt2: window: 1280x800 pixels, fullscreen\n"
+                              "ttt2: gpu: cannot compile vertex shader 0123456789abcdef:\n"
+                              "ttt2: gpu: 40.1 frames/s, 325 draws per frame\n"
+                              "ttt2: gpu: video memory: 4 stream-out buffers (88 MB)\n"
+                              "ttt2: present: 39.8/s, interval mean 25.10 ms\n"
+                              "ttt2: cpu: window 1%, present 6%, gpu 41%\n"
+                              "\n"
+                              "ttt2: cannot create a Vulkan surface for the window: no device\n"
+                              "  r0  00000000  r1  0FFFE000  r2  00000000  r3  00000001\n"
+                              "guest backtrace (LR, then saved return addresses):\n"
+                              "  0x0865BDF0\n";
+    auto said = last_words(crash, 3);
+    check(said.size() == 3 && said[0] == "ttt2: window: 1280x800 pixels, fullscreen" &&
+              said[1] == "ttt2: gpu: cannot compile vertex shader 0123456789abcdef:" &&
+              said[2] == "ttt2: cannot create a Vulkan surface for the window: no device",
+          "last words: a fatal error");
+    said = last_words("[guest] Devname usb0\r\nX Error of failed request:  BadMatch\n"
+                      "  Major opcode of failed request:  20 (X_GetProperty)\nttt2: the game exited with status 1",
+                      2);
+    check(said.size() == 2 && said[0] == "X Error of failed request:  BadMatch" &&
+              said[1] == "ttt2: the game exited with status 1",
+          "last words: the last two, without a line break at the end");
+    check(last_words("", 3).empty() && last_words("\n\n  r0 0\n", 3).empty(), "last words: none");
+    check(last_words(std::string(500, 'x'), 1)[0].size() == 300, "last words: a long line is cut");
+
     check(thousands(0) == "0" && thousands(999) == "999" && thousands(1000) == "1,000" &&
               thousands(1234567) == "1,234,567",
           "thousands");
@@ -742,6 +769,7 @@ void test_uninstall(const fs::path& root) {
         write(places.cache / "ttt2/tekken7/t7helper.exe", "h");
         write(places.home / ".cache/ttt2/tekken7/run/helper.log", "h"); // (an importer before $XDG_CACHE_HOME)
         write(places.owned_cache(), R"({"owned": {"eliza": true}})");
+        write(places.game_log(), "ttt2: loaded image\n");
         write(places.saves / "80000001/save.dat", "save");
         write(places.saves / "common/x.dat", "save");
         write(places.packs / "kzm/character.ini", "pack");
@@ -776,8 +804,8 @@ void test_uninstall(const fs::path& root) {
     check(there(outside / "precious.txt") && there(outside), "uninstall: links are not followed");
     check(!there(places.desktop_entry()) && !there(places.record()), "uninstall: menu entry and record");
     check(!there(places.cache / "ttt2/pipelines.bin") && !there(places.cache / "ttt2/spirv") &&
-              !there(places.cache / "ttt2/build") && !there(places.owned_cache()),
-          "uninstall: shader caches, work folder and the DLC answer");
+              !there(places.cache / "ttt2/build") && !there(places.owned_cache()) && !there(places.game_log()),
+          "uninstall: shader caches, work folder, the DLC answer and the game's log");
     check(there(places.saves / "80000001/save.dat") && there(places.packs / "kzm/character.ini") &&
               there(places.packs / ".kzm.part") && there(places.packs / ".dnc.old") &&
               there(places.tekken7_data) && there(places.cache / "ttt2/tekken7") &&

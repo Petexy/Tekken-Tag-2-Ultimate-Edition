@@ -582,7 +582,7 @@ VERTEX_BUDGET = 42000           # vertices of a fighter's model the game skins: 
                                 # buffer, 80 bytes each, and in a match's first frame those of all four (the port
                                 # makes the buffers 28 MiB: roster.cpp; its own fighters have 20-34k): over it, 2P
                                 # colour layers are left out, the largest first (a definition's VERTEX_BUDGET: its
-                                # own, Noctis's weapons)
+                                # own, Noctis's with his weapons; its DECIMATE: a Tekken 7 model decimated to fit)
 LAYER_OFFSET = 1.0              # mm: how far the 2P colour layer sits outside the polygon it covers (less flickers:
                                 # the depth buffer cannot tell them apart at fighting distance)
 # a Tekken 8 part's share of the vertices it gives up to the budget against the body's 1 (decimate.decimate's
@@ -722,6 +722,14 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         covered[part] = front if part not in covered else covered[part] | front
         log('  %s: %d triangles in front of %s left out' % (part, sum(
             int(front[p['tris']].any(1).sum()) for p in k['prims'] if p['part'] == part), material))
+    shrink = getattr(d, 'DECIMATE', None) if source.game == 'tekken7' else None
+    if shrink:                                   # (a definition's: a model too big to skin every frame, Noctis's)
+        from . import decimate
+        weights = {tag: PART_WEIGHTS.get(tag[:3], 1.0) for tag, _ in worn}
+        k = decimate.decimate(k, shrink['body'], weights, log=log)
+        if 'source' in k:                        # the masks above on the streams left
+            hidden = hidden[k['source']] if hidden is not None else None
+            covered = {part: front[k['source']] for part, front in covered.items()}
     parts, prims = list(worn), list(k['prims'])
     sockets = [('item%d' % n, path, offsets) for n, (path, offsets) in enumerate(socket_items(items))]
     for tag, path, offsets in sockets:           # static meshes worn on the head (glasses): rigid on its Head joint
@@ -758,6 +766,10 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             weight_maps[tag] = np.full(len(wk['bones']['names']), index, np.int64)
             own = wk['bones']['names'].index(w['bone'])
             kept = [dict(q, part=tag) for q in (weapons.triangles(q, own) for q in wk['prims']) if len(q['tris'])]
+            if kept and shrink and shrink.get('weapons'):    # (a share of its vertices, or as few as its hard
+                one = dict(wk, prims=kept)                    # edges leave: what is left is no warning)
+                kept = decimate.decimate(one, int(decimate.count(one) * shrink['weapons']),
+                                         log=lambda line: None if 'WARNING' in line else log(line))['prims']
             parts.append((tag, w['mesh']))
             prims += kept
             mesh_order[tag] = ('%s_wpn%d' % (d.CODE, n), w['parent'], 100 + n)

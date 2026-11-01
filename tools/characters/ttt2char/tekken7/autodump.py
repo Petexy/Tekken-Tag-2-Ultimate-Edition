@@ -14,7 +14,9 @@ has to run, and it runs where nobody sees or hears it, and with nothing pressed:
 * the dumper reads the result from the game's memory (memdump.py) and writes .tkmvst files.
 Some fighters' files the game keeps encrypted in its paks (Geese Howard's and Noctis's costumes, Noctis's voice bank):
 the helper has the game read them with its own file reader (the one its loading uses), which hands them over decoded,
-and they are saved under their pak paths in a folder of their own (FILES) that the importer reads them from.
+and they are saved under their pak paths in a folder of their own (FILES) that the importer reads them from. One the
+game does not hand over plain and whole (a mod's pak may replace it) is named in a warning and not saved: an import
+fails on it only when it needs it.
 No menu, key or screen is involved, so the player's key bindings, settings, language or pop-ups do not matter.
 Nothing is written into the game's files, its saves or its prefix (but the helper's copy at C:\\t7helper.exe).
 A session ends what it started and nothing else (Session.close; also on the SIGTERM of the launcher's Cancel, see
@@ -61,6 +63,8 @@ FILES = os.path.join(paths.data_root(), 'tekken7', 'files')
 CACHE = paths.cache_root()
 FILE_BATCH = 64                                 # files the game reads at once (the helper takes up to 256) ...
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
+unread = {}                                     # {pak path: why} of the files the game did not read (this run's) ...
+UNREAD_SHOWN = 5                                # ... the ones named in the log (then how many more)
 
 
 class DumpError(Exception):
@@ -710,8 +714,23 @@ def unsaved_files(paks, code):
     return out
 
 
+def _why_unread(e, d):
+    """Why the game's reading of pak entry e (d: its bytes, None when the game could not read it) is not the file;
+    None when it is."""
+    if d is None:
+        return 'the game could not open it'
+    if len(d) != e.usize:
+        return ('the game gave %d bytes, its pak entry has %d (a pak in a subfolder of %s, such as a mod, may replace '
+                'it)' % (len(d), e.usize, os.path.join('TekkenGame', 'Content', 'Paks')))
+    if not plain(e.path, d):
+        return 'the game gave it still encoded'
+    return None
+
+
 def _save_files(h, paks, entries):
-    """Has the game read the entries (in batches) and saves them below paks.saved."""
+    """Has the game read the entries (in batches) and saves the ones it hands over plain and whole below paks.saved.
+    -> {pak path: why} of the others (an import fails on one only when it needs it: pak.py's EncryptedError)."""
+    failed = {}
     k = 0
     while k < len(entries):
         batch, size = [], 0
@@ -720,13 +739,16 @@ def _save_files(h, paks, entries):
             size += entries[k].usize
             k += 1
         for e, d in zip(batch, h.files([e.path for e in batch])):
-            if d is None or len(d) != e.usize or not plain(e.path, d):
-                raise DumpError('Tekken 7 did not read %s' % e.path)
+            why = _why_unread(e, d)
+            if why:
+                failed[e.path] = why
+                continue
             path = paks.saved_path(e)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path + '.part', 'wb') as f:
                 f.write(d)
             os.replace(path + '.part', path)
+    return failed
 
 
 # ---------------------------------------------------------------- dumping
@@ -768,7 +790,8 @@ def _until(what, condition, timeout):
 def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     """Dumps the fighters ({roster id: (Tekken 7 code, name)}) into `out` as T7_<name>.tkmvst; Heihachi too (when
     there are any). files: {roster id: (name, [pak entries])}: also saves those encrypted files (from unsaved_files)
-    of the fighters, as the game reads them, below paks.saved. -> ({id: path} dumped, {id: reason} skipped)."""
+    of the fighters, as the game reads them, below paks.saved (the ones it does not read are logged, and kept in
+    `unread`, and the movesets are dumped all the same). -> ({id: path} dumped, {id: reason} skipped)."""
     from . import memdump                   # (numpy: the rest of this module works without it)
     if not steam_running():
         raise DumpError('Steam is not running: start it, then try again (Tekken 7 needs it)')
@@ -811,7 +834,15 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
         for fid, (name, entries) in files.items():
             log('  %s: %d encrypted files (%d MB), as the game reads them'
                 % (name, len(entries), sum(e.usize for e in entries) >> 20))
-            _save_files(h, paks, entries)
+            failed = _save_files(h, paks, entries)
+            for path, why in list(failed.items())[:UNREAD_SHOWN]:       # (all of them kept in unread)
+                log('  WARNING: Tekken 7 did not read %s: %s' % (path, why))
+            if len(failed) > UNREAD_SHOWN:
+                log('  WARNING: ... and %d more' % (len(failed) - UNREAD_SHOWN))
+            if failed:
+                log('  %s: %d of the %d files not saved, asked for again on the next import (an import fails only on '
+                    'one it needs, naming it)' % (name, len(failed), len(entries)))
+            unread.update(failed)
         if wanted:
             common = h.common()
             _until('the shared animations did not load', lambda: h.u64(common + COMMON_ANIMATIONS), LOAD_TIMEOUT)

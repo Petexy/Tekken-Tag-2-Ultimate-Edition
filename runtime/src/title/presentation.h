@@ -25,8 +25,8 @@ namespace cafe::title {
 void prepare_presentation();
 
 // An entry of the title's archives ("content/hdd/data003", the entry's name
-// hash), unpacked, as the game has it.
-std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash);
+// hash), unpacked, as the game has it; its NRCZ header flags in `flags`.
+std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash, uint8_t (*flags)[8] = nullptr);
 
 // The title's texture shows `contents()` instead (RGBA8, its size; null:
 // its own); gpu::texture_replacements_changed() when that changes. Before

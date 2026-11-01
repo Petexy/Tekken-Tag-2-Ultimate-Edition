@@ -39,6 +39,14 @@ int main() {
     } catch (const std::runtime_error&) { threw=true; }
     assert(threw);
     for (auto [at,value]:original) assert(read(at)==value);
+    // An opponent outside the four roster entries still needs donor metadata.
+    memory[0x5000+84]=71; memory[0x5000+80]=71;
+    const std::array<uint32_t,8> roster_and_opponents{
+        players[0],0x5000,players[1],players[2],players[2],0,players[3],0x5000};
+    with_donors(roster_and_opponents,read,write,lookup,[&] {
+        assert(read(0x5000+84)==38 && read(0x5000+80)==38);
+    });
+    assert(read(0x5000+84)==71 && read(0x5000+80)==71);
     // Repeated/null pointers are safe; actual game changes are not overwritten.
     with_donors(std::array<uint32_t,4>{players[1],players[1],0,0},read,write,lookup,[&] {
         write(players[1]+84,7);

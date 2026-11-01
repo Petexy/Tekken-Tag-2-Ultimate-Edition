@@ -46,6 +46,9 @@ struct Places {
     fs::path display() const { return config / "ttt2" / "display.ini"; }
     fs::path shader_cache() const { return cache / "ttt2"; }
     fs::path build_work() const { return cache / "ttt2" / "build"; } // ttt2-build's default --work
+    // What the game wrote (standard output and error) the last time the
+    // launcher started it: why it stopped, for the player's report.
+    fs::path game_log() const { return cache / "ttt2" / "game.log"; }
     // Steam's last answer to which DLC the account owns (launcher.py owned),
     // shown at once on the next start while Steam is asked again.
     fs::path owned_cache() const { return cache / "ttt2" / "dlc-owned.json"; }

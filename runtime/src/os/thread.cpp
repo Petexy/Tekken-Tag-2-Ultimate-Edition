@@ -117,6 +117,7 @@ void* host_main(void* argument) {
     char name[16];
     std::snprintf(name, sizeof(name), "%08X/%d", t->guest, t->core);
     pthread_setname_np(pthread_self(), name);
+    track_thread_cpu(name, t->guest);
     t_current = t;
     set_current_context(&t->ctx);
     uint32_t exit_value;
@@ -127,6 +128,7 @@ void* host_main(void* argument) {
     } else {
         exit_value = t->ctx.r[3]; // OSExitThread left its argument here
     }
+    untrack_thread_cpu();
     finish(t, exit_value);
     return nullptr;
 }
@@ -146,6 +148,7 @@ void start_host_thread(Thread* t) {
 // Runs deferred guest work (thread deallocators) in its own context.
 void* system_thread_main(void*) {
     Thread* t = g_system_thread;
+    track_thread_cpu(nullptr, t->guest);
     t_current = t;
     set_current_context(&t->ctx);
     for (;;) {
