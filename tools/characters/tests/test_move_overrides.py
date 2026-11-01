@@ -195,7 +195,7 @@ class OnHitFollowup(unittest.TestCase):
     def test_restores_timing_with_native_hit_gate_and_rejects_other_requirements(self):
         from ttt2char.movesets import Moveset
         k=Moveset();k.game='t7';k.aliases=[]
-        source=dict(direction=0,button=0,req=0,extradata=0,win_start=17,win_end=18,start_frame=20,move_id=1,option=0)
+        source=dict(direction=0,button=0,req=0,extradata=0,win_start=17,win_end=18,start_frame=20,move_id=1,option=65)
         end=dict(source,direction=M.LIST_END,move_id=0)
         k.tables={'moves':[dict(cancel=0),dict(cancel=1)],'cancels':[source,end],
                   'requirements':[dict(condition=51,param=0),dict(condition=881,param=0)]}
@@ -206,8 +206,38 @@ class OnHitFollowup(unittest.TestCase):
         self.assertEqual((row['win_start'],row['win_end'],row['start_frame']),(17,18,20))
         self.assertEqual(T.reqs(c.T,row['req']),[(47,0)])
         self.assertEqual(row['move_id'],1)
+        self.assertEqual(row['option'],0)
+        self.assertEqual(source['option'],65)
         k.tables['requirements'][0]['condition']=52
         with self.assertRaises(ValueError):O.on_hit_followup(c,'first','second')
+
+class HitGrabFollowup(unittest.TestCase):
+    def test_native_options_preserve_hit_throw_gates_and_button_timing(self):
+        import copy
+        from ttt2char.movesets import Moveset
+        k=Moveset();k.game='t7';k.aliases=[]
+        source=dict(direction=0,button=0x40000003,req=0,extradata=0,
+                    win_start=13,win_end=15,start_frame=14,move_id=1,option=80)
+        end=dict(source,direction=M.LIST_END,button=0,move_id=0)
+        k.tables={'moves':[dict(cancel=0),dict(cancel=1)],'cancels':[source,end],
+                  'requirements':[dict(condition=a,param=0) for a in (2,51,96,66,881)]}
+        c=types.SimpleNamespace(game='t7',k=k,kn={'b2':0},newidx={0:0,1:1},
+            stats=collections.Counter(),extradata=lambda _:7)
+        c.T={'moves':[dict(cancel=0),dict(cancel=0)],'cancels':[dict(end)],
+             'requirements':[dict(condition=a,param=0) for a in (2,47,93,63,690)]}
+        c.conv_reqs=lambda start,overrides: (0,True) if overrides=={2:2,51:47} else (None,False)
+        before=copy.deepcopy(k.tables)
+        O.restore_hitgrab_followups(c,'b2')
+        row=T.cancels(c.T,c.T['moves'][0]['cancel'])[0]
+        self.assertEqual((row['button'],row['direction'],row['win_start'],row['win_end'],row['start_frame']),
+                         (0x40000003,0,13,15,14))
+        self.assertEqual((row['option'],row['extradata'],row['move_id']),(0,7,1))
+        self.assertEqual(T.reqs(c.T,row['req']),[(2,0),(47,0),(93,0),(63,0)])
+        self.assertEqual(k.tables,before)
+        k.tables['requirements'][1]['condition']=52
+        with self.assertRaisesRegex(ValueError,'no missing'):
+            O.restore_hitgrab_followups(c,'b2')
+
 
 class ScopedRequirementConversion(unittest.TestCase):
     def test_override_does_not_poison_normal_requirement_cache(self):
