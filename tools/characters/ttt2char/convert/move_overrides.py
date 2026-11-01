@@ -155,16 +155,7 @@ def apply(c):
                 hit['reactions'] = reaction
                 changed += 1
         if not changed:
-            # Some source attacks have only a grounded/default reaction. A
-            # definition may explicitly provide their native airborne fallback;
-            # never replace ground/guard behavior or add an unguarded reaction.
-            if name not in c.defn.MOVESET.get('air_reaction_entries', ()) or len(hits) != 1 \
-                    or TS.reqs(c.T, hits[0]['req']):
-                raise ValueError('no airborne hit condition: ' + name)
-            req = TS.write(c.T, 'requirements',
-                [dict(condition=TS.AIR, param=0), dict(condition=TS.TT_END, param=0)])
-            hits.insert(0, dict(req=req, damage=hits[0]['damage'], reactions=reaction))
-            changed = 1
+            raise ValueError('no airborne hit condition: ' + name)
         move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
         c.stats['airborne reactions replaced from native template'] += changed
     for source, target in c.defn.MOVESET.get('buffered_stance_transitions', {}).items():
