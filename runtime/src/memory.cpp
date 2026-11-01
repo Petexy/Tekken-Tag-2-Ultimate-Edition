@@ -23,6 +23,7 @@ constexpr uint64_t kGuestSpace = uint64_t{1} << 32;
 constexpr uint64_t kGuard = 0x10000;
 constexpr uint32_t kPageShift = 12;
 constexpr uint64_t kPage = uint64_t{1} << kPageShift;
+constexpr uint64_t kHugePage = uint64_t{2} << 20; // x86-64's transparent huge pages
 
 uint8_t* g_base = nullptr;
 std::mutex g_commit_mutex;
@@ -49,12 +50,27 @@ void reserve_guest_memory() {
         fatal("cannot reserve guest memory: Windows error %lu", GetLastError());
     }
 #else
-    void* p = mmap(nullptr, kGuestSpace + kGuard, PROT_NONE,
+    // At a 2 MiB boundary, with transparent huge pages asked for: the
+    // recompiled code reads and writes guest memory all over, and the GPU
+    // imports it (VK_EXT_external_memory_host), which amdgpu walks page by
+    // page at each submission. With 4 KiB pages the "gpu" thread spent 44 %
+    // of a core in the kernel during a fight, with 2 MiB ones 7 %; the
+    // processor's TLB misses halved. Without the advice the kernel gives
+    // them only when it is set to "always" and has whole 2 MiB blocks free
+    // (soon after a boot), not with "madvise" (SteamOS); with it, it makes
+    // them (the "defrag" setting's default compacts memory for them).
+    void* p = mmap(nullptr, kGuestSpace + kGuard + kHugePage, PROT_NONE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (p == MAP_FAILED) {
         fatal("cannot reserve 4 GiB of address space for guest memory: %s",
               std::strerror(errno));
     }
+    const auto start = reinterpret_cast<uintptr_t>(p);
+    const uintptr_t aligned = (start + kHugePage - 1) & ~(kHugePage - 1);
+    if (aligned > start) munmap(p, aligned - start);
+    munmap(reinterpret_cast<void*>(aligned + kGuestSpace + kGuard), start + kHugePage - aligned);
+    p = reinterpret_cast<void*>(aligned);
+    madvise(p, kGuestSpace, MADV_HUGEPAGE); // (refused by a kernel without them: 4 KiB pages then)
 #endif
     g_base = static_cast<uint8_t*>(p);
 }

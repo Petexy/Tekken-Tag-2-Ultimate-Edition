@@ -242,12 +242,13 @@ UninstallReport uninstall(const Places& places, const fs::path& folder_path, con
     }
     remove_if_empty(places.record().parent_path());
 
-    // The compiled shaders, the builder's work folder and Steam's answer of
-    // the DLC owned: made again when needed.
+    // The compiled shaders, the builder's work folder, Steam's answer of the
+    // DLC owned (made again when needed) and the game's last log.
     deleter.remove(places.shader_cache() / "pipelines.bin");
     deleter.remove(places.shader_cache() / "spirv");
     deleter.remove(places.build_work());
     deleter.remove(places.owned_cache());
+    deleter.remove(places.game_log());
 
     if (options.saves) {
         if (precious(places.saves, places)) {

@@ -1,6 +1,11 @@
 """First-run setup regressions; all fixtures are synthetic and asset-free."""
 from pathlib import Path
 import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -42,6 +47,14 @@ class FirstRun(unittest.TestCase):
         expected=hashlib.sha256(b'update').hexdigest()
         self.assertEqual(verified_rpx(self.root,expected),right)
         with self.assertRaisesRegex(ValueError,'v16'):verified_rpx(self.root,'0'*64)
+    def test_git_too_old_for_setting_safe_directory_is_not_used(self):
+        from setup_game import recent_git
+        for said,usable in (('git version 2.37.3.windows.1\n',False),('git version 2.38.0\n',True),
+                            ('git version 2.56.0.windows.4\n',True),('',False)):
+            with mock.patch('shutil.which',return_value='git.exe'), \
+                 mock.patch('subprocess.run',return_value=mock.Mock(stdout=said)):
+                self.assertEqual(recent_git(),usable,said)
+        with mock.patch('shutil.which',return_value=None):self.assertFalse(recent_git())
     def test_missing_inputs_stop_before_downloading_tools(self):
         settings=Settings(self.root/'build-windows-tools',self.root/'config.json',self.root)
         settings.values.update(source='',title='',install='')
@@ -128,7 +141,7 @@ class DependencyCheckout(unittest.TestCase):
     def test_windows_git_gets_process_local_longpath_option(self):
         with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module.subprocess,'run') as run:
             self.module.git('dependency','status')
-            self.assertEqual(run.call_args.args[0][:5],['git','-c','core.longpaths=true','-C','dependency'])
+            self.assertEqual(run.call_args.args[0][:7],['git','-c','safe.directory=*','-c','core.longpaths=true','-C','dependency'])
     def test_only_missing_files_are_restored(self):
         from types import SimpleNamespace
         with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module,'git',return_value=SimpleNamespace(stdout='source/missing header.h\0')) as git:
@@ -138,5 +151,24 @@ class DependencyCheckout(unittest.TestCase):
         with mock.patch.object(self.module.os,'name','posix'), mock.patch.object(self.module,'git') as git:
             self.module.repair_missing_windows_files('dependency')
             git.assert_not_called()
+    # tools/setup_deps.py where Git calls every folder someone else's (an exFAT or FAT32 drive, a drive from another
+    # PC), after setups that stopped there: the library folders they left (only .git; empty) are downloaded again.
+    def test_unfinished_download_on_a_drive_git_calls_foreign(self):
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);root=Path(temp.name)
+        def git(folder,*args):
+            return subprocess.run(['git','-c','user.name=test','-c','user.email=test@example.com','-c','commit.gpgsign=false',
+                                   '-C',str(folder),*args],check=True,capture_output=True,text=True).stdout.strip()
+        source=root/'source';source.mkdir();git(source,'init','-q');(source/'file').write_text('pinned')
+        git(source,'add','file');git(source,'commit','-q','-m','pinned')
+        project=root/'project';(project/'tools').mkdir(parents=True)
+        shutil.copy2(Path(__file__).resolve().parents[2]/'tools/setup_deps.py',project/'tools')
+        pinned=dict(url=str(source),revision=git(source,'rev-parse','HEAD'))
+        (project/'dependencies.lock.json').write_text(json.dumps({'Library':pinned,'Empty':pinned}))
+        left=project/'third_party/Library';left.mkdir(parents=True);git(left,'init','-q')
+        (project/'third_party/Empty').mkdir()
+        result=subprocess.run([sys.executable,str(project/'tools/setup_deps.py')],capture_output=True,text=True,
+                              env=dict(os.environ,GIT_TEST_ASSUME_DIFFERENT_OWNER='1'))
+        self.assertEqual(result.returncode,0,result.stderr)
+        for name in ('Library','Empty'):self.assertEqual((project/'third_party'/name/'file').read_text(),'pinned')
 
 if __name__=='__main__':unittest.main()

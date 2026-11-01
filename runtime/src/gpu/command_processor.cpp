@@ -202,6 +202,7 @@ void retire_later(const Retirement& r) {
 void retire(uint64_t timestamp);
 void retirement_main() {
     pthread_setname_np(pthread_self(), "gpu retire");
+    track_thread_cpu("gpu retire");
     for (;;) {
         Retirement r;
         {
@@ -553,6 +554,7 @@ std::chrono::steady_clock::duration g_idle{};
 
 void command_processor_main() {
     pthread_setname_np(pthread_self(), "gpu");
+    track_thread_cpu("gpu");
     for (;;) {
         Submission s;
         {

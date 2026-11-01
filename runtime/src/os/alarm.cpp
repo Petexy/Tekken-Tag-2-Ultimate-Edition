@@ -52,6 +52,7 @@ void arm(uint32_t alarm, uint64_t when) {
 void* alarm_main(void*) {
     Thread* t = g_alarm_thread;
     bind_current_thread(t);
+    track_thread_cpu(nullptr, t->guest);
     KernelLock lock(kernel_mutex());
     for (;;) {
         if (g_schedule.empty()) {
@@ -62,7 +63,7 @@ void* alarm_main(void*) {
         const auto next = g_schedule.begin();
         if (next->first > now) {
             const uint64_t wait = (next->first - now) * 1000000000ull / kTimerHz;
-            wait_channel(kWaitAlarms).wait_for(lock, std::chrono::nanoseconds(wait));
+            host::timed_wait(wait_channel(kWaitAlarms), lock, std::chrono::nanoseconds(wait));
             continue;
         }
         const uint32_t alarm = next->second;

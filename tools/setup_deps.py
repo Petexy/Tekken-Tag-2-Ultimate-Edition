@@ -11,9 +11,21 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def git(directory, *args, capture=False, check=True):
-    options = ["-c", "core.longpaths=true"] if os.name == "nt" else []
+    # These folders are this script's own downloads. Git refuses a repository whose owner is not the current user
+    # ("dubious ownership"), and on Windows that is every folder on an exFAT or FAT32 drive, which records no owner,
+    # or on a drive from another PC; only the command line or the user's own Git settings can allow it.
+    options = ["-c", "safe.directory=*"]
+    if os.name == "nt":
+        options += ["-c", "core.longpaths=true"]
+    # (stderr is not captured: what Git says goes into the setup log)
     return subprocess.run(["git", *options, "-C", str(directory), *args], check=check,
-                          capture_output=capture, text=True)
+                          stdout=subprocess.PIPE if capture else None, text=True)
+
+
+def unfinished(directory):
+    """A download an earlier setup left before its first checkout (no network, or Git refused or was missing): nothing
+    in the folder but .git, or nothing at all."""
+    return [entry.name for entry in directory.iterdir()] in ([], [".git"])
 
 
 def repair_missing_windows_files(directory):
@@ -44,15 +56,15 @@ def main():
     for name in selected:
         dependency = dependencies[name]
         directory = ROOT / "third_party" / name
-        if not directory.exists():
-            directory.mkdir(parents=True)
+        if not directory.exists() or unfinished(directory):
+            directory.mkdir(parents=True, exist_ok=True)
             git(directory, "init", "--quiet")
-            git(directory, "remote", "add", "origin", dependency["url"])
-            git(directory, "fetch", "--depth", "1", "origin", dependency["revision"])
+            git(directory, "fetch", "--depth", "1", dependency["url"], dependency["revision"])
             git(directory, "checkout", "--detach", "FETCH_HEAD")
-        actual = git(directory, "rev-parse", "HEAD", capture=True).stdout.strip()
+        actual = git(directory, "rev-parse", "--verify", "--quiet", "HEAD", capture=True, check=False).stdout.strip()
         if actual != dependency["revision"]:
-            parser.exit(1, f"Refusing to change existing {directory}: expected {dependency['revision']}, got {actual}\n")
+            parser.exit(1, f"Refusing to change existing {directory}: expected {dependency['revision']}, "
+                           f"got {actual or 'no checkout'}. Delete that folder and start again.\n")
         repair_missing_windows_files(directory)
         print(f"{name}: {actual}")
 

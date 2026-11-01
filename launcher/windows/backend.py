@@ -217,6 +217,10 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         tools = Path(settings.values['tools'])
         if not (tools / 'python/cmake/data/bin/cmake.exe').is_file():
             raise ValueError('Select the Windows build tools folder in Paths first.')
+        # (the last of the libraries Set Up Game prepares before building: missing when no setup got that far)
+        if not (settings.root / 'build-windows-shaderc/libshaderc/libshaderc_shared.dll').is_file():
+            raise ValueError('The libraries the game is built with are not ready; Set Up Game prepares them. '
+                             'Use Set Up Game: it carries on from where an earlier one stopped.')
         run_command(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                      str(settings.root / 'tools/build_windows_runtime.ps1'), '-ToolsRoot', str(tools)], settings)
     elif action == 'launcher':

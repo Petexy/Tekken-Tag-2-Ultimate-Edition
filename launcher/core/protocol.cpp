@@ -45,6 +45,15 @@ bool number(std::string_view text, uint64_t& out) {
     return ec == std::errc() && end == text.data() + text.size();
 }
 
+// The game's reports every 10 s: frames per second, video memory, presentation, threads' CPU.
+bool report(std::string_view line) {
+    for (const std::string_view start : {"ttt2: present: ", "ttt2: gpu: video memory: ", "ttt2: cpu: ", "pacing: "}) {
+        if (line.starts_with(start)) return true;
+    }
+    constexpr std::string_view gpu = "ttt2: gpu: "; // (its other lines are errors: "ttt2: gpu: cannot compile ...")
+    return line.starts_with(gpu) && line.size() > gpu.size() && line[gpu.size()] >= '0' && line[gpu.size()] <= '9';
+}
+
 } // namespace
 
 Line parse_line(std::string_view text) {
@@ -209,6 +218,22 @@ void Progress::import_step(const Line& line) {
     } else {
         step_ = line.text.empty() ? line.word : line.text;
     }
+}
+
+std::vector<std::string> last_words(std::string_view output, size_t count) {
+    std::vector<std::string> lines;
+    while (!output.empty() && lines.size() < count) {
+        const size_t start = output.rfind('\n');
+        std::string_view line = output.substr(start == std::string_view::npos ? 0 : start + 1);
+        output.remove_suffix(line.size() + (start == std::string_view::npos ? 0 : 1));
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.remove_suffix(1);
+        if (line.empty() || line.front() == ' ' || line.front() == '\t' || line.starts_with("guest backtrace") ||
+            report(line)) {
+            continue;
+        }
+        lines.emplace(lines.begin(), line.substr(0, 300));
+    }
+    return lines;
 }
 
 } // namespace launcher

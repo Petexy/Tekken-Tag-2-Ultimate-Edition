@@ -27,7 +27,8 @@ fighters: the Tekken 7 ones are skipped, as the Tekken 8 ones are without it).
 
 A moveset Tekken 7 only has while it runs: the ones not saved yet are saved first (dump_tekken7.py: Tekken 7 runs in
 the background, no window, no sound; Steam must be running), and so are the files Tekken 7 keeps encrypted (Geese's
-and Noctis's), as the game reads them. Fighters whose DLC your account does not own are skipped.
+and Noctis's), as the game reads them (one it does not read is named in a warning: the import fails only when it
+needs it, a preset outfit needing it is left out). Fighters whose DLC your account does not own are skipped.
 Movesets saved from your own Tekken 7 with TKMovesets2 work too (--movesets); DLC fighters are imported only when your
 Steam account owns them.
 
@@ -61,6 +62,7 @@ Needs Python 3 with numpy and Pillow (--remove only when what the packs left sha
 """
 import argparse
 import os
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -329,16 +331,17 @@ def shared_games(folder, tekken7, tekken8, progress):
 
 
 def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=True):
-    """The Tekken 7 fighters that can be imported: owned (DLC fighters: as Steam tells), their movesets and
-    encrypted files saved (Tekken 7 runs hidden for those not saved yet). alone: no other fighter is imported (none of
-    them left fails)."""
+    """The Tekken 7 fighters that can be imported: owned (DLC fighters: as Steam tells), their movesets saved
+    (Tekken 7 runs hidden for those not saved yet, and has their encrypted files read, those it reads saved). alone:
+    no other fighter is imported (none of them left fails)."""
     from ttt2char import InputError, importer
     from ttt2char.tekken7 import autodump
     from ttt2char.tekken7.pak import Paks
     # only fighters the player owns, whichever movesets are already saved (DLC fighters: as Steam tells)
     ids = [importer.definition(f).TEKKEN7_ID for f in fighters]
     if any(fid in autodump.DLC for fid in ids):
-        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden in Tekken 7\'s Proton prefix)')
+        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden %s)'
+                 % ('in the background' if os.name == 'nt' else 'in Tekken 7\'s Proton prefix'))
     try:
         skipped = autodump.unowned(ids)
     except autodump.DumpError as error:
@@ -355,7 +358,8 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         progress.fail('none of the fighters asked for is owned')
     # the movesets and encrypted files not saved yet: Tekken 7 in the background, once for all of them
     try:
-        paks = Paks(importer.tekken7_paks(tekken7), saved=files_folder)
+        paks_dir = importer.tekken7_paks(tekken7)
+        paks = Paks(paks_dir, saved=files_folder)
     except InputError as error:
         progress.fail(str(error))
     have = importer.saved_movesets(movesets)
@@ -364,11 +368,13 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         d = importer.definition(fighter)
         if d.TEKKEN7_ID not in have:
             needed[d.TEKKEN7_ID] = (d.TEKKEN7_CODE, d.NAME)
-        entries = autodump.unsaved_files(paks, d.TEKKEN7_CODE)
+        entries = autodump.unsaved_files(paks, d.TEKKEN7_CODE)     # (one the game did not read before: again)
         if entries:
             files[d.TEKKEN7_ID] = (d.NAME, entries)
     if importer.HEIHACHI not in have:                       # (every import needs his)
         needed[importer.HEIHACHI] = ('hei', 'Heihachi')
+    if files:
+        mod_paks(paks_dir, [e for _, entries in files.values() for e in entries])
     if needed or files:
         print('Saving %d Tekken 7 moveset(s) and %d fighter(s)\' encrypted files first (Tekken 7 runs hidden in the '
               'background for a minute or two) ...' % (len(needed), len(files)))
@@ -383,8 +389,8 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         for fid, why in skipped.items():
             print('Skipped %s: %s.' % (who.get(fid, 'Heihachi'), why))
         have = importer.saved_movesets(movesets)
-        saved = [f for f in fighters if importer.definition(f).TEKKEN7_ID in have and
-                 not autodump.unsaved_files(paks, importer.definition(f).TEKKEN7_CODE)]
+        # (an encrypted file the game did not read fails the import only when it needs it: importer.run says why)
+        saved = [f for f in fighters if importer.definition(f).TEKKEN7_ID in have]
         for fighter in fighters:
             if fighter not in saved:
                 progress('skipped', fighter, skipped.get(importer.definition(fighter).TEKKEN7_ID,
@@ -395,6 +401,29 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         if not fighters and alone:
             progress.fail('none of the fighters asked for could be saved from Tekken 7')
     return fighters
+
+
+def mod_paks(paks_dir, entries):
+    """Warns of the paks in folders below Tekken 7's Paks folder (a mod's, in ~mods say), naming the entries (the
+    encrypted files the game is asked for) one holds: the game mounts them too, and may hand over a copy of theirs,
+    which the import cannot use, but the importer reads only the paks at the top."""
+    from ttt2char.tekken7.pak import nested_paks, read_index
+    asked = {e.path.lower() for e in entries}
+    for path in nested_paks(paks_dir):
+        try:
+            held = sorted(e.path for e in read_index(path) if e.path.lower() in asked)
+        except (OSError, ValueError, struct.error) as error:
+            print('WARNING: Tekken 7 also reads %s (a mod?), whose list of files cannot be read (%s): the game may '
+                  'hand over its copies of encrypted files' % (path, error))
+            continue
+        if held:
+            print('WARNING: Tekken 7 also reads %s (a mod?), which has %d of the encrypted files it is asked for '
+                  '(%s%s): the game may hand over its copies, which the import cannot use; move it out of the Paks '
+                  'folder if one is not read'
+                  % (path, len(held), ', '.join(held[:3]), ', ...' if len(held) > 3 else ''))
+        else:
+            print('WARNING: Tekken 7 also reads %s (a mod?): the import reads only the paks at the top of %s'
+                  % (path, paks_dir))
 
 
 def tekken8_ready(fighters, movesets, progress):

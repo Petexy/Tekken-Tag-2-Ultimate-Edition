@@ -98,16 +98,25 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     static const char* const kRequired[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
                                             VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
     int best = -1;
+    std::vector<uint32_t> usable;
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(devices[i], nullptr, &n, nullptr);
         std::vector<VkExtensionProperties> exts(n);
         vkEnumerateDeviceExtensionProperties(devices[i], nullptr, &n, exts.data());
-        bool ok = true;
-        for (const char* r : kRequired) ok &= has_extension(exts, r);
+        std::string missing;
+        for (const char* r : kRequired) {
+            if (!has_extension(exts, r)) missing += std::string(" ") + r;
+        }
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(devices[i], &p);
-        if (!ok || p.apiVersion < VK_API_VERSION_1_3) continue;
+        if (!missing.empty() || p.apiVersion < VK_API_VERSION_1_3) {
+            std::fprintf(stderr, "ttt2: GPU: %s left out: Vulkan %u.%u%s%s\n", p.deviceName,
+                         VK_API_VERSION_MAJOR(p.apiVersion), VK_API_VERSION_MINOR(p.apiVersion),
+                         missing.empty() ? "" : ", without", missing.c_str());
+            continue;
+        }
+        usable.push_back(i);
         const bool discrete = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
         if (best < 0 || (discrete && properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)) {
             best = static_cast<int>(i);
@@ -120,6 +129,13 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     physical = devices[best];
     vkGetPhysicalDeviceMemoryProperties(physical, &memory);
     std::fprintf(stderr, "ttt2: GPU: %s\n", properties.deviceName);
+    for (uint32_t i : usable) {
+        if (static_cast<int>(i) == best) continue;
+        VkPhysicalDeviceProperties p;
+        vkGetPhysicalDeviceProperties(devices[i], &p);
+        std::fprintf(stderr, "ttt2: GPU: %s usable too (a discrete GPU goes first, else the first listed)\n",
+                     p.deviceName);
+    }
 
     uint32_t family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &family_count, nullptr);
@@ -150,6 +166,8 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     if (custom_border_color) device_extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     present_wait = surface_capabilities2 && has_extension(available, VK_KHR_PRESENT_ID_2_EXTENSION_NAME) &&
                    has_extension(available, VK_KHR_PRESENT_WAIT_2_EXTENSION_NAME);
+    memory_budget = has_extension(available, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+    if (memory_budget) device_extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 
     VkPhysicalDeviceCustomBorderColorFeaturesEXT border{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
     VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -293,6 +311,69 @@ Buffer Context::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMem
     return b;
 }
 
+Buffer Context::try_create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags,
+                                  VkMemoryPropertyFlags avoid) {
+    Buffer b;
+    b.size = size;
+    VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bci.size = size;
+    bci.usage = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    if (vkCreateBuffer(device, &bci, nullptr, &b.buffer) != VK_SUCCESS) return Buffer{};
+    VkMemoryRequirements req;
+    vkGetBufferMemoryRequirements(device, b.buffer, &req);
+    int type = -1;
+    for (int pass = 0; pass < 2 && type < 0; ++pass) {
+        for (uint32_t i = 0; i < memory.memoryTypeCount && type < 0; ++i) {
+            const VkMemoryPropertyFlags f = memory.memoryTypes[i].propertyFlags;
+            if ((req.memoryTypeBits & (1u << i)) && (f & flags) == flags && (pass == 1 || !(f & avoid))) {
+                type = static_cast<int>(i);
+            }
+        }
+    }
+    VkMemoryAllocateFlagsInfo flags_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO};
+    flags_info.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.pNext = &flags_info;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = static_cast<uint32_t>(type);
+    if (type < 0 || vkAllocateMemory(device, &mai, nullptr, &b.memory) != VK_SUCCESS) {
+        vkDestroyBuffer(device, b.buffer, nullptr);
+        return Buffer{};
+    }
+    VK_CHECK(vkBindBufferMemory(device, b.buffer, b.memory, 0));
+    if (memory.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+        void* p = nullptr;
+        if (vkMapMemory(device, b.memory, 0, VK_WHOLE_SIZE, 0, &p) != VK_SUCCESS) {
+            destroy_buffer(b);
+            return Buffer{};
+        }
+        b.mapped = static_cast<uint8_t*>(p);
+    }
+    VkBufferDeviceAddressInfo bai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    bai.buffer = b.buffer;
+    b.address = vkGetBufferDeviceAddress(device, &bai);
+    return b;
+}
+
+VkDeviceSize Context::video_memory_left() const {
+    if (!memory_budget) return UINT64_MAX;
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    p.pNext = &budget;
+    vkGetPhysicalDeviceMemoryProperties2(physical, &p);
+    // The largest device-local heap.
+    int heap = -1;
+    for (uint32_t i = 0; i < p.memoryProperties.memoryHeapCount; ++i) {
+        const VkMemoryHeap& h = p.memoryProperties.memoryHeaps[i];
+        if ((h.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+            (heap < 0 || h.size > p.memoryProperties.memoryHeaps[heap].size)) {
+            heap = static_cast<int>(i);
+        }
+    }
+    if (heap < 0) return UINT64_MAX;
+    return budget.heapBudget[heap] > budget.heapUsage[heap] ? budget.heapBudget[heap] - budget.heapUsage[heap] : 0;
+}
+
 void Context::destroy_buffer(Buffer& b) {
     if (b.buffer) vkDestroyBuffer(device, b.buffer, nullptr);
     if (b.memory) vkFreeMemory(device, b.memory, nullptr);
@@ -352,13 +433,20 @@ void GuestMemory::init(Context& c) {
         mai.pNext = &flags;
         mai.allocationSize = size;
         mai.memoryTypeIndex = c.memory_type(props.memoryTypeBits & req.memoryTypeBits, 0);
+        const VkMemoryType& type = c.memory.memoryTypes[mai.memoryTypeIndex];
         VK_CHECK(vkAllocateMemory(c.device, &mai, nullptr, &region.buffer.memory));
         VK_CHECK(vkBindBufferMemory(c.device, region.buffer.buffer, region.buffer.memory, 0));
         VkBufferDeviceAddressInfo bai{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
         bai.buffer = region.buffer.buffer;
         region.buffer.address = vkGetBufferDeviceAddress(c.device, &bai);
         region.buffer.size = size;
-        std::fprintf(stderr, "ttt2: GPU: guest memory 0x%08X-0x%08X imported\n", r.base, r.base + size - 1);
+        // (Whether the GPU caches it, HOST_CACHED 0x8, decides much of what reading it costs.)
+        const VkMemoryHeap& heap = c.memory.memoryHeaps[type.heapIndex];
+        std::fprintf(stderr,
+                     "ttt2: GPU: guest memory 0x%08X-0x%08X imported (memory type %u of 0x%X, flags 0x%X; heap %u, "
+                     "flags 0x%X, %llu MiB)\n",
+                     r.base, r.base + size - 1, mai.memoryTypeIndex, props.memoryTypeBits & req.memoryTypeBits,
+                     type.propertyFlags, type.heapIndex, heap.flags, static_cast<unsigned long long>(heap.size >> 20));
         regions_.push_back(region);
     }
 }
@@ -368,6 +456,16 @@ bool GuestMemory::locate(uint32_t address, uint32_t size, VkBuffer& buffer, VkDe
         if (address >= r.base && uint64_t{address} + size <= uint64_t{r.base} + r.size) {
             buffer = r.buffer.buffer;
             offset = address - r.base;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool GuestMemory::guest_address(VkDeviceAddress device, uint32_t size, uint32_t& address) const {
+    for (const Region& r : regions_) {
+        if (device >= r.buffer.address && device - r.buffer.address + size <= r.size) {
+            address = r.base + static_cast<uint32_t>(device - r.buffer.address);
             return true;
         }
     }
@@ -394,6 +492,14 @@ void UploadRing::init(Context& c, VkDeviceSize size) {
                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
                                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+}
+
+bool UploadRing::init(Context& c, VkDeviceSize size, VkMemoryPropertyFlags flags) {
+    buffer_ = c.try_create_buffer(size,
+                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                  flags | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+    return buffer_.mapped != nullptr;
 }
 
 uint8_t* UploadRing::allocate(VkDeviceSize size, VkDeviceSize alignment, VkDeviceSize& offset) {

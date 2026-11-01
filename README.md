@@ -53,6 +53,10 @@ and shaders are translated to Vulkan as it runs.
   to five, and the player entry screen pictures the keyboard, PlayStation,
   Xbox-style or Nintendo controller each player holds, drawn in the game's
   style. Everywhere else every device plays as the one player.
+- **Solo Ghost Battle**: a new Offline mode, below GHOST BATTLE: Ghost
+  Battle fought one on one. The player picks one fighter (no Tag or Solo
+  choice) and every ghost fights alone, with its own name, rank, record
+  and recorded play; wins, ranks and rewards count as Ghost Battle's.
 - **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
   together put both fighters back where the stage put them; a hint at the
   bottom right of the screen says so, in the look of the game's own.
@@ -272,7 +276,10 @@ does; then **Play**, **Update** (when the launcher's version differs from
 the program's) and **Uninstall…** (saves and added characters are kept unless you
 tick them; of a save folder you chose with `TTT2_SAVE_DIR`, only the game's
 own saves go). While the game runs, however it was started, Play, Update and
-Uninstall wait for it to end. The gear next to Play opens its **Settings**:
+Uninstall wait for it to end. What the game writes when Play starts it goes
+to `~/.cache/ttt2/game.log` (of its last start); when it stops with an error,
+its last lines are shown under Play: attach that file to a report. The gear
+next to Play opens its **Settings**:
 whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, and its keyboard keys ([Playing](#playing)). Its
@@ -578,7 +585,12 @@ Noctis's costumes (and Noctis's voice) encrypted in its files: in the same
 run the game reads those files with its own file reader, the one its loading
 uses, which hands them over decoded, and they are saved to
 `~/.local/share/ttt2/tekken7/files/` (about 670 MB for both) for the
-importer. `tools/characters/dump_tekken7.py` does that step alone (the
+importer. A file the game does not hand over plain and whole (a mod's pak
+in a folder below `TekkenGame/Content/Paks` can replace it) is named in the
+log, with why, and asked for again on the next import of that fighter: the
+import fails only when it needs that file, saying which, and a preset outfit
+that needs it is left out.
+`tools/characters/dump_tekken7.py` does that step alone (the
 movesets go to `~/.local/share/ttt2/tekken7/movesets/`); movesets saved with
 [TKMovesets2](https://github.com/Kiloutre/TKMovesets) work too
 (`--movesets FOLDER`).
