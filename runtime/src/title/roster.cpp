@@ -252,6 +252,8 @@ struct NativeCostumes {
     uint32_t entries = 0, native_count = 0, count = 0, key = 0, saved_key = 0;
 };
 std::map<uint32_t, NativeCostumes> g_native;
+// Recovered bodies reuse their native character's original part registries.
+std::map<std::string, std::map<uint32_t, uint32_t>> g_original_part_keys, g_original_texture_keys;
 std::map<uint32_t, uint32_t> g_native_ids;
 uint32_t g_native_picks[2][2] = {};
 uint32_t g_native_choice = 0;
@@ -1634,11 +1636,23 @@ void register_added(PPCContext& ctx, uint8_t* base) {
                 {9, part_pack(original.code, 2)}, {10, key_of(added.code + "/10")}, {11, part_pack(original.code, 3)},
                 {13, key_of(added.code + "/13")}, {15, part_pack(original.code, 1)}, {12, part_pack(original.code, 2)}};
             for (const auto& [t, k] : keys) {
-                store(key, k);
+                uint32_t registered_key = k;
+                if (const auto original_keys = g_original_part_keys.find(added.code);
+                    original_keys != g_original_part_keys.end()) {
+                    if (const auto part = original_keys->second.find(t); part != original_keys->second.end())
+                        registered_key = part->second;
+                }
+                store(key, registered_key);
                 guest_call(ctx, base, sub_0663C34C, {registry, code, t, key});
             }
             for (uint32_t i = 0; i < 20; ++i) {
-                store(key, key_of(added.code + "/14/" + std::to_string(i)));
+                uint32_t texture_key = key_of(added.code + "/14/" + std::to_string(i));
+                if (const auto original_keys = g_original_texture_keys.find(added.code);
+                    original_keys != g_original_texture_keys.end()) {
+                    if (const auto texture = original_keys->second.find(i); texture != original_keys->second.end())
+                        texture_key = texture->second;
+                }
+                store(key, texture_key);
                 guest_call(ctx, base, sub_0663D644, {registry, code, 14, key, i});
             }
             guest_call(ctx, base, sub_0661CF78, {code, 0});
