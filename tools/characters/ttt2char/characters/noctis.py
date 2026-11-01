@@ -9,7 +9,7 @@ NAME = 'Noctis'
 SHORT_NAME = 'NOCTIS'
 TEKKEN7_ID = 44
 TEKKEN7_CODE = 'mrz'
-REVISION = 7
+REVISION = 8
 CODE = 'mrz'
 SEX = 'male'
 
@@ -91,6 +91,12 @@ MOVESET = {
     'hitboxes': {name: (0xfe, 0xfc, 0xfe, 9) for name in
                  ('Mz_t_srk01F', 'Mz_t_srk01F_C', 'Mz_t_srk02Fy')} |
                 {'Mz_t_srk02F': (0xfe, 0, 0xfe, 9)},
+    # Native non-Bound juggle reactions for neutral 1+2 and both forms of
+    # each 2,2 hit. T7's second hit has no separate air entry; its grounded
+    # reaction must not be used for a back-facing/post-Bound airborne victim.
+    'air_reactions': {name: 'La_rplp00' for name in
+                      ('Mz_WP00', 'Mz_rush01', 'Mz_rush01y', 'Mz_rush02', 'Mz_rush02y')},
+    'air_reaction_entries': ('Mz_WP00', 'Mz_rush02', 'Mz_rush02y'),
     'free_air_screws': ('Mz_s_trp01',),
     # Only these finishers retain their T7 airborne slam instead of a rebound.
     'source_air_reactions': ('Mz_t_srk02', 'Mz_t_srk02Easy'),

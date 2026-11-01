@@ -108,6 +108,43 @@ class BufferedStanceCandidate(unittest.TestCase):
         self.assertEqual(c.T['moves'][1]['bitfield'],0x20)
         self.assertEqual(c.T['cancels'][0],row)
 
+class ExplicitAirEntry(unittest.TestCase):
+    def fixture(self, allowed=True):
+        native_req=[dict(condition=T.AIR,param=0),dict(condition=T.TT_END,param=0)]
+        native={'moves':[dict(hit_condition=0)],'requirements':native_req,
+                'hit_conditions':[dict(req=0,damage=18,reactions=0),dict(req=1,damage=18,reactions=0)],
+                'reactions':[dict(default=32,back=33,vertical_pushback=0)]}
+        c=types.SimpleNamespace(game='t7',map_req=lambda _:None,defn=types.SimpleNamespace(MOVESET={
+            'air_reactions':{'attack':'native'},'air_reaction_entries':('attack',) if allowed else ()}),
+            dn={'native':0},kn={'attack':0},newidx={0:0},stats=collections.Counter(),
+            d=types.SimpleNamespace(tables=native),T={
+                'moves':[dict(hit_condition=0),dict(hit_condition=0)],
+                'requirements':[dict(condition=T.TT_END,param=0)],
+                'hit_conditions':[dict(req=0,damage=17,reactions=0)],
+                'reactions':[dict(default=99,block=100)]})
+        def add(table,value):
+            index=len(c.T[table]);c.T[table].append(value);return index
+        c.add=add
+        return c
+    def test_only_explicit_air_entry_uses_native_non_bound_reaction(self):
+        import copy
+        c=self.fixture();before=copy.deepcopy(c.T)
+        O.apply(c)
+        hits=T.hits(c.T,c.T['moves'][0]['hit_condition'])
+        self.assertEqual(len(hits),2)
+        self.assertEqual(T.reqs(c.T,hits[0]['req']),[(T.AIR,0)])
+        self.assertEqual(hits[0]['damage'],17)
+        self.assertEqual(c.T['reactions'][hits[0]['reactions']],c.d.tables['reactions'][0])
+        self.assertEqual(hits[1],before['hit_conditions'][0])
+        self.assertEqual(c.T['moves'][1],before['moves'][1])
+        self.assertEqual(c.T['hit_conditions'][:1],before['hit_conditions'])
+    def test_absent_opt_in_and_complex_hit_list_fail_closed(self):
+        c=self.fixture(allowed=False)
+        with self.assertRaisesRegex(ValueError,'no airborne'):O.apply(c)
+        c=self.fixture();c.T['requirements'].insert(0,dict(condition=10,param=0))
+        with self.assertRaisesRegex(ValueError,'no airborne'):O.apply(c)
+
+
 class SafeBufferNormalization(unittest.TestCase):
     def fixture(self, complex_capture=False, missing_dispatch=False):
         c=types.SimpleNamespace(game='t7',kn={'kick':0},newidx={0:0},stats=collections.Counter())
