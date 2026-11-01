@@ -1,13 +1,15 @@
 // The title's file formats and the pictures made from them, on synthetic
 // data (no game files needed): archive scrambling, packing and rebuilding,
 // texture decoding, the font's glyph table and icon sets, the text banks'
-// button names, the copyright line without "Wii U Edition", and a still
-// without the logo's subtitle getting none.
+// button names, the copyright line without "Wii U Edition", a still
+// without the logo's subtitle getting none, and the Offline menu's SOLO
+// GHOST BATTLE row.
 
 #include "title/archive.h"
 #include "title/draw.h"
 #include "title/font.h"
 #include "title/image.h"
+#include "title/menudata.h"
 #include "title/pictures.h"
 #include "title/text.h"
 #include "title/title_screen.h"
@@ -19,9 +21,11 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace cafe::title;
+using namespace std::string_literals;
 
 namespace {
 
@@ -489,6 +493,137 @@ void test_logo() {
     check(!title_screen::logo(blank(640, 360)), "logo: none for another size");
 }
 
+// A menus' file (BX01) shaped like the title's Offline menu: name tables,
+// a frame with the menu (its OnLoad script's two icon arrays, eight rows
+// with an OnEnter script each), eight descriptions and eight values.
+struct Bx {
+    std::vector<uint8_t> d;
+    void text(const std::string& t) {
+        put_be32(d, static_cast<uint32_t>(t.size()));
+        d.insert(d.end(), t.begin(), t.end());
+        d.resize(d.size() + (-t.size() & 3));
+    }
+    // An element with its attributes (number, text) and `children` children to follow.
+    void element(uint32_t tag, const std::string& t, std::vector<std::pair<uint32_t, std::string>> attributes,
+                 uint32_t children) {
+        put_be32(d, tag);
+        text(t);
+        put_be32(d, static_cast<uint32_t>(attributes.size()));
+        for (const auto& [id, value] : attributes) {
+            put_be32(d, id);
+            text(value + '\0');
+        }
+        put_be32(d, children);
+    }
+    void table(std::vector<std::pair<uint32_t, std::string>> names) {
+        put_be32(d, static_cast<uint32_t>(names.size()));
+        std::string pool;
+        for (const auto& [id, name] : names) {
+            put_be32(d, static_cast<uint32_t>(pool.size()));
+            put_be32(d, static_cast<uint32_t>(name.size() + 1));
+            put_be32(d, id);
+            pool += name + '\0';
+        }
+        d.insert(d.end(), pool.begin(), pool.end());
+    }
+};
+
+std::string icon_script(bool size_field = true) {
+    std::string code = "\x30\x00\x00\x02\x42\x01\x02"s;
+    for (char v = 1; v <= 8; ++v) code += "\x02\x02\x00"s + v + "\x43\x01\x02"s;
+    code += "\x4a\x00\x00\x03\x00\x00\x01"s;
+    for (int i = 0; i < 8; ++i) code += "\x02\x02\x00\x09\x43\x01\x02"s;
+    code += "\x4a\x00\x00\x04\x00\x00\x01"s;
+    std::vector<uint8_t> s = {'x', 't', 'a', 'l', 1, 0, 0, 0};
+    put_be32(s, static_cast<uint32_t>(code.size()));
+    s.insert(s.end(), code.begin(), code.end());
+    std::vector<uint8_t> tail(80, 0);
+    if (size_field) tail[69] = static_cast<uint8_t>(code.size() - 1);
+    s.insert(s.end(), tail.begin(), tail.end());
+    return std::string(s.begin(), s.end());
+}
+
+// (`menu_last`: the menu after the statics, as a file laid out otherwise could have it)
+std::vector<uint8_t> offline_menu(bool size_field = true, bool menu_last = false) {
+    enum : uint32_t { kMenuData = 0, kFrame = 1, kMenu = 2, kItem = 3, kStatic = 4, kOnLoad = 100, kOnEnter = 104 };
+    enum : uint32_t { kName = 0, kText = 4, kTextId = 5 };
+    Bx b;
+    b.d = {'B', 'X', '0', '1', 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    b.element(kMenuData, "", {}, 1);
+    b.element(kFrame, "", {{kName, "FrameMode002-01"}}, 17);
+    const auto menu = [&] {
+        b.element(kMenu, "", {{kName, "MenuMode002-01"}}, 9);
+        b.element(kOnLoad, icon_script(size_field), {}, 0);
+        const char* rows[] = {"ARCADE BATTLE", "GHOST BATTLE", "VS BATTLE", "TEAM BATTLE", "TIME ATTACK", "SURVIVAL", "PRACTICE", "PAIR PLAY"};
+        for (int i = 0; i < 8; ++i) {
+            b.element(kItem, "", {{kName, "MenuItemMode002-0" + std::to_string(i + 1)}, {kText, rows[i]}, {kTextId, "4," + std::to_string(26 + i)}}, 1);
+            b.element(kOnEnter, "xtal ghost " + std::to_string(i), {}, 0);
+        }
+    };
+    if (!menu_last) menu();
+    for (int i = 0; i < 8; ++i)
+        b.element(kStatic, "", {{kName, "StaticMode002-0" + std::to_string(i + 1)}, {kText, "description " + std::to_string(i + 1)}, {kTextId, "4," + std::to_string(34 + i)}}, 0);
+    for (int i = 0; i < 8; ++i) b.element(kStatic, "", {{kName, "StaticValueMode002-0" + std::to_string(i + 1)}, {kText, ""}}, 0);
+    if (menu_last) menu();
+    const uint32_t tags = static_cast<uint32_t>(b.d.size());
+    b.table({{kMenuData, "menudata"}, {kFrame, "frame"}, {kMenu, "menu"}, {kItem, "menuitemtext"}, {kStatic, "statictext"},
+             {kOnLoad, "OnLoad"}, {kOnEnter, "OnEnter"}});
+    const uint32_t attributes = static_cast<uint32_t>(b.d.size());
+    b.table({{kName, "name"}, {kText, "text"}, {kTextId, "textid"}});
+    for (int i = 0; i < 4; ++i) {
+        b.d[8 + i] = static_cast<uint8_t>(tags >> (24 - 8 * i));
+        b.d[12 + i] = static_cast<uint8_t>(attributes >> (24 - 8 * i));
+    }
+    return b.d;
+}
+
+void test_menudata() {
+    const std::vector<uint8_t> file = offline_menu();
+    const auto out = menudata::add_solo_ghost_row(file);
+    check(out.has_value(), "menudata: the Offline menu gets its row");
+    if (!out) return;
+    const std::string_view o(reinterpret_cast<const char*>(out->data()), out->size());
+    const auto at = [&](std::string_view s) { return o.find(s); };
+    check(at("MenuItemMode002-02") < at("MenuItemMode002-09") && at("MenuItemMode002-09") < at("MenuItemMode002-03") &&
+              at("MenuItemMode002-09") < at("SOLO GHOST BATTLE") && at("SOLO GHOST BATTLE") < o.find("xtal ghost 1", at("MenuItemMode002-09")),
+          "menudata: the row is GHOST BATTLE's, below it, with its own label");
+    check(o.find("4,27", at("MenuItemMode002-09")) > at("MenuItemMode002-03"), "menudata: the row's label is its own text");
+    check(at("StaticMode002-02") < at("description 2") && at("description 2") < at("StaticMode002-03") &&
+              at("StaticMode002-03") < at("one-on-one") && at("one-on-one") < at("StaticMode002-04") &&
+              at("StaticMode002-04") < at("description 3") && at("StaticMode002-09") < at("description 8") &&
+              at("StaticValueMode002-09") != std::string_view::npos,
+          "menudata: the descriptions and values follow the rows' places");
+    const std::string grown = [] {
+        std::string s = icon_script();
+        const uint32_t size = be32(reinterpret_cast<const uint8_t*>(&s[8]));
+        std::string code = s.substr(12, size);
+        const std::string ghost = "\x02\x02\x00\x02\x43\x01\x02"s, large = "\x02\x02\x00\x09\x43\x01\x02"s;
+        code.insert(code.find(large) + 2 * 7, large);
+        code.insert(code.find(ghost) + 7, ghost);
+        std::string t = s.substr(12 + size);
+        t[69] = static_cast<char>(size + 14 - 1);
+        std::string h = s.substr(0, 12);
+        h[11] = static_cast<char>(size + 14);
+        return h + code + t;
+    }();
+    check(o.find(grown) != std::string_view::npos, "menudata: the icon arrays get the row's icons");
+    check(be32(&(*out)[8]) == out->size() - (file.size() - be32(&file[8])) &&
+              std::equal(file.begin() + be32(&file[8]), file.end(), out->begin() + be32(&(*out)[8])),
+          "menudata: the name tables follow");
+    check(!menudata::add_solo_ghost_row(*out), "menudata: no second row");
+    check(!menudata::add_solo_ghost_row(offline_menu(false)), "menudata: a script not as expected leaves the menu");
+    std::vector<uint8_t> cut(file.begin(), file.begin() + file.size() / 2);
+    check(!menudata::add_solo_ghost_row(cut), "menudata: a cut file");
+    std::vector<uint8_t> long_text = file;
+    const size_t script = std::string_view(reinterpret_cast<const char*>(file.data()), file.size()).find("xtal ghost 3");
+    long_text[script - 4] = 0x7F; // the script's length, past the file's end
+    check(!menudata::add_solo_ghost_row(long_text), "menudata: a text longer than the file");
+    const auto last = menudata::add_solo_ghost_row(offline_menu(true, true));
+    check(last && std::string_view(reinterpret_cast<const char*>(last->data()), last->size()).find("MenuItemMode002-09") !=
+                      std::string_view::npos,
+          "menudata: the menu after the statics");
+}
+
 } // namespace
 
 int main() {
@@ -503,6 +638,7 @@ int main() {
     test_text();
     test_copyright_line();
     test_logo();
+    test_menudata();
     if (g_failures == 0) std::printf("title_test: all passed\n");
     return g_failures == 0 ? 0 : 1;
 }

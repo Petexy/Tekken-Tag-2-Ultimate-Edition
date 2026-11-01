@@ -55,4 +55,15 @@ void set_current_context(PPCContext* ctx);
 void install_fault_handler();
 void print_guest_state(const PPCContext& ctx);
 
+// ---------------------------------------------------------------- CPU time
+// Threads whose CPU time the GPU statistics report: the calling thread, by
+// `name`, or a guest thread, by its OSThread's name when the report is made
+// (OSSetThreadName's, else `name`, else its address). A thread that ends
+// leaves first.
+void track_thread_cpu(const char* name, uint32_t guest_thread = 0);
+void untrack_thread_cpu();
+// "gpu 40%, present 5%; guest threads 90%, busiest Main 60%": the CPU each
+// tracked thread used since the last report, in percent of one core.
+std::string thread_cpu_report();
+
 } // namespace cafe

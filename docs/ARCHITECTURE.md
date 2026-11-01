@@ -45,7 +45,13 @@ the reachability bound sound.
 - Guest state: `PPCContext` (r0–r31, f0–f31 as paired doubles, CR as eight
   fields, LR, CTR, XER, FPSCR, GQR0–7, reservation).
 - Guest memory: one 4 GiB host reservation; guest address `a` is `base + a`.
-  Data stays big-endian; loads/stores byte-swap.
+  Data stays big-endian; loads/stores byte-swap. On Linux the base is at a
+  2 MiB boundary and the reservation asks for transparent huge pages
+  (`MADV_HUGEPAGE`): the GPU imports it (below), and amdgpu walks an
+  imported range page by page at each submission; with 4 KiB pages that
+  took the "gpu" thread from 7 % to 44 % of a core in the kernel during a
+  fight. Unasked, a kernel set to "madvise" (SteamOS) gives it none and one
+  set to "always" only while whole 2 MiB blocks are free (after a boot).
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
@@ -94,7 +100,12 @@ channel. With one shared condition variable every mutex unlock and every
 OSRestoreInterrupts woke all ~40 of the title's blocked threads: the title's
 allocator locks a mutex per allocation, and the boot-time loading screen
 took ~17 s of herd wake-ups for 0.9 s of work (now ~1 s; CPU use fell from
-~5 cores to a quarter of one).
+~5 cores to a quarter of one). On Windows a timed wait (OSSleepTicks, the
+alarm thread, waits with a timeout, the renderer's wait for a presentation
+image) sleeps whole milliseconds, rounded up (`host/timed_wait.h`):
+llvm-mingw's libc++ rounds a timed wait down and returns at once below a
+millisecond, so its own loop to the deadline spun on the lock (a
+1 ms OSSleepTicks took a whole core for its millisecond).
 
 System libraries the title loads with OSDynLoad are implemented the same
 way: `swkbd` (software keyboard) and `erreula` (error viewer) have no UI
@@ -216,6 +227,43 @@ attachment formats and blend state.
   from vertex shaders (skinned fighters, text); the first draw after a run
   of stream-out draws ends the rendering pass for a barrier, which a pass
   cannot hold, so the draws reading the output see all of it.
+- Guest memory is system memory, which a discrete GPU reads over the bus,
+  4 bytes at a time (uncached on some: NVIDIA documents pinned host memory
+  so). On RADV a fight frame takes about 3.3 ms at any resolution; slower
+  links or uncached reads multiply what skinning costs: per vertex about
+  112 dword reads of bone matrices, 28 of vertex data and 20 stores, and
+  16-20 reads for each draw of the skinned vertex (issues #45, #48). So on
+  a discrete GPU (`shadows.cpp`) the stream-out buffers of 1 MiB or more
+  in use (the title's four skinning buffers, which it writes about every
+  other frame) get copies in video memory, made at a swap. A stream-out
+  draw that writes every byte of its vertices (the translator's
+  `stream_out_complete`: each dword of the stride at the top level of the
+  main program; not indexed, one instance) writes the copy, and its range
+  goes back to guest memory with a `vkCmdCopyBuffer` at the barrier after
+  the run (finished by the next barrier, and before the submission
+  retires: the CPU and anything reading in place see the same bytes as
+  before). A vertex buffer reads the copy only when every byte the draw
+  can fetch (the index range, base vertex and stride, plus the
+  translator's `vb_extent`: what the fetch shader, called first and
+  indexed by the vertex index, reads past a vertex's start) was written
+  there in the last 4 frames (skinning reads each vertex's state from a
+  buffer it wrote 1-3 frames before) and 250 ms, and not since announced as
+  written by the CPU (`cpu_wrote`) or a render target's write-back, nor
+  overwritten by stream-out in place; anything else reads guest memory. A
+  draw using guest memory under a copy back not yet finished gets a
+  barrier first. The stream-out draws writing video memory read their
+  buffer resources and uniform blocks (bone palettes) from copies the CPU
+  writes into host-visible video memory as the draw is built (as
+  interpolation's records do). Replays (120 fps) do not run the skinning
+  draws (stream-out draws that draw nothing), so they read none of those
+  inputs in place.
+  The 10 s statistics add a `video memory:` line (copies, reads from video
+  and guest memory and why, replays' reads included, constants copied,
+  vertex data the skinning still reads in place).
+  `TTT2_SHADOWS=0` reads everything in place; `TTT2_SHADOW_CHECK=1`
+  compares every copy with guest memory once each frame finished, and `=2`
+  also draws each such stream-out draw the old way into guest memory
+  (without copies back), comparing both paths' output.
 - Submission is asynchronous: command buffers (8 in turn) and upload
   memory (8 chunks of a 256 MiB host buffer) are tracked on a timeline
   semaphore and reused once the GPU has finished with them. The command
@@ -317,28 +365,29 @@ attachment formats and blend state.
   (`TTT2_INTERP_2D=1` blends them too). Draws whose data mostly jumps (a
   different object, a cut) and frames where fewer than 80% of draws match
   are shown as they are. Replays skip anything that writes guest memory
-  (stream-out writes, CPU-side surface copies); render targets a frame
-  reads before writing them start replays from their start-of-frame
-  content, and the next frame sees the real frame's. With unblended replays
-  (`TTT2_INTERP_TEST=1`) every extra frame equals its real frame pixel for
-  pixel (checked through menus, character select and fights). Particles
-  whose geometry the CPU rebuilds each frame and the HUD move at 60 Hz, and
-  so do models skinned through stream-out: in fights the fighters are
-  (point draws that write their skinned vertices), so their extra frames
-  show the real frame's pose. A frame whose swap comes while the GPU has
-  yet to finish the previous frame's images gets no extra frames (the
-  previous image stays up through their part of its slot): the title learns
-  a frame is done only after its replays, so on a shared or overloaded GPU
-  they would slow the game itself (measured: a fight on a desktop
-  compositor taking ~80% of the GPU went from 46-51 to 55-60 title frames a
-  second; the statistics line counts the extra frames skipped). Nor does
-  one while the command processor has no time for them: it renders them
-  too, on its one CPU thread, so a slower CPU kept it busy all the time and
-  the game slowed down (issue #15; a fight with 16 µs more per draw, as a
-  slower CPU: 46 title frames a second, now 59-60 with the extra frames
-  left out of heavy scenes only). It goes by averages over 16 frames of its
-  time without commands and of the replays' time per second of the frame's
-  own work (which holds when a scene changes), keeping them while a
+  (stream-out writes, CPU-side surface copies; a stream-out draw that
+  rasterises nothing, the fighters' skinning, is not run at all); render
+  targets a frame reads before writing them start replays from their
+  start-of-frame content, and the next frame sees the real frame's. With
+  unblended replays (`TTT2_INTERP_TEST=1`) every extra frame equals its
+  real frame pixel for pixel (checked through menus, character select and
+  fights). Particles whose geometry the CPU rebuilds each frame and the HUD
+  move at 60 Hz, and so do models skinned through stream-out: in fights the
+  fighters are (point draws that write their skinned vertices), so their
+  extra frames show the real frame's pose. A frame whose swap comes while
+  the GPU has yet to finish the previous frame's images gets no extra
+  frames (the previous image stays up through their part of its slot): the
+  title learns a frame is done only after its replays, so on a shared or
+  overloaded GPU they would slow the game itself (measured: a fight on a
+  desktop compositor taking ~80% of the GPU went from 46-51 to 55-60 title
+  frames a second; the statistics line counts the extra frames skipped).
+  Nor does one while the command processor has no time for them: it renders
+  them too, on its one CPU thread, so a slower CPU kept it busy all the
+  time and the game slowed down (issue #15; a fight with 16 µs more per
+  draw, as a slower CPU: 46 title frames a second, now 59-60 with the extra
+  frames left out of heavy scenes only). It goes by averages over 16 frames
+  of its time without commands and of the replays' time per second of the
+  frame's own work (which holds when a scene changes), keeping them while a
   millisecond would be left and taking them up again at three; the
   statistics line shows how busy it is.
 - Presentation (`gpu/vulkan/present.cpp`) runs on its own thread and on a
@@ -863,6 +912,81 @@ delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
 
+## Solo Ghost Battle
+
+The Offline menu has SOLO GHOST BATTLE below GHOST BATTLE: Ghost Battle
+(mode kind 12) fought one on one (`title/solo_ghost.cpp`,
+`title/menudata.cpp`).
+
+**The row.** The title's menus are MenuToolKit files read once at start-up
+(entry `4615C394`, the update's copy in data100 winning over data000's):
+BX01, a binary XML (a header with the offsets of the tag and attribute
+name tables at its end; per element a tag, a text, attributes {name's
+number, text} and children), whose event handlers are children holding
+compiled Xtal scripts. The Offline menu is frame FrameMode002-01 with menu
+MenuMode002-01: eight rows MenuItemMode002-01..08 (ARCADE BATTLE, GHOST
+BATTLE, ... PAIR PLAY), each with an OnEnter script that asks the mode
+manager for a mode, and per row a description StaticMode002-0N and an empty
+value StaticValueMode002-0N, which the menu's scripts find by the cursor's
+place ("StaticMode002-0" + place + 1), as they find the rows' icons in two
+arrays its OnLoad script fills (an append each: `02 02 00 VV` loads the
+icon's number, `43 01 02` appends it). At start-up the port writes the file
+again with a ninth row, MenuItemMode002-09, at place 2: a copy of GHOST
+BATTLE's (the same OnEnter script) with its own label (the `text`
+attribute, without GHOST BATTLE's `textid`), an append more after GHOST
+BATTLE's in both icon arrays (the script's code size, at +8, and the word
+holding the code's size less one, 66 bytes after the code, grow by 14), and
+a description and a value at place 2 (the later ones renamed a number on),
+the description with its own text. A file not as expected is left as it is.
+
+**The session.** The rows' scripts call `ModeManager::Impl::requestChangeMode`
+(`sub_0738E098`: r4 the mode, r5 its argument; the Offline entry is 17,
+whose flags GHOST BATTLE's row gives as 9, bit 8 making Ghost Battle,
+`sub_028A28D4`, in `sub_02E50960`; the main menu is 16). The menus stay
+made, with their cursors (a container's children at +160/+164, the cursor
+at +172; entities by name through `sub_04545920` from
+`*(*0x1084FEBC + 744) + 4`), so a request for the Offline entry with flags 9
+is a Solo Ghost Battle when the Offline menu's focused row is the new one;
+the pause menu's CHARACTER SELECT asks for the Offline entry with the same
+flags, the row still focused. Every request for the Offline entry or the
+main menu sets the port's flag anew; hooks act while it is set and the mode
+manager's kind is 12.
+
+**The player.** The select screen's Tag/Solo popup (states 1 and 2 of the
+select's cursor, `sub_033E3DC8`) asks whether the mode is Mushroom Battle
+(`sub_02C23554`, from `0x033E3EA0` or `0x033E3EC4`); if so it gives the
+cursor SOLO (`sub_033E1010(cursor, 2)`: its style at +0x821C) and is done
+in the frame it opens, before the popup draws (only in states 2 and 32,
+`sub_0298E654`), and each pick is then committed twice, the game's solo
+team (`sub_033E265C`). The select's help bar asks the same
+(`0x033E5E44`) before offering PRESET TAG. In Solo Ghost Battle the port
+answers yes at those three calls.
+
+**The ghosts.** A ghost is a band file's record of two GOST blocks, its
+fighter's and its partner's (fighter +20, rank +24, the player's name
++0x1118, the recorded inputs). Before the fight `sub_06EEF064` copies them
+into the CPU side's member blocks (`sub_04DCAD34`, `sub_04DCAE7C`), puts
+the first member's fighter in the partner's place when the partner's
+fighter is not available (`sub_06EE94D0`, called at `0x06EEFA98`), and
+writes the side's second record (mm+428[side + 2]) from the partner's
+member copy, over the stage set-up's solo pair. The ghost cards
+(`sub_028A2B8C`) show the ghost's fighter alone under the same rule
+(`sub_06EE94D0` through the thunk `0x028AA478`, return address
+`0x028A2BE0`). In Solo Ghost Battle `sub_06EE94D0` answers "not available"
+at both places (the strong ghosts' draw, `sub_028A2DA8`, asks too and keeps
+its answer), and the partner's block is a copy of the first member's
+(`sub_04DCAE7C` runs `sub_04DCAD34`), so the second member's rank, which
+the side's rank uses, is the ghost's own. Name, record, rank and recorded
+play are the ghost's; records, ranks and rewards are Ghost Battle's.
+
+**The name.** The title's texts come from `sub_04D49F5C` (r4 the bank's
+number << 24 | the text's), looked up every frame. The fight's corner asks
+for common 144, GHOST BATTLE (`sub_033DB714` at `0x033DBFE0`,
+`sub_033DAEAC` at `0x033DAF6C`); in Solo Ghost Battle it gets SOLO GHOST
+BATTLE (in the bank's form: its length in characters before it). The
+select screen's GHOST BATTLE title is a picture and stays.
+`TTT2_TRACE_SOLO_GHOST=1` logs the session's start and end.
+
 ## Added fighters
 
 `runtime/src/title/roster.*` adds fighters from character packs (folders in
@@ -965,10 +1089,12 @@ not fit there draws black from its tag-in on. The buffers are sized for the
 title's fighters (20,000-34,000 vertices, 7 MiB each), so the port triples
 them (`sub_08977AE8`'s configuration), and the importer keeps an added fighter
 under 42,000 vertices (leaving out 2P colour layers if it must; Noctis, whose
-model holds all his summoned weapons and his trousers, 90,000: two of him and
-two others fit) and its textures at 4 MB like the title's (the largest
-halved). The effect files a match copies in (the common ones, the stage's and
-each fighter's) share the resource manager's 20 MiB pool (`sub_08A7ED8C`'s
+model holds all his summoned weapons and his trousers, is decimated from
+89,000 to about 49,000: every vertex is skinned and drawn every frame, shown
+or not, and at full size he took three times another added fighter's GPU
+time) and its textures at 4 MB like the title's (the largest halved). The
+effect files a match copies in (the common ones, the stage's and each
+fighter's) share the resource manager's 20 MiB pool (`sub_08A7ED8C`'s
 size) with textures that are loading and much else; two fighters with many
 effects filled it and the match did not load, so with added fighters it is
 twice the size. And the CPU's play (`sub_039A6214`) reads a table of 67
@@ -1218,9 +1344,18 @@ of paths at a time on one thread of its own (the pak layer keeps a reader
 per thread), copies the buffers out and frees them with the game's
 `FMemory::Free`; paths must be relative ones under the game's content. The
 dumper saves them under their pak paths in `~/.local/share/ttt2/tekken7/files/`,
-and the importer's pak reader takes a file from there whenever the pak's
-copy is encrypted. No key is looked for or used: the game reads its own
-files, as it does when it loads the fighter.
+and the importer's pak reader takes a file from there (only one of the pak
+entry's size) whenever the pak's copy is encrypted. No key is looked for or
+used: the game reads its own files, as it does when it loads the fighter. A
+file the game does not hand over plain and of its pak entry's size is not
+saved and is named in a warning, with why (a pak in a folder below `Paks`,
+such as a mod's in `~mods`, which the game mounts too but the importer's
+reader skips, may replace it: that is warned of too); being unsaved, it is
+asked for again on the fighter's next import, which runs Tekken 7 hidden
+again (and saves it once the mod is gone). The movesets are dumped all the
+same, and the importer fails only on a file it reads, naming it; a preset
+outfit whose files are missing is left out (its code is not listed, the
+others keep theirs).
 
 **The importer** (`tools/characters/`, Python with numpy and Pillow) reads
 Tekken 7's pak files (version 3; every entry is flagged encrypted but
@@ -1528,7 +1663,12 @@ compiler.
   (it stops what it started in order: the importer closes the hidden
   Tekken 7 or Tekken 8), kills what is left of the group once it has ended, and the
   whole group with SIGKILL when it has not ended within 45 s. The game runs
-  in a session of its own; it counts as running when any `/proc/<pid>/exe`
+  in a session of its own, its standard output and error in
+  `$XDG_CACHE_HOME/ttt2/game.log` (made anew at each Play; a file, not a pipe,
+  so that it can go on writing when the launcher is closed); when it stops
+  with an error, its last lines that are not indented (a crash's registers
+  and return addresses) or frame rate reports are shown with the exit code.
+  It counts as running when any `/proc/<pid>/exe`
   is the install's program (also "(deleted)"), whoever started it, and
   Play, Update and Uninstall wait for it. Steam's last answer of the DLC
   owned is kept in `$XDG_CACHE_HOME/ttt2/dlc-owned.json`, shown at once
@@ -1541,7 +1681,7 @@ compiler.
   through file descriptors, never following a link or crossing into
   another file system and never while the game runs, then the folder if it
   is empty (and the link to it, when it is reached through one), the menu
-  entry and the record when they are that folder's, and the shader caches;
+  entry and the record when they are that folder's, the shader caches and the game's log;
   when asked, the saves the game wrote (`common/` and the 8-digit user
   folders, nothing else of a `TTT2_SAVE_DIR` folder) and the character
   packs (with the importer's hidden `.<code>.part` and `.<code>.old`
@@ -1792,9 +1932,16 @@ host threads are named `<OSThread address>/<core>`. The export thunks take
 `(PPCContext&, uint8_t* base)`, so `$rsi` in any `imp_*` frame is the guest
 base address. `TTT2_TRACE_THREADS=1` logs thread creation, priorities,
 affinities and names. The GPU backends print frames per second and draws
-per frame every ten seconds. The captures, dumps and traces below hold the
-game's own images, shaders and sounds: write them under `local/`, which Git
-ignores. Renderer debugging:
+per frame every ten seconds; under it the Vulkan backend's `ttt2: cpu:` line
+gives the CPU the runtime's threads (window, present, gpu, gpu retire,
+display) and the guest threads took over the same time, with the busiest
+guest thread, which tells a CPU-bound run from a GPU-bound one in a
+player's log. Its start-up lines name the GPUs left out and why, the memory
+type the title's memory is imported with, and each swapchain it creates,
+with its present mode and why (one just like the last line at most once a
+second). The captures, dumps and traces below hold the game's own images,
+shaders and sounds: write them under `local/`, which Git ignores. Renderer
+debugging:
 
 | Variable | Effect |
 | --- | --- |
@@ -1819,6 +1966,8 @@ ignores. Renderer debugging:
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
+| `TTT2_SHADOWS=0/1` | stream-out output and its draws' constants read in place (0) or from copies in video memory (1; the default on discrete GPUs) |
+| `TTT2_SHADOW_CHECK=1/2` | compare those copies with guest memory after each frame (2: also draw the stream-out draws the old way, into guest memory) |
 | `TTT2_VK_VALIDATION=1` | Khronos validation layer, if installed (synchronization checks: `khronos_validation.validate_sync = true` in a file named by `VK_LAYER_SETTINGS_PATH`) |
 | `TTT2_AUDIO_DUMP=<file.wav>` | everything played, as 48 kHz stereo WAV (also without a device) |
 | `TTT2_TRACE_AX=1` | voice set-up, device mixes, output level |

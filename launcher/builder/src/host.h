@@ -35,10 +35,11 @@ std::vector<std::string> compiler_candidates();
 // A program in PATH (or a path), as an absolute path.
 std::optional<std::filesystem::path> find_program(const std::string& name);
 
-// A shared library by its soname ("libSDL3.so.0"), x86-64, as the dynamic
-// loader finds it (`cached`: in its cache), else in `folders`, else in the
-// usual folders. The game program finds one that is not in the cache only
-// through a run path to its folder.
+// A shared library by its soname ("libSDL3.so.0") or the name a
+// distribution gives it instead (Debian's libshaderc.so.1), x86-64, as the
+// dynamic loader finds it (`cached`: in its cache), else in `folders`, else
+// in the usual folders. The game program finds one that is not in the cache
+// only through a run path to its folder.
 struct Library {
     std::filesystem::path file;
     bool cached = false;

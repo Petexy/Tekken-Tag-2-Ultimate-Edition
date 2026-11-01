@@ -56,6 +56,8 @@ void vsync_locked() {
 }
 
 void display_main() {
+    pthread_setname_np(pthread_self(), "display");
+    track_thread_cpu("display");
     auto next = std::chrono::steady_clock::now();
     for (;;) {
         next += kRefreshPeriod;

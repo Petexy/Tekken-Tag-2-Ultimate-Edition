@@ -573,6 +573,7 @@ void Renderer::cpu_wrote(uint32_t address, uint32_t size) {
                      static_cast<unsigned long long>(frame_number_));
     }
     if (size == 0) return;
+    if (!shadows_.empty()) forget_written(address, end);
     mark_textures_dirty(address, end);
     // The CPU's data is newer than a render target over the same memory.
     // (A flush of everything says nothing about render targets.)

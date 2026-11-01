@@ -202,6 +202,7 @@ class Window:
     def show_game(self):
         L, px = self.look, self.look.px
         card = self.game_card
+        offset = self.main.offset          # (kept, as show_characters keeps it: the game ended, say)
         clear(card)
         installed = self.settings.installed()
         busy = self.task is not None and self.task.get('running')
@@ -245,6 +246,7 @@ class Window:
         if installed:
             L.button(buttons, icon='folder', command=lambda: opened(installed),
                      tip='Open the game\'s folder').pack(side='right', padx=(0, px(8)))
+        self.main.keep(offset)
 
     def more_menu(self, button):
         """Windows' own: building and installing from a Wii U source, and the logs."""
@@ -432,6 +434,12 @@ class Window:
         return None
 
     def show_characters(self):
+        # (Made again on coming back to the launcher, among others: the page stays where the player scrolled it.)
+        offset = self.main.offset
+        self.fill_characters()
+        self.main.keep(offset)
+
+    def fill_characters(self):
         L, px = self.look, self.look.px
         card = self.characters_card
         clear(card)
@@ -963,10 +971,10 @@ class Window:
         self.log_view = tk.Text(self.log_frame, height=10, wrap='word', bg=LOG, fg='#d8d8d8', bd=0, relief='flat',
                                 font=L.fonts['log'], padx=px(10), pady=px(8), insertbackground=TEXT,
                                 highlightthickness=0, state='disabled')
-        bar = ttk.Scrollbar(self.log_frame, orient='vertical', command=self.log_view.yview)
+        bar = ttk.Scrollbar(self.log_frame, orient='vertical', command=self.log_view.yview, style='Log.Vertical.TScrollbar')
         self.log_view.configure(yscrollcommand=bar.set)
-        bar.pack(side='right', fill='y')
-        self.log_view.pack(fill='both', expand=True, padx=1, pady=1)
+        bar.pack(side='right', fill='y', padx=(0, 1), pady=1)
+        self.log_view.pack(fill='both', expand=True, padx=(1, 0), pady=1)
 
     def toggle_details(self):
         if self.log_frame.winfo_ismapped():
@@ -1077,14 +1085,28 @@ class Window:
         action, names = task['action'], task['names']
         shown = ', '.join(self.display(n) for n in names) if len(names) < 3 else '%d characters' % len(names)
         mine = action in ('launcher', 'files')     # (the launcher's own update)
+        if mine and ok and task['updated'] and 'opened' not in task:
+            # The new launcher opened (it waits for this one to end), from a thread: a virus scanner can hold the
+            # start of a program it has not seen before, and this window says what it waits for meanwhile, instead
+            # of hanging. (Then this again, with what came of it.)
+            task.update(running=True, opening=True)
+            self.task_title.configure(text='Updated to ' + task['updated'])
+            self.task_detail.configure(text='Opening it…')
+            self.task_button.configure(state='disabled')
+            def open_it():
+                try:
+                    self_update.open_updated(self.exe); task['opened'] = None
+                except OSError as error:
+                    task['opened'] = error
+                self.events.put(('done', code))
+            threading.Thread(target=open_it, daemon=True).start()
+            return
+        if mine and ok and task['updated'] and not task['opened']:
+            self.root.destroy()
+            return
         if mine and ok and task['updated']:
-            try:
-                self_update.open_updated(self.exe)
-                self.root.destroy()
-                return
-            except OSError as error:
-                title, detail, ok = ('Updated to %s, but it cannot be opened' % task['updated'],
-                                     self_update.reason(error) + '. Start the launcher again.', False)
+            title, detail, ok = ('Updated to %s, but it cannot be opened' % task['updated'],
+                                 self_update.reason(task['opened']) + '. Start the launcher again.', False)
         elif code == 130:
             title, detail = ('Update cancelled' if mine else 'Cancelled'), (
                 'The launcher is as it was.' if mine else 'Completed extraction data is kept.')
@@ -1165,15 +1187,20 @@ class Window:
                 elif kind == 'main': self.main_known(payload)
         except queue.Empty:
             pass
-        except tk.TclError:
-            return                  # (the window is gone: an update opened the new launcher)
+        except Exception:
+            try:
+                if not self.root.winfo_exists(): return
+            except tk.TclError:
+                return              # (the window is gone: an update opened the new launcher)
+            # (Said, and the events after it still shown: a task's end among them, else its panel waits for good.)
+            self.callback_failed(*sys.exc_info())
         self.root.after(100, self.pump)
 
     def error(self, error):
         messagebox.showerror(NAME, str(error), parent=self.root)
 
     def close(self):
-        if self.busy():
+        if self.busy() and not self.task.get('opening'):    # (the new launcher is opening: this one can go)
             messagebox.showinfo('Task running', 'Wait for this task to finish, or cancel it first. The launcher stays '
                                 'open so that cleaning up and logging can finish.', parent=self.root)
         else:
@@ -1254,6 +1281,7 @@ class Window:
         box = ttk.Combobox(parent, state='readonly', values=[label for _, label in RESOLUTIONS],
                            textvariable=self.resolution, width=12, font=self.look.fonts['normal'])
         box.bind('<<ComboboxSelected>>', lambda e: (box.selection_clear(), self.save_display()))
+        self.settings_page.take_wheel(box)          # (else the wheel passing over it chooses, and saves, a size)
         return box
 
     def display_file(self):
@@ -1513,6 +1541,9 @@ class Window:
             self.close_settings()
             assert rows == len(self.status['fighters']) > 0, (rows, len(self.status['fighters']))
             assert switches == 3 and len(caps) == 19 and all(caps), (switches, caps)
+            # (A bar to click and drag: clam's is 1 px wide when its thumb has no size.)
+            bar = self.main.bar.winfo_reqwidth()
+            assert bar >= self.look.px(8), bar
             self.args.ui_smoke_test.write_text(json.dumps(dict(
                 window=self.root.title(), fighters=rows, pages=2, keys=caps, paths=self.settings.values,
                 ), indent=2), encoding='utf-8')
