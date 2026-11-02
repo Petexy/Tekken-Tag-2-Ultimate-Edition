@@ -2,6 +2,7 @@
 
     python3 -m pytest -q tools/characters/tests/test_arcs.py
 """
+import collections
 import os
 import sys
 import unittest
@@ -10,7 +11,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from ttt2char.convert import arcs  # noqa: E402
+from ttt2char.convert import arcs, moveset  # noqa: E402
+from ttt2char.convert import idmaps as M  # noqa: E402
+from ttt2char.movesets import Moveset  # noqa: E402
 from ttt2char.ttt2 import animation  # noqa: E402
 
 
@@ -107,6 +110,33 @@ class Arcs(unittest.TestCase):
         self.assertEqual((base, n), (1271.0, 35))
         np.testing.assert_array_equal(out['values'][:5, 1, 1], [754, 754, 781, 898, 898])
         np.testing.assert_allclose(out['values'][5:24, 1, 1], 1271.0 + np.linspace(11, -7, 19), rtol=1e-6)
+
+    def test_landing_bit(self):
+        # Hyakkigozan (0: a 2D air move, ground_fall 14) lands into its slide (1) one frame later; the slide gets
+        # TTT2's bit 31. Not: the stance (2, an alias slot), a move a ground move (3) cancels into too (4), the
+        # landing of a baked ground arc (5 -> 6: its fighter stays on the floor)
+        def move(cancel, props=None, fall=0, air=0):
+            return dict(cancel=cancel, extraprops=props, ground_fall=fall, airborne_start=air, transition=0x8000,
+                        bitfield=0)
+
+        def cancel(to, win=(15, 15), direction=0):
+            return dict(direction=direction, move_id=to, win_start=win[0], win_end=win[1])
+        k = Moveset()
+        k.game, k.aliases = 't7', [2]
+        k.tables = {
+            'moves': [move(0, 0, 14, 1), move(None), move(None), move(3), move(None), move(5, 2, 20), move(None)],
+            'cancels': [cancel(1), cancel(4), cancel(2, (0, 0), M.LIST_END), cancel(4, (1, 32767)),
+                        cancel(2, (0, 0), M.LIST_END), cancel(6, (21, 21)), cancel(2, (0, 0), M.LIST_END)],
+            'group_cancels': [], 'reactions': [],
+            'extra_move_properties': [dict(frame=0x8001, id=arcs.AIR_MOVE, value=0), dict(frame=0, id=0, value=0),
+                                      dict(frame=5, id=arcs.ARC, value=0x82466400), dict(frame=0, id=0, value=0)]}
+        c = moveset.Converter.__new__(moveset.Converter)
+        c.k, c.game, c.stats = k, 't7', collections.Counter()
+        c.newidx = {i: 100 + i for i in range(7)}
+        c.T = {'moves': [None] * 100 + [dict(bitfield=0x20) for _ in range(7)]}
+        c.arc_landings()
+        self.assertEqual([r['bitfield'] for r in c.T['moves'][100:]], [0x20, 0x80000020] + [0x20] * 5)
+        self.assertEqual(c.stats['2D arcs: landing moves given the landing bit'], 1)
 
 
 if __name__ == '__main__':

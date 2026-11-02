@@ -1823,6 +1823,44 @@ class Converter:
             row['cancel'] = len(self.T['cancels'])
             self.T['cancels'] += cl
 
+    def arc_landings(self):
+        """A ground move that only 2D air moves land into (their cancel one frame after their ground_fall; every
+        other way in counts: cancel lists' rows, group lists, transitions, reactions, alias slots) gets TTT2's bit
+        31, Tekken 7's bit 0, which its other landings (sJUMP_*_chak) have and Akuma's Hyakkigozan slide lacks. TTT2
+        starts a move without it from a squat when the fighter comes down from the air (the runtime flies those
+        moves at the player's own height): the slide's first frame had his hips at half height and his feet 110 mm
+        under the floor, the landings with the bit cleared sank to 200 mm for three frames."""
+        arc, air_move = ARCS[self.game]
+        if air_move is None:
+            return
+        k = self.k
+        moves = k.tables['moves']
+        air = set()                                       # the 2D air moves (arc_rows: not baked)
+        for i, mv in enumerate(moves):
+            p = [(f, idv) for f, idv, _ in M.xps(k, mv['extraprops'])]
+            flies = any(idv == air_move for _, idv in p)
+            if flies or any(idv == arc and not arcs.is_ground_arc(flies, f) for f, idv in p):
+                air.add(i)
+
+        def target(mid):
+            return None if mid is None else k.resolve_alias(mid) if mid >= 0x8000 else mid
+        ways = collections.defaultdict(set)               # Tekken 7 move -> per way in: a 2D air move's landing?
+        for i, mv in enumerate(moves):
+            for _, c in k.iter_list('cancels', mv['cancel'], lambda c: c['direction'] == M.LIST_END):
+                if c['direction'] != M.GROUP:
+                    ways[target(c['move_id'])].add(i in air and c['direction'] == 0 and
+                                                   0 < mv['ground_fall'] < c['win_start'] == c['win_end'])
+        for t in [target(c['move_id']) for c in k.tables['group_cancels']] + \
+                [target(mv['transition']) for mv in moves] + list(k.aliases) + \
+                [target(r[f]) for r in k.tables['reactions'] for f in REACTION_MOVE_FIELDS]:
+            ways[t].add(False)
+        for t, landing in ways.items():
+            if landing == {True} and t in self.newidx and not moves[t]['airborne_start']:
+                row = self.T['moves'][self.newidx[t]]
+                if not row['bitfield'] & 1 << 31:
+                    row['bitfield'] |= 1 << 31
+                    self.stats['2D arcs: landing moves given the landing bit'] += 1
+
     def conv_props(self, table, i):
         if i is None:
             return None
@@ -2207,6 +2245,7 @@ class Converter:
         self.own_transitions()
         self.link_queued(counterpart)          # Tekken 7 generic movement states the last two reached
         self.bake_arcs()
+        self.arc_landings()
         self.stats['grounded Screw launches preserve Bound'] += len(
             tagsystem.preserve_grounded_screw_bound(self.T, self.move_name))
         self.stats['native running collision exits restored'] += tagsystem.restore_running_contacts(
