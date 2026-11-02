@@ -18,8 +18,10 @@ an older importer's ("outdated": the game does not load it; adding the fighter a
 ("newer": the game does not load it either, and this importer does not replace it; the game needs updating), whether
 the pack the game loads misses what importing the fighter now gives ("update": an older revision, pack.revision;
 adding them again replaces it), whether its moveset is saved, how many preset outfits adding it can make
-("outfits", 0 for none: import_character.py --outfits) and whether the pack the game loads has them
-("outfits_added"). A Tekken 8 fighter has "game": "tekken8" too (it is
+("outfits", 0 for none: import_character.py --outfits), whether the pack the game loads has them
+("outfits_added") and whether what the packs share needs its game when it is made again, at every fighter added or
+removed ("needs_game": its pack, an older version's, keeps no copy of its pictures and name call, and, when its game
+cannot be read, the shared/ there has none of its pictures either). A Tekken 8 fighter has "game": "tekken8" too (it is
 read from Tekken 8), its "moveset_saved" is whether its own Tekken 8 moveset is saved whole (any version's, in
 --tekken8-movesets: the import uses it without Tekken 8 running; true for a fighter that converts none), and
 "stand_in" whether the pack the game loads fights with its stand-in's moveset because its own could not be had when
@@ -141,6 +143,12 @@ def status(game=None, movesets=None, movesets8=None):
     helper = 'prebuilt' if autodump.ready_helper(autodump.CACHE) else 'mingw' if shutil.which(MINGW) else None
     helper8 = 'prebuilt' if dump8.ready_helper(dump8.CACHE) else 'mingw' if shutil.which(MINGW) else None
     found8 = tekken8()
+    found7 = tekken7()
+    readable = {'tekken7': found7['readable'], 'tekken8': found8['found']}
+    copyless = {d.CODE: d for d in map(definition, CHARACTERS)
+                if d.CODE in loaded and not pack.carries_source(loaded[d.CODE]['path'], d)}
+    # (of those, the ones whose game cannot be read keep what the shared/ there has of them, if it has them)
+    held = pack.holds(folder, [code for code, d in copyless.items() if not readable[game_of(d)]])
     build_known = None              # (whether the helper knows Tekken 8's build: its exe read once, when a pack asks)
     fighters = []
     for name in CHARACTERS:
@@ -153,7 +161,8 @@ def status(game=None, movesets=None, movesets8=None):
                    'update': d.CODE in loaded and loaded[d.CODE]['revision'] < pack.revision(d),
                    'moveset_saved': tekken8_fighter or d.TEKKEN7_ID in saved,
                    'outfits': len(getattr(d, 'PRESETS', ())),
-                   'outfits_added': d.CODE in loaded and loaded[d.CODE]['outfits'] > 0}
+                   'outfits_added': d.CODE in loaded and loaded[d.CODE]['outfits'] > 0,
+                   'needs_game': d.CODE in copyless and d.CODE not in held}
         if tekken8_fighter:
             own = getattr(d, 'MOVESET_SOURCE', None) == 'tekken8'       # (importer.converts_tekken8, without numpy)
             fighter['moveset_saved'] = not own or dump8.whole(dump8.saved_files(d.TEKKEN8_CODE, movesets8))
@@ -170,7 +179,7 @@ def status(game=None, movesets=None, movesets8=None):
            'tools': {'gamescope': shutil.which('gamescope'), 'pactl': shutil.which('pactl'), 'helper': helper,
                      'tekken8_helper': helper8, 'cc': native.compiler()},
            'steam': steam(),
-           'tekken7': tekken7(),
+           'tekken7': found7,
            'tekken8': found8,
            'packs_folder': folder,
            'movesets': {'folder': movesets, 'heihachi': autodump.HEIHACHI in saved},     # (Tekken 7's imports need his)

@@ -123,7 +123,7 @@ void test_status() {
                      {"name": "chloe", "display": "Lucky Chloe", "dlc": null, "installed": true, "outdated": true,
                       "update": true, "moveset_saved": true},
                      {"name": "geese", "display": "Geese Howard", "dlc": 592373, "installed": true,
-                      "outdated": false, "update": true, "moveset_saved": false},
+                      "outdated": false, "update": true, "moveset_saved": false, "needs_game": false},
                      {"name": "noctis", "display": "Noctis", "dlc": 592374, "installed": false, "outdated": true},
                      {"name": "josie", "display": "Josie Rizal", "dlc": null, "installed": true, "outdated": false,
                       "newer": true},
@@ -157,6 +157,9 @@ void test_status() {
         check(!noctis.installed && !noctis.outdated && !noctis.added(), "status: outdated without a pack is not");
         check(kazumi.outfits == 9 && kazumi.outfits_added, "status: outfits");
         check(eliza.outfits == 0 && !eliza.outfits_added && !chloe.outfits_added, "status: no \"outfits\": none");
+        check(!geese.needs_game, "status: a pack whose shared pictures need no game");
+        check(kazumi.needs_game && !eliza.needs_game && !chloe.needs_game,
+              "status: no \"needs_game\": an added pack needs its game");
     }
     const auto missing =
         parse_status(R"({"tekken7": {"found": false, "path": null, "error": "Steam is not installed"}})");

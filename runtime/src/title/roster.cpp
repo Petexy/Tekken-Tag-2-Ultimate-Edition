@@ -747,7 +747,9 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     // all the packs together): a `keys/` folder in a pack (an early
     // importer's, made for one fighter alone) is never read, since its
     // texture pages would be joined to the title's containers before
-    // shared/'s and move every added fighter's pictures one place.
+    // shared/'s and move every added fighter's pictures one place. Nor is
+    // `source/`: the pictures and name call from its game that the importer
+    // makes shared/ from (megabytes the title never asks for).
     std::error_code ec;
     for (const auto& item : fs::recursive_directory_iterator(pack.directory, ec)) {
         if (!item.is_regular_file()) continue;
@@ -755,7 +757,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         const bool known = name == "character.ini" ||
                            std::any_of(files.begin(), files.end(), [&](const File& f) { return f.name == name; }) ||
                            std::find(bank_files.begin(), bank_files.end(), name) != bank_files.end();
-        if (known || name.compare(0, 5, "keys/") == 0) continue;
+        if (known || name.compare(0, 5, "keys/") == 0 || name.compare(0, 7, "source/") == 0) continue;
         auto contents = read_file(item.path());
         if (!contents) continue;
         ++own;

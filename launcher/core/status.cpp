@@ -57,6 +57,8 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
         fighter.stand_in = fighter.added() && f["stand_in"].boolean();
         fighter.outfits = static_cast<int>(f["outfits"].number(0));
         fighter.outfits_added = fighter.added() && f["outfits_added"].boolean();
+        // (An importer without "needs_game": every pack needs its game.)
+        fighter.needs_game = fighter.added() && f["needs_game"].boolean(true);
         s.fighters.push_back(std::move(fighter));
     }
     return s;

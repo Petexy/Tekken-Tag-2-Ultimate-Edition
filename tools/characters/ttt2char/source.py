@@ -17,8 +17,8 @@ convert/voice.py's Clips):
     cloth(k, parts, log)                  (Tekken 8) the cloth it simulates as convert/cloth.add takes it
 Tekken7Source wraps the paks (tekken7/), Tekken8Source the store (tekken8/). A definition with TEKKEN8_CODE is a
 Tekken 8 fighter (characters.game_of); source_of() opens the source a definition needs, and Sources keeps one per
-game for shared/, which reads every installed fighter's pictures and name call again (a Tekken 7 and a Tekken 8
-fighter side by side need both games).
+game for shared/, which reads an installed fighter's pictures and name call again when its pack has no copy of them
+(shared.py: packs made before they kept one).
 
 Tekken 8 is found like Tekken 7, through Steam's files (its app id's manifest in a library), when no folder is
 given. This module imports no numpy itself (the launcher asks where the games are): each source loads its readers
@@ -266,8 +266,9 @@ def source_of(d, tekken7_dir=None, tekken8_dir=None, files=None):
 
 
 class Sources:
-    """One source per game, opened when a fighter of that game first needs one (shared/ reads every installed
-    fighter's pictures and name call again). opened: sources already open (the import's own)."""
+    """One source per game, opened when a fighter of that game first needs one (shared/ reads an installed
+    fighter's pictures and name call again when its pack has no copy of them). opened: sources already open (the
+    import's own). InputError when that game is not there (shared/ then keeps what it has of the fighter)."""
 
     def __init__(self, tekken7=None, tekken8=None, files=None, opened=()):
         self.folders = {'tekken7': tekken7, 'tekken8': tekken8}

@@ -46,6 +46,12 @@ struct Fighter {
     int outfits = 0;
     // Their pack in the game has its outfits. (Only with `added()`.)
     bool outfits_added = false;
+    // What all added characters share needs their game whenever it is made
+    // again (a character added or removed): their pack, made by an older
+    // version, keeps no copy of their pictures and name call, and, their game
+    // gone, the shared pictures there have none of theirs. (Only with
+    // `added()`.)
+    bool needs_game = false;
 
     // In the game: a pack it loads.
     bool added() const { return installed && !outdated && !newer; }

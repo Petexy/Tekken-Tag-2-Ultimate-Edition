@@ -21,6 +21,9 @@ $XDG_DATA_HOME/ttt2/characters, else ~/.local/share/ttt2/characters, as the port
     art/                       its pictures for the loading and VS screens and the costume chooser (the port shows
                                its art when the pack has this folder)
     colours.json               its player 2 colours (palette number: 1P and 2P colour), for shared/
+    source/                    what shared/ takes from its game, saved by its import (shared.source_files): the
+                               pictures (PNG, named after their objects: source_name) and its name call
+                               (name_call.wav), so that shared/ is made again without its game (the port skips it)
     <outfit>.nud .nut .bon     optional complete preset bodies, with matching .xml and .mop;
                                character.ini outfits lists their three-letter codes in preview order
                                (up to fourteen). art/costumes.nut then has one texture per preset.
@@ -47,6 +50,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 
@@ -56,6 +60,7 @@ from .characters import GAMES, game_of
 
 FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
+SOURCE = 'source'               # a pack's copy of what shared/ takes from its game
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
 REVISION = 7                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
                                 # 2: tag combos; Reina's throws, bounds and icon; 3: face animations and eyelids;
@@ -221,6 +226,43 @@ def remove_shared(folder):
     goes, not what it leads to)."""
     for path in (os.path.join(folder, SHARED + end) for end in ('', '.part', '.old')):
         delete_path(path)
+
+
+def source_pictures(d):
+    """The objects of fighter d's game whose pictures shared/ is made from (convert/art.py's Sources: d.ART's bust,
+    body and name)."""
+    return [d.ART['bust'][0], d.ART['body'][0], d.ART['name']]
+
+
+def source_name(path):
+    """The file in a pack's source/ of the picture of object `path` ('/Game/UI/CS_CH_L/CS_CH_L_KZM' ->
+    'CS_CH_L_KZM.png'): a definition that names other pictures finds none of its pack's."""
+    return path.rsplit('/', 1)[-1].split('.')[0] + '.png'
+
+
+def carries_source(path, d):
+    """Whether pack folder `path` of fighter d has its copy of every picture shared/ takes from d's game (packs made
+    before source/ have none: shared/ needs their game, or keeps what it has of them)."""
+    return all(os.path.isfile(os.path.join(path, SOURCE, source_name(p))) for p in source_pictures(d))
+
+
+def holds(folder, codes):
+    """The fighters of `codes` that shared/ in characters folder `folder` has pictures of: a 2D layout of
+    shared/keys/ with their grid cell (the symbol face_panel_<code>, LMB's {u32 length, name, NUL}), which a
+    fighter whose game is gone keeps from there."""
+    keys = os.path.join(folder, SHARED, 'keys')
+    wanted = {code: struct.pack('>I', len('face_panel_' + code)) + ('face_panel_%s\0' % code).encode('latin1')
+              for code in codes}
+    found = set()
+    for name in sorted(os.listdir(keys)) if os.path.isdir(keys) else ():
+        if not name.endswith('.bin') or len(found) == len(wanted):
+            continue
+        with open(os.path.join(keys, name), 'rb') as f:
+            if f.read(4) != b'LMB\0':
+                continue
+            data = f.read()
+        found |= {code for code, symbol in wanted.items() if symbol in data}
+    return found
 
 
 def revision(d):
