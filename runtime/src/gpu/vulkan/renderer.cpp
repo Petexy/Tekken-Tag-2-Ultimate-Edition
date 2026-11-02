@@ -40,6 +40,7 @@ Renderer::Renderer() {
     guest_.init(ctx_);
     ring_.init(ctx_, kRingSize);
     init_shadows();
+    if (const char* e = std::getenv("TTT2_EVICT")) evict_ = *e != '0';
     VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VK_CHECK(vkCreateSemaphore(ctx_.device, &sci, nullptr, &acquired_));
 
@@ -532,16 +533,18 @@ void Renderer::swap() {
         trace_frame_ = frame_number_ + 1;
     }
     update_shadows();
+    evict_unused();
     ++frame_number_;
     ++frames_;
     const double t = now_seconds();
     if (t - window_start_ >= 10.0) {
         save_pipeline_cache();
         std::fprintf(stderr, "ttt2: gpu: %.1f frames/s, %.0f draws per frame (%.0f skipped), %zu targets, %zu textures, "
-                             "%zu shaders, %zu pipelines; %.1f GPU waits, %.1f ms waiting (%.1f ms GPU busy) per frame; %llu/%llu extra frames blended (%llu skipped: GPU behind, %llu: command processor busy), %.1f MB recorded; replay %.1f ms (matching %.1f); command processor busy %.0f%%\n",
+                             "%zu shaders, %zu pipelines (%llu targets, %llu textures evicted); %.1f GPU waits, %.1f ms waiting (%.1f ms GPU busy) per frame; %llu/%llu extra frames blended (%llu skipped: GPU behind, %llu: command processor busy), %.1f MB recorded; replay %.1f ms (matching %.1f); command processor busy %.0f%%\n",
                      frames_ / (t - window_start_), double(draws_) / std::max<uint64_t>(frames_, 1),
                      double(skipped_draws_) / std::max<uint64_t>(frames_, 1), targets_.size(), textures_.size(),
-                     modules_.size(), pipelines_.size(), double(waits_) / std::max<uint64_t>(frames_, 1),
+                     modules_.size(), pipelines_.size(), static_cast<unsigned long long>(evicted_targets_),
+                     static_cast<unsigned long long>(evicted_textures_), double(waits_) / std::max<uint64_t>(frames_, 1),
                      wait_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1), busy_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1),
                      static_cast<unsigned long long>(blended_replays_),
                      static_cast<unsigned long long>(replays_), static_cast<unsigned long long>(skipped_replays_),
@@ -564,6 +567,7 @@ void Renderer::swap() {
         }
         replay_seconds_ = match_seconds_ = 0;
         replays_ = blended_replays_ = skipped_replays_ = busy_skipped_replays_ = 0;
+        evicted_targets_ = evicted_textures_ = 0;
         window_start_ = t;
         frames_ = draws_ = skipped_draws_ = waits_ = 0;
         wait_seconds_ = busy_seconds_ = idle_seconds_ = 0;

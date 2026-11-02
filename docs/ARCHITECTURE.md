@@ -280,6 +280,15 @@ attachment formats and blend state.
   shader samples with nothing bound reads zeros (a 1x1 image), as on the
   GPU: Fallen Garden's and Heaven Garden's water draws have one, and
   skipping them left those stages without water.
+- Targets and textures the title stopped using are freed
+  (`Renderer::evict_unused`, every 60 title frames): textures not bound
+  for 30 s (`kUnusedFrames`), and targets not used for as long whose
+  memory holds newer data (the CPU's, or another target's rendered later;
+  the others hold what only the GPU rendered and stay), once the GPU has
+  finished with them. Each match loads fighters, stages and effects at
+  other addresses: kept, their images took about 1.3 GB more video memory
+  an hour, and the scans over every target (thousands a frame) slowed the
+  command processor until after a few hours the game ran in slow motion.
 - Write-back: the title reads some render targets with the CPU, as the
   console's GPU renders into guest memory. Its exposure averages the scene
   down to one element of a 64x64 target and reads it two frames later
@@ -1971,6 +1980,7 @@ debugging:
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
+| `TTT2_EVICT=0` | keep the textures and render targets the title stopped using (freed after 30 s otherwise) |
 | `TTT2_SHADOWS=0/1` | stream-out output and its draws' constants read in place (0) or from copies in video memory (1; the default on discrete GPUs) |
 | `TTT2_SHADOW_CHECK=1/2` | compare those copies with guest memory after each frame (2: also draw the stream-out draws the old way, into guest memory) |
 | `TTT2_VK_VALIDATION=1` | Khronos validation layer, if installed (synchronization checks: `khronos_validation.validate_sync = true` in a file named by `VK_LAYER_SETTINGS_PATH`) |

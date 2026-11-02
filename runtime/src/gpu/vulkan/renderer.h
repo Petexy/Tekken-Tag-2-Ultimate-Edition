@@ -99,6 +99,9 @@ struct Target {
     bool rewrites = false;      // was rewritten after being carried before: copy its start
     Image start_copy, end_copy;
     Image view_copy; // its content before the view window's replay, put back after it
+    // Its last use (rendered into, copied, found for a texture): the title
+    // frame and the submission recording it (Renderer::evict_unused).
+    uint64_t used_frame = 0, used_value = 0;
 };
 
 struct Texture {
@@ -121,6 +124,7 @@ struct Texture {
     int replacement = -1;
     uint64_t replacement_generation = 0;
     bool rgba = false;
+    uint64_t used_frame = 0, used_value = 0; // last bound: the title frame, the submission recording it
 };
 
 struct ShaderModule {
@@ -227,6 +231,24 @@ private:
     // A 1x1 2D image of zeros, for texture slots with nothing bound.
     const Image& null_texture();
     Image null_texture_;
+    // Targets and textures the title stopped using. Each match loads its
+    // fighters, stage and effects at other addresses, and each new address
+    // made new images that stayed: video memory and the scans of every
+    // target (find_target, cpu_wrote; thousands a frame) grew all session.
+    // Every 60 title frames (swap), textures not bound for kUnusedFrames
+    // and targets not used for as long whose memory holds newer data are
+    // freed once the GPU finished with them; a texture bound again is made
+    // again. TTT2_EVICT=0 keeps everything.
+    static constexpr uint64_t kUnusedFrames = 1800; // 30 s
+    template <typename T>
+    void note_used(T& x) {
+        x.used_frame = frame_number_;
+        x.used_value = submitted_ + 1; // (the command buffer being recorded)
+    }
+    void evict_unused();
+    void drop_target(Target* t);
+    bool evict_ = true;
+    uint64_t evicted_targets_ = 0, evicted_textures_ = 0; // (statistics)
 
     // ---------------------------------------------------- draws (draw.cpp)
     const ShaderModule* shader(latte::Stage stage, uint32_t address, uint32_t size, uint32_t fetch_address,

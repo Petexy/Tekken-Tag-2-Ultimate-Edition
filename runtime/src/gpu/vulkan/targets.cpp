@@ -58,6 +58,7 @@ Target* Renderer::find_target(uint32_t address, uint32_t format, bool depth) {
         if (format != 0 && (t->format & 0x3F) != (format & 0x3F)) continue;
         if (best == nullptr || t->written > best->written) best = t.get();
     }
+    if (best) note_used(*best);
     return best;
 }
 
@@ -70,6 +71,7 @@ Target* Renderer::color_target(uint32_t base_reg, uint32_t size_reg, uint32_t in
     for (auto& t : targets_) {
         if (!t->depth && t->address == address && t->format == format && t->pitch == pitch && t->height == height) {
             t->base_reg = base_reg;
+            note_used(*t);
             return t.get();
         }
     }
@@ -101,6 +103,7 @@ Target* Renderer::color_target(uint32_t base_reg, uint32_t size_reg, uint32_t in
                             VK_IMAGE_VIEW_TYPE_2D);
     t->written = stamp();
     t->written_frame = frame_number_;
+    note_used(*t);
     if (std::getenv("TTT2_TRACE_TARGETS")) {
         std::fprintf(stderr, "ttt2: gpu: new color target 0x%08X fmt 0x%03X %ux%u tile %u scale %g (size 0x%08X info 0x%08X)\n",
                      address, format, pitch, height, tile_mode, static_cast<double>(t->scale), size_reg, info_reg);
@@ -121,6 +124,7 @@ Target* Renderer::depth_target(uint32_t base_reg, uint32_t size_reg, uint32_t in
     const uint32_t height = (((size_reg >> 10) & 0xFFFFF) + 1) * 64 / pitch;
     for (auto& t : targets_) {
         if (t->depth && t->address == address && t->format == format && t->pitch == pitch && t->height == height) {
+            note_used(*t);
             return t.get();
         }
     }
@@ -148,6 +152,7 @@ Target* Renderer::depth_target(uint32_t base_reg, uint32_t size_reg, uint32_t in
                             VK_IMAGE_VIEW_TYPE_2D);
     t->written = stamp();
     t->written_frame = frame_number_;
+    note_used(*t);
     targets_.push_back(std::move(t));
     return targets_.back().get();
 }
