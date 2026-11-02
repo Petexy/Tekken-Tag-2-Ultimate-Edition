@@ -2436,6 +2436,15 @@ void with_donor_id(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PP
 }
 PPC_FUNC(sub_03D6B9F4_orig);
 PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); }
+// Each frame sub_03D6B544 sizes the 8 spheres the fighters push each other
+// apart with (sub_03A40400): the radii (+2516 + 16k) come from the select
+// id's row of 0x107C3D04 (8 floats; 288 115.2 115.2 360 and four 144 mm for
+// nearly every fighter), changed by the current move's +0x6C (a mode, spheres
+// switched off). Past that table's 63 rows an added fighter read the next
+// table's row id - 63, hurt sizes: 220 220 220 220 and four 132, or 275 for
+// all eight (a big fighter's), which held the opponent off a lunge's reach.
+PPC_FUNC(sub_03D6B544_orig);
+PPC_FUNC(sub_03D6B544) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B544_orig); }
 // The CPU's set-up at a round's start (sub_0399221C) goes through the four
 // players (kCpuPlayers) and copies each one's distances and its opponent's
 // (+152) from such a table (0x107BABD0, 12-byte rows): past it an added
