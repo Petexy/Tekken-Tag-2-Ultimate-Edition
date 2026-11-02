@@ -3741,7 +3741,13 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
 } // namespace
 
 namespace {
-std::map<uint32_t, damage::HitGrabContinuation> g_warp_strike_scaling;
+std::map<uint32_t, damage::HitGrabContinuation> g_hit_grab_scaling; // by defender (sub_03AE1704)
+// the percent a thrower's throw damage continues (its latest airborne hit's; 0, none)
+uint32_t hit_grab_percent(uint32_t thrower) {
+    for (const auto& [defender, continuation] : g_hit_grab_scaling)
+        if (const uint32_t percent = continuation.of(thrower)) return percent;
+    return 0;
+}
 std::string_view damage_move_name(uint32_t player) {
     const uint32_t move = player ? load(player + kPlayerMove) : 0;
     return move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
@@ -3786,21 +3792,19 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     }
     const uint32_t flags = load(result + 0x3c);
     uint32_t percent = 100;
-    auto& warp = g_warp_strike_scaling[defender];
-    const bool noctis = k >= 0 && g_added[k].code == "mrz";
-    if (load(result + 0x40) != 4) {
-        warp.clear(); // any intervening collision invalidates the continuation
-        if (noctis && damage_move_name(attacker) == "Mz_rp00F" &&
-            (flags & 0x00200000u) && !(flags & 0x80000000u)) {
-            // sub_03AE1704 @03AE1C30 uses this defender counter and table.
-            // Preserve the initiating hit's native curve through the forced
-            // victim state, whose flat property otherwise bypasses the curve.
-            const uint32_t count = load(defender + 0x1cc);
-            const uint32_t native_percent = count <= 8 ? load8(0x101ce884 + count) : 30;
-            warp.remember(attacker, native_percent);
-        }
-    } else if (noctis && damage_move_name(defender) == "Mz_rp01F_n") {
-        if (const uint32_t inherited = warp.take(attacker)) percent = inherited;
+    // An added fighter's hit-grab (a hit that cancels into a throw: Noctis's Warp-Strikes, Kunimitsu II's kunai)
+    // deals its throw part as throw damage (0x8058 / 0x8059 in its _n move, sub_03AE86A0 below), which never comes
+    // here and which the native code never scales: in a juggle it came whole. Its airborne hit is remembered for it,
+    // with the percent this calculation takes for that hit (@03AE1C30: the defender's counter, before this hit adds
+    // to it, into the table at 0x101ce884; 30 past its 9 entries). A thrower continues its latest such hit only;
+    // any other collision on the defender ends it (a standing hit, a real throw's grab).
+    auto& hit_grab = g_hit_grab_scaling[defender];
+    hit_grab.clear();
+    if (k >= 0 && (flags & 0x00200000u) && !(flags & 0x80000000u)) {
+        for (auto& [other, continuation] : g_hit_grab_scaling)
+            if (continuation.owner == attacker) continuation.clear();
+        const uint32_t count = load(defender + 0x1cc);
+        hit_grab.remember(attacker, count <= 8 ? load8(0x101ce884 + count) : 30);
     }
     if (k >= 0 && g_added[k].code == "mry" &&
         damage::ground_hit(flags, load8(defender + 0x36b))) {
@@ -3862,7 +3866,15 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const bool noctis_trace = (id == 0x8093 || id == 0x80a5) && trace_noctis_air(player);
     const uint32_t requested = noctis_trace ? load(ctx.r[4]+4) : 0;
     const uint32_t pass = ctx.r[5];
+    // Throw damage of an added fighter: 0x8058 / 0x8059 store the points (the value's low half) as the thrower's
+    // pending damage (+0x4a4, kind 1 / 2 at +0x487; @03AEFAB4, pass 0 only), which goes to the victim's health
+    // without sub_03AE1704. A hit-grab's takes the scale of the airborne hit it continues (sub_03AE1704 above).
+    const int32_t throw_points = (id == 0x8058 || id == 0x8059) && pass == 0 && added_slot(player) >= 0
+                                 ? static_cast<int16_t>(load(ctx.r[4] + 4)) : 0;
     sub_03AE86A0_orig(ctx, base);
+    if (throw_points > 0 && load(player + 0x4a4) == uint32_t(throw_points) && load8(player + 0x487) == id - 0x8057)
+        if (const uint32_t percent = hit_grab_percent(player))
+            store(player + 0x4a4, static_cast<uint32_t>(damage::scale_hit(throw_points, percent)));
     if (noctis_trace)
         std::fprintf(stderr,"noctis-air SET player=%08X frame=%u prop=%04X requested=%u stored=%u pass=%u\n",
             player,load(player+kPlayerFrame),id,requested,load(player+(id==0x80a5?0x628:0x63c)),pass);
