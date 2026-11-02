@@ -11,7 +11,8 @@ TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
 REVISION = 3                  # his gauge (1: packs made before have his EX moves free); its full sound (2);
-                              # his cancel rows' sound effects, his own back-turned kicks, Demon Flip in the air (3)
+                              # his cancel rows' sound effects, his own back-turned kicks, Demon Flip in the air
+                              # and its Hyakkigozan landing (3)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
