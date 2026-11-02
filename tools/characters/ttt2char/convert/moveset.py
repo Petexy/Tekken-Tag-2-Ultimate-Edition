@@ -484,9 +484,14 @@ HIT_POINT8 = {**dict.fromkeys((36, 37, 40, 41, 51, 53), 40), **dict.fromkeys((38
 # shows the weapons (roster.cpp, weapons) from 0x822E / 0x822F, ids its property interpreter ignores and no TTT2
 # moveset uses; the particles become the fighter's effects at the weapon's hand (the definition's weapon 'part').
 # Negan's moves show and hide the items of his weapon mesh with 0x82c4 n / 0x82c5 n instead (0 the bat in his left
-# hand, 1 the knife, 2 the bat in his right hand; no other fighter uses these ids): the same summons.
+# hand, 1 the knife, 2 the bat in his right hand; no other fighter uses these ids): the same summons. Kunimitsu II's
+# with 0x8300 n / 0x8301 n (only her moveset has them): 0 the short sword in her left hand, 1 the kunai in it, 2 the
+# knife in her right hand, the others her sheathed blades (3 and 6 at her hips, 5 in her right hand); a sword move
+# shows 0 and hides 6 as she draws, and the other way round as she sheathes it.
 TT_SUMMON, TT_DISMISS = 0x822E, 0x822F
-SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON, 0x82c5: TT_DISMISS},
+TT_DISMISS_ALL = 16
+SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON, 0x82c5: TT_DISMISS,
+                       0x8300: TT_SUMMON, 0x8301: TT_DISMISS},
                 't8': {0x8317: TT_SUMMON, 0x8318: TT_DISMISS}}
 SUMMON_EFFECT = {'t7': 0x82af, 't8': 0x831f}
 # A thrown weapon that hits stays where it hit (Noctis's Warp-Strike: Tekken 7 dismisses the sword as it hits, with
@@ -1501,9 +1506,28 @@ class Converter:
             row = self.T['moves'][i]
             start = row['extraprops']
             if start not in made:
-                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_DISMISS, value=16)])
+                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_DISMISS, value=TT_DISMISS_ALL)])
             row['extraprops'] = made[start]
             self.stats['weapon summons: dismissed by the donor\'s moves'] += 1
+
+    def dismiss_at_start(self):
+        """Tekken 7 puts a fighter's weapons away as a round starts (its game, not the moveset: Kunimitsu II's intros
+        end with her sword drawn, and the fight starts with her hands empty); TTT2 does not. So the definition's
+        WEAPON_DISMISS moves (a pattern of Tekken 7 move names: her stance, which a round starts in and her moves end
+        in, and the move her intros and win poses end in) start by dismissing all summons."""
+        pattern = getattr(self.defn, 'WEAPON_DISMISS', None)
+        if not pattern or not self.summons:
+            return
+        made = {}
+        for t7, i in sorted(self.newidx.items()):
+            if not re.search(pattern, self.name(t7)):
+                continue
+            row = self.T['moves'][i]
+            start = row['extraprops']
+            if start not in made:
+                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_DISMISS, value=TT_DISMISS_ALL)])
+            row['extraprops'] = made[start]
+            self.stats['weapon summons: dismissed as a move starts (WEAPON_DISMISS)'] += 1
 
     def hold_thrown(self):
         """The definition's WEAPON_HOLD moves (a pattern of Tekken 7 move names: those a thrown weapon's hit leads
@@ -1857,7 +1881,9 @@ class Converter:
 
     def thrown_rows(self, i, row):
         """A move of the definition's THROWN: its projectile (a row appended) and the properties spawning it; the
-        move's hit boxes go. -> the properties, or []."""
+        move's hit boxes go. A summoned weapon of the thrown item's bone (Kunimitsu II's kunai, drawn in her hand from
+        the move's summon on) is dismissed as the projectile is spawned: the projectile's look flies it from there
+        (the hand's copy would follow the pairs Tekken 7 flies it by, up to 7 m out). -> the properties, or []."""
         spec = self.thrown.get(self.name(i))
         if spec is None or row['hit_condition'] is None:
             return []
@@ -1880,6 +1906,8 @@ class Converter:
                 self.projectile_effects[eid] = seen
             if eid is not None:
                 look = [dict(frame=f, id=EFFECT_PROP, value=THROWING_HAND << 8 | eid)]   # (there until it flies)
+            look += [dict(frame=f, id=TT_DISMISS, value=n) for n, w in sorted(self.summons.items())
+                     if (w.get('mesh'), w.get('bone')) == (spec['item']['mesh'], spec['item']['bone'])]
         return [dict(frame=f, id=TT_PROJ_LIMB, value=0),
                 dict(frame=f, id=TT_PROJ_OFFSETS[0], value=spec['forward'] & 0xFFFF),
                 dict(frame=f, id=TT_PROJ_OFFSETS[1], value=spec['up'] & 0xFFFF),
@@ -2096,6 +2124,7 @@ class Converter:
         move_overrides.apply(self)
         specialcancels.apply(self)
         self.dismiss_when_hit()
+        self.dismiss_at_start()
         self.hold_thrown()
         # TTT2's tag system on the converted moves (convert/tagsystem.py; the slams were gated while linking): the
         # Tag Crash rows of the landing reactions, then the Tag Assault twins of the bound moves

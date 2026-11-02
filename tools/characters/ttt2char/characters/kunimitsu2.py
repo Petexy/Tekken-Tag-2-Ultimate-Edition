@@ -111,23 +111,32 @@ HIDE = [('gla', 'ATH_L_hand_mask_knm')]
 # no scalp); Tekken 7 shows the mask over it: the hair in front of the mask's face is left out
 COVERED = [('har', 'MI_CH_knm_gla_1p_Mask')]
 
-# her blades, drawn and posed by her animations' extra pairs (weapons.py): the left hand's short sword (pair 0; with
-# the other left-hand pairs it is the kunai she throws, which Tekken 7 flies by these pairs, up to 7 m out) and the
-# right hand's (pair 3); the points they hit with (Tekken 7 hit locations) are Tekken 7's own: the swords' tips, the
-# kunai's ends
+# her blades (weapons.py), posed by her animations' extra pairs. Her weapon mesh holds eight items: the short sword
+# (ATH_L_weapon001, pair 0) and the kunai (ATH_L_weapon002, pair 1) in her left hand, a knife (ATH_R_weapon001, pair
+# 3) and the sheathed sword (ATH_R_weapon_spear) in her right, and the sheath with the sword and the knife in it at her
+# hips (ATH_R_weapon002, pair 4); Tekken 7 shows an item only while a move has it out (0x8300 n .. 0x8301 n:
+# moveset.SUMMON_PROPS), so her stance has her hands empty: 0 the sword (1,1,1 and the other strings ending in a
+# slash, d, d/f, f + 1 + 2, her Rage Drive and Rage Art), 1 the kunai (her two kunai throws, until it flies), 2 the
+# knife (one intro). The points they hit with (Tekken 7 hit locations) are Tekken 7's own, on the sword and the knife,
+# written whether they are shown or not. The sheathed items (shown by default in Tekken 7) are not drawn.
 _WEAPONS = _ITEM + '/Meshes/knm/extra/knm_exp_1p/Meshes/SK_CH_knm_exp_1p'
 WEAPONS = [
-    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon001', 'parent': 'TE_L_jnt', 'pair': 0,
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon001', 'parent': 'TE_L_jnt', 'pair': 0, 'summon': 0,
      'points': {0x74: 'ATH_L_weapon001_top', 0x76: 'ATH_L_weapon001_top', 0x77: 'ATH_L_weapon001_hilp'}},
-    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3,
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3, 'summon': 2,
      'points': {0x75: 'ATH_R_weapon001_top'}},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon002', 'parent': 'TE_L_jnt', 'pair': 1, 'summon': 1},
 ]
+# Tekken 7 puts her blades away as a round starts (one intro ends with the sword drawn): her stance and the move her
+# intros and win poses end in dismiss them (moveset.dismiss_at_start)
+WEAPON_DISMISS = r'^Kt_(sKAM00_|KAM)$'
 # her Piercing Kunai Throw (d, d/f, f + 1) and the kunai ending her low-high kicks: Tekken 7 flies the kunai by those
 # pairs, which TTT2 cannot follow at range; a TTT2 projectile instead (convert/moveset.py thrown_rows), flying as the
 # kunai does: from 1.2 m ahead of her hips at its first active frame, 1.1 m up, 460 mm a frame for 13 frames
-# The kunai is seen flying with it: the blade of her left hand (its triangles in her weapon mesh, tip forward), with
-# the speed line Tekken 7 trails behind it (her effect 40)
-_KUNAI = {'mesh': _WEAPONS, 'bone': 'ATH_L_weapon001', 'tip': 'ATH_L_weapon001_top'}
+# The kunai is seen flying with it: her kunai (its triangles in her weapon mesh, tip forward: it has no point bone of
+# its own, and in the bind it points as the sword beside it does), with the speed line Tekken 7 trails behind it (her
+# effect 40); the kunai drawn in her hand goes as the projectile is spawned (moveset.thrown_rows)
+_KUNAI = {'mesh': _WEAPONS, 'bone': 'ATH_L_weapon002', 'tip': 'ATH_L_weapon001_top'}
 THROWN = {'Kt_236LP': dict(frame=15, forward=1200, up=350, speed=460, frames=13, radius=150, height=250,
                            item=_KUNAI, trail=40),
           'Kt_2lkrk_LP': dict(frame=26, forward=1200, up=350, speed=470, frames=13, radius=150, height=250,

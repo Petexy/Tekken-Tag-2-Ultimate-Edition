@@ -1309,6 +1309,14 @@ two seconds.
 His moves hit with a weapon's tip (Tekken 7's hitbox (tip, 0, tip, hand)) and
 some with its guard: a hand's weapons share the four point slots (a point
 `n>slot`), a slot taking the summoned weapon's point, else the first listed's.
+Negan's moves show and hide his items with 0x82c4 / 0x82c5, Kunimitsu II's
+with 0x8300 / 0x8301 (her short sword, her kunai and her knife are out only
+while a move has them out; her stance has her hands empty): the same summons.
+Tekken 7 also puts her blades away as a round starts (an intro of hers ends
+with the sword drawn), which TTT2 does not: the moves of the definition's
+`WEAPON_DISMISS` (her stance, the move her intros end in) start by
+dismissing them all. A summoned weapon the definition's `THROWN` item is
+(her kunai) is dismissed as the projectile flying its look is spawned.
 
 **Saving Tekken 7's movesets** (`tekken7/autodump.py`, `tekken7/memdump.py`,
 `tools/characters/t7helper/`): Tekken 7's data files are encrypted, and a

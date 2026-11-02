@@ -140,14 +140,62 @@ class Weapons(unittest.TestCase):
 
     def test_item_props_summon(self):
         # Negan's moves show and hide his weapon mesh's items with 0x82c4 n / 0x82c5 n (n 1: the knife), Noctis's
-        # with 0x82a7 n / 0x82a8 n: the port's summons alike
+        # with 0x82a7 n / 0x82a8 n, Kunimitsu II's with 0x8300 n / 0x8301 n (a sword move: 0 out, 6 the hips' in):
+        # the port's summons alike
         c = types.SimpleNamespace(game='t7', summons={1: dict(bone='ATH_L_weapon002')}, stats=collections.Counter())
-        rows = moveset.Converter.summon_rows(c, [(3, 0x82c4, 1), (51, 0x82c5, 1), (7, 0x82a7, 3), (9, 0x8001, 1)])
+        rows = moveset.Converter.summon_rows(c, [(3, 0x82c4, 1), (51, 0x82c5, 1), (7, 0x82a7, 3), (9, 0x8001, 1),
+                                                 (15, 0x8300, 0), (15, 0x8301, 6)])
         self.assertEqual(rows, [dict(frame=3, id=moveset.TT_SUMMON, value=1),
                                 dict(frame=51, id=moveset.TT_DISMISS, value=1),
-                                dict(frame=7, id=moveset.TT_SUMMON, value=3)])
+                                dict(frame=7, id=moveset.TT_SUMMON, value=3),
+                                dict(frame=15, id=moveset.TT_SUMMON, value=0),
+                                dict(frame=15, id=moveset.TT_DISMISS, value=6)])
         c.summons = {}                                                             # no summoned weapon: none
-        self.assertEqual(moveset.Converter.summon_rows(c, [(3, 0x82c4, 1)]), [])
+        self.assertEqual(moveset.Converter.summon_rows(c, [(3, 0x82c4, 1), (15, 0x8300, 0)]), [])
+
+    def test_thrown_item_leaves_the_hand(self):
+        # the kunai drawn in the hand from its summon on goes as the projectile flying it is spawned; a weapon of
+        # another bone stays, and a THROWN move without an item dismisses nothing
+        mesh = '/Game/x/SK_CH_abc_exp_1p'
+        c = types.SimpleNamespace(game='t7', T={'projectiles': []}, stats=collections.Counter(),
+                                  projectile_effects={}, name=lambda i: ['Ab_236LP', 'Ab_rk'][i],
+                                  summons={0: dict(mesh=mesh, bone='ATH_L_weapon001'),
+                                           1: dict(mesh=mesh, bone='ATH_L_weapon002')})
+        c.add = lambda table, row: moveset.Converter.add(c, table, row)
+        kunai = dict(mesh=mesh, bone='ATH_L_weapon002')
+        c.thrown = {'Ab_236LP': dict(frame=15, forward=1200, up=350, speed=460, frames=13, radius=150, height=250,
+                                     item=kunai)}
+        row = dict(hit_condition=7, hitlevel=0x10217, hitbox=b'vw\0\0', first_active=15, last_active=26)
+        rows = moveset.Converter.thrown_rows(c, 0, row)
+        self.assertEqual([r for r in rows if r['id'] in (moveset.TT_SUMMON, moveset.TT_DISMISS)],
+                         [dict(frame=15, id=moveset.TT_DISMISS, value=1)])
+        self.assertIn(dict(frame=15, id=moveset.TT_PROJ_SPAWN, value=0), rows)
+        self.assertEqual((row['hitbox'], row['first_active'], row['last_active']), (bytes(4), 0, 0))
+        c.thrown['Ab_236LP'] = dict(c.thrown['Ab_236LP'], item=None)
+        rows = moveset.Converter.thrown_rows(c, 0, dict(row))
+        self.assertFalse([r for r in rows if r['id'] in (moveset.TT_SUMMON, moveset.TT_DISMISS)])
+        self.assertEqual(moveset.Converter.thrown_rows(c, 1, dict(row)), [])           # not a THROWN move
+
+    def test_weapons_dismissed_as_a_move_starts(self):
+        # WEAPON_DISMISS: those moves (Tekken 7 names) start by dismissing all summons, keeping their own rows;
+        # moves sharing a property list share the new one; without summoned weapons nothing changes
+        props = [dict(frame=5, id=0x801f, value=3), dict(frame=0, id=0, value=0)]
+        c = types.SimpleNamespace(defn=types.SimpleNamespace(WEAPON_DISMISS=r'^Ab_(sKAM00_|KAM)$'),
+                                  summons={0: {}}, stats=collections.Counter(),
+                                  newidx={10: 0, 11: 1, 12: 2}, name=lambda t7: {10: 'Ab_sKAM00_', 11: 'Ab_KAM',
+                                                                                  12: 'Ab_rp00'}[t7],
+                                  T={'moves': [dict(extraprops=0), dict(extraprops=0), dict(extraprops=0)],
+                                     'extra_move_properties': [dict(r) for r in props]})
+        c.with_props = lambda start, extra: moveset.Converter.with_props(c, start, extra)
+        moveset.Converter.dismiss_at_start(c)
+        table, moves = c.T['extra_move_properties'], c.T['moves']
+        self.assertEqual((moves[0]['extraprops'], moves[1]['extraprops'], moves[2]['extraprops']), (2, 2, 0))
+        self.assertEqual(table[2:], [props[0], dict(frame=0x8001, id=moveset.TT_DISMISS, value=16), props[1]])
+        c.summons = {}
+        c.T['moves'][2]['extraprops'] = 0
+        moveset.Converter.dismiss_at_start(c)
+        self.assertEqual(c.T['moves'][2]['extraprops'], 0)
+        self.assertEqual(len(table), 5)
 
     def test_triangles(self):
         joints = np.array([[1, 0], [1, 2], [2, 0], [1, 0]])
