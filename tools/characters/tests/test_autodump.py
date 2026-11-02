@@ -215,10 +215,6 @@ class FightersWithUnreadFiles(unittest.TestCase):
         self.assertFalse(any('pakchunk0' in l for l in lines))
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class HelperNotStarted(unittest.TestCase):
     """The helper's port never opens: the error says what the session's logs say, and where they are."""
 
@@ -247,3 +243,7 @@ class HelperNotStarted(unittest.TestCase):
         with mock.patch.object(autodump.time, 'sleep'):
             with self.assertRaisesRegex(autodump.DumpError, 'did not start'):
                 autodump.Helper(port, 'x', timeout=3600, alive=lambda: False)
+
+
+if __name__ == '__main__':
+    unittest.main()
