@@ -2,9 +2,11 @@
 
     python3 -m unittest discover tools/characters/tests
 """
+import collections
 import os
 import struct
 import sys
+import types
 import unittest
 
 import numpy as np
@@ -12,7 +14,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from ttt2char import pack                              # noqa: E402
-from ttt2char.convert import chains, weapons           # noqa: E402
+from ttt2char.convert import chains, moveset, weapons  # noqa: E402
 from ttt2char.ttt2 import bone                         # noqa: E402
 
 SWAP = np.eye(4)[[0, 2, 1, 3]]
@@ -135,6 +137,17 @@ class Weapons(unittest.TestCase):
         self.assertIn('weapons = 3:1:0,1:3 5:1:2>0:5\n', ini)
         with self.assertRaises(ValueError):                                        # slots are 0..3
             weapons.append_bones(s, t7, dict(dagger, points={0x65: (40, 4)}))
+
+    def test_item_props_summon(self):
+        # Negan's moves show and hide his weapon mesh's items with 0x82c4 n / 0x82c5 n (n 1: the knife), Noctis's
+        # with 0x82a7 n / 0x82a8 n: the port's summons alike
+        c = types.SimpleNamespace(game='t7', summons={1: dict(bone='ATH_L_weapon002')}, stats=collections.Counter())
+        rows = moveset.Converter.summon_rows(c, [(3, 0x82c4, 1), (51, 0x82c5, 1), (7, 0x82a7, 3), (9, 0x8001, 1)])
+        self.assertEqual(rows, [dict(frame=3, id=moveset.TT_SUMMON, value=1),
+                                dict(frame=51, id=moveset.TT_DISMISS, value=1),
+                                dict(frame=7, id=moveset.TT_SUMMON, value=3)])
+        c.summons = {}                                                             # no summoned weapon: none
+        self.assertEqual(moveset.Converter.summon_rows(c, [(3, 0x82c4, 1)]), [])
 
     def test_triangles(self):
         joints = np.array([[1, 0], [1, 2], [2, 0], [1, 0]])

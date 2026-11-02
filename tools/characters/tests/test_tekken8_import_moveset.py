@@ -109,7 +109,7 @@ class References(unittest.TestCase):
             t['moves'][0]['hit_condition'] = 0
             k.refs.append((99, 'own'))
             t['moves'].append(dict(anim=99, cancel=None, hit_condition=None, extraprops=None, begin_props=None,
-                                   end_props=None, hitbox=b'\0\0\0\0'))
+                                   end_props=None, hitbox=b'\0\0\0\0', airborne_start=0))
         b = Tables()
         hit = b.hits((b.req((450, 0)), 1, b.reaction(4)), (b.req(), 0, None))
         b.move('Co_dwupL', hit_condition=hit)

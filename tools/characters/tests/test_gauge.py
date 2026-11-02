@@ -64,6 +64,29 @@ class SoundEffects(unittest.TestCase):
         self.assertEqual(e.number('mrx_hadou01_hit'), 8)
         self.assertIsNone(e.number('SE_battle_spgauge_full'))
 
+    def test_a_moves_sounds_and_its_hits_in_its_cancel_rows(self):
+        from ttt2char.convert import sounds
+        names = [None] * 430 + ['se_mrz_hit_sword']
+        names[57] = 'mrx_hadou01_shot'
+        k = type('K', (), {'tables': {'moves': [{'extraprops': 0, 'cancel': 0}, {'extraprops': 1, 'cancel': 1}]},
+                           'move_name': lambda self, i: ['Mz_rush01', 'Mz_RageArt00'][i]})()
+        xps = lambda m, i: [(1, 0x84c4, 15 << 24 | 57), (1, 0x84c4, 7 << 24 | 16)]
+        actions = lambda m, mv: [(44, 0), (0x802e, 99), (0x84c6, 15 << 24 | 430)]       # a sword hit's row
+        kept = lambda name: not sounds.LEFT_OUT.search(name)
+        self.assertEqual(sounds.move_sounds(names, k, xps, kept, actions), ['mrx_hadou01_shot', 'se_mrz_hit_sword'])
+        self.assertEqual(sounds.move_sounds(names, k, xps, kept), ['mrx_hadou01_shot'])
+
+    def test_the_moves_the_converter_leaves_out_play_none(self):
+        """(the importer's kept(): a Rage Drive, _EX, is left out without a gauge, an EX move kept with one)"""
+        import types
+        from ttt2char.convert import moveset
+        d = types.SimpleNamespace(MOVESET={'drop_moves': r'^Ka_Fly'})
+        self.assertTrue(moveset.drop_moves(d).search('Ka_66rp_EX'))
+        self.assertTrue(moveset.drop_moves(d).search('Ka_Fly00'))
+        self.assertFalse(moveset.drop_moves(d).search('Ka_66rp'))
+        d.GAUGE = {'full_sound': None}
+        self.assertFalse(moveset.drop_moves(d).search('Ka_66rp_EX'))
+
 
 class FullSound(unittest.TestCase):
     """Tekken 7 plays SE_battle_spgauge_full as Akuma's and Eliza's gauges fill up; the gauge line's last field."""

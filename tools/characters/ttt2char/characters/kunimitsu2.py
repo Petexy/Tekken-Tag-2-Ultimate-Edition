@@ -80,11 +80,12 @@ VOICE_PREFIX = 'kt'
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 # Keep both BT 1 stance-side variants: their generic names hide Kunimitsu's
-# own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups.
-REVISION = 3
+# own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups; likewise her own
+# BT 4 and crouching 2, d/f+3 and d/f+4 (4).
+REVISION = 4
 
 MOVESET = {
-    'own_moves': r'^Co_R_(?:rp00L|lp00R)$',
+    'own_moves': r'^Co_(?:R_(?:rp00L|lp00R|rk00R)|syarp00|syalkF|syarkF)$',
     # Native movement/tag groups also reference the donor's BT jab directly.
     # Only exact 1 presses should use her attack, not native 2 or 1+2 turns.
     'generic_input_replacements': {'Co_R_rp00L': 0x40000001, 'Co_R_lp00R': 0x40000001},

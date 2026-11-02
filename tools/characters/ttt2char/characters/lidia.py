@@ -9,6 +9,7 @@ SHORT_NAME = 'LIDIA'
 TEKKEN7_ID = 56
 TEKKEN7_CODE = 'nsd'
 CODE = 'nsd'
+REVISION = 1                  # her moves' sound effects (Tekken 7's bank 15), her own crouching d/f+3
 SEX = 'female'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -77,6 +78,8 @@ MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
     'bounds': dict.fromkeys(('Nd_2lp', 'Nd_4lprp', 'Nd_66rphrk', 'Nd_6rklklp', 'Nd_9lk', 'Nd_steprk',
                              'Nd_yokorp'), True),
+    # her crouching d/f+3 (Odd-tooth Snake, ndod_sya_3lk) has the generic name Co_syalkF: hers, not the donor's
+    'own_moves': r'^Co_syalkF$',
     'drop_moves': r'^Nd_Direct$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['nd_s%02d' % k for k in range(3)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['nd_w%02d' % k for k in range(3)])],         # win poses

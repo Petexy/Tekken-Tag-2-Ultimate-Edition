@@ -328,10 +328,14 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
 
     step('voice: %s\'s %s voice in %s\'s sound banks' % (d.NAME, source.NAME, d.DONOR))
     effects = None
-    if own_moveset is not None and game_of(d) == 'tekken7' and gauge.of(d):
+    if own_moveset is not None and game_of(d) == 'tekken7':
+        # (every Tekken 7 fighter's: a weapon's hits play bank 15 sounds too, Noctis's se_mrz_hit_sword; not those of
+        # the moves the converter leaves out, a Rage Drive's without a gauge)
+        dropped = moveset.drop_moves(d)
         effects = sounds.Effects(source.paks, d.TEKKEN7_CODE, own_moveset, idmaps.xps,
-                                 lambda name: not sounds.LEFT_OUT.search(name),
-                                 extra=[s for s in (gauge.full_sound(d),) if s])
+                                 lambda name: not sounds.LEFT_OUT.search(name) and not dropped.search(name),
+                                 extra=[s for s in (gauge.full_sound(d),) if s],
+                                 actions=lambda m, mv: idmaps.cancel_reqs(m, mv['cancel']))
         effects.base = sounds.item_count(rpx, d.DONOR)
     try:
         clips = source.clips(d)
@@ -425,8 +429,9 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     for who, row in d.ALIGN:
         idmaps.align(k if who == 'self' else h7, motbin.read(archives.entry('data006', row)), evidence)
     req, prop = idmaps.build_maps(evidence)
-    maps = (req, prop, idmaps.reaction_remap(evidence), idmaps.hitbox_remap(evidence))
     ttt2_movesets = [motbin.read(archives.entry('data006', row)) for row in range(58)]
+    signatures = (idmaps.frame_signatures([k, h7]), idmaps.frame_signatures(ttt2_movesets, by_set=True))
+    maps = (req, prop, idmaps.reaction_remap(evidence, signatures), idmaps.hitbox_remap(evidence))
     usage = idmaps.ttt2_usage(ttt2_movesets)
     tag_states = tagsystem.TagStates(ttt2_movesets)     # movement states: tag out (walking back, ...)
     del ttt2_movesets

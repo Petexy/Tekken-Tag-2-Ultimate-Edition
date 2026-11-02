@@ -8,6 +8,7 @@ SHORT_NAME = 'KAZUMI'          # her name on the 2D screens (TTT2 shows short na
 TEKKEN7_ID = 26               # her id in Tekken 7's roster (TKMovesets2 writes it into the .tkmvst header)
 TEKKEN7_CODE = 'kzm'          # her code in Tekken 7's files (AkBankVoiceKZM.bnk, Item/Meshes/kzm/)
 CODE = 'kzm'                  # her three-letter code in the pack (not a code TTT2 already has)
+REVISION = 1                  # her tiger in f,F+2's throw (1)
 SEX = 'female'
 
 PRESETS = (
@@ -46,8 +47,7 @@ TEKKEN7 = {
 
 # part -> (TTT2 mesh name, the bone the mesh is bound to as a whole, draw order)
 # Her tiger: Tekken 7 draws it as an actor of its own; here it becomes extra bones of hers, shown by her tiger moves
-# (convert/tiger.py). Its animations by the index her moves give them (move property 0x828f); index 12 (Ka_test_n,
-# a test move) has none.
+# (convert/tiger.py). Its animations by the index her moves give them (move property 0x828f).
 _TIGER = '/Game/Character/CharacterAlly/KazumiTiger'
 TIGER = {
     'mesh': _TIGER + '/Mesh/SK_CH_kzm_tiger',
@@ -58,6 +58,7 @@ TIGER = {
         6: _TIGER + '/Anim/TA_Missle00_tackle',               # 2+3 (Ka_Tora00) and others
         7: _TIGER + '/Anim/TA_Missle01_rolling',              # 1+4 (Ka_Tora01), Ka_spamarm2
         9: _TIGER + '/Anim/TA_Effect00_tigeruc',              # Ka_66rp_EX2
+        12: _TIGER + '/Anim/TA_Throw00_kick',                 # f,F+2's throw on hit (Ka_test_n, both 128 frames)
         17: _TIGER + '/Anim/TA_Missile02_tigerattack',        # Ka_t_srpFH, Ka_10comb11
         18: _TIGER + '/Anim/TA_Effect01_chouhatsu1P',         # taunt (2+3+4)
         19: _TIGER + '/Anim/TA_Effect02_chouhatsu_2P',        # taunt as player 2

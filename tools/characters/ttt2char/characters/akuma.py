@@ -10,7 +10,8 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 2                  # his gauge (1: packs made before have his EX moves free); its full sound (2)
+REVISION = 3                  # his gauge (1: packs made before have his EX moves free); its full sound (2);
+                              # his cancel rows' sound effects, his own back-turned kicks, Demon Flip in the air (3)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -94,10 +95,11 @@ MOVESET = {
     'recovery_trim': {'Mx_3rplp': 4},
     'startup_trim': {'Mx_3lrp': 4, 'Mx_66rk': 4},
     'name': '[AKUMA]',
-    # Keep Akuma's own WS2 and crouching punches rather than donor equivalents.
+    # Keep Akuma's own WS2, crouching punches and back-turned attacks rather than donor equivalents.
     'own_moves': (
         r'^Mx_6lrk_zanku_EX$|'
         '(?:^Co_(s_trp00|t_slp00(?:y2?)?|t_srp00|t_slk00|syarp03|syalp00(?:y)?|syarp00)$)|^(?:Co_R_clp00R|'
+        'Co_R_clk00L|Co_R_crk00R|Co_R_lk00L|Co_R_rk00R|'
         'Co_R_crp00L|Co_R_lp00R|Co_R_rp00L|Co_s_tlp00|Co_s_trp00|Co_syalp00|Co_syarp00|Co_syarp03|Co_t_slk00|'
         'Co_t_slp00|Co_t_srp00|Mx_4lp00|Mx_6lrk|Mx_asyura|Mx_asyurab|Mx_hyakiC|Mx_hyakiD|Mx_lp00|Mx_lplp|'
         'Mx_rp00|Mx_sDASHB_sv|Mx_sDASHF_sv|Mx_sSTEPB_sv|Mx_s_tlk00|Mx_saving|Mx_saving_cn|Mx_syalk00|'

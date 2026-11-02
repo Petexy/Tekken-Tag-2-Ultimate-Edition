@@ -37,7 +37,7 @@ class Source8(Moveset):
         self.names, self.refs = dict(names or {}), list(refs or [])
         self.aliases = [0] * 56
         self.tables = collections.defaultdict(list)
-        self.tables['moves'] = [dict(anim=i, anim_len=0) for i in range(len(self.refs))]
+        self.tables['moves'] = [dict(anim=i, anim_len=0, airborne_start=0) for i in range(len(self.refs))]
 
     def move_name(self, i):
         return self.names.get(i, '')
@@ -232,6 +232,17 @@ class Properties(unittest.TestCase):
         c.game = 't7'
         self.assertIsNone(c.conv_voiceclips(0))
 
+    def test_wall_pushback(self):
+        # 0x8258 (a wall hit's pushback, Tekken 7's 0x81e8) names one of the fighter's pushbacks: copied, the value
+        # the pack's index (not the pack's own pushback 4, a 1.3 m push)
+        c = self.c
+        self.k.tables['pushbacks'] = [dict(duration=0, displacement=0, loops=1, extradata=None)] * 4 + [
+            dict(duration=1, displacement=65036, loops=1, extradata=None)]
+        c.T.update(pushbacks=[dict(duration=20, displacement=1300, loops=20, extradata=None)] * 5, pushback_extras=[])
+        i = c.conv_value(0x8258, 4)
+        self.assertEqual(i, 5)
+        self.assertEqual(c.T['pushbacks'][i], dict(duration=1, displacement=65036, loops=1, extradata=None))
+
 
 class Animations(unittest.TestCase):
     def test_provider(self):
@@ -378,6 +389,30 @@ class Maps(unittest.TestCase):
         self.assertEqual(ev['req'].pairs[(723, 466)], 1)  # their hit conditions
         self.assertEqual(ev['react.move'].pairs[('#2', 'Co_DmA')], 1)
         self.assertEqual(M.reaction_remap(ev)['#2'], 'Co_DmA')
+
+    def test_reaction_remap_prefers_a_move_with_the_same_frames(self):
+        """A source reaction that leaves the ground takes the evidence's move with its very airborne frames, before
+        the one with the most votes (Azucena's WS2 #283: TTT2's sDw_UP_01_, not the lower sDw_UP_00_)."""
+        ev = collections.defaultdict(M.Evidence)
+        for x, y, n in (('#283', 'sDw_UP_00_', 10), ('#283', 'sDw_UP_01_', 2), ('#341', 'sDw_KAO00_', 12),
+                        ('#341', 'dw_nog00', 8), ('sDw_UP_02_', 'sDw_UP_00_', 3), ('sDw_UP_02_', 'sDw_UP_01_', 1)):
+            ev['react.move'].add(x, y, n)
+        k = Source8({1: 'sDw_UP_02_'}, [(i, 'own') for i in range(342)])
+        for i, f in ((283, (1, 52, 51)), (341, (1, 35, 49)), (1, (1, 52, 51))):
+            k.tables['moves'][i].update(airborne_start=f[0], airborne_end=f[1], ground_fall=f[2])
+        b = Tables()
+        for name, f in (('sDw_UP_00_', (1, 48, 47)), ('sDw_UP_01_', (1, 52, 51)), ('sDw_KAO00_', (1, 38, 37)),
+                        ('sDw_UP_02_', (1, 40, 39)), ('dw_nog00', (1, 36, 49))):
+            b.move(name, airborne_start=f[0], airborne_end=f[1], ground_fall=f[2])
+        sigs = M.frame_signatures([k]), M.frame_signatures([moveset_of(b)], by_set=True)
+        self.assertEqual(sigs[0]['#283'], (1, 52, 51))
+        self.assertEqual(sigs[1]['sDw_UP_01_'], {(1, 52, 51)})
+        self.assertEqual(M.reaction_remap(ev), {'#283': 'sDw_UP_00_', '#341': 'sDw_KAO00_',
+                                                'sDw_UP_02_': 'sDw_UP_00_'})
+        self.assertEqual(M.reaction_remap(ev, sigs), {
+            '#283': 'sDw_UP_01_',               # the same frames
+            '#341': 'sDw_KAO00_',               # none has its frames: the votes
+            'sDw_UP_02_': 'sDw_UP_00_'})        # a name TTT2 has (airborne): the votes
 
 
 class SpecialCancels(unittest.TestCase):

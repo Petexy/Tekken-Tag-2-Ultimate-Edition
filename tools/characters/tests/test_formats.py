@@ -543,6 +543,33 @@ class Materials(unittest.TestCase):
         self.assertEqual(classify('MI_CH_x_bdu', 'M_CH_Base_mask', lace), ('cloth', True, True))
         self.assertEqual(classify('MI_CH_x_bdu', 'M_CH_Base', np.ones((8, 8))), ('cloth', True, False))
 
+    def test_prop_material_slots(self):
+        """M_CH_Prop (the weapon items' base: Negan's knife) names its colour and normal maps 'Diffuse_Map' and
+        'Normal_Map': the albedo is its colour texture, the normal map is its 'Normal'."""
+        from ttt2char.convert.model import bake_albedo
+        from ttt2char.tekken7.material import Materials as Tekken7Materials
+        mats = Tekken7Materials(None)
+        prop = {'vectors': {}, 'scalars': {}, 'textures': {'Diffuse_Map': '/Game/T_D', 'Normal_Map': '/Game/T_N'},
+                'overrides': {}, 'base': '/Game/M_CH_Prop.M_CH_Prop', 'base_class': 'Material'}
+        mats._resolve = lambda path: prop
+        mats._defaults['/Game/M_CH_Prop.M_CH_Prop'] = {'vectors': {}, 'scalars': {}, 'textures': {}, 'fixed': []}
+        eff = mats.effective('/Game/MI_CH_knife.MI_CH_knife')
+        self.assertEqual((eff['base'], eff['textures']['Normal']), ('M_CH_Prop', '/Game/T_N'))
+
+        class Textures:
+            @staticmethod
+            def exists(path):
+                return path in ('/Game/T_D', '/Game/T_N')
+
+            @staticmethod
+            def linear(path):
+                return np.full((4, 4, 3), 0.25 if path == '/Game/T_D' else 0.5, np.float32), None
+        rgb, alpha = bake_albedo(eff, Textures())
+        self.assertTrue(np.allclose(rgb, 0.25))
+        self.assertIsNone(alpha)
+        prop['textures'] = {'Diffuse': '/Game/T_D', 'Normal': '/Game/T_X', 'Normal_Map': '/Game/T_N'}
+        self.assertEqual(mats.effective('/Game/MI_CH_x.MI_CH_x')['textures']['Normal'], '/Game/T_X')   # its own kept
+
     def test_texture_budget(self):
         from ttt2char.convert.model import TextureBank
         bank = TextureBank()

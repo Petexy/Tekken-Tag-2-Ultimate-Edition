@@ -9,6 +9,7 @@ SHORT_NAME = 'KATARINA'
 TEKKEN7_ID = 21
 TEKKEN7_CODE = 'ltn'
 CODE = 'ltn'
+REVISION = 1                  # her own crouching 2 (1)
 SEX = 'female'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -76,13 +77,13 @@ VOICE_PREFIX = 'ln'
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
-    # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
-    'counterhit_reactions': {'Ln_t_srkF': 'sDw_utuharai_l', 'Ln_3lrk': 'sDw_utuharai_l'},
     'name': '[KATARINA]',
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
     'bounds': dict.fromkeys(('Ln_2lp', 'Ln_4rklrp', 'Ln_6lk', 'Ln_6lrp', 'Ln_6rkrp', 'Ln_9lrk2', 'Ln_9rkrk', 'Ln_lk05',
                              'Ln_lplplk', 'Ln_lplplp', 'Ln_runlk00'), True),
     'drop_moves': r'^Ln_Direct$',
+    # her crouching 2 (lnet_srp) has the generic name Co_syarp00: hers, not the donor's
+    'own_moves': r'^Co_syarp00$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['ln_s%02d' % k for k in range(5)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['ln_w%02d' % k for k in range(3)])],         # win poses
 }

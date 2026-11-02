@@ -5,6 +5,7 @@ from . import tagsystem as TS
 # 0x80a6, Tekken 8's counterparts in the id maps between the two games); the id maps give TTT2's (313 / 0x8096)
 STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
 LATCHES = 4                     # TTT2's latches: the string buffer is the first of four, 313..316 (moveset.py)
+CONTACT = (46, 49)              # TTT2's tests: the attack connected (its hit latch), was blocked
 
 
 
@@ -79,10 +80,6 @@ def apply(c):
         restore_air_reaction(c, source)
     for source in c.defn.MOVESET.get("air_hit_strings", ()):
         air_hit_string(c, source)
-    for source in c.defn.MOVESET.get('hitgrab_followups', ()):
-        restore_hitgrab_followups(c, source)
-    for source, target in c.defn.MOVESET.get('on_hit_followups', {}).items():
-        on_hit_followup(c, source, target)
     for name, reaction in c.defn.MOVESET.get('counterhit_reactions', {}).items():
         counterhit_reaction(c, name, reaction)
     # Explicit neutral inputs only: do not add attack cancels or alter recovery.
@@ -314,6 +311,11 @@ def normalize_buffered_strings(c):
                for a, b in req):
             c.stats['buffered strings kept: their dispatch waits for another latch'] += 1
             continue
+        # ... and so does one that waits for the hit or the block (Reina's Heaven's Wrath 3,4: the 4 pressed from frame
+        # 1 dispatches at 28-29 on the hit or the block; a direct row tests the hit at the press, before the kick lands)
+        if any(a in CONTACT for req in dispatches if any(x == variable and y != 0 for x, y in req) for a, b in req):
+            c.stats['buffered strings kept: their dispatch waits for the hit or block'] += 1
+            continue
         direct_buffered_string(c, name)
 
 
@@ -406,61 +408,6 @@ def counterhit_reaction(c, name, reaction):
         raise ValueError('no grounded hit entry for CH override: ' + name)
     move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
     c.stats['explicit counter-hit reactions restored'] += changed
-
-
-def on_hit_followup(c, source, target):
-    """Restore an opted-in automatic on-hit continuation using its T7 timing.
-
-    Only the single unsupported [51, 0] contact check is accepted here. Other
-    requirements or player-input rows must not be silently made unconditional.
-    """
-    from . import idmaps as M
-    original = c.k.tables['moves'][c.kn[source]]
-    matches = [row for row in M.cancels(c.k, original['cancel'])
-               if TS.is_automatic(row) and c.k.resolve_alias(row['move_id']) == c.kn[target]
-               and M.reqs(c.k, row['req']) == [(51, 0)]]
-    if len(matches) != 1:
-        raise ValueError('no unique T7 on-hit continuation: ' + source)
-    move = c.T['moves'][c.newidx[c.kn[source]]]
-    index = c.newidx[c.kn[target]]
-    rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
-    if any(row['move_id'] == index for row in rows[:-1]):
-        raise ValueError('on-hit continuation already present: ' + source)
-    req = TS.write(c.T, 'requirements', [dict(condition=47, param=0), dict(condition=TS.TT_END,param=0)])
-    row = dict(matches[0], move_id=index, req=req, extradata=c.extradata(matches[0]['extradata']))
-    rows.insert(len(rows)-1, row)
-    move['cancel'] = TS.write(c.T, 'cancels', rows)
-    c.stats['explicit on-hit continuations restored'] += 1
-
-
-def restore_hitgrab_followups(c, source):
-    """Restore only attack-to-throw + on-hit rows from an explicit move.
-
-    T7 editor requirements 2/51 are attack-to-throw/on-hit. Native 2 tests
-    attack-to-throw eligibility; 47 is the verified native contact predicate.
-    All other source requirements, facing, input and timing remain converted.
-    """
-    from . import idmaps as M
-    original=c.k.tables['moves'][c.kn[source]]
-    move=c.T['moves'][c.newidx[c.kn[source]]]
-    rows=[dict(row) for row in TS.cancels(c.T,move['cancel'])]
-    added=[]
-    for row in M.cancels(c.k,original['cancel']):
-        required=M.reqs(c.k,row['req'])
-        if (2,0) not in required or (51,0) not in required:
-            continue
-        target=c.k.resolve_alias(row['move_id'])
-        if target not in c.newidx:
-            raise ValueError('missing hit-grab target: ' + source)
-        req,ok=c.conv_reqs(row['req'],overrides={2:2,51:47})
-        if not ok:
-            raise ValueError('unmapped hit-grab gate: ' + source)
-        new=dict(row,req=req,move_id=c.newidx[target],extradata=c.extradata(row['extradata']))
-        if new not in rows:added.append(new)
-    if not added:
-        raise ValueError('no missing hit-grab continuations: ' + source)
-    move['cancel']=TS.write(c.T,'cancels',rows[:-1]+added+rows[-1:])
-    c.stats['scoped hit-grab continuations restored'] += len(added)
 
 
 def air_hit_string(c, source):

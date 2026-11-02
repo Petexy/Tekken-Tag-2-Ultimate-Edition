@@ -19,8 +19,9 @@ hips channel, the fighter's own height stays 0), so:
   airborne_end, ground_fall and landing cancels move by the frames added. Forward and back jumps whose Tekken 7
   animations are deltas ("_sabun" over the neutral jump; Akuma) get the delta made absolute first: its rotations
   are absolute, its hips height between the take-off and the last two frames is relative to the neutral jump's
-  air height. Such a move also gets 0x822D at frame 0x8001 (value A, B, C, f0) so the runtime knows the arc when
-  an air move is cancelled out of it.
+  air height. So does an animation of no such name whose hips turn relative at the arc's frame (Akuma's Demon
+  Flip: relative_hips). Such a move also gets 0x822D at frame 0x8001 (value A, B, C, f0) so the runtime knows the
+  arc when an air move is cancelled out of it.
 * 0x8227 becomes 0x822C at frame 0x4001 (every frame from 1 on: a cancel may start a move past its frame 1), and an
   air move's 0x8226 stays as it is. The runtime (runtime/src/title/roster.cpp, "2D arcs") flies those moves with
   the fighter's own height and vertical speed, holds them on their ground_fall frame and lands them.
@@ -76,6 +77,14 @@ def absolute_sabun(delta, whole):
     rel = np.abs(v[:, 1, 1]) < 0.5 * base
     v[rel, 1, 1] += base
     return dict(delta, values=v), base, int(rel.sum())
+
+
+def relative_hips(dec, f0):
+    """Whether an animation's hips height (decoded: channel 1 y) is relative from the arc's frame f0 on, as the
+    "_sabun" jumps' airborne frames are: under half the frame before's (Akuma's Demon Flip, mxyt_sp_100ki: 898 mm,
+    then 11). The animations that hold their flat airborne pose (the other 2D fighters' jumps) keep their height."""
+    y = dec['values'][:, 1, 1]
+    return 1 <= f0 < len(y) and y[f0 - 1] > 0 and abs(float(y[f0])) < 0.5 * float(y[f0 - 1])
 
 
 def bake(dec, f0, a, g, hold):

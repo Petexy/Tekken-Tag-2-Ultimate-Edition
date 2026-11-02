@@ -91,6 +91,23 @@ class Arcs(unittest.TestCase):
         np.testing.assert_array_equal(out['values'][:5, 1, 1], 700.0)
         np.testing.assert_array_equal(out['values'][38:, 1, 1], 1000.0)
 
+    def test_relative_hips(self):
+        # Akuma's Demon Flip: absolute take-off frames, then relative hips from the arc's frame (5) on
+        flip = made_up(40, hips=0.0)
+        flip['values'][:5, 1, 1] = [754, 754, 781, 898, 898]
+        flip['values'][5:24, 1, 1] = np.linspace(11, -7, 19)
+        self.assertTrue(arcs.relative_hips(flip, 5))
+        self.assertFalse(arcs.relative_hips(flip, 4))           # still absolute there
+        held = made_up(44)                                       # a jump holding its flat airborne pose
+        self.assertFalse(arcs.relative_hips(held, 9))
+        self.assertFalse(arcs.relative_hips(held, 0))
+        self.assertFalse(arcs.relative_hips(held, 44))
+        whole = made_up(44, hips=1271.0)
+        out, base, n = arcs.absolute_sabun(flip, whole)          # made absolute as the "_sabun" jumps are
+        self.assertEqual((base, n), (1271.0, 35))
+        np.testing.assert_array_equal(out['values'][:5, 1, 1], [754, 754, 781, 898, 898])
+        np.testing.assert_allclose(out['values'][5:24, 1, 1], 1271.0 + np.linspace(11, -7, 19), rtol=1e-6)
+
 
 if __name__ == '__main__':
     unittest.main()

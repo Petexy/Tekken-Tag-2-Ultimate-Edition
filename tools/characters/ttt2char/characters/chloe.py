@@ -8,6 +8,7 @@ SHORT_NAME = 'CHLOE'          # her name on the 2D screens (TTT2 shows short nam
 TEKKEN7_ID = 22               # her id in Tekken 7's roster (TKMovesets2 writes it into the .tkmvst header)
 TEKKEN7_CODE = 'dnc'          # her code in Tekken 7's files (AkBankVoiceDNC.bnk, Item/Meshes/dnc/)
 CODE = 'dnc'                  # her three-letter code in the pack (not a code TTT2 already has)
+REVISION = 1                  # her moves' sound effects (Tekken 7's bank 15)
 SEX = 'female'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.

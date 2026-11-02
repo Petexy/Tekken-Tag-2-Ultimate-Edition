@@ -21,6 +21,7 @@ sys.path.insert(0, HERE)
 
 import launcher                                       # noqa: E402
 from ttt2char import InputError, pack, shared, signals    # noqa: E402
+from ttt2char.characters import definition             # noqa: E402
 from ttt2char.tekken7 import autodump                 # noqa: E402
 
 spec = importlib.util.spec_from_file_location('import_character', os.path.join(HERE, 'import_character.py'))
@@ -28,7 +29,8 @@ import_character = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(import_character)
 
 KAZUMI = mock.Mock(CODE='kzm', NAME='Kazumi Mishima', DONOR='jun', SEX='female')
-CHLOE = mock.Mock(CODE='dnc', NAME='Lucky Chloe', DONOR='jun', SEX='female')
+CHLOE = mock.Mock(CODE='dnc', NAME='Lucky Chloe', DONOR='jun', SEX='female',     # (her definition's revision)
+                  REVISION=vars(definition('chloe')).get('REVISION', 0))
 
 
 def write(path, text=''):

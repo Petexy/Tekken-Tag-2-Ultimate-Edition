@@ -9,6 +9,7 @@ SHORT_NAME = 'FAHKUMRAM'
 TEKKEN7_ID = 54
 TEKKEN7_CODE = 'nsc'
 CODE = 'nsc'
+REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15)
 SEX = 'male'
 
 # Ordered entries for the in-game preset chooser (asset names, never game data).
