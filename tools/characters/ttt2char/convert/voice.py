@@ -368,6 +368,32 @@ def name_call(clips, data, donor, code):
     clip = clips.kinds.get(('name', None))
     if not clip:
         return None
+
+    def audio(bank, offset, k):
+        rate, channels, _ = bank.format(k)
+        return _audio(bank.audio[k], clip[0], channels, rate)
+    return _with_name_call(data, donor, code, audio)
+
+
+def kept_name_call(earlier, data, donor, code):
+    """name_call with the fighter's audio as an earlier bank made by it has it (`earlier`: shared/'s, for a fighter
+    whose game is gone): the same bytes. -> bytes, or None when the earlier bank has no name call of it."""
+    old = Bank(earlier)
+    mine = {old.name(i): i for i in range(len(old.tones))}.get('sel_syvo_name_%s' % code)
+    if mine is None:
+        return None
+    tones = dict(old.links(mine))           # (its entry is the donor's link tone's, with its own tones at the offsets)
+
+    def audio(bank, offset, k):
+        if offset not in tones:
+            raise ValueError('the earlier name call of %s has no tone at %d' % (code, offset))
+        return (old.audio[tones[offset]],) + old.format(tones[offset])
+    return _with_name_call(data, donor, code, audio)
+
+
+def _with_name_call(data, donor, code, audio):
+    """Bank `data` with the fighter's name call: audio(bank, offset in the link entry, the donor's tone there) ->
+    (audio bytes, rate, channels, samples) of each of its tones."""
     bank = Bank(data)
     names = {bank.name(i): i for i in range(len(bank.tones))}
     link = names.get('sel_syvo_name_%s' % donor)
@@ -375,10 +401,9 @@ def name_call(clips, data, donor, code):
         return None
     entry = bank.renamed(link, 'sel_syvo_name_%s' % code)
     for offset, k in bank.links(link):
-        rate, channels, _ = bank.format(k)
-        audio, rate, ch, n = _audio(bank.audio[k], clip[0], channels, rate)
-        new = bank.append(bank.renamed(k, bank.name(k).replace('_' + donor, '_' + code)), audio=audio)
-        bank.replace(new, audio, rate, ch, n)
+        sound, rate, ch, n = audio(bank, offset, k)
+        new = bank.append(bank.renamed(k, bank.name(k).replace('_' + donor, '_' + code)), audio=sound)
+        bank.replace(new, sound, rate, ch, n)
         struct.pack_into('<I', entry, offset, new)
     bank.append(entry)
     return bank.write()

@@ -332,12 +332,19 @@ class Window:
         if not found['found'] or (game == 'tekken7' and found['error']):
             return found['error'] or '%s is not installed.' % name
         other = 'tekken7' if game == 'tekken8' else 'tekken8'
-        if not self.readable(other) and any(self.of(f, other) and self.added(f) for f in s['fighters']):
+        if not self.readable(other) and any(self.of(f, other) and self.added(f) and self.needs_game(f)
+                                            for f in s['fighters']):
             other_name = 'Tekken 8' if other == 'tekken8' else 'Tekken 7'
             return ('The %s characters added need %s whenever a character is added: what all of them share is made '
-                    'again from each one\'s own game. Install %s again, or remove them first.'
-                    % (other_name, other_name, other_name))
+                    'again, and neither their packs (made by an older version) nor what they share now have their '
+                    'pictures. Install %s again, or remove them first.' % (other_name, other_name, other_name))
         return None
+
+    @staticmethod
+    def needs_game(f):
+        """Whether what the added characters share needs `f`'s game when it is made again (an importer without
+        "needs_game": every pack does)."""
+        return f.get('needs_game', True)
 
     def of(self, f, game):
         return f.get('game', 'tekken7') == game
@@ -425,7 +432,8 @@ class Window:
         """None, or why `f` cannot be removed alone now."""
         s = self.status
         for o in s['fighters'] if s else ():
-            if o['name'] != f['name'] and self.added(o) and not self.readable(o.get('game', 'tekken7')):
+            if o['name'] != f['name'] and self.added(o) and self.needs_game(o) and \
+                    not self.readable(o.get('game', 'tekken7')):
                 name = 'Tekken 8' if self.of(o, 'tekken8') else 'Tekken 7'
                 return '%s is needed for the %s characters that stay: what they share is made again from it.' % (name, name)
         return None

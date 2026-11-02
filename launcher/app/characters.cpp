@@ -2,9 +2,12 @@
 // the importer finds them, what is missing to import, each game's characters
 // (Tekken 7's DLC characters with whether the player owns them; a Tekken 8
 // character added with a stand-in's moves, and why), and adding and removing
-// them through import_character.py. Neither game needs the other: only what
-// all added characters share is made again from each one's own game, so the
-// characters of a game that is gone need it whenever another is added.
+// them through import_character.py. Neither game needs the other: what all
+// added characters share is made again from the copy of their pictures and
+// name call each pack keeps; a pack an older version made, without it, is
+// read from its own game again, or, that game gone, keeps what the shared
+// pictures there have of it. Only when they have none either does it need its
+// game whenever another character is added or removed (needs_game).
 
 #include "launcher.h"
 
@@ -77,12 +80,13 @@ GtkWidget* note_line(GtkWidget* card, const char* icon, const std::string& text,
 constexpr const char* kUnknownBuild = "Tekken 8 was updated to a version that Ultimate Launcher cannot save moves from "
                                       "yet";
 
-// Why a game's characters cannot be added while the characters of `other`,
-// a game that is gone, are in the game.
+// Why a game's characters cannot be added while characters of `other`, a
+// game that is gone, are in the game and need it (needs_game).
 std::string shared_needs(std::string_view other) {
     const std::string name = game_name(other);
     return "The " + name + " characters added need " + name + " whenever a character is added: what all of them "
-           "share is made again from each one's own game. Install " + name + " again, or remove them first.";
+           "share is made again, and neither their packs (made by an older version) nor what they share now have "
+           "their pictures. Install " + name + " again, or remove them first.";
 }
 
 } // namespace
@@ -110,12 +114,13 @@ bool Launcher::can_import(std::string* why) const {
 
 std::string Launcher::shared_blocker(const std::string& game) const {
     // (Whatever is added, what the characters share is made again for all of
-    // them, each from its own game.)
+    // them: from their packs' copies, else each from its own game, else as
+    // the shared pictures there have them.)
     if (!status_) return {};
     const std::string other = other_game(game);
     if (status_->readable(other)) return {};
     for (const Fighter& f : status_->fighters) {
-        if (f.of(other) && f.added()) return other;
+        if (f.of(other) && f.added() && f.needs_game) return other;
     }
     return {};
 }
@@ -180,12 +185,12 @@ std::string Launcher::not_addable_why(const Fighter& f) const {
 }
 
 std::string Launcher::removable(const Fighter& f) const {
-    // Removing a character the game loads makes what those left share again,
-    // from their games: one that is gone stops it (all of that game's
+    // Removing a character the game loads makes what those left share again:
+    // one left that needs its game, gone, stops it (all of that game's
     // characters go at once with Remove All).
     if (!status_ || !f.added()) return {};
     for (const Fighter& o : status_->fighters) {
-        if (o.name != f.name && o.added() && !status_->readable(o.game)) {
+        if (o.name != f.name && o.added() && o.needs_game && !status_->readable(o.game)) {
             const char* name = game_name(o.game);
             return std::string(name) + " is needed for the " + name + " characters that stay: what they share is made "
                    "again from it" + (o.of(f.game) ? ". Remove All removes them all at once." : ".");
@@ -226,16 +231,19 @@ std::vector<std::string> Launcher::to_update(const std::string& game, bool stand
 
 std::vector<std::string> Launcher::to_remove_all(const std::string& game) const {
     // Only when the game is gone and more than one of its characters is in
-    // the game: then one alone cannot go (removable), all of them can.
+    // the game, one of them needing it: then one alone cannot go (removable),
+    // all of them can.
     std::vector<std::string> names;
     if (!status_ || status_->readable(game)) return names;
     int added = 0;
+    bool needed = false;
     for (const Fighter& f : status_->fighters) {
         if (!f.of(game) || !f.installed) continue;
         names.push_back(f.name);
         added += f.added();
+        needed = needed || f.needs_game;
     }
-    if (added < 2) names.clear();
+    if (added < 2 || !needed) names.clear();
     return names;
 }
 

@@ -23,7 +23,7 @@ HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, HERE)
 
 import launcher                                       # noqa: E402
-from ttt2char import importer, pack, shared, signals, ttt2   # noqa: E402
+from ttt2char import importer, pack, shared, signals, source, ttt2   # noqa: E402
 from ttt2char.tekken7 import autodump                 # noqa: E402
 from ttt2char.tekken8 import autodump as dump8        # noqa: E402
 
@@ -90,7 +90,7 @@ class Status(unittest.TestCase):
             self.assertEqual(fighters['kazumi'], {'name': 'kazumi', 'display': 'Kazumi Mishima', 'dlc': None,
                                                   'installed': False, 'outdated': False, 'newer': False,
                                                   'update': False, 'moveset_saved': False, 'outfits': 9,
-                                                  'outfits_added': False})
+                                                  'outfits_added': False, 'needs_game': False})
             self.assertEqual(fighters['reina']['outfits'], 0)
             self.assertEqual(fighters['eliza']['dlc'], 592370)
 
@@ -141,6 +141,29 @@ class Status(unittest.TestCase):
             fighters = {f['name']: f for f in launcher.status(install, os.path.join(d, 'movesets'))['fighters']}
             self.assertTrue(fighters['kazumi']['outfits_added'])
 
+
+    def test_needs_its_game_only_without_a_copy_of_its_pictures(self):
+        # (Reina's and Azucena's packs, made by an older version, have no source/; Tekken 8 is gone)
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, HOME=d, TTT2_CHARACTERS=os.path.join(d, 'packs')), \
+                mock.patch.object(source, 'find_tekken8', return_value=None):
+            packs = os.path.join(d, 'packs')
+            made_pack(packs, 'rei', 17)
+            made_pack(packs, 'azu', 18)
+
+            def needs():
+                fighters = launcher.status(None, os.path.join(d, 'movesets'))['fighters']
+                return {f['name']: f['needs_game'] for f in fighters if f['installed']}
+            self.assertEqual(needs(), {'reina': True, 'azucena': True})
+            keys = os.path.join(packs, pack.SHARED, 'keys')
+            os.makedirs(keys)
+            with open(os.path.join(keys, '0000abcd.bin'), 'wb') as f:             # (a 2D layout with Reina's cell)
+                f.write(b'LMB\0' + bytes(12) + struct.pack('>I', 14) + b'face_panel_rei\0\0')
+            self.assertEqual(needs(), {'reina': False, 'azucena': True})
+            azucena = importer.definition('azucena')
+            for path in pack.source_pictures(azucena):
+                write(os.path.join(packs, 'azu', pack.SOURCE, pack.source_name(path)))
+            self.assertEqual(needs(), {'reina': False, 'azucena': False})
 
 class Folders(unittest.TestCase):
     def test_packs_folder_as_the_game_finds_it(self):
@@ -306,8 +329,10 @@ class Progress(unittest.TestCase):
                     mock.patch.object(importer, 'tekken7_paks'), mock.patch.object(importer, 'ttt2_folder'), \
                     mock.patch.object(importer, 'make_shared') as shared:
                 code, lines = self.main(['--remove', 'chloe', '--game', 'g', '--out', d, '--progress'])
-            self.assertEqual((code, lines), (0, ['@removed chloe', '@step shared', '@done']))
+            # (what the others share is made first, as if Lucky Chloe's pack were gone: then it goes)
+            self.assertEqual((code, lines), (0, ['@step shared', '@removed chloe', '@done']))
             shared.assert_called_once()
+            self.assertEqual(shared.call_args[1]['leaving'], {'dnc'})
             self.assertEqual(pack.places_of(pack.installed(d)), {'kzm': 0, 'elz': 2})
             self.assertEqual(pack.choose_slot(d, 'mrx'), 1)          # the next fighter takes the free place
 
@@ -319,7 +344,7 @@ class Progress(unittest.TestCase):
                 code, lines = self.main(['--remove', 'chloe', '--game', 'g', '--out', d, '--progress'])
             self.assertEqual(code, 1)
             self.assertTrue(lines[-1].startswith('@error Steam is not installed'), lines)
-            self.assertIn('nothing was removed', lines[-1])
+            self.assertIn('Nothing was changed', lines[-1])
             self.assertEqual(sorted(os.listdir(d)), ['dnc', 'kzm'])  # (nothing was removed)
 
 
@@ -739,7 +764,7 @@ class Remove(unittest.TestCase):
                 autodump.find_tekken7()                     # (no Proton prefix: Tekken 7 never ran)
             with mock.patch.object(importer, 'ttt2_folder'), mock.patch.object(importer, 'make_shared') as shared:
                 code, lines = Progress.main(self, ['--remove', 'chloe', '--game', 'g', '--out', packs, '--progress'])
-            self.assertEqual((code, lines), (0, ['@removed chloe', '@step shared', '@done']))
+            self.assertEqual((code, lines), (0, ['@step shared', '@removed chloe', '@done']))
             self.assertEqual(shared.call_args[0][0], game)
             self.assertEqual(os.listdir(packs), ['kzm'])
 
@@ -753,15 +778,17 @@ class Remove(unittest.TestCase):
                     mock.patch.object(importer, 'ttt2_folder'), mock.patch.object(importer, 'make_shared') as shared:
                 code, lines = Progress.main(self, ['--remove', 'chloe', '--game', 'g', '--out', d, '--progress'])
                 self.assertEqual(code, 1)                               # (Kazumi stays: she needs Tekken 7)
-                self.assertIn('nothing was removed', lines[-1])
+                self.assertIn('Nothing was changed', lines[-1])
                 code, lines = Progress.main(self, ['--remove', 'kazumi', 'chloe', '--game', 'g', '--out', d,
                                                    '--progress'])
-            self.assertEqual((code, lines), (0, ['@removed kazumi', '@removed chloe', '@step shared', '@done']))
+            self.assertEqual((code, lines), (0, ['@step shared', '@removed kazumi', '@removed chloe', '@done']))
             self.assertEqual(shared.call_args[0][0], None)              # (Reina's shared/ needs Tekken 8 alone)
             self.assertEqual(shared.call_args[1]['tekken8'], '/games/TEKKEN 8')
             self.assertEqual(os.listdir(d), ['rei'])
 
     def test_stopped_before_what_they_share_is_made_again(self):
+        # (it is made first: stopped, every pack and shared/ stay, which may be all a fighter whose game is gone has
+        # of its pictures)
         with tempfile.TemporaryDirectory() as d:
             for code, slot in (('kzm', 0), ('dnc', 1), ('elz', 2)):
                 made_pack(d, code, slot)
@@ -770,8 +797,8 @@ class Remove(unittest.TestCase):
                     mock.patch.object(importer, 'tekken7_paks'), mock.patch.object(importer, 'ttt2_folder'), \
                     mock.patch.object(importer, 'make_shared', side_effect=SystemExit(143)):     # (Cancel)
                 code, lines = Progress.main(self, ['--remove', 'chloe', '--game', 'g', '--out', d, '--progress'])
-            self.assertEqual((code, lines), (143, ['@removed chloe', '@step shared']))
-            self.assertEqual(sorted(os.listdir(d)), ['elz', 'kzm'])          # (shared/ would show Lucky Chloe)
+            self.assertEqual((code, lines), (143, ['@step shared']))
+            self.assertEqual(sorted(os.listdir(d)), ['dnc', 'elz', 'kzm', pack.SHARED])
 
     def test_no_numpy_needed_to_remove_the_last(self):
         with tempfile.TemporaryDirectory() as home:
@@ -870,6 +897,7 @@ class Shared(unittest.TestCase):
 
     def build(self, folder):
         with mock.patch.object(shared, 'fighters_of', return_value=[(0, None, None)]), \
+                mock.patch.object(shared, 'own_sources', return_value=({}, [])), \
                 mock.patch.object(shared.art, 'shared_files', return_value={'keys/00000002.bin': b'new'}), \
                 mock.patch.object(shared, 'palettes', return_value={}), \
                 mock.patch.object(shared, 'name_calls', return_value={}):

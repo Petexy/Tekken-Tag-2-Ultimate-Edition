@@ -18,10 +18,11 @@ it is saved first (tekken8/autodump.py: Tekken 8 runs in the background, no wind
 with the other Tekken 8 fighters' movesets the conversion compares it with; when it cannot be (no Steam, a game
 update the helper does not know yet), she is imported all the same, fighting with TTT2's own Heihachi moveset (a
 warning says so, and her pack: add her again later for her own; the launcher offers it as an update). What the packs
-share is made again from every added fighter's own game, so with Tekken 7 fighters added too, Tekken 7 is read for
-them then (and Tekken 8 for Tekken 8 fighters when a Tekken 7 one is added): when a game the fighters added need is
-gone (uninstalled since), nothing is changed and the error says which fighters need it (removing all of them at
-once needs only the other game).
+share is made again for every added fighter, from the copy of its pictures and name call its pack keeps (source/),
+so neither game is needed for the other's fighters. Packs made before they kept it are read from their own game
+again (Tekken 7 for Tekken 7 fighters when a Tekken 8 one is added, ...), or, that game gone (uninstalled since),
+keep what the shared/ there has of them; when it has none either, nothing is changed and the error says which
+fighters need their game (removing all of them at once needs only the other game).
 --all adds every Tekken 7 fighter, and the Tekken 8 ones when Tekken 8 is there (with Tekken 8 alone there, its
 fighters: the Tekken 7 ones are skipped, as the Tekken 8 ones are without it).
 
@@ -37,10 +38,10 @@ from Tekken 7's costume sets): all (the default), none, or the fighters' names s
 of an import's time; a fighter without them has its default costume only. The launcher asks for them by name.
 
 --remove deletes fighters' packs again. The packs left keep their places (their files are made for them) and what
-they share is made again for them, from both games' files (not when only packs the game does not load go, which it
-never held); the next fighter imported takes the first free place. A pack an older importer made (launcher.py status
-"outdated") is not loaded by the game: adding its fighter again replaces it whole, in its place. A newer importer's
-pack is not replaced.
+they share is made again for them first, as when a fighter is added (not when only packs the game does not load go,
+which it never held): a failure or Cancel removes nothing. The next fighter imported takes the first free place. A
+pack an older importer made (launcher.py status "outdated") is not loaded by the game: adding its fighter again
+replaces it whole, in its place. A newer importer's pack is not replaced.
 
 --progress adds lines for the launcher (launcher/app), one each, flushed, among the others:
     @step dump <text>              saving what only the running Tekken 7 has (hidden in the background)
@@ -292,41 +293,51 @@ def add(args, fighters, progress):
     print('Start the game. The packs (in %s) hold Namco\'s assets: keep them for yourself.' % os.path.dirname(target))
 
 
-def shared_games(folder, tekken7, tekken8, progress):
+def shared_games(folder, tekken7, tekken8, progress, leaving=()):
     """(tekken7, tekken8): the installations what the packs in `folder` share is made from, for the games of the
-    fighters whose packs it is made for (the ones the game loads): the ones given, else found through Steam. Fails,
-    naming the fighters that need it, when a game they need is not there (or its files are not)."""
+    fighters whose packs it is made for (the ones the game loads, but those of codes `leaving`) that need their game
+    for it: packs made before packs kept a copy of what it takes from their game (source/); the ones given, else
+    found through Steam (None: not needed, or not there). A game that is not there (or its files are not) fails,
+    naming the fighters that need it, unless the shared/ there has their pictures, which they keep then."""
     from ttt2char import InputError, importer, pack, source
     from ttt2char.characters import CHARACTERS, GAMES, definition, game_of
     from ttt2char.tekken7 import autodump
     known = {definition(f).CODE: definition(f) for f in CHARACTERS}
-    needing = {}                        # {game: [the names of its fighters there]}
-    for _, p in pack.loaded(pack.installed(folder)):
-        if p['code'] in known:
-            needing.setdefault(game_of(known[p['code']]), []).append(known[p['code']].NAME.split(' (')[0])
-    why = None
+    needing = {}                        # {game: [(code, name) of its fighters there without their copy]}
+    for _, p in pack.loaded([p for p in pack.installed(folder) if p['code'] not in leaving]):
+        d = known.get(p['code'])
+        if d is not None and not pack.carries_source(p['path'], d):
+            needing.setdefault(game_of(d), []).append((d.CODE, d.NAME.split(' (')[0]))
+    why = {}
     if 'tekken7' in needing:
         try:
             if tekken7 is None:
                 tekken7 = autodump.tekken7_library()[2]
             importer.tekken7_paks(tekken7)
         except autodump.DumpError as error:
-            why = 'tekken7', str(error)
+            why['tekken7'] = str(error)
         except InputError:
-            why = 'tekken7', 'Tekken 7 has no pak files in %s' % tekken7
-    if 'tekken8' in needing and why is None:
+            why['tekken7'] = 'Tekken 7 has no pak files in %s' % tekken7
+    if 'tekken8' in needing:
         try:
             tekken8 = importer.tekken8_folder(tekken8)
         except InputError as error:
-            why = 'tekken8', 'Tekken 8 is not installed in any Steam library' if tekken8 is None and \
+            why['tekken8'] = 'Tekken 8 is not installed in any Steam library' if tekken8 is None and \
                 source.find_tekken8() is None else str(error)
-    if why is not None:
-        game, reason = why
-        names = needing[game]
-        progress.fail('%s, and the %s fighters added (%s) need it: what all added fighters share is made again from '
-                      'each one\'s own game when one is added. Nothing was changed: install %s again (or give --%s), '
-                      'or remove %s first' % (reason, GAMES[game], ', '.join(names), GAMES[game], game,
-                                              'that fighter' if len(names) == 1 else 'those fighters (all at once)'))
+    for game, reason in sorted(why.items()):
+        if game == 'tekken7':
+            tekken7 = None
+        else:
+            tekken8 = None
+        held = pack.holds(folder, [code for code, _ in needing[game]])
+        names = [name for code, name in needing[game] if code not in held]
+        if names:
+            progress.fail('%s, and the %s fighters added (%s) need it: what all added fighters share is made again '
+                          'when one is added or removed, and their packs (made by an older version) hold no copy of '
+                          'their pictures and name calls, nor does what the packs share now. Nothing was changed: '
+                          'install %s again (or give --%s), or remove %s first'
+                          % (reason, GAMES[game], ', '.join(names), GAMES[game], game,
+                             'that fighter' if len(names) == 1 else 'those fighters (all at once)'))
     return tekken7, tekken8
 
 
@@ -475,7 +486,7 @@ def tekken8_ready(fighters, movesets, progress):
 
 def remove(args, fighters, progress):
     from ttt2char import InputError, pack              # (no numpy until what the packs left share is made again)
-    from ttt2char.characters import CHARACTERS, definition, game_of
+    from ttt2char.characters import CHARACTERS, definition
     from ttt2char.tekken7 import autodump
     try:
         out = pack.output_folder(args.out and os.path.expanduser(args.out))
@@ -506,26 +517,24 @@ def remove(args, fighters, progress):
     remake = bool(left) and bool(gone & current & set(known)) and not args.no_shared
     tekken7 = tekken8 = importer = None
     if remake:
-        # what the packs left share is made again from both games' files (each fighter's own game: Tekken 7's paks,
-        # not its Proton; Tekken 8's store): they must be there, and what converts them, before a pack goes
+        # what the packs left share is made again from their copies of what it takes from their games, else from
+        # those games' files (each fighter's own game: Tekken 7's paks, not its Proton; Tekken 8's store), else as
+        # the shared/ there has it: they must be there, and what converts them, before a pack goes
         needs_packages(progress)
         from ttt2char import importer
-        games = {game_of(known[code]) for code in left}
-        why = None
+        tekken7, tekken8 = shared_games(out, args.tekken7 and os.path.expanduser(args.tekken7),
+                                        args.tekken8 and os.path.expanduser(args.tekken8), progress, leaving=gone)
         try:
-            if 'tekken7' in games:
-                tekken7 = os.path.expanduser(args.tekken7) if args.tekken7 else autodump.tekken7_library()[2]
-                importer.tekken7_paks(tekken7)
-            if 'tekken8' in games:
-                tekken8 = importer.tekken8_folder(args.tekken8 and os.path.expanduser(args.tekken8))
             importer.ttt2_folder(game)
-        except autodump.DumpError as error:
-            why = '%s (or give --tekken7)' % error
         except InputError as error:
-            why = str(error)
-        if why:
-            progress.fail('%s; the fighters left need both games\' files for what they share, so nothing was removed'
-                          % why)
+            progress.fail('%s; nothing was removed' % error)
+        # ... and made first, without the fighters going: stopped or failing, every pack and shared/ stay as they
+        # were (the shared/ there may be all a fighter whose game is gone has of its pictures)
+        progress('step', 'shared')
+        try:
+            importer.make_shared(tekken7, game, out, files=files_folder, tekken8=tekken8, leaving=gone)
+        except (InputError, OSError) as error:
+            progress.fail('%s; nothing was removed' % error)
     changed = False
     try:
         for fighter in going:
@@ -537,28 +546,23 @@ def remove(args, fighters, progress):
                     progress.fail('cannot remove %s: %s' % (path, error))
                 print('Removed %s (%s).' % (definition(fighter).NAME, path))
             progress('removed', fighter)
-        if args.no_shared or (left and not remake):
+        if args.no_shared or left:
             return
         progress('step', 'shared')
         try:
-            if left:
-                importer.make_shared(tekken7, game, out, files=files_folder, tekken8=tekken8)
-            else:
-                pack.remove_shared(out)
-                print('No added fighter is left: removed %s.' % os.path.join(out, pack.SHARED))
-        except (InputError, OSError) as error:
-            progress.fail('%s; the fighters left are without what they share until a fighter is imported again'
-                          % error)
+            pack.remove_shared(out)
+        except OSError as error:
+            progress.fail('cannot remove %s: %s' % (os.path.join(out, pack.SHARED), error))
+        print('No added fighter is left: removed %s.' % os.path.join(out, pack.SHARED))
     except BaseException:
-        # stopped (a failure, the launcher's Cancel) before what the packs share was made again: what it held would
-        # show the removed fighters
-        if changed and (remake or not left) and not args.no_shared:
+        # stopped (a failure, the launcher's Cancel) with no fighter left, before shared/ went: it would show the
+        # removed fighters
+        if changed and not left and not args.no_shared:
             try:
                 pack.remove_shared(out)
             except OSError:
                 pass
         raise
-
 
 if __name__ == '__main__':
     main()

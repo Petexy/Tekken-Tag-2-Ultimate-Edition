@@ -11,6 +11,7 @@ import io
 import os
 import shutil
 import stat
+import struct
 import sys
 import tempfile
 import unittest
@@ -318,6 +319,7 @@ class Shared(unittest.TestCase):
 
     def build(self, folder, fighters):
         with mock.patch.object(shared, 'fighters_of', return_value=fighters), \
+                mock.patch.object(shared, 'own_sources', return_value=({}, [])), \
                 mock.patch.object(shared.art, 'shared_files', return_value={'keys/00000002.bin': b'new'}), \
                 mock.patch.object(shared, 'palettes', return_value={}), \
                 mock.patch.object(shared, 'name_calls', return_value={}):
@@ -339,6 +341,88 @@ class Shared(unittest.TestCase):
             self.build(packs, [])
             self.assertEqual(os.listdir(packs), [])
             self.assertEqual(files_in(elsewhere), ['keys/00000001.bin'])
+
+
+def with_art(d, tag):
+    """Fighter d with the objects of its game its shared pictures are made from (pack.source_pictures)."""
+    d.ART = {'bust': ('/Game/UI/Bust/BUST_%s' % tag, 0), 'body': ('/Game/UI/Body/BODY_%s.BODY_%s' % (tag, tag), 0),
+             'name': '/Game/UI/Name/NAME_%s' % tag}
+    return d
+
+
+def held_by_shared(folder, *codes):
+    """A 2D layout in folder's shared/ with the select grid cells of `codes` (the symbols face_panel_<code>)."""
+    data = b'LMB\0' + bytes(12)
+    for code in codes:
+        name = ('face_panel_' + code).encode()
+        data += struct.pack('>I', len(name)) + name + b'\0' * (4 - len(name) % 4)
+    path = os.path.join(folder, pack.SHARED, 'keys', '0000abcd.bin')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(data)
+
+
+class SourceCopy(unittest.TestCase):
+    """A pack's copy of what shared/ takes from its game (source/), and what shared/ keeps of a fighter whose game is
+    gone and whose pack (made by an older version) has no copy."""
+
+    def test_written_and_read_back_as_its_game_gave_them(self):
+        import numpy as np
+        d = with_art(mock.Mock(CODE='kzm', NAME='Kazumi Mishima'), 'KZM')
+        pictures = {path: np.random.default_rng(len(path)).integers(0, 256, (6, 5, 4), np.uint8)
+                    for path in pack.source_pictures(d)}
+        call = np.random.default_rng(1).integers(-32768, 32768, (2, 300)).astype(np.int16)
+        game = mock.Mock(picture=lambda path: pictures[path])
+        files = shared.source_files(game, d, mock.Mock(kinds={('name', None): [('name', 44100, call)]}))
+        self.assertEqual(sorted(files), ['source/BODY_KZM.png', 'source/BUST_KZM.png', 'source/NAME_KZM.png',
+                                         'source/name_call.wav'])
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertFalse(pack.carries_source(folder, d))
+            for name, data in files.items():
+                os.makedirs(os.path.join(folder, os.path.dirname(name)), exist_ok=True)
+                with open(os.path.join(folder, name), 'wb') as f:
+                    f.write(data)
+            self.assertTrue(pack.carries_source(folder, d))
+            copy = shared.PackSource(folder, d)
+            for path, picture in pictures.items():
+                self.assertTrue(np.array_equal(copy.picture(path), picture), path)
+            (_, rate, a), = copy.clips(d).kinds[('name', None)]
+            self.assertEqual(rate, 44100)
+            self.assertTrue(np.array_equal(a, call))
+
+    def test_no_name_call_no_wave(self):
+        import numpy as np
+        d = with_art(mock.Mock(CODE='kzm'), 'KZM')
+        game = mock.Mock(picture=lambda path: np.zeros((4, 4, 4), np.uint8))
+        files = shared.source_files(game, d, mock.Mock(kinds={}))
+        self.assertNotIn('source/name_call.wav', files)
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(shared.PackSource(folder, d).clips(d).kinds, {})
+
+    def test_its_copy_first_else_its_game_else_kept(self):
+        kazumi, chloe, eliza = (with_art(mock.Mock(CODE=c), c.upper()) for c in ('kzm', 'dnc', 'elz'))
+        with tempfile.TemporaryDirectory() as folder:
+            for path in pack.source_pictures(kazumi):
+                write(os.path.join(folder, 'kzm', pack.SOURCE, pack.source_name(path)))
+            games = {'dnc': 'tekken 7'}
+
+            def source_of(d):
+                if d.CODE not in games:
+                    raise InputError('Tekken 8 is not installed in any Steam library')
+                return games[d.CODE]
+            sources, kept = shared.own_sources([(0, kazumi, os.path.join(folder, 'kzm')),
+                                                (1, chloe, os.path.join(folder, 'dnc')),
+                                                (2, eliza, os.path.join(folder, 'elz'))], source_of)
+        self.assertIsInstance(sources['kzm'], shared.PackSource)
+        self.assertEqual(sources['dnc'], 'tekken 7')
+        self.assertEqual(kept, [(2, eliza)])
+
+    def test_what_shared_has_pictures_of(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(pack.holds(folder, ['rei']), set())
+            held_by_shared(folder, 'kzm', 'rei')
+            write(os.path.join(folder, pack.SHARED, 'keys', '00000001.bin'), 'face_panel_azu')     # (not a layout)
+            self.assertEqual(pack.holds(folder, ['rei', 'azu', 'kz']), {'rei'})
 
 
 class Status(unittest.TestCase):
@@ -413,8 +497,26 @@ class Remove(unittest.TestCase):
             with mock.patch.object(autodump, 'tekken7_library', side_effect=autodump.DumpError('no Steam')):
                 code, lines = self.main(['--remove', 'kazumi', '--game', 'g', '--out', d, '--progress'])
             self.assertEqual(code, 1)
-            self.assertTrue(lines[0].startswith('@error no Steam (or give --tekken7); the fighters left need both'))
+            self.assertTrue(lines[0].startswith('@error no Steam, and the Tekken 7 fighters added (Lucky Chloe) need '
+                                                'it'))
+            self.assertIn('Nothing was changed', lines[0])
             self.assertEqual(sorted(os.listdir(d)), ['dnc', 'kzm'])  # (nothing was removed)
+
+    def test_a_current_pack_removed_without_the_others_game_when_shared_has_them(self):
+        # (Lucky Chloe's pack, made by an older version, has no copy of her pictures: she keeps shared/'s)
+        with tempfile.TemporaryDirectory() as d:
+            current_pack(d, KAZUMI, 0)
+            current_pack(d, CHLOE, 1)
+            held_by_shared(d, 'kzm', 'dnc')
+            with mock.patch.object(autodump, 'tekken7_library', side_effect=autodump.DumpError('no Steam')), \
+                    mock.patch.object(import_character, 'needs_packages'), \
+                    mock.patch('ttt2char.importer.ttt2_folder'), \
+                    mock.patch('ttt2char.importer.make_shared') as make_shared:
+                code, lines = self.main(['--remove', 'kazumi', '--game', 'g', '--out', d, '--progress'])
+            self.assertEqual((code, lines), (0, ['@step shared', '@removed kazumi', '@done']))
+            self.assertIsNone(make_shared.call_args[0][0])                  # (no Tekken 7)
+            self.assertEqual(make_shared.call_args[1]['leaving'], {'kzm'})
+            self.assertEqual(sorted(os.listdir(d)), ['dnc', pack.SHARED])
 
 
 class NoShared(unittest.TestCase):
