@@ -136,6 +136,9 @@ private:
     void dlc_section(GtkWidget* card, bool usable);
     GtkWidget* fighter_row(const Fighter& fighter, bool usable);
     void start_import(const std::vector<std::string>& names);
+    // numpy and Pillow for the importer's Python, downloaded into a folder
+    // of their own (get_python_packages.py), where nothing else adds them.
+    void start_get_packages();
     void start_remove(const std::vector<std::string>& names);
     void ask_remove_all(const std::string& game);
     bool addable(const Fighter& fighter) const;
@@ -257,7 +260,7 @@ private:
     void open_release_page();
 
     // ------------------------------------------------ task.cpp
-    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate };
+    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate, kPackages };
     struct Task {
         Kind kind;
         std::string title;

@@ -6,8 +6,10 @@
     python3 tools/characters/launcher.py main --commit SHA
 
 status: what is there, quickly (nothing is started): this Python and whether it has numpy and Pillow (the import
-needs them; this does not), the tools running Tekken 7 or Tekken 8 hidden needs (each game's helper: "helper" Tekken
-7's, "tekken8_helper" Tekken 8's) and the C compiler a Tekken 8 import builds two small parts with ("cc"), Steam (its
+needs them; this does not) and whether the launcher can get them for it ("packages": their folder, the bytes to
+download, or the "error" why not: get_python_packages.py), the tools running Tekken 7 or Tekken 8 hidden needs (each
+game's helper: "helper" Tekken 7's, "tekken8_helper" Tekken 8's) and the C compiler a Tekken 8 import builds two small
+parts with ("cc"; "prebuilt" when the launcher names both built: native.py), Steam (its
 folder, and "flatpak" or "snap" for a sandboxed one), Tekken 7 (found through Steam as the importer finds it, or why it
 is not usable; "readable": its files are there, which what the packs share needs even when it cannot run), Tekken 8
 (found through Steam's files; "build_known": whether it is the build the helper knows, so that a moveset not saved yet
@@ -56,7 +58,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from ttt2char import native, pack, signals, source             # noqa: E402  (these need no numpy)
+from ttt2char import native, pack, python_packages, signals, source   # noqa: E402  (these need no numpy)
 from ttt2char.characters import CHARACTERS, definition, game_of  # noqa: E402
 from ttt2char.tekken7 import autodump                          # noqa: E402
 from ttt2char.tekken7.pak import pak_names                     # noqa: E402
@@ -140,6 +142,7 @@ def status(game=None, movesets=None, movesets8=None):
     saved = saved_movesets(movesets)
     helper = 'prebuilt' if autodump.ready_helper(autodump.CACHE) else 'mingw' if shutil.which(MINGW) else None
     helper8 = 'prebuilt' if dump8.ready_helper(dump8.CACHE) else 'mingw' if shutil.which(MINGW) else None
+    cc = native.compiler() or ('prebuilt' if all(map(native.prebuilt, ('decimate', 'oodle'))) else None)
     found8 = tekken8()
     build_known = None              # (whether the helper knows Tekken 8's build: its exe read once, when a pack asks)
     fighters = []
@@ -166,9 +169,9 @@ def status(game=None, movesets=None, movesets8=None):
         fighters.append(fighter)
     found8['build_known'] = build_known if found8['found'] else None       # (None: no fighter needs a moveset saved)
     out = {'python': {'version': platform.python_version(), 'numpy': importable('numpy'),
-                      'pillow': importable('PIL.Image')},
+                      'pillow': importable('PIL.Image'), 'packages': python_packages.status()},
            'tools': {'gamescope': shutil.which('gamescope'), 'pactl': shutil.which('pactl'), 'helper': helper,
-                     'tekken8_helper': helper8, 'cc': native.compiler()},
+                     'tekken8_helper': helper8, 'cc': cc},
            'steam': steam(),
            'tekken7': tekken7(),
            'tekken8': found8,

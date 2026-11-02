@@ -134,6 +134,7 @@ void test_status() {
     check(s.has_value(), "status: parses (" + error + ")");
     if (!s) return;
     check(s->python_version == "3.14.0" && s->numpy && !s->pillow, "status: python");
+    check(!s->packages_gettable && s->packages_size == 0, "status: no \"packages\": not gettable");
     check(s->gamescope == "/usr/bin/gamescope" && s->pactl.empty() && s->helper == "prebuilt", "status: tools");
     check(s->steam_installed && !s->steam_running, "status: steam");
     check(s->tekken7_usable() && s->tekken7_path == "/s/steamapps/common/TEKKEN 7", "status: tekken 7");
@@ -227,6 +228,15 @@ void test_status() {
     check(only8 && !only8->tekken7_readable && only8->tekken8_usable() && only8->tekken8_build_known == true &&
               only8->tekken8_run_error == "Tekken 8 has not run with Proton yet: start it once from Steam",
           "status Tekken 8 only");
+    const auto gettable = parse_status(R"({"python": {"numpy": false, "pillow": false,
+        "packages": {"folder": "/d/ttt2/python/cp313", "size": 23864284, "error": null}}})");
+    check(gettable && gettable->packages_gettable && gettable->packages_size == 23864284 &&
+              gettable->packages_error.empty(),
+          "status: numpy and Pillow the launcher can get");
+    const auto refused = parse_status(R"({"python": {"packages": {"folder": "/d", "size": 0,
+        "error": "the launcher gets numpy and Pillow for Python 3.10, 3.11 only, not 3.9"}}})");
+    check(refused && !refused->packages_gettable && refused->packages_error.ends_with("not 3.9"),
+          "status: numpy and Pillow the launcher cannot get, and why");
     check(!parse_status("[1]") && !parse_status("not json"), "status: not an object");
 
     const Ownership owned = parse_owned(R"({"owned": {"eliza": true, "geese": false}})");
@@ -535,11 +545,12 @@ void test_actions() {
     const auto actions = parse_test_actions(
         "install:/g/TEKKEN (EU).wua:/i/x ; update;add:kazumi, chloe;add-all-base;add-all-owned;remove:kazumi;"
         "uninstall:keep;uninstall:all;play;expand-dlc;expand-log;show-uninstall;wait:1.5;quit;focus:add:kazumi;"
-        "refresh;toggle:outfits:kazumi",
+        "refresh;toggle:outfits:kazumi;get-packages",
         &error);
     check(actions.has_value(), "actions: parse (" + error + ")");
     if (!actions) return;
-    check(actions->size() == 17, "actions: count");
+    check(actions->size() == 18, "actions: count");
+    check((*actions)[17].name == "get-packages" && (*actions)[17].args.empty(), "actions: get-packages");
     check((*actions)[16].name == "toggle" && (*actions)[16].args == std::vector<std::string>{"outfits:kazumi"},
           "actions: toggle");
     check((*actions)[14].name == "focus" && (*actions)[14].args.size() == 1 && (*actions)[14].args[0] == "add:kazumi" &&
@@ -601,7 +612,8 @@ void test_actions() {
                             "fullscreen", "fullscreen:", "fullscreen:on", "fullscreen:YES", "interpolation",
                             "interpolation:1", "input-delay", "input-delay:2", "input_delay:yes", "resolution",
                             "resolution:", "resolution:1920", "resolution:1366x768",
-                            "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all"}) {
+                            "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all",
+                            "get-packages:numpy"}) {
         check(!parse_test_actions(bad), std::string("actions: rejects ") + bad);
     }
 }

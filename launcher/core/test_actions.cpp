@@ -101,7 +101,7 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
                  (a.name == "update" || a.name == "add-all-base" || a.name == "add-all-owned" || a.name == "play" ||
                   a.name == "quit" || a.name == "expand-dlc" || a.name == "expand-log" || a.name == "show-uninstall" ||
                   a.name == "refresh" || a.name == "settings" || a.name == "back" || a.name == "reset-keys" ||
-                  a.name == "update-launcher");
+                  a.name == "update-launcher" || a.name == "get-packages");
         }
         if (!ok) {
             if (error) *error = "not a test action: " + item;

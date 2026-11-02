@@ -1609,8 +1609,12 @@ compiler.
   `@progress` (at most ten a second) and `@error`.
 - **The importer's side** (`tools/characters/launcher.py`): `status` is one
   JSON object, in about 0.1 s and without numpy, with what adding fighters
-  needs (numpy and Pillow, gamescope, pactl, each game's helper, a C
-  compiler, Steam, Tekken 7's folder or why it cannot be used and whether
+  needs (numpy and Pillow, and whether the launcher can download them for
+  this Python: `get_python_packages.py`, PyPI's wheels pinned per Python
+  version in `ttt2char/python_packages.lock.json`, unpacked into
+  `~/.local/share/ttt2/python/cp3XY`, which `ttt2char` puts on its path
+  before site-packages; gamescope, pactl, each game's helper, a C
+  compiler or the kit's prebuilt `native/*.so`, Steam, Tekken 7's folder or why it cannot be used and whether
   its files can be read (`readable`: what `shared/` needs even when it
   cannot run), Tekken 8's folder, whether it is the build its helper knows
   (`build_known`, read from the exe only while a fighter's own moveset is

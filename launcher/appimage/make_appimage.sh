@@ -132,7 +132,10 @@ unexpected() {
             ./usr/lib/ttt2/kit/lib/*.a | ./usr/lib/ttt2/kit/lib/generated_stub.o) ;;
             ./usr/lib/ttt2/kit/kit.ini | ./usr/lib/ttt2/kit/VERSION) ;;
             ./usr/lib/ttt2/kit/t7helper.exe | ./usr/lib/ttt2/kit/t8helper.exe) ;;
+            ./usr/lib/ttt2/kit/native/decimate.so | ./usr/lib/ttt2/kit/native/oodle.so) ;;
             ./usr/share/ttt2/characters/*.py) ;;
+            # (the numpy and Pillow wheels the launcher downloads where Python has none: get_python_packages.py)
+            ./usr/share/ttt2/characters/ttt2char/python_packages.lock.json) ;;
             ./usr/share/ttt2/characters/t7helper/t7helper.c | ./usr/share/ttt2/characters/t8helper/t8helper.c) ;;
             # (the importer's C parts, compiled on the player's PC for Tekken 8's import: ttt2char/native.py)
             ./usr/share/ttt2/characters/ttt2char/tekken8/oodle.c | ./usr/share/ttt2/characters/ttt2char/tekken8/oodle_windows.h) ;;
@@ -149,17 +152,23 @@ found=$(unexpected)
 # What a Tekken 8 import needs besides Python and a C compiler: the importer
 # with its C parts, and Tekken 8's helper (prebuilt when MinGW was there, as
 # Tekken 7's; else built from its source on the player's PC).
-for file in import_character.py launcher.py t8helper/t8helper.c ttt2char/tekken8/oodle.c ttt2char/convert/decimate.c; do
+for file in import_character.py launcher.py get_python_packages.py ttt2char/python_packages.lock.json \
+    t8helper/t8helper.c ttt2char/tekken8/oodle.c ttt2char/convert/decimate.c; do
     [ -f "$appdir/usr/share/ttt2/characters/$file" ] || die "the importer in the AppDir lacks $file"
 done
 if [ -f "$appdir/usr/lib/ttt2/kit/t7helper.exe" ] && [ ! -f "$appdir/usr/lib/ttt2/kit/t8helper.exe" ]; then
     die "the kit has Tekken 7's helper but not Tekken 8's"
 fi
+# The importer's C parts, built (a player's PC may have no C compiler: SteamOS).
+for part in decimate oodle; do
+    [ -f "$appdir/usr/lib/ttt2/kit/native/$part.so" ] || die "the kit lacks the importer's $part.so"
+done
 
 # The kit's programs are copied as built: stripped like the launcher.
 strip=$(sed -n 's/^CMAKE_STRIP:FILEPATH=//p' "$build/CMakeCache.txt")
 if [ -n "$strip" ] && [ -x "$strip" ]; then
-    "$strip" "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp"
+    "$strip" "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp" \
+        "$appdir/usr/lib/ttt2/kit/native/decimate.so" "$appdir/usr/lib/ttt2/kit/native/oodle.so"
 fi
 
 # Any x86-64 processor must start them (ttt2-build itself tells a player
@@ -205,7 +214,8 @@ newest_glibc_linked_here() { # FILE LIMIT: the newest such GLIBC_ version FILE n
     done | sort -V | tail -n 1
 }
 for program in "$appdir/usr/bin/ttt2-launcher" "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" \
-    "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp" "$build/launcher/builder/kit_check"; do
+    "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp" "$appdir/usr/lib/ttt2/kit/native/decimate.so" \
+    "$appdir/usr/lib/ttt2/kit/native/oodle.so" "$build/launcher/builder/kit_check"; do
     for limit in GLIBC_2.39 GLIBCXX_3.4.33; do
         if [ "${program##*/}" = kit_check ] && [ "${limit%_*}" = GLIBC ]; then
             need=$(newest_glibc_linked_here "$program" "${limit##*_}")
