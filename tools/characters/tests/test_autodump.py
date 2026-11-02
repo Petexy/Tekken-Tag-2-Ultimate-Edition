@@ -215,5 +215,35 @@ class FightersWithUnreadFiles(unittest.TestCase):
         self.assertFalse(any('pakchunk0' in l for l in lines))
 
 
+class HelperNotStarted(unittest.TestCase):
+    """The helper's port never opens: the error says what the session's logs say, and where they are."""
+
+    def test_the_logs_say_why(self):
+        with tempfile.TemporaryDirectory() as run:
+            with open(os.path.join(run, 'gamescope.log'), 'w') as f:
+                f.write('[gamescope] [Error] vulkan: no suitable physical device\n\n')
+            with open(os.path.join(run, 'helper.log'), 'w') as f:
+                f.write('0124:fixme:ntdll:NtQuerySystemInformation info_class SYSTEM_PERFORMANCE_INFORMATION\n'
+                        'wine: could not load kernel32.dll, status c0000135\n')
+            ended = types.SimpleNamespace(poll=lambda: 1, returncode=1)
+            text = str(autodump.not_started(run, ended, 'Tekken 7'))
+            self.assertIn("the helper did not start in Tekken 7's hidden session", text)
+            self.assertIn("hidden session (gamescope ended with code 1; gamescope said: [gamescope]", text)
+            self.assertIn('gamescope said: [gamescope] [Error] vulkan: no suitable physical device', text)
+            self.assertIn('Proton said: wine: could not load kernel32.dll', text)
+            self.assertNotIn('fixme', text)
+            self.assertIn('the logs are in %s' % run, text)
+            running = types.SimpleNamespace(poll=lambda: None, returncode=None)
+            os.remove(os.path.join(run, 'helper.log'))
+            os.remove(os.path.join(run, 'gamescope.log'))
+            self.assertIn('(Proton said nothing;', str(autodump.not_started(run, running, 'Tekken 8')))
+
+    def test_not_waited_for_once_its_session_ended(self):
+        port = autodump._free_port()
+        with mock.patch.object(autodump.time, 'sleep'):
+            with self.assertRaisesRegex(autodump.DumpError, 'did not start'):
+                autodump.Helper(port, 'x', timeout=3600, alive=lambda: False)
+
+
 if __name__ == '__main__':
     unittest.main()

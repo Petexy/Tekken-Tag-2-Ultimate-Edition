@@ -40,6 +40,12 @@ def compiler():
     return None
 
 
+def prebuilt(name):
+    """The prebuilt file $TTT2_NATIVE_<NAME> names, when it is there (build() takes it instead), else None."""
+    path = os.environ.get('TTT2_NATIVE_' + name.upper())
+    return path if path and os.path.isfile(path) else None
+
+
 def _source_path(source):
     return source if os.path.isabs(source) else os.path.join(PACKAGE_DIR, source)
 

@@ -448,8 +448,8 @@ class Helper(t7.Helper):
     """A connection to t8helper.exe (serve <port> <secret>): the Tekken 7 helper's protocol (dlc, attach, ready, quit),
     the moveset archive's files written to their files as they come (save), the protected fields (protected)."""
 
-    def __init__(self, port, secret, timeout=90):
-        t7.Helper.__init__(self, port, secret, timeout)
+    def __init__(self, port, secret, timeout=90, alive=None):
+        t7.Helper.__init__(self, port, secret, timeout, alive)
         self.s.settimeout(SOCKET_TIMEOUT)
 
     def attach(self):
@@ -698,7 +698,10 @@ class Session:
         raise DumpError('Tekken 8 did not start within %d s' % timeout)
 
     def connect(self):
-        self.helper = Helper(self.port, self.secret)
+        try:
+            self.helper = Helper(self.port, self.secret, alive=lambda: self.gamescope.poll() is None)
+        except DumpError:
+            raise t7.not_started(self.run, self.gamescope, 'Tekken 8') from None
         return self.helper
 
     def close(self):

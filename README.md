@@ -563,7 +563,13 @@ copies of both games** and writes character packs on your computer. You need:
   reads its folder);
 - gamescope, `pactl` (PipeWire or PulseAudio), MinGW
   (`x86_64-w64-mingw32-gcc`, to build a small helper the first time) and
-  Python 3 with numpy and Pillow.
+  Python 3 with numpy and Pillow. The launcher brings the helpers and the
+  importer's C parts built, and where Python has no numpy and Pillow
+  (SteamOS, Bazzite) its **Download** gets them from PyPI into
+  `~/.local/share/ttt2/python/` (the wheels pinned with their SHA-256 in
+  `tools/characters/ttt2char/python_packages.lock.json`; no pip, nothing of
+  the system changes): `tools/characters/get_python_packages.py` does the
+  same from a terminal.
 
 ```bash
 python3 tools/characters/import_character.py --all --game /path/to/your/install

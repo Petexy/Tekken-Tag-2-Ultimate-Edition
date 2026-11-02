@@ -61,6 +61,12 @@ struct Fighter {
 struct ImporterStatus {
     std::string python_version;
     bool numpy = false, pillow = false;
+    // Whether the launcher can get numpy and Pillow for this Python itself
+    // (get_python_packages.py: PyPI's wheels into a folder of their own), the
+    // bytes it downloads, or why it cannot (another Python version, no glibc).
+    bool packages_gettable = false;
+    uint64_t packages_size = 0;
+    std::string packages_error;
     std::string gamescope, pactl; // their paths, empty when missing
     std::string helper;           // "prebuilt", "mingw", or empty: no way to make Tekken 7's helper
     std::string tekken8_helper;   // the same for Tekken 8's helper
