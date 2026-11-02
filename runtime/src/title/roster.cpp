@@ -4008,13 +4008,21 @@ bool special_assist_sequence(uint32_t player) {
     const auto window = legacy ? eliza_assist::InputWindow{} : special_assist_window(player);
     const bool glide_finisher = name == "Vp_66lklk" || name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
     const bool own_move = !glide_finisher && eliza_assist::owns_move(g_added[slot].code, name);
-    const bool starts = legacy ? eliza_assist::entry(name) :
-        ((g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last)));
+    // Only while the assist owns the pad (the Glide keeps its own rule; it
+    // holds the pad from Vp_rk00B on anyway). TTT2's own expiry
+    // (sub_04E187B8) gives the pad back to the fighter that started the Tag
+    // Assault when no window is open to defer it (Geese's qcf+2: My_ReppuuB
+    // has none, My_ReppuuB2's opens at frame 35). A window opening after that
+    // must not take it away again: that fighter, the owner by then, would be
+    // decoded on the inactive route below and crouch-walk on its TAG + d/b.
+    const bool owns_pad = load(player + 0x1e80) != 0;
+    const bool starts = legacy ? eliza_assist::entry(name) : owns_pad &&
+        (g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last));
     const uint32_t move = load(player + kPlayerMove);
     const uint32_t bridge_end = g_added[slot].code == "mry" && move ?
         eliza_assist::geese_contact_bridge(name, load(move + 0x68)) :
         g_added[slot].code == "mrz" ? window.bridge_end() : 0;
-    const bool continues = legacy ? eliza_assist::continuation(name) : bridge_end != 0;
+    const bool continues = legacy ? eliza_assist::continuation(name) : owns_pad && bridge_end != 0;
     const bool active = state.update_window(true, load(player + 0x408) == 0,
         load(player + 0x1e88) == 1, load(player + 0xac), load(player + kPlayerFrame),
         legacy ? assist_recovery(player) : std::max(window.control_end(), bridge_end), starts, continues);
