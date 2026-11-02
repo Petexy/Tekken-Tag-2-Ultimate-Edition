@@ -564,5 +564,6 @@ def remove(args, fighters, progress):
                 pass
         raise
 
+
 if __name__ == '__main__':
     main()

@@ -141,7 +141,6 @@ class Status(unittest.TestCase):
             fighters = {f['name']: f for f in launcher.status(install, os.path.join(d, 'movesets'))['fighters']}
             self.assertTrue(fighters['kazumi']['outfits_added'])
 
-
     def test_needs_its_game_only_without_a_copy_of_its_pictures(self):
         # (Reina's and Azucena's packs, made by an older version, have no source/; Tekken 8 is gone)
         with tempfile.TemporaryDirectory() as d, \
@@ -164,6 +163,7 @@ class Status(unittest.TestCase):
             for path in pack.source_pictures(azucena):
                 write(os.path.join(packs, 'azu', pack.SOURCE, pack.source_name(path)))
             self.assertEqual(needs(), {'reina': False, 'azucena': False})
+
 
 class Folders(unittest.TestCase):
     def test_packs_folder_as_the_game_finds_it(self):
