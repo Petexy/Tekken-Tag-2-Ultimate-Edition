@@ -1261,10 +1261,15 @@ item at player +3416 (70..77, written only by items; above 77 a location
 has no position at all), so the weapon's points hit as locations 70..73 and
 the port writes their positions there every frame, made from the parent
 bone's world matrix (the title keeps none for still extra bones). That
-matrix (the hit test's skeleton) is a frame behind the animation, so the
-points take the local drawn the frame before; with the current one, Noctis's
-thrown sword (1 to 4 m from a hand swinging down) had its points fly over the
-opponent's head while the sword drawn went through him.
+matrix is the model's own (the hit test's skeleton is the model's bone
+container), and the model's update (`sub_069DF470`) makes it only after the
+posing, so the port writes the points as that update ends, from the frame's
+locals and the new matrices: the bones the hit test reads next. Written at the
+posing they were a frame off: with the frame's locals on the frame before's
+matrix, Noctis's thrown sword (1 to 4 m from a hand swinging down) had its
+points fly over the opponent's head while the sword drawn went through him;
+with the locals drawn the frame before, every weapon hit a frame late (0.4 to
+0.5 m behind Negan's bat at its active frame).
 
 **Summoned weapons (Noctis).** Noctis's mesh of weapons holds a copy of each
 for each hand (a great sword, a sword, a dagger; a spear in the right, a

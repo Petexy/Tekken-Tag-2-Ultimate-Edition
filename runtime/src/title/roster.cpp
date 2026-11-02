@@ -3289,10 +3289,16 @@ PPC_FUNC(sub_05BDC714) {
 // the points' positions are made here from the parent's world matrix (the hit
 // test's skeleton, sub_04E1A4C8(player) +32: 144-byte records, the body bones
 // by bone index, +64 world, rows the axes, row 3 the position) and the locals.
-// Those records are a frame behind the animation (as the hit test's own
-// bones), so the points take the local drawn the frame before: with this
-// frame's, a thrown sword's points (1 to 4 m from a swinging hand) flew
-// over the opponent's head while the sword drawn went through him.
+// That skeleton is the model's own bone container, whose world matrices the
+// model's update (sub_069DF470) makes after the posing: while the weapons are
+// posed they are still the frame before's (moved on by the player's step), so
+// the points are made as the update ends, from this frame's locals and those
+// matrices, the very bones the hit test reads next. (Made at the posing, from
+// this frame's locals, a thrown sword's points (1 to 4 m from a swinging hand)
+// flew over the opponent's head while the sword drawn went through him; from
+// the locals drawn the frame before, they hit a frame late: 0.4-0.5 m behind
+// Negan's swinging bat, Noctis's sword tip a metre over the opponent as his
+// slash came down.)
 // Summoned weapons (Noctis's sword, daggers, spear, shield): a move summons
 // weapon n (Tekken 7's 0x82a7, the importer's 0x822E) and dismisses it or all
 // (0x82a8 -> 0x822F, value 16: all); a weapon not summoned is collapsed into
@@ -3316,11 +3322,17 @@ constexpr int kHoldFrames = 120;   // a held weapon let go after these frames wh
 constexpr float kHeldReach = 1500.0f; // mm: a weapon always in hand (no summon) ignores a pair farther out (the
                                       // channels of another animation's use: Tekken 7's spin reactions, 20 m paths)
 struct WeaponBone {
-    std::array<uint32_t, 16> bind{}, last{}, drawn{};
-    bool shown = false; // drawn last frame (with `drawn`, not collapsed)
+    std::array<uint32_t, 16> bind{}, last{};
 };
-std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last, the one drawn
+std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last
 std::map<uint32_t, uint64_t> g_summoned; // player -> its summoned weapons (bit n: summon n)
+struct PosedWeapons {
+    uint32_t player = 0;
+    const std::vector<Weapon>* weapons = nullptr;
+    std::vector<std::array<uint32_t, 16>> locals; // by weapon: this frame's (not collapsed)
+    std::vector<bool> shown;
+};
+std::map<uint32_t, PosedWeapons> g_posed_weapons; // model -> its weapons as posed, until its update ends
 // Row-vector 4x4 matrices (rows the axes, row 3 the position), as the title's records keep them.
 using Matrix = std::array<float, 16>;
 struct WeaponHold {
@@ -3445,7 +3457,7 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     }
     const uint32_t skeleton = guest_call(ctx, base, sub_04E1A4C8, {player});
     const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
-    std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (as drawn last frame, not collapsed)
+    std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (this frame's, not collapsed)
     std::vector<bool> shown(weapons.size(), false);
     for (size_t w = 0; w < weapons.size(); ++w) {
         const Weapon& weapon = weapons[w];
@@ -3481,9 +3493,7 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         if (records != 0) {
             shown[w] = hold_weapon(player, w, shown[w], records + kRecordSize * weapon.parent + kRecordWorld, local);
         }
-        locals[w] = bone.shown ? bone.drawn : local; // the parent's record is a frame behind the animation
-        bone.drawn = local;
-        bone.shown = shown[w];
+        locals[w] = local;
         if (!shown[w]) {
             for (int row = 0; row < 3; ++row) {
                 for (int col = 0; col < 3; ++col) local[4 * row + col] = bits(0.0f);
@@ -3495,6 +3505,20 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         bone.last = local;
     }
     if (const auto hold = g_weapon_holds.find(player); hold != g_weapon_holds.end()) hold->second.requested = false;
+    g_posed_weapons[model] = {player, &weapons, std::move(locals), std::move(shown)};
+}
+
+// The points of the weapons a model's update posed, as it ends (its world matrices made: see above).
+void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
+    const auto posed = g_posed_weapons.find(model);
+    if (posed == g_posed_weapons.end()) return;
+    const uint32_t player = posed->second.player;
+    const std::vector<Weapon>& weapons = *posed->second.weapons;
+    const std::vector<std::array<uint32_t, 16>> locals = std::move(posed->second.locals);
+    const std::vector<bool> shown = std::move(posed->second.shown);
+    g_posed_weapons.erase(posed);
+    const uint32_t skeleton = guest_call(ctx, base, sub_04E1A4C8, {player});
+    const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
     if (records == 0) return;
     // the points: position = p L R + t R + T (rows: L the local axes, R the parent's world axes; p the point's
     // local translation); the summoned weapons' first, then a slot none of them wrote from the first weapon with it
@@ -3618,6 +3642,20 @@ PPC_FUNC(sub_069D8B30) {
         }
         pose_weapons(ctx, base, model, player, g_added[slot_of_id(load(player + kPlayerSelectId))].weapons);
     }
+    ctx.r[3] = r3;
+    ctx.lr = lr;
+}
+
+// A model's update (it samples the animation, poses the bones through
+// sub_069D8B30 above, then makes their world matrices): then the added
+// fighter's weapon points, from those matrices.
+PPC_FUNC(sub_069DF470_orig);
+PPC_FUNC(sub_069DF470) {
+    const uint32_t model = ctx.r[3];
+    sub_069DF470_orig(ctx, base);
+    if (g_posed_weapons.empty()) return;
+    const uint32_t r3 = ctx.r[3], lr = ctx.lr;
+    weapon_points(ctx, base, model);
     ctx.r[3] = r3;
     ctx.lr = lr;
 }
