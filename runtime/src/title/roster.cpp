@@ -3168,6 +3168,50 @@ PPC_FUNC(sub_033E265C) {
     }
 }
 
+// The '?' cell (cell 11, 34 or 54 of a grid) picks its cursor's roulette id,
+// cursor +60 (sub_033E33F4), which sub_033E1A54 (select r3, now r4) moves on
+// for each cursor (select +48, +56), every third frame or now, to the next id
+// after it that is free in the cursor's mask and available, 62 wrapping round
+// to 0: TTT2's fighters only. On the title's grid (select +76: 1, kGrid) each
+// lap goes on here, after TTT2's last, through the added fighters with a cell
+// that the cursor's team has not picked, in slot order, so '?' picks each of
+// them as often as each TTT2 fighter (the roulette holds every id three
+// frames). A pick of one needs nothing more: it is the pick of its cell.
+constexpr uint32_t kSelectGrid = 76, kSelectCursors = 48, kCursorRoulette = 60;
+// The first added fighter after id `after` that the roulette of `cursor` can stop on.
+std::optional<uint32_t> roulette_added(uint32_t cursor, uint32_t after) {
+    const std::set<uint32_t> team = team_added(cursor);
+    for (const Added& added : g_added) {
+        if (added.active && added.cell != 0 && added.id > after && team.count(added.id) == 0) return added.id;
+    }
+    return std::nullopt;
+}
+PPC_FUNC(sub_033E1A54_orig);
+PPC_FUNC(sub_033E1A54) {
+    const uint32_t select = ctx.r[3];
+    uint32_t cursors[2], before[2];
+    for (uint32_t p = 0; p < 2; ++p) {
+        cursors[p] = load(select + kSelectCursors + 8 * p);
+        before[p] = cursors[p] ? load(cursors[p] + kCursorRoulette) : 0;
+    }
+    sub_033E1A54_orig(ctx, base);
+    if (!g_active || load(select + kSelectGrid) != 1) return;
+    for (uint32_t p = 0; p < 2; ++p) {
+        const uint32_t cursor = cursors[p];
+        if (!cursor || load(cursor + kCursorRoulette) == before[p]) continue; // not moved on this frame
+        // From an added fighter the title went on from 0: the next added one comes first, if any is left. From
+        // TTT2's own, a step back (62 wrapped round to 0) ends TTT2's lap: the added fighters come first.
+        const bool was_added = slot_of_id(before[p]) >= 0;
+        std::optional<uint32_t> next;
+        if (was_added) next = roulette_added(cursor, before[p]);
+        else if (load(cursor + kCursorRoulette) < before[p]) next = roulette_added(cursor, 0);
+        if (next) store(cursor + kCursorRoulette, *next);
+        if (traces().roster && next.has_value() != was_added) // the lap goes into or out of the added fighters
+            std::fprintf(stderr, "ttt2: roster: '?' roulette of cursor %u: %u -> %u\n", p, before[p],
+                         load(cursor + kCursorRoulette));
+    }
+}
+
 // Notes the fighter a player's cursor is on for the chooser (object r3,
 // player r4, select id r5), asserting that the id is below 63: an added
 // fighter's donor's.
