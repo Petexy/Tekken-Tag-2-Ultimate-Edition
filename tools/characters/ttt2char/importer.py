@@ -469,7 +469,8 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
 
 def _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon):
     """What moveset.Converter c takes from the import besides the movesets (both games): the definition's gameplay
-    options' reference movesets, the win quotes' tones, the shouts' count, the movement states, the hit locations."""
+    options' reference movesets, the win quotes' tones, the shouts' count, the movement states, the HANDS row, the
+    hit locations."""
     if d.MOVESET.get('electric_tag_exit'):
         c.electric_pack = archives.entry('data005', 13)
     c.air_reaction_references = {spec[0]: motbin.read(archives.entry('data006', spec[0]))
@@ -481,6 +482,8 @@ def _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon):
     c.win_tones = wins
     c.shouts = sum(1 for mask, _ in vlist if mask & voice.KIAI) + len(voice_extra)
     c.tag_states = tag_states
+    if getattr(d, 'HANDS', None) is not None:              # the TTT2 row whose hands its moveset takes
+        c.hands_reference = (motbin.read(archives.entry('data006', d.HANDS)), archives.entry('data005', d.HANDS))
     c.hit_locations = dict(getattr(d, 'HIT_LOCATIONS', {}))     # Tekken 7 hit locations TTT2 numbers otherwise
     c.hit_locations.update(weapons.points_of(bone.read(bon)['names']))         # ... and its weapons' points
 

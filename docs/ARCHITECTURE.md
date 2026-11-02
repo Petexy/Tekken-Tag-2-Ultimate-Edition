@@ -1310,13 +1310,33 @@ His moves hit with a weapon's tip (Tekken 7's hitbox (tip, 0, tip, hand)) and
 some with its guard: a hand's weapons share the four point slots (a point
 `n>slot`), a slot taking the summoned weapon's point, else the first listed's.
 Negan's moves show and hide his items with 0x82c4 / 0x82c5, Kunimitsu II's
-with 0x8300 / 0x8301 (her short sword, her kunai and her knife are out only
-while a move has them out; her stance has her hands empty): the same summons.
-Tekken 7 also puts her blades away as a round starts (an intro of hers ends
-with the sword drawn), which TTT2 does not: the moves of the definition's
-`WEAPON_DISMISS` (her stance, the move her intros end in) start by
-dismissing them all. A summoned weapon the definition's `THROWN` item is
-(her kunai) is dismissed as the projectile flying its look is spawned.
+with 0x8300 / 0x8301: the same summons. Some of hers are out before any move
+takes them out (the kunai in her right fist, the sheath with her sword at her
+hips): the importer finds them from her moves that both take an item out and
+put it away (putting it away first: it was out). Tekken 7 starts a round with
+those out (an intro of hers ends with the sword drawn), which TTT2 does not:
+the moves of the definition's `WEAPON_DISMISS` (her stance, the move her
+intros end in), the donor's moves and the round-start poses start by
+dismissing all summons and taking those out again. An item carried in another
+(the sword and the knife in her sheath) is a weapon under that weapon's bone,
+collapsed with it, without points (character.ini names the fighter's bone
+carrying it: the same in every preset outfit, whose cloth bones differ). A
+summoned weapon the definition's `THROWN` item is (the kunai she throws) is
+dismissed as the projectile flying its look is spawned.
+Her fingers: a hand shows a frame of the moveset's hand shapes (MOTA slot 2
+of the moveset, one animation whose frames are the shapes; TTT2's 0x82d6
+left, 0x82d7 right, frame value >> 8, 0x82d9 both back to their defaults,
+left frame 1, right frame 2) or a hand animation (Tekken 7's 0x842e /
+0x842f, TTT2's 0x82db left / 0x82dc right: an animation of the motion pack's
+hands container), which the hand keeps until a move gives it another. Her
+stance gives only her left hand an animation (open); her right hand is the
+default shape, a fist round the kunai in Tekken 7 but open in the donor's
+shapes (Jun's). Tekken 7's hand animations are another codec and not in the
+saved moveset, but its Kunimitsu II keeps TTT2's Kunimitsu's hands: the
+definition's `HANDS` names that TTT2 row, whose hand shapes her moveset
+takes, and a Tekken 7 hand value her moves share with its moves of the same
+name becomes its animation, copied into her pack's hands container (her
+stance's open left hand).
 
 **Saving Tekken 7's movesets** (`tekken7/autodump.py`, `tekken7/memdump.py`,
 `tools/characters/t7helper/`): Tekken 7's data files are encrypted, and a

@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 from ttt2char import pack                              # noqa: E402
 from ttt2char.convert import chains, moveset, weapons  # noqa: E402
-from ttt2char.ttt2 import bone                         # noqa: E402
+from ttt2char.movesets import TABLE_ORDER, Moveset     # noqa: E402
+from ttt2char.ttt2 import bone, motbin, motion         # noqa: E402
 
 SWAP = np.eye(4)[[0, 2, 1, 3]]
 
@@ -49,6 +50,38 @@ def tekken7(hand_world, d, scale=0.95):
     tip = t7(weapon_axes, at + weapon_axes[:, 0] * 920 * scale)
     return dict(names=['R_Hand', 'ATH_R_weapon001', 'ATH_R_weapon001_top'], parents=[-1, 0, 1],
                 world=[hand, weapon, tip])
+
+
+class Moves(Moveset):
+    """A made-up moveset: [(move name, [(frame, property id, value)])]."""
+    def __init__(self, moves, game='t7'):
+        self.game = game
+        self.tables = {'moves': [], 'extra_move_properties': []}
+        self.names = [name for name, _ in moves]
+        for _, rows in moves:
+            self.tables['moves'].append(dict(extraprops=len(self.tables['extra_move_properties'])))
+            self.tables['extra_move_properties'] += [dict(frame=f, id=i, value=v) for f, i, v in rows]
+            self.tables['extra_move_properties'].append(dict(frame=0, id=0, value=0))
+
+    def move_name(self, i):
+        return self.names[i]
+
+
+def hands(anims):
+    """A made-up hands container: anims[n] is animation n (equal ones share an offset)."""
+    first = motion.HANDS_HEADER + 4 * len(anims) + 60
+    body, at, offs = bytearray(), {}, []
+    for a in anims:
+        if a not in at:
+            at[a] = first + len(body)
+            body += a + bytes(-len(a) % 4)
+        offs.append(at[a])
+    table = struct.pack('<15H', *[8] * 15) + struct.pack('<15H', *range(15))
+    return struct.pack('<4H', 1, len(anims), 15, 15) + struct.pack('<%dI' % len(offs), *offs) + table + bytes(body)
+
+
+def motion_pack(hand_container):
+    return motion.build_pack([b'MOTA\0\x01' + bytes(14), hand_container, b'', b'', b'', b''])
 
 
 class Weapons(unittest.TestCase):
@@ -187,15 +220,124 @@ class Weapons(unittest.TestCase):
                                   T={'moves': [dict(extraprops=0), dict(extraprops=0), dict(extraprops=0)],
                                      'extra_move_properties': [dict(r) for r in props]})
         c.with_props = lambda start, extra: moveset.Converter.with_props(c, start, extra)
+        c.shown = []
+        c.summon_reset = lambda: moveset.Converter.summon_reset(c)
         moveset.Converter.dismiss_at_start(c)
         table, moves = c.T['extra_move_properties'], c.T['moves']
         self.assertEqual((moves[0]['extraprops'], moves[1]['extraprops'], moves[2]['extraprops']), (2, 2, 0))
         self.assertEqual(table[2:], [props[0], dict(frame=0x8001, id=moveset.TT_DISMISS, value=16), props[1]])
+        # summons out by default (default_summons) are taken out again after that
+        c.shown = [3, 7]
+        c.T['moves'][1]['extraprops'] = 0
+        c.T['moves'][0]['extraprops'] = None
+        moveset.Converter.dismiss_at_start(c)
+        self.assertEqual(table[moves[1]['extraprops']:], [props[0], dict(frame=0x8001, id=moveset.TT_DISMISS, value=16),
+                                                          dict(frame=0x8001, id=moveset.TT_SUMMON, value=3),
+                                                          dict(frame=0x8001, id=moveset.TT_SUMMON, value=7), props[1]])
+        self.assertEqual(table[moves[0]['extraprops']], dict(frame=0x8001, id=moveset.TT_DISMISS, value=16))
         c.summons = {}
         c.T['moves'][2]['extraprops'] = 0
+        before = len(table)
         moveset.Converter.dismiss_at_start(c)
         self.assertEqual(c.T['moves'][2]['extraprops'], 0)
-        self.assertEqual(len(table), 5)
+        self.assertEqual(len(table), before)
+
+    def test_summons_out_by_default(self):
+        # an item a move puts away before taking it out again was out before the move (most such moves say so); one
+        # taken out and put away was not; a move doing only one of the two (a clean-up, a win pose) tells nothing;
+        # items without a summon of the definition's are not counted
+        show, hide = 0x8300, 0x8301
+        k = Moves([('Ab_rp', [(5, hide, 3), (5, show, 5), (40, hide, 5), (40, show, 3)]),
+                   ('Ab_lp', [(0x8001, hide, 3), (30, show, 3), (12, hide, 6), (12, show, 0), (50, hide, 0),
+                              (50, show, 6)]),
+                   ('Ab_odd', [(2, show, 3), (9, hide, 3)]),
+                   ('Ab_236LP', [(5, show, 1), (27, hide, 1)]),
+                   ('Ab_236LP_HIT', [(0, hide, 1)]),
+                   ('Ab_win', [(0, hide, 3), (0, show, 5), (0, hide, 7)]),
+                   ('Ab_other', [(3, hide, 9), (8, show, 9)])])
+        c = types.SimpleNamespace(game='t7', k=k, summons={n: {} for n in (0, 1, 3, 5, 6, 7)})
+        c.xp_rows = lambda i: moveset.Converter.xp_rows(c, i)
+        self.assertEqual(moveset.Converter.default_summons(c), [3, 6])
+        c.summons = {}
+        self.assertEqual(moveset.Converter.default_summons(c), [])
+
+    def test_hand_animations_from_the_hands_row(self):
+        # the hands container's animations by number (shared offsets too) and appended ones after them
+        a, b, c_, d = b'\x40\0' + bytes(6), b'\x10\0' + bytes(10), b'\x20\0' + bytes(2), b'\x30\0' + bytes(5)
+        h = hands([a, b, a])
+        self.assertEqual(motion.hand_animations(h), [a, b, a])
+        extended = motion.extend_hands(h, [c_, d])
+        self.assertEqual(motion.hand_animations(extended)[:3], [a, b, a])
+        self.assertEqual(motion.hand_animations(extended)[3], c_)
+        self.assertEqual(motion.hand_animations(extended)[4][:len(d)], d)
+        self.assertEqual(extended[motion.HANDS_HEADER + 4 * 5:][:60], h[motion.HANDS_HEADER + 4 * 3:][:60])
+        with self.assertRaises(ValueError):
+            motion.hand_animations(b'\2\0' + h[2:])
+        # a Tekken 7 hand value its moves share with the HANDS row's moves of the same name becomes that row's
+        # animation: the donor's own of the same bytes, else one added after the donor's; other values stay unmapped
+        k = Moves([('Ab_sKAM00_', [(0x8001, 0x842e, 0x40fc)]), ('Ab_KAM', [(0x8001, 0x842e, 0x40fc)]),
+                   ('Ab_rp', [(0x8001, 0x842f, 0x40bc), (0x8001, 0x842e, 0x59)]), ('Ab_only', [(1, 0x842e, 0x77)])])
+        row = Moves([('Ab_sKAM00_', [(0x8001, 0x82db, 0x4001)]), ('Ab_KAM', [(0x8001, 0x82db, 0x4001)]),
+                     ('Ab_rp', [(0x8001, 0x82dc, 0x4000)])], game='ttt2')
+        conv = types.SimpleNamespace(game='t7', k=k, _hands=None, hand_anims=[], donor_pack=motion_pack(hands([c_, b])),
+                                     hands_reference=(row, motion_pack(hands([b, d]))))
+        conv.xp_rows = lambda i: moveset.Converter.xp_rows(conv, i)
+        got = moveset.Converter.hand_map(conv)
+        self.assertEqual(got, {(0x842e, 0x40fc): 0x4002, (0x842f, 0x40bc): 0x4001})
+        self.assertEqual([x[:len(d)] for x in conv.hand_anims], [d])
+        self.assertIs(moveset.Converter.hand_map(conv), got)
+        conv = types.SimpleNamespace(game='t7', k=k, _hands=None, hand_anims=[], hands_reference=None)
+        self.assertEqual(moveset.Converter.hand_map(conv), {})                     # no HANDS row: none
+
+    def test_hand_shapes_from_the_hands_row(self):
+        # a moveset's MOTA slot replaced: the others keep their bytes and order (4-aligned), the slots move with them
+        blob, slots = b'MOTA' + bytes(4) + b'abcdef' + bytes(2) + b'MOTA', [0, None, 8, None, 16] + [None] * 8
+        got, moved = motbin.with_slot(blob, slots, 2, b'0123456789')
+        self.assertEqual(got, b'MOTA' + bytes(4) + b'0123456789' + bytes(2) + b'MOTA')
+        self.assertEqual(moved[:5], [0, None, 8, None, 20])
+        with self.assertRaises(ValueError):
+            motbin.with_slot(blob, slots, 1, b'x')                                # an empty slot
+
+        # with a HANDS row, the fighter's moveset takes that row's hand shapes (slot 2); its other MOTAs stay the
+        # donor's; without one, the donor's moveset keeps its own
+        def made(shapes):
+            hdr = bytearray(motbin.BASE)
+            hdr[4:8] = b'COM\0'
+            mota = b'MOTA\0\x01' + bytes(14)
+            slots = [0, None, len(mota), None, len(mota) + len(shapes)] + [None] * 8
+            return motbin.build(hdr, b'[X]\0', {t: [] for t in TABLE_ORDER}, mota + shapes + mota, slots)
+        donor, row = made(hands([b'\x10\0' + bytes(6)])), made(hands([b'\x20\0' + bytes(10)]))
+
+        def written(reference):
+            conv = types.SimpleNamespace(d=motbin.read(donor), newid=60, aliases=list(range(56)),
+                                         strings=bytearray(b'[X]\0'),
+                                         defn=types.SimpleNamespace(MOVESET={'name': '[X]'}), string=lambda s: 0,
+                                         T={t: [] for t in TABLE_ORDER}, donor_pack=motion_pack(hands([b'\x30\0'])),
+                                         new_anims=[], hand_anims=[], part3=None, hands_reference=reference)
+            return motbin.read(moveset.Converter.write(conv)[0])
+        out = written((motbin.read(row), None))
+        self.assertEqual(motbin.slot_bytes(out, motbin.HAND_SHAPES), motbin.slot_bytes(motbin.read(row), 2))
+        for k in (0, 4):
+            self.assertEqual(motbin.slot_bytes(out, k), motbin.slot_bytes(motbin.read(donor), k))
+        self.assertEqual(motbin.slot_bytes(written(None), 2), motbin.slot_bytes(motbin.read(donor), 2))
+
+    def test_weapon_carried_in_another(self):
+        # an item carried in another (the sword in the sheath at the hips) hangs under that weapon's bone, bound
+        # where Tekken 7 binds it, and is listed with it as its parent
+        skel = fighter()
+        t7 = tekken7(bone.world_matrices(skel)[1], np.eye(3))
+        sheath = dict(bone='ATH_R_weapon001', parent='TE_R_jnt', pair=4, summon=7)
+        sword = dict(bone='ATH_R_weapon001_top', parent='ATH_R_weapon001', pair=None, summon=6)
+        s, outer, _, _ = weapons.append_bones(skel, t7, sheath)
+        s, inner, number, _ = weapons.append_bones(s, t7, sword)
+        self.assertEqual((outer, inner, number, s['parent'][inner]), (2, 3, 820, 2))
+        world = bone.world_matrices(bone.read(bone.write(s)))
+        self.assertTrue(np.allclose(world[inner][:3, 3], (np.asarray(t7['world'][2]) @ SWAP)[:3, 3], atol=1e-2))
+        self.assertEqual(weapons.of_skeleton(s, [sheath, sword]), [(4, 1, [], 7), (20, 1, [], 6)])   # (the hand)
+        with self.assertRaises(ValueError):                                        # no points of its own
+            weapons.append_bones(s, t7, dict(sword, bone='ATH_R_weapon001', points={0x75: 5}))
+        with self.assertRaises(ValueError):                                        # neither a bone nor a weapon
+            weapons.append_bones(s, t7, dict(sword, parent='ATH_L_weapon009'))
 
     def test_triangles(self):
         joints = np.array([[1, 0], [1, 2], [2, 0], [1, 0]])

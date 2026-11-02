@@ -349,9 +349,9 @@ PROP_DROP = {
            0x81be: 'rage art fx', 0x801b: 'rage drive vfx', 0x8233: 'rage drive bg', 0x8234: 'rage drive bg',
            0x8272: 'spend rage', 0x828b: 'game speed', 0x828c: 'slow motion', 0x828d: 'slow motion immunity',
            0x829d: 'HUD', 0x829f: 'subtitles', 0x8243: 'subtitles', 0x82bf: 'assist vfx',
-           0x8414: 'assist combo value', 0x842e: 'hand animation (Tekken 7 hand codec not converted)',
-           0x842f: 'hand animation', 0x8435: 'camera/item animation id', 0x8049: 'item id', 0x8343: 'attach item',
-           0x8344: 'detach item'},
+           0x8414: 'assist combo value', 0x842e: 'hand animation (none of the HANDS row\'s: HAND_PROPS)',
+           0x842f: 'hand animation (none of the HANDS row\'s: HAND_PROPS)', 0x8435: 'camera/item animation id',
+           0x8049: 'item id', 0x8343: 'attach item', 0x8344: 'detach item'},
     't8': {0x82ff: 'tiger animation', 0x82fe: 'projectile index', 0x822d: 'power crush',
            0x822e: 'rage art fx', 0x801b: 'rage drive vfx', 0x82a3: 'rage drive bg', 0x82a4: 'rage drive bg',
            0x82e2: 'spend rage', 0x82fb: 'game speed', 0x82fc: 'slow motion', 0x82fd: 'slow motion immunity',
@@ -486,10 +486,26 @@ HIT_POINT8 = {**dict.fromkeys((36, 37, 40, 41, 51, 53), 40), **dict.fromkeys((38
 # Negan's moves show and hide the items of his weapon mesh with 0x82c4 n / 0x82c5 n instead (0 the bat in his left
 # hand, 1 the knife, 2 the bat in his right hand; no other fighter uses these ids): the same summons. Kunimitsu II's
 # with 0x8300 n / 0x8301 n (only her moveset has them): 0 the short sword in her left hand, 1 the kunai in it, 2 the
-# knife in her right hand, the others her sheathed blades (3 and 6 at her hips, 5 in her right hand); a sword move
-# shows 0 and hides 6 as she draws, and the other way round as she sheathes it.
+# sheathed sword in her right hand (intros), 3 her kunai in her right fist, 5 and 6 the knife and the sword in the
+# sheath at her hips, 7 that sheath; a sword move shows 0 and hides 6 as she draws, and the other way round as she
+# sheathes it. Some items are out before any move shows them (her kunai, her sheath): Tekken 7 starts a round with
+# them out and its moves end so; default_summons finds them, and summon_reset takes them out again where the summons
+# are put away (her stance, the donor's moves).
 TT_SUMMON, TT_DISMISS = 0x822E, 0x822F
 TT_DISMISS_ALL = 16
+# The fingers: a hand shows a frame of the moveset's hand shapes (ttt2/motbin.py HAND_SHAPES: TTT2 0x82d6 left,
+# 0x82d7 right, 0x82d9 both back to their defaults; Tekken 7's own shape properties map to them), or a hand
+# animation (Tekken 7's 0x842e / 0x842f, TTT2's 0x82db left / 0x82dc right, value HAND_OWN | n: animation n of the
+# motion pack's hands container, ttt2/motion.py), until a move gives it another. The shapes are the moveset's own
+# (the donor's: Jun's hands are open where Kunimitsu II's are fists), and the two games' hand animations are
+# numbered and made apart; but a fighter TTT2 has keeps its hands: the definition's HANDS names that TTT2 motion row,
+# whose hand shapes the fighter's moveset takes (Kunimitsu II's right fist round her kunai, Tekken 7's default right
+# hand: her stance gives only her left hand an animation), and a Tekken 7 hand value the fighter's moves share with
+# that row's moves of the same name becomes that row's animation, copied into the pack's hands container (or the
+# donor's own of the same bytes: Converter.hand_map; Kunimitsu II's stance's open left hand). The other values are
+# left out (PROP_DROP).
+HAND_PROPS = {'t7': {0x842e: 0x82db, 0x842f: 0x82dc}, 't8': {}}
+HAND_OWN = 0x4000
 SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON, 0x82c5: TT_DISMISS,
                        0x8300: TT_SUMMON, 0x8301: TT_DISMISS},
                 't8': {0x8317: TT_SUMMON, 0x8318: TT_DISMISS}}
@@ -648,6 +664,8 @@ class Converter:
                                         # id -> variable, set by __init__
     counted = frozenset()               # the counted holds' variables of the cancel list being converted (COUNT_VAR)
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
+    hands_reference = None              # the definition's HANDS row: (its motbin, its motion pack), by the importer
+    _hands = None                       # hand_map's map
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
         """k: the fighter's moveset (Tekken 7: tkmvst.read; Tekken 8: tekken8.motbin.read, its moves named),
@@ -668,6 +686,8 @@ class Converter:
         self.req_map, self.prop_map, self.react_remap, self.hitbox = maps
         self.hit_locations = {}         # Tekken 7 hit location -> TTT2's, before the id maps' (weapons.py)
         self.summons = {w['summon']: w for w in getattr(d, 'WEAPONS', []) if w.get('summon') is not None}
+        self.shown = []                 # the summons out by default (default_summons, by run)
+        self.hand_anims = []            # animations added to the pack's hands container (hand_map)
         self.posed = set()              # the donor's intro and win pose moves playing the fighter's animations
         self.usage = usage
         self.stats = collections.Counter()
@@ -1427,6 +1447,10 @@ class Converter:
             if idv in SUMMON_PROPS[g] or idv == SUMMON_EFFECT[g]:  # summoned weapons
                 rows += self.summon_rows([(f, idv, v)], move)
                 continue
+            if (idv, v) in self.hand_map():                 # a hand animation the HANDS row has
+                rows.append(dict(frame=f, id=HAND_PROPS[g][idv], value=self.hand_map()[idv, v]))
+                self.stats['hand animations (the HANDS row\'s)'] += 1
+                continue
             if idv in DAMAGE_DEAL[g]:                       # throw damage: points of the amount set before
                 at = 0 if f >= 0x8000 else f
                 since, amount = next(((g, a) for g, a in reversed(amounts) if g <= at),
@@ -1491,12 +1515,77 @@ class Converter:
                 self.effect_rows.append((rows[-1], eid, self.frames_left(move, f)))
         return rows
 
+    def default_summons(self):
+        """The definition's summons out before any move takes them out (Kunimitsu II's kunai in her right fist, the
+        sheath with her sword at her hips), sorted: by the fighter's moves that both take a summon out and put it away,
+        whichever they do first (putting it away: it was out), most of them; a move doing only one of the two (the
+        clean-up after a throw, a win pose putting her kunai away) tells nothing."""
+        ids = SUMMON_PROPS[self.game]
+        votes = collections.defaultdict(collections.Counter)
+        for mv in self.k.tables['moves'] if self.summons else ():
+            ops = collections.defaultdict(list)
+            for f, idv, v, _ in self.xp_rows(mv.get('extraprops')):
+                if idv == 0 and f == 0:
+                    break
+                if idv in ids and v in self.summons:
+                    ops[v].append((0 if f >= 0x8000 else f, ids[idv] == TT_SUMMON))
+            for n, rows in ops.items():
+                rows.sort(key=lambda r: r[0])
+                if len({out for _, out in rows}) == 2:
+                    votes[n][not rows[0][1]] += 1
+        return sorted(n for n, c in votes.items() if c[True] > c[False])
+
+    def summon_reset(self):
+        """The rows that start a move with the summons as a round starts: all put away, then those out by default
+        (default_summons) taken out again."""
+        return [dict(frame=0x8001, id=TT_DISMISS, value=TT_DISMISS_ALL)] + \
+            [dict(frame=0x8001, id=TT_SUMMON, value=n) for n in self.shown]
+
+    def hand_map(self):
+        """{(Tekken 7 hand property, value): TTT2 value} of the hand animations the definition's HANDS row has
+        (HAND_PROPS; hands_reference): per value the fighter's moves give a hand, the value most of that row's moves of
+        the same name give the hand (one of its pack's own animations); the animation is the donor pack's of the same
+        bytes, else one added to it (hand_anims, numbered after the donor's)."""
+        if self._hands is not None:
+            return self._hands
+        self._hands = {}
+        props = HAND_PROPS[self.game]
+        if self.hands_reference is None or not props:
+            return self._hands
+        t, pack = self.hands_reference
+        o, n = motion.pack_items(pack)[1]
+        theirs = motion.hand_animations(pack[o:o + n])
+        o, n = motion.pack_items(self.donor_pack)[1]
+        donor = motion.hand_animations(self.donor_pack[o:o + n])
+        number = {}
+        for i, a in reversed(list(enumerate(donor))):
+            number[a] = i
+        names = {t.move_name(j): j for j in range(len(t.tables['moves']))}
+        votes = collections.defaultdict(collections.Counter)
+        for i, mv in enumerate(self.k.tables['moves']):
+            j = names.get(self.k.move_name(i))
+            if j is None:
+                continue
+            given = {idv: v for f, idv, v in M.xps(t, t.tables['moves'][j]['extraprops']) if idv in props.values()}
+            for f, idv, v, _ in self.xp_rows(mv.get('extraprops')):
+                ttt2 = given.get(props.get(idv))
+                if ttt2 is not None and ttt2 & HAND_OWN and (ttt2 & ~HAND_OWN) < len(theirs):
+                    votes[idv, v][ttt2] += 1
+        for key, c in sorted(votes.items()):
+            a = theirs[c.most_common(1)[0][0] & ~HAND_OWN]
+            if a not in number:
+                number[a] = len(donor) + len(self.hand_anims)
+                self.hand_anims.append(a)
+            self._hands[key] = HAND_OWN | number[a]
+        return self._hands
+
     def dismiss_when_hit(self):
         """Tekken 7 puts a summoned weapon away when the fighter is hit (its game, not the moveset, does) and in its
         stance; the added fighter is hit into, falls and gets up through the donor's generic moves, and gets up into the
-        donor's stance (La_KAM), so each of the donor's moves dismisses all summons as it starts (the fighter's own
-        moves never go through them with a weapon out: Noctis's only into a KO), but the intro and win poses that play
-        the fighter's animations (they summon their own)."""
+        donor's stance (La_KAM), so each of the donor's moves starts with the summons as a round starts (summon_reset:
+        all put away, those out by default out again; the fighter's own moves never go through them with a weapon
+        out: Noctis's only into a KO), but the intro and win poses that play the fighter's animations (they summon
+        their own)."""
         if not self.summons:
             return
         made = {}
@@ -1506,15 +1595,15 @@ class Converter:
             row = self.T['moves'][i]
             start = row['extraprops']
             if start not in made:
-                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_DISMISS, value=TT_DISMISS_ALL)])
+                made[start] = self.with_props(start, self.summon_reset())
             row['extraprops'] = made[start]
             self.stats['weapon summons: dismissed by the donor\'s moves'] += 1
 
     def dismiss_at_start(self):
         """Tekken 7 puts a fighter's weapons away as a round starts (its game, not the moveset: Kunimitsu II's intros
-        end with her sword drawn, and the fight starts with her hands empty); TTT2 does not. So the definition's
+        end with her sword drawn, and the fight starts with only her kunai out); TTT2 does not. So the definition's
         WEAPON_DISMISS moves (a pattern of Tekken 7 move names: her stance, which a round starts in and her moves end
-        in, and the move her intros and win poses end in) start by dismissing all summons."""
+        in, and the move her intros and win poses end in) start with the summons as a round starts (summon_reset)."""
         pattern = getattr(self.defn, 'WEAPON_DISMISS', None)
         if not pattern or not self.summons:
             return
@@ -1525,7 +1614,7 @@ class Converter:
             row = self.T['moves'][i]
             start = row['extraprops']
             if start not in made:
-                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_DISMISS, value=TT_DISMISS_ALL)])
+                made[start] = self.with_props(start, self.summon_reset())
             row['extraprops'] = made[start]
             self.stats['weapon summons: dismissed as a move starts (WEAPON_DISMISS)'] += 1
 
@@ -2081,6 +2170,7 @@ class Converter:
         k, d = self.k, self.d
         self.alloc_ok = 0
         self.queue = []
+        self.shown = self.default_summons()
         # per reaction slot, the donor's most common move (fallback); the donor's bound reactions (requirement 467)
         self.slot_default = {f: collections.Counter(r[f] for r in d.tables['reactions']).most_common(1)[0][0]
                              for f in REACTION_MOVE_FIELDS}
@@ -2455,6 +2545,8 @@ class Converter:
                 posed = True
                 self.stats['donor round-start moves with her animation'] += 1
                 summons = self.summon_rows(M.xps(self.k, self.k.tables['moves'][t7]['extraprops']), t7)
+                if self.shown:                           # (from the summons a round starts with: summon_reset)
+                    summons = self.summon_reset() + summons
                 if summons:                              # the weapons its pose holds (Noctis's sword)
                     row['extraprops'] = self.with_props(row['extraprops'], summons)
             elif not name.startswith('co_') or re.search(r'_%s\(' % re.escape(prefix), name):
@@ -2550,6 +2642,9 @@ class Converter:
     def write(self):
         """-> (motbin bytes, motion pack bytes)"""
         hdr, strings, blob, slots = motbin.split(self.d)
+        if self.hands_reference is not None:             # the HANDS row's hand shapes
+            blob, slots = motbin.with_slot(blob, slots, motbin.HAND_SHAPES,
+                                           motbin.slot_bytes(self.hands_reference[0], motbin.HAND_SHAPES))
         hdr = bytearray(hdr)
         nid = self.newid
         struct.pack_into('>4H', hdr, 0xF8 + 32 * 2, nid - 1, (-(nid - 1)) & 0xFFFF, nid, (-nid) & 0xFFFF)
@@ -2561,6 +2656,8 @@ class Converter:
         pk = self.donor_pack
         items = [pk[o:o + s] for o, s in motion.pack_items(pk)]
         items[0] = motion.extend_mota(items[0], self.new_anims)
+        if self.hand_anims:                              # (hand_map)
+            items[1] = motion.extend_hands(items[1], self.hand_anims)
         if self.part3 is not None:
             items[3] = motion.replace_mota(items[3], self.part3)
         return mb, motion.build_pack(items)
@@ -2568,6 +2665,13 @@ class Converter:
     def summary(self):
         lines = ['tables: ' + ', '.join('%s %d' % (t, len(self.T[t])) for t in TABLE_ORDER),
                  'new animations: %d (%d bytes)' % (len(self.new_anims), sum(len(a) for a in self.new_anims))]
+        if self.hands_reference is not None:
+            lines.append('hand shapes: the HANDS row\'s')
+        if self.hand_anims:
+            lines.append('hand animations added from the HANDS row: %d (%d bytes)' % (
+                len(self.hand_anims), sum(len(a) for a in self.hand_anims)))
+        if self.shown:
+            lines.append('summons out by default (default_summons): %s' % ', '.join(map(str, self.shown)))
         lines += ['%s: %d' % kv for kv in sorted(self.stats.items())]
         if self.unmapped:
             lines.append('ids without a TTT2 counterpart (dropped where used): %d' % len(self.unmapped))

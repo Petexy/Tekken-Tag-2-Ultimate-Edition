@@ -111,25 +111,31 @@ HIDE = [('gla', 'ATH_L_hand_mask_knm')]
 # no scalp); Tekken 7 shows the mask over it: the hair in front of the mask's face is left out
 COVERED = [('har', 'MI_CH_knm_gla_1p_Mask')]
 
-# her blades (weapons.py), posed by her animations' extra pairs. Her weapon mesh holds eight items: the short sword
-# (ATH_L_weapon001, pair 0) and the kunai (ATH_L_weapon002, pair 1) in her left hand, a knife (ATH_R_weapon001, pair
-# 3) and the sheathed sword (ATH_R_weapon_spear) in her right, and the sheath with the sword and the knife in it at her
-# hips (ATH_R_weapon002, pair 4); Tekken 7 shows an item only while a move has it out (0x8300 n .. 0x8301 n:
-# moveset.SUMMON_PROPS), so her stance has her hands empty: 0 the sword (1,1,1 and the other strings ending in a
-# slash, d, d/f, f + 1 + 2, her Rage Drive and Rage Art), 1 the kunai (her two kunai throws, until it flies), 2 the
-# knife (one intro). The points they hit with (Tekken 7 hit locations) are Tekken 7's own, on the sword and the knife,
-# written whether they are shown or not. The sheathed items (shown by default in Tekken 7) are not drawn.
+# her blades (weapons.py), posed by her animations' extra pairs. Her weapon mesh holds eight items, which her moves
+# show and hide by number (Tekken 7's 0x8300 n .. 0x8301 n: moveset.SUMMON_PROPS): 0 the short sword (ATH_L_weapon001,
+# pair 0: 1,1,1 and the other strings ending in a slash, d, d/f, f + 1 + 2, her Rage Drive and Rage Art) and 1 the
+# kunai (ATH_L_weapon002, pair 1: her two kunai throws, until it flies) in her left hand; 3 her kunai in her right
+# fist (ATH_R_weapon001, pair 3), 2 the sheathed sword she holds in that hand in an intro (ATH_R_weapon_spear, pair 5,
+# its sword ATH_R_weapon_spear_top in it); 7 the sheath at her hips (ATH_R_weapon002, pair 4) with 6 the sword and 5
+# the knife in it (ATH_R_weapon002_top, _hilp: carried in the sheath, they go where it goes). 3, 6 and 7 are out
+# before any move takes them out (moveset.default_summons): her stance holds the kunai in her right fist (her hand
+# shapes: HANDS) and the sheath with the sword at her hips. The points they hit with (Tekken 7 hit locations) are
+# Tekken 7's own, on the sword and the kunai in her fist, written whether they are shown or not.
 _WEAPONS = _ITEM + '/Meshes/knm/extra/knm_exp_1p/Meshes/SK_CH_knm_exp_1p'
 WEAPONS = [
     {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon001', 'parent': 'TE_L_jnt', 'pair': 0, 'summon': 0,
      'points': {0x74: 'ATH_L_weapon001_top', 0x76: 'ATH_L_weapon001_top', 0x77: 'ATH_L_weapon001_hilp'}},
-    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3, 'summon': 2,
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3, 'summon': 3,
      'points': {0x75: 'ATH_R_weapon001_top'}},
     {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon002', 'parent': 'TE_L_jnt', 'pair': 1, 'summon': 1},
 ]
-# Tekken 7 puts her blades away as a round starts (one intro ends with the sword drawn): her stance and the move her
-# intros and win poses end in dismiss them (moveset.dismiss_at_start)
+# Tekken 7 starts a round with only the kunai in her fist and the sheath with the sword out (one intro ends with the
+# sword drawn): her stance and the move her intros and win poses end in start so (moveset.dismiss_at_start)
 WEAPON_DISMISS = r'^Kt_(sKAM00_|KAM)$'
+# her fingers are TTT2 Kunimitsu's (row 44; moveset.HAND_PROPS): its hand shapes, whose default right hand is the
+# fist round her kunai Tekken 7 shows (the donor's are Jun's open hands), and its stance's open left hand (Tekken 7
+# kept her stance animation and its hand property)
+HANDS = 44
 # her Piercing Kunai Throw (d, d/f, f + 1) and the kunai ending her low-high kicks: Tekken 7 flies the kunai by those
 # pairs, which TTT2 cannot follow at range; a TTT2 projectile instead (convert/moveset.py thrown_rows), flying as the
 # kunai does: from 1.2 m ahead of her hips at its first active frame, 1.1 m up, 460 mm a frame for 13 frames
@@ -153,4 +159,15 @@ WEAPONS += [
      'points': {0xfe: ({'parent_local_offset': (87.579403, -313.689518, 128.174626)}, 1)}},
     {'bone': 'L_Leg', 'parent': 'HIZA_L_jnt', 'pair': None,
      'points': {0xfd: ({'parent_local_offset': (-46.328674, -88.211068, -8.512432)}, 2)}},
+]
+# her sheathed blades (after the points above, which keep their numbers): the sheath at her hips and the sword and
+# the knife in it, the sheathed sword in her right hand and its sword
+WEAPONS += [
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002', 'parent': 'KOSHI_jnt', 'pair': 4, 'summon': 7},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002_hilp', 'parent': 'ATH_R_weapon002', 'pair': None,
+     'summon': 5},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002_top', 'parent': 'ATH_R_weapon002', 'pair': None,
+     'summon': 6},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon_spear', 'parent': 'TE_R_jnt', 'pair': 5, 'summon': 2},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon_spear_top', 'parent': 'ATH_R_weapon_spear', 'pair': None},
 ]

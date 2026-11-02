@@ -772,7 +772,8 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
                                          log=lambda line: None if 'WARNING' in line else log(line))['prims']
             parts.append((tag, w['mesh']))
             prims += kept
-            mesh_order[tag] = ('%s_wpn%d' % (d.CODE, n), w['parent'], 100 + n)
+            up = skel['names'][skel['parent'][index]]          # (w['parent'], or the weapon it is carried in)
+            mesh_order[tag] = ('%s_wpn%d' % (d.CODE, n), up[4:] if up.startswith('cha:') else up, 100 + n)
         log('  weapon %s: OPT %d under %s (%s), hit points OPT %s, %d triangles drawn' % (
             w['bone'], number, w['parent'], 'pair %d' % w['pair'] if w.get('pair') is not None else 'still', points,
             sum(len(q['tris']) for q in kept)))

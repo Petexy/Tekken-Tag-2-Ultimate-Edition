@@ -5,6 +5,10 @@ Motion pack (data005: one per motion row): little-endian u32 count (6), count x 
 16-byte aligned from 0x40: body MOTA, hands, face, (empty), camera, extra.
 MOTA: "MOTA", u8, u8 (byte order: 0 1 big-endian, 1 0 little-endian), u16, u32 0x14, u32 count @0xC, u32, then
 count x u32 offsets (from the MOTA's start) at 0x14.
+Hands (item 1: the fingers' animations, which moves play with 0x82db / 0x82dc, value 0x4000 | number): little-endian
+u16 1, u16 count, u16 15, u16 15, count x u32 offsets (from the item's start; numbers may share one), the fingers'
+15 joints (15 x u16 8, then 0..14), then the animations (u16 frames, ...), 4-aligned; an animation holds no offsets
+(the same bytes stand at other offsets in other fighters' packs).
 Animation: u16 type, u16 channel count, then
     type 0xC8 (raw): u32 frames, nch x u32 descriptors, frames x nch x 3 f32
     type 0x64 (compressed): nch x u16 descriptors, u16 frames, u8, u8, u16 n, n x u32, per channel 3 x i16
@@ -70,6 +74,45 @@ def replace_mota(m, anims):
     if m[:4] != b'MOTA' or m[4] != 0:
         raise ValueError('not a big-endian MOTA')
     return extend_mota(m[:0xC] + bytes(4) + m[0x10:0x14], anims)
+
+
+HANDS_HEADER = 8
+
+
+def _hands(h):
+    """(count, [offsets], where the offsets end) of a hands container."""
+    one, cnt = struct.unpack_from('<HH', h, 0)
+    offs = list(struct.unpack_from('<%dI' % cnt, h, HANDS_HEADER))
+    end = HANDS_HEADER + 4 * cnt
+    if one != 1 or any(o < end or o >= len(h) for o in offs):
+        raise ValueError('not a hands container')
+    return cnt, offs, end
+
+
+def hand_animations(h):
+    """[bytes] of a hands container's animations, by number (each to where the next one starts)."""
+    _, offs, _ = _hands(h)
+    starts = sorted(set(offs)) + [len(h)]
+    size = {a: b - a for a, b in zip(starts, starts[1:])}
+    return [bytes(h[o:o + size[o]]) for o in offs]
+
+
+def extend_hands(h, anims):
+    """A hands container with animations appended (numbered from its count on, each padded to 4)."""
+    cnt, offs, end = _hands(h)
+    body = bytearray(h[end:])
+    while len(body) % 4:
+        body.append(0)
+    new_offs = [o + 4 * len(anims) for o in offs]
+    at = end + 4 * len(anims) + len(body)
+    for a in anims:
+        new_offs.append(at)
+        a = bytes(a) + bytes(-len(a) % 4)
+        body += a
+        at += len(a)
+    hdr = bytearray(h[:HANDS_HEADER])
+    struct.pack_into('<H', hdr, 2, len(new_offs))
+    return bytes(hdr) + struct.pack('<%dI' % len(new_offs), *new_offs) + bytes(body)
 
 
 def _swap(b, o, w):

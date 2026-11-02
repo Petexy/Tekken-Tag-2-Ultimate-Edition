@@ -8,11 +8,12 @@ leave the bone where Tekken 7's bind pose has it. The pairs are TTT2's own: TTT2
 bones 1200, 1210 under his hands) from such pairs and writes them into the bones' records unchanged, and Tekken 7's
 item moves carry the very same animations as TTT2's (Co_IHomeRun). So the weapon bone's local transform is the pair
 (the rotation R = Rz Ry Rx of its angles), in TTT2's frame of the parent. Checked on Tekken 7's own fighters: the
-pairs' resting values are the bind poses' (Kunimitsu II's right sword, hip sword: within 2 degrees and 1 mm; Negan's
-right bat: its rotation), Kunimitsu II's kunai flies straight at the opponent, Negan's bat strikes reach in front.
-The bone's frame is Tekken 7's bone's with y reversed (M below; TTT2's frames are Tekken 7's so, the hands' bind poses
-show). Which pair poses which bone: Tekken 7's order (Negan: 0 the left bat, 1 the right; Kunimitsu II: 0..2 her
-left hand's, 3 the right sword, 4 the hip sword), found by the resting values.
+pairs' resting values are the bind poses' (Kunimitsu II's kunai in her right hand, the sheath at her hips: within 2
+degrees and 1 mm; Negan's right bat: its rotation), Kunimitsu II's thrown kunai flies straight at the opponent, Negan's
+bat strikes reach in front. The bone's frame is Tekken 7's bone's with y reversed (M below; TTT2's frames are Tekken
+7's so, the hands' bind poses show). Which pair poses which bone: Tekken 7's order (Negan: 0 the left bat, 1 the
+right; Kunimitsu II: 0..2 her left hand's, 3 the kunai in her right hand, 4 the sheath at her hips, 5 the sheathed
+sword in her right hand), found by the resting values.
 
 TTT2 samples those channels for every fighter but uses them only for some fighters' extra bones; the runtime poses
 the added fighter's extra bone OPT 800 + k with pair k (title/roster.cpp, weapons). So:
@@ -30,7 +31,9 @@ the added fighter's extra bone OPT 800 + k with pair k (title/roster.cpp, weapon
 A fighter that summons its weapons (Noctis: a sword, a great sword and a dagger for each hand, a spear and a shield,
 each shown from a move's summon property, Tekken 7's 0x82a7, until a dismiss, 0x82a8) has a weapon per summon
 (`summon`: its number); the runtime collapses a weapon not summoned. A hand holds one of them at a time, so its
-weapons' points share slots (a point's `(where, slot)`): a slot takes the summoned weapon's point.
+weapons' points share slots (a point's `(where, slot)`): a slot takes the summoned weapon's point. An item carried in
+another (Kunimitsu II's sword and knife in the sheath at her hips) names that weapon's Tekken 7 bone as its parent: it
+goes where that one goes and is collapsed with it.
 
 Written for this project from the files themselves (no third-party code).
 """
@@ -86,18 +89,25 @@ def points_of(names):
 
 def of_skeleton(skel, definitions=()):
     """[(k = number - 800, parent bone index, [(point number - 850, slot)], summon or None)] of a skeleton's
-    weapons, for character.ini; definitions: the fighter's WEAPONS (their summons, by the bones' names)."""
+    weapons, for character.ini; definitions: the fighter's WEAPONS (their summons, by the bones' names). The parent
+    of an item carried in another is the fighter's bone carrying that one (the runtime takes the parent's place only
+    for points and held weapons, which such an item has not: parent_index), the same in every preset outfit, whose
+    cloth bones before the weapons' may differ."""
     index = _numbers(skel)
+    weapon_bones = {index[n] for n in index if OPT_FIRST <= n < POINT_FIRST}
     out = []
     for n in sorted(index):
         if OPT_FIRST <= n < POINT_FIRST:
             b = index[n]
+            up = skel['parent'][b]
+            while up in weapon_bones:
+                up = skel['parent'][up]
             points = [(m - POINT_FIRST, _point(skel['names'][index[m]])[2]) for m in sorted(index)
                       if m >= POINT_FIRST and skel['parent'][index[m]] == b]
             summon = next((w.get('summon') for w in definitions
                            if (OPT_FIRST + w['pair'] == n if w.get('pair') is not None else
                                ('cha:OPT%d_%s' % (n, w['bone']))[:NAME_LENGTH] == skel['names'][b])), None)
-            out.append((n - OPT_FIRST, skel['parent'][b], points, summon))
+            out.append((n - OPT_FIRST, up, points, summon))
     return out
 
 
@@ -109,14 +119,29 @@ def number_of(skel, weapon):
     return next(n for n in range(STILL_FIRST, POINT_FIRST) if n not in used)
 
 
+def parent_index(skel, name):
+    """The bone a weapon hangs under: a bone of the fighter's by its TTT2 name, or a weapon appended before it by its
+    Tekken 7 bone (cha:OPT<n>_<bone>: an item carried in another, as Kunimitsu II's sword sits in the sheath at her
+    hips, goes where that one goes and is collapsed with it; it has no points: of_skeleton)."""
+    names = [n[4:] if n.startswith('cha:') else n for n in skel['names']]
+    if name in names:
+        return names.index(name)
+    for n, i in sorted(_numbers(skel).items()):
+        if OPT_FIRST <= n < POINT_FIRST and skel['names'][i] == ('cha:OPT%d_%s' % (n, name))[:NAME_LENGTH]:
+            return i
+    raise ValueError('a weapon\'s parent %s is neither a bone of the fighter nor a weapon before it' % name)
+
+
 def append_bones(skel, t7bones, weapon):
     """The fighter's skeleton with a weapon's bone and its hit points after its own.
     t7bones: {'names', 'parents', 'world'} of the Tekken 7 skeleton holding the weapon's bone (model.load_tekken7_model:
-    TTT2 space, mm); weapon: the definition's entry {'bone', 'parent' (a TTT2 bone), 'pair' (None: no animation poses
-    it), 'points': {code: a Tekken 7 bone's name, or cm along the weapon, or (either, slot)}}.
+    TTT2 space, mm); weapon: the definition's entry {'bone', 'parent' (a TTT2 bone, or the Tekken 7 bone of a weapon
+    appended before it: parent_index), 'pair' (None: no animation poses it), 'points': {code: a Tekken 7 bone's name,
+    or cm along the weapon, or (either, slot)}}.
     -> (skeleton, the weapon bone's index, its number, the point numbers used)."""
-    names = [n[4:] if n.startswith('cha:') else n for n in skel['names']]
-    parent = names.index(weapon['parent'])
+    parent = parent_index(skel, weapon['parent'])
+    if skel['names'][parent].startswith('cha:OPT') and weapon.get('points'):
+        raise ValueError('an item carried in another (%s) has no points of its own' % weapon['bone'])
     t7 = {n: i for i, n in enumerate(t7bones['names'])}
     i = t7[weapon['bone']]
     world_t7 = np.array(t7bones['world'], np.float64)
