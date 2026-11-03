@@ -265,6 +265,23 @@ struct Added {
     std::vector<Outfit> outfits;
 };
 std::vector<Added> g_added;
+struct NativeCostumes {
+    Added fighter;
+    uint32_t entries = 0, native_count = 0, count = 0, key = 0, saved_key = 0;
+};
+std::map<uint32_t, NativeCostumes> g_native;
+// Recovered bodies reuse their native character's original part registries.
+std::map<std::string, std::map<uint32_t, uint32_t>> g_original_part_keys, g_original_texture_keys;
+std::map<uint32_t, uint32_t> g_native_ids;
+uint32_t g_native_picks[2][2] = {};
+uint32_t g_native_choice = 0;
+struct NativeChooser {
+    uint32_t fighter = 0;
+    outfit_menu::NativePage layout{};
+    std::array<uint8_t, 16 * outfit_menu::kMaxPresets> entries{};
+};
+std::map<uint32_t, NativeChooser> g_native_choosers; // independent state per player cursor
+
 std::map<uint32_t, int> g_outfit_ids;
 // These are private 32-bit keys in the chara master's map, not fighter IDs.
 // Code lookup normalizes them before the command parser sees them, and the
@@ -1245,6 +1262,8 @@ void prepare_costumes(const Pack& pack, uint32_t donor, size_t slot) {
     }
 }
 
+#include "native_costumes.inc"
+
 // ------------------------------------------------------------------ extra bones (Kazumi's tiger)
 
 // A fighter's extra bones (OPT bones, numbered in their names: `cha:OPT600_..`)
@@ -1469,6 +1488,7 @@ void prepare_roster() {
         fs::is_regular_file(armor / "keys" / "f1e8d23d.bin", ec)) {
         add_shared(armor);
     }
+    prepare_native_costumes(directory);
     if (!g_active) return;
     add_shared(directory / "shared");
     patch_sounds();
@@ -1545,6 +1565,10 @@ PPC_FUNC(sub_0209506C) {
     // They are not player identities: loadPlayer indexes its model cache by
     // the returned tuple's id (020A0488), while the player uses the base id.
     // Keep the outfit code and row, but attach its body to the actual fighter.
+    if (const auto native = g_native_ids.find(load(result)); native != g_native_ids.end()) {
+        store(result, native->second);
+        return;
+    }
     const auto it = g_outfit_ids.find(load(result));
     if (it == g_outfit_ids.end()) return;
     const Added& fighter = g_added[it->second];
@@ -1571,14 +1595,22 @@ PPC_FUNC(sub_02091898) {
         for (const auto& outfit : g_added[k].outfits)
             if (outfit.id == body_id) selected = &outfit;
     }
+    uint32_t selected_id = k >= 0 ? g_added[k].id : 0;
+    uint32_t selected_row = k >= 0 ? g_added[k].row : 0;
+    if (const auto owner = g_native_ids.find(body_id); owner != g_native_ids.end() && owner->second == load(tuple)) {
+        const auto& native = g_native.at(owner->second).fighter;
+        for (const auto& outfit : native.outfits) if (outfit.id == body_id) selected = &outfit;
+        selected_id = native.id;
+        selected_row = native.row;
+    }
     const uint32_t fighter_id = load(tuple);
     if (selected) {
         // All fighter codes/names here are inline three-byte strings. Use a
         // private tuple so the shared master entry keeps its base identity.
         static const uint32_t body = system_alloc(72);
         std::memcpy(guest_pointer(body), guest_pointer(tuple), 72);
-        store(body, g_added[k].id);
-        store(body + 4, g_added[k].row);
+        store(body, selected_id);
+        store(body + 4, selected_row);
         guest_call(ctx, base, sub_065E8604, {body + 8, selected->code_string});
         guest_call(ctx, base, sub_065E8604, {body + 40, selected->code_string});
         ctx.r[4] = body;
@@ -1594,9 +1626,12 @@ PPC_FUNC(sub_02091898) {
 void register_added(PPCContext& ctx, uint8_t* base) {
     static const uint32_t scratch = system_alloc(128);
     const uint32_t code = scratch, key = scratch + 32, name = scratch + 64, text = scratch + 96;
-    for (const Added& original : g_added) {
+    std::vector<Added> originals = g_added;
+    for (const auto& [id, native] : g_native) originals.push_back(native.fighter);
+    for (const Added& original : originals) {
         if (!original.active) continue;
-        std::vector<Added> bodies{original};
+        std::vector<Added> bodies;
+        if (original.id >= kFirstAddedId) bodies.push_back(original);
         for (const auto& outfit : original.outfits) {
             Added body = original;
             body.code = outfit.code;
@@ -1621,11 +1656,23 @@ void register_added(PPCContext& ctx, uint8_t* base) {
                 {9, part_pack(original.code, 2)}, {10, key_of(added.code + "/10")}, {11, part_pack(original.code, 3)},
                 {13, key_of(added.code + "/13")}, {15, part_pack(original.code, 1)}, {12, part_pack(original.code, 2)}};
             for (const auto& [t, k] : keys) {
-                store(key, k);
+                uint32_t registered_key = k;
+                if (const auto original_keys = g_original_part_keys.find(added.code);
+                    original_keys != g_original_part_keys.end()) {
+                    if (const auto part = original_keys->second.find(t); part != original_keys->second.end())
+                        registered_key = part->second;
+                }
+                store(key, registered_key);
                 guest_call(ctx, base, sub_0663C34C, {registry, code, t, key});
             }
             for (uint32_t i = 0; i < 20; ++i) {
-                store(key, key_of(added.code + "/14/" + std::to_string(i)));
+                uint32_t texture_key = key_of(added.code + "/14/" + std::to_string(i));
+                if (const auto original_keys = g_original_texture_keys.find(added.code);
+                    original_keys != g_original_texture_keys.end()) {
+                    if (const auto texture = original_keys->second.find(i); texture != original_keys->second.end())
+                        texture_key = texture->second;
+                }
+                store(key, texture_key);
                 guest_call(ctx, base, sub_0663D644, {registry, code, 14, key, i});
             }
             guest_call(ctx, base, sub_0661CF78, {code, 0});
@@ -1811,6 +1858,7 @@ PPC_FUNC(sub_044BE1EC_orig);
 PPC_FUNC(sub_044BE1EC) {
     const int k = slot_of_record(ctx.r[5]);
     if (k < 0) {
+        if (load_native_costume(ctx, base)) return;
         g_outfit_bodies.remember(ctx.r[4], 0, 0);
         sub_044BE1EC_orig(ctx, base);
         return;
@@ -1974,6 +2022,7 @@ PPC_FUNC(sub_033E2530) {
         g_picks[number][member] = k >= 0 ? g_added[k].id : 0;
         const uint32_t outfit = g_outfit_cursor == player ? g_outfit_choice : 0;
         g_outfit_picks[number][member] = k >= 0 && outfit < g_added[k].outfits.size() ? outfit : 0;
+        g_native_picks[number][member] = g_outfit_cursor == player ? g_native_choice : 0;
     }
     fix_side_ids();
 }
@@ -3103,6 +3152,16 @@ PPC_FUNC(sub_06F046D4) {
 // the place of Paul's row while the function reads it.
 PPC_FUNC(sub_0580D690_orig);
 PPC_FUNC(sub_0580D690) {
+    if (const auto native = g_native.find(ctx.r[4]); native != g_native.end()) {
+        const uint32_t address = kCostumeLists + 8 * ctx.r[4];
+        const uint32_t old_list = load(address), old_count = load(address + 4);
+        store(address, native->second.entries);
+        store(address + 4, native->second.count);
+        sub_0580D690_orig(ctx, base);
+        store(address, old_list);
+        store(address + 4, old_count);
+        return;
+    }
     const int k = slot_of_id(ctx.r[4]);
     if (k < 0 || g_costumes[k].entries == 0) {
         sub_0580D690_orig(ctx, base);
@@ -3125,6 +3184,13 @@ std::vector<uint32_t> g_costume_places; // what the added fighters' places of kC
 void lend_costume_keys(bool on) {
     if (on && g_costume_lent++ != 0) return;
     if (!on && --g_costume_lent != 0) return;
+    for (auto& [id, native] : g_native) {
+        const uint32_t place = kCostumePreviews + 4 * id;
+        if (on) {
+            native.saved_key = load(place);
+            store(place, native.key);
+        } else store(place, native.saved_key);
+    }
     g_costume_places.resize(g_added.size());
     for (size_t k = 0; k < g_added.size(); ++k) {
         if (!g_added[k].active || g_costumes[k].key == 0) continue;
@@ -3154,6 +3220,21 @@ PPC_FUNC(sub_033E265C) {
     const uint32_t cursor = ctx.r[4];
     const int k = slot_of_id(ctx.r[7]);
     const uint32_t old_cursor = g_outfit_cursor, old_choice = g_outfit_choice;
+    const uint32_t old_native = g_native_choice;
+    g_native_choice = 0;
+    if (const auto native = g_native.find(ctx.r[7]); native != g_native.end() && outfit_menu::confirming(ctx.lr)) {
+        const auto menu = g_native_choosers.find(cursor);
+        const auto layout = menu != g_native_choosers.end() && menu->second.fighter == ctx.r[7]
+            ? menu->second.layout : outfit_menu::NativePage{native->second.native_count, native->second.fighter.outfits.size()};
+        const size_t choice = layout.outfit(ctx.r[8]);
+        if (choice < native->second.fighter.outfits.size()) {
+            g_native_choice = native->second.fighter.outfits[choice].id;
+            if (std::getenv("TTT2_TRACE_ROSTER"))
+                std::fprintf(stderr, "ttt2: native costume: confirmed extra preset %zu (%s)\n", choice + 1,
+                    native->second.fighter.outfits[choice].code.c_str());
+            ctx.r[8] = 1; // native equipment style, with the chosen complete body's XML
+        }
+    }
     g_outfit_cursor = cursor;
     g_outfit_choice = k >= 0 && ctx.r[8] > 0 && ctx.r[8] <= g_added[k].outfits.size() ? ctx.r[8] - 1 : 0;
     // Opening and confirming use this same function. Only confirmation may
@@ -3172,6 +3253,7 @@ PPC_FUNC(sub_033E265C) {
     sub_033E265C_orig(ctx, base);
     g_outfit_cursor = old_cursor;
     g_outfit_choice = old_choice;
+    g_native_choice = old_native;
     lend_costume_keys(false);
     if (lend) {
         set_mask_bit(cursor, static_cast<uint32_t>(k), g_lent_bit);
@@ -3237,12 +3319,25 @@ PPC_FUNC(sub_02669380) {
 PPC_FUNC(sub_033E3460_orig);
 PPC_FUNC(sub_033E3460) {
     const uint32_t cursor = ctx.r[3];
+    const uint32_t native_id = ctx.r[4];
     const int k = slot_of_id(ctx.r[4]);
     const bool added = k >= 0 && g_costumes[k].key != 0;
     const bool pending = load8(cursor + kChooserPending) != 0;
     lend_costume_keys(true);
     sub_033E3460_orig(ctx, base);
     lend_costume_keys(false);
+    if (pending && !load8(cursor + kChooserPending)) {
+        g_native_choosers.erase(cursor);
+        if (const auto native = g_native.find(native_id); native != g_native.end()) {
+            NativeChooser menu;
+            menu.fighter = native_id;
+            menu.layout = {native->second.native_count, native->second.fighter.outfits.size()};
+            if (load8(cursor + kChooserCount) == menu.layout.count()) {
+                std::memcpy(menu.entries.data(), guest_pointer(cursor + kChooserEntries), menu.layout.count() * 16);
+                g_native_choosers[cursor] = std::move(menu);
+            }
+        }
+    }
     if (!added || !pending || load8(cursor + kChooserPending) != 0) return; // not built this time
     const uint32_t count = load8(cursor + kChooserCount);
     uint32_t kept = 0;
@@ -3251,6 +3346,46 @@ PPC_FUNC(sub_033E3460) {
     if (!g_added[k].outfits.empty() && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
                      kept, g_added[k].code.c_str());
+}
+
+// The native chooser already uses left/right. Up/down turn only the imported
+// page, reusing loaded preview IDs and retaining the native/custom entry records.
+// No guest allocation or chooser rebuild is needed, and mirror cursors are separate.
+PPC_FUNC(sub_033E39B0_orig);
+PPC_FUNC(sub_033E39B0) {
+    const uint32_t cursor = ctx.r[3];
+    const auto found = g_native_choosers.find(cursor);
+    if (found != g_native_choosers.end() && !load8(cursor + kChooserPending)) {
+        auto& menu = found->second;
+        const uint32_t up = load(0x10708ad4) | load(0x10708a94);
+        const uint32_t down = load(0x10708acc) | load(0x10708a8c);
+        const bool previous = (ctx.r[5] & up) != 0, next = (ctx.r[5] & down) != 0;
+        if (menu.layout.pages() > 1 && previous != next) {
+            const auto old = menu.layout;
+            menu.layout.turn(next);
+            const auto page = menu.layout;
+            const size_t initial = std::min(page.capacity(), page.extras);
+            const uint32_t selected = load(cursor + 84);
+            for (size_t i = 0; i < page.visible(); ++i) {
+                const uint32_t entry = cursor + kChooserEntries + 16 * (page.originals + i);
+                std::memcpy(guest_pointer(entry), menu.entries.data() + 16 * page.originals, 16);
+                // The UI loader assigns consecutive picture IDs to the complete container.
+                const uint32_t first = load(entry + 8);
+                store(entry + 8, first + static_cast<uint32_t>(page.offset() + i));
+            }
+            std::memcpy(guest_pointer(cursor + kChooserEntries + 16 * (page.originals + page.visible())),
+                menu.entries.data() + 16 * (page.originals + initial), 5 * 16);
+            store8(cursor + kChooserCount, static_cast<uint8_t>(page.count()));
+            const size_t position = selected >= old.originals + old.visible()
+                ? page.originals + page.visible() + selected - old.originals - old.visible()
+                : std::min<size_t>(selected, page.originals + page.visible() - 1);
+            store(cursor + 84, static_cast<uint32_t>(std::min(position, page.count() - 1)));
+            if (std::getenv("TTT2_TRACE_ROSTER"))
+                std::fprintf(stderr, "ttt2: native costume page: cursor %08x page %zu/%zu, %zu entries\n",
+                    cursor, page.page + 1, page.pages(), page.count());
+        }
+    }
+    sub_033E39B0_orig(ctx, base);
 }
 
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)

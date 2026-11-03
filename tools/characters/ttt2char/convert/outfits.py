@@ -51,7 +51,8 @@ def definition(paks, base, costume):
     meshes = dict(base.MESHES)
     categories = {'Face': 'fac', 'Lower': 'bdl', 'Upper': 'bdu',
                   'Hair': 'har', 'Face_Hair': 'fah', 'Head': 'hed', 'Full_Body': 'bdf',
-                  'Full_Head': 'hef', 'Glasses': 'gla', 'Hair_Acc': 'oph', 'Lower_Acc': 'tail', 'Extra': 'ext'}
+                  'Full_Head': 'hef', 'Glasses': 'gla', 'Hair_Acc': 'oph', 'Lower_Acc': 'tail', 'Extra': 'ext',
+                  'Upper_Acc': 'opu', 'Make_Up': 'mak', 'Base': 'base'}
     seen = set()
     for item in items:
         # Some T7 items (Katarina's face) omit the default MeshType.
@@ -66,6 +67,12 @@ def definition(paks, base, costume):
         seen.add(path.lower())
         category = next((tag for folder, tag in categories.items()
                          if '/%s/' % folder.lower() in path.lower()), None)
+        if category is None and '/dramadata/itemmesh/' in path.lower():
+            # Story-only sets (Lee's demo Violet) use their part tag in the
+            # mesh name rather than the normal wearable category directories.
+            stem = path.rsplit('/', 1)[-1].lower()
+            category = next((tag for tag in ('bdl', 'bdu', 'fac', 'har', 'fah', 'bdf', 'hef', 'hed', 'gla', 'oph', 'opu', 'mak')
+                             if '_' + tag + '_' in stem or stem.endswith('_' + tag)), None)
         if category is None:
             raise ValueError('unsupported preset mesh category: %s' % path)
         if category == 'ext' and '_har' in path.lower():
@@ -75,8 +82,8 @@ def definition(paks, base, costume):
             tag += str(len(parts))
         parts.append((tag, path))
         parent = meshes[category][1] if category in meshes else (
-            'KOSHI_jnt' if category in ('bdf', 'bdl', 'tail') else
-            'MUNE2_jnt' if category == 'bdu' else 'ATAMA_jnt_assist')
+            'KOSHI_jnt' if category in ('bdf', 'bdl', 'tail', 'base') else
+            'MUNE2_jnt' if category in ('bdu', 'opu') else 'ATAMA_jnt_assist')
         meshes.setdefault(tag, (base.CODE + '_' + tag, parent, 0 if category == 'bdf' else 50 + len(parts)))
     if not parts:
         raise ValueError('preset has no skeletal meshes: %s' % costume)

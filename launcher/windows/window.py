@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 import keys
 import look
 import self_update
-from backend import built_by, importer, installed_by
+from backend import built_by, importer, installed_by, native_runtime_ready, swimsuit_runtime_ready
 from look import (BAD, CARD_LINE, DIM, HEADER, HEADER_LINE, LIST, LOG, NOTICE, NOTICE_ICON, OK, ROW_LINE, TASK,
                   TASK_LINE, TEXT, WARN, WINDOW)
 
@@ -31,7 +31,10 @@ RESOLUTIONS = [('auto', 'Automatic'), ('1280x720', '1280 × 720'), ('1920x1080',
                ('2560x1440', '2560 × 1440'), ('3840x2160', '3840 × 2160'), ('5120x2880', '5120 × 2880')]
 TASK_TITLES = dict(setup='Setting up the game', build='Building the game', install='Installing the game',
                    update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher',
-                   files='Updating the launcher')
+                   files='Updating the launcher', **{'native-import': 'Importing costume presets',
+                                                    'native-remove': 'Removing costume presets',
+                                                    'swimsuit-import': 'Restoring swimsuit presets',
+                                                    'swimsuit-remove': 'Removing swimsuit presets'})
 FOLDERS = [('source', 'Wii U archive', 'Your European Wii U .wua with update v16', False),
            ('title', 'Extracted Wii U title', 'For development imports, instead of an installed game', True),
            ('install', 'Installation folder', 'Where Set Up Game installs the game', True),
@@ -485,9 +488,161 @@ class Window:
             self.note(card, 'info', ('%s adds %s: Update the launcher to get them.' % (self.branch, names)) if self.branch
                       else 'Main adds %s: they come with the next release.' % names)
         self.outfits_line(card)
+        self.native_costumes_line(card)
+        self.swimsuits_line(card)
         for game in ('tekken7', 'tekken8'):
             tk.Frame(card, bg=CARD_LINE, height=1).pack(fill='x', pady=(px(18), px(16)))
             self.show_game_characters(card, game)
+
+    def native_costumes_line(self, card):
+        L, px = self.look, self.look.px
+        row = L.frame(card)
+        row.pack(fill='x', pady=(px(12), 0))
+        L.label(row, 'Native roster · Tekken 7 costumes', 'card').pack(side='left')
+        button = L.button(row, 'Choose presets…', self.choose_native_costumes)
+        button.pack(side='right')
+        ready = bool(self.settings.installed() and self.readable('tekken7'))
+        button.configure(state='normal' if ready and not self.busy() else 'disabled')
+        L.label(card, 'Adds Tekken 7 outfits to 34 native fighters while keeping their Tag 2 movesets.', 'small',
+                wrap=True).pack(fill='x', pady=(px(4), 0))
+        if self.settings.installed() and not native_runtime_ready(self.settings):
+            self.note(card, 'warning', 'Roster costumes need the updated experiment runtime. Build/update the game first.', WARN)
+            build = L.button(card, 'Build costume-enabled game', lambda: self.start('upgrade'))
+            build.pack(anchor='w', pady=(px(6), 0))
+            build.configure(state='disabled' if self.busy() else 'normal')
+
+    def swimsuits_line(self, card):
+        L, px = self.look, self.look.px
+        row = L.frame(card)
+        row.pack(fill='x', pady=(px(12), 0))
+        L.label(row, 'Native roster · Swimsuit presets', 'card').pack(side='left')
+        button = L.button(row, 'Choose swimsuits…', self.choose_swimsuits)
+        button.pack(side='right')
+        button.configure(state='normal' if self.settings.installed() and not self.busy() else 'disabled')
+        L.label(card, 'Restore 48 swimwear presets for 45 fighters from your Wii U game. No other game needed.',
+                'small', wrap=True).pack(fill='x', pady=(px(4), 0))
+        if self.settings.installed() and not swimsuit_runtime_ready(self.settings):
+            self.note(card, 'warning', 'Update the game to enable recovered swimsuit presets.', WARN)
+            update = L.button(card, 'Build swimsuit-enabled game', lambda: self.start('upgrade'))
+            update.pack(anchor='w', pady=(px(6), 0))
+            update.configure(state='disabled' if self.busy() else 'normal')
+
+    def choose_swimsuits(self):
+        sys.path.insert(0, str(self.settings.root / 'tools/characters'))
+        from ttt2char.swimsuits import PROFILES, installed
+        present = set(installed(self.settings.values['packs']))
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Native roster — Swimsuit presets')
+        dialog.transient(self.root)
+        body = ttk.Frame(dialog, padding=20)
+        body.pack(fill='both', expand=True)
+        ttk.Label(body, text='Choose fighters whose swimwear you want to restore.').pack(anchor='w')
+        ttk.Label(body, text='Keeps original costumes, Tekken 7 imports and five custom slots.').pack(anchor='w', pady=(4, 0))
+        ttk.Label(body, text='Swimsuits follow imported outfits; Up / Down changes costume pages.').pack(anchor='w')
+        ttk.Label(body, text='Preview images use each fighter’s default costume. Restart after changes.').pack(anchor='w', pady=(0, 10))
+        frame = ttk.Frame(body)
+        frame.pack(fill='both', expand=True)
+        listing = tk.Listbox(frame, selectmode='extended', exportselection=False, width=62, height=18)
+        scroll = ttk.Scrollbar(frame, orient='vertical', command=listing.yview)
+        listing.configure(yscrollcommand=scroll.set)
+        listing.pack(side='left', fill='both', expand=True)
+        scroll.pack(side='right', fill='y')
+        for i, profile in enumerate(PROFILES):
+            listing.insert('end', '%s · %d preset(s)%s' % (profile['name'], len(profile['items']),
+                           ' · installed' if profile['code'] in present else ''))
+            if not present or profile['code'] in present: listing.selection_set(i)
+        note = ttk.Label(body)
+        note.pack(anchor='w', pady=(10, 6))
+        controls = ttk.Frame(body)
+        controls.pack(fill='x')
+        def names(): return [PROFILES[i]['code'] for i in listing.curselection()]
+        def run(remove=False):
+            selected = names()
+            if not selected: return
+            self.start('swimsuit-remove' if remove else 'swimsuit-import', selected)
+            dialog.destroy()
+        install = ttk.Button(controls, text='Restore / update selected', command=lambda: run(False))
+        install.pack(side='right')
+        remove = ttk.Button(controls, text='Remove selected swimsuits', command=lambda: run(True))
+        remove.pack(side='left')
+        def changed(*_):
+            selected = names()
+            note.configure(text='%d fighters selected · %d installed' % (len(selected), len(present)))
+            install.configure(state='normal' if selected and swimsuit_runtime_ready(self.settings) else 'disabled')
+            remove.configure(state='normal' if present.intersection(selected) else 'disabled')
+        def select_all():
+            listing.selection_set(0, 'end')
+            changed()
+        ttk.Button(body, text='Select all fighters', command=select_all).pack(anchor='w', pady=(8, 0))
+        listing.bind('<<ListboxSelect>>', changed)
+        changed()
+        dialog.grab_set()
+
+    def choose_native_costumes(self):
+        sys.path.insert(0, str(self.settings.root / 'tools/characters'))
+        from ttt2char.native_costumes import installed
+        from ttt2char.native_profiles import PROFILES, presets, page_size
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Native roster — Tekken 7 costumes')
+        dialog.transient(self.root)
+        body = ttk.Frame(dialog, padding=20)
+        body.pack(fill='both', expand=True)
+        ttk.Label(body, text='Choose a fighter and the Tekken 7 presets to add.').pack(anchor='w')
+        fighter = ttk.Combobox(body, state='readonly', width=45, values=[p['name'] for p in PROFILES])
+        fighter.current(0)
+        fighter.pack(fill='x', pady=(8, 8))
+        ttk.Label(body, text='Up / Down changes pages in game. Original outfits and five custom slots are kept.').pack(anchor='w')
+        ttk.Label(body, text='Kunimitsu, Slim Bob and Forest Law remain separate.').pack(anchor='w', pady=(3, 8))
+        boxes = ttk.Frame(body)
+        boxes.pack(fill='both', expand=True)
+        count = ttk.Label(body)
+        count.pack(anchor='w', pady=(10, 6))
+        choices = {}
+        def target(): return PROFILES[fighter.current()]['code']
+        def changed(*_):
+            size = sum(value.get() for value in choices.values())
+            capacity = page_size(target())
+            count.configure(text='%d selected · %d page(s), %d imported outfits per page. Restart after importing.' %
+                            (size, (size + capacity - 1) // capacity, capacity))
+            apply.configure(state='normal' if size and native_runtime_ready(self.settings) else 'disabled')
+        def load_choices(*_):
+            for widget in boxes.winfo_children(): widget.destroy()
+            choices.clear()
+            current = installed(self.settings.values['packs'], target())
+            selected = set(current or [name for name, _ in presets(target())])
+            for index, (preset, label) in enumerate(presets(target())):
+                value = tk.BooleanVar(value=preset in selected)
+                choices[preset] = value
+                ttk.Checkbutton(boxes, text=label, variable=value).grid(row=index % 9, column=index // 9,
+                    sticky='w', padx=(0, 15), pady=3)
+                value.trace_add('write', changed)
+            remove.configure(state='normal' if current else 'disabled')
+            changed()
+        def select_all():
+            for value in choices.values(): value.set(True)
+        ttk.Button(body, text='Select all for this fighter', command=select_all).pack(anchor='w', pady=(0, 8))
+        buttons = ttk.Frame(body)
+        buttons.pack(fill='x')
+        def import_presets():
+            names = [target() + ':' + name for name, value in choices.items() if value.get()]
+            self.start('native-import', names)
+            dialog.destroy()
+        apply = ttk.Button(buttons, text='Import / update fighter', command=import_presets)
+        apply.pack(side='right')
+        def remove_presets():
+            self.start('native-remove', [target()])
+            dialog.destroy()
+        remove = ttk.Button(buttons, text='Remove this fighter’s imports', command=remove_presets)
+        remove.pack(side='left')
+        def import_roster():
+            self.start('native-import', ['all'])
+            dialog.destroy()
+        bulk = ttk.Button(body, text='Import all supported roster presets (long task)', command=import_roster)
+        bulk.pack(fill='x', pady=(14, 0))
+        bulk.configure(state='normal' if native_runtime_ready(self.settings) else 'disabled')
+        fighter.bind('<<ComboboxSelected>>', load_choices)
+        load_choices()
+        dialog.grab_set()
 
     def show_game_characters(self, card, game):
         L, px = self.look, self.look.px
@@ -854,6 +1009,11 @@ class Window:
             if action in ('import', 'remove'):
                 if self.game and self.game.poll() is None: raise ValueError('Close the game before changing its characters.')
                 self.settings.import_command(names, action == 'remove')
+            if action in ('native-import', 'native-remove'):
+                if self.game and self.game.poll() is None: raise ValueError('Close the game before changing costumes.')
+                self.settings.native_costume_command(names, action == 'native-remove')
+            if action in ('swimsuit-import', 'swimsuit-remove'):
+                self.settings.swimsuit_command(names, action == 'swimsuit-remove')
             if action in ('install', 'update'): self.settings.installer_command(action == 'update')
             self.settings.save()
             logs = Path(self.settings.values['data']) / 'logs'
@@ -888,7 +1048,7 @@ class Window:
         self.task_progress.configure(mode='indeterminate')
         self.task_progress.pack(fill='x', pady=(self.look.px(10), 0), before=self.details_button)
         self.task_progress.start(12)
-        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher', 'files')
+        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher', 'files', 'native-import', 'native-remove', 'swimsuit-import', 'swimsuit-remove')
                                    else 'disabled')
         if not self.task_panel.winfo_ismapped(): self.task_panel.pack(side='bottom', fill='x', before=self.body)
         self.show_all()
@@ -962,7 +1122,11 @@ class Window:
             title = {'import': ('Updated ' if task['updating'] else 'Added ') + shown, 'remove': 'Removed ' + shown,
                      'setup': 'The game is set up', 'build': 'The game is built', 'install': 'The game is installed',
                      'update': 'The installed game is updated', 'upgrade': 'The game is updated',
-                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date'}[action]
+                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date',
+                     'native-import': 'Costume presets imported — restart the game',
+                     'native-remove': 'Imported costume presets removed',
+                     'swimsuit-import': 'Swimsuit presets restored — restart the game',
+                     'swimsuit-remove': 'Swimsuit presets removed'}[action]
             detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
@@ -1349,6 +1513,33 @@ class Window:
             self.dlc_open = True
             self.show_characters()
             self.root.update()
+            self.choose_native_costumes()
+            self.root.update()
+            costume_dialog = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
+            costume_boxes = [w for w in walk(costume_dialog) if isinstance(w, ttk.Checkbutton)]
+            assert len(costume_boxes) == 10, len(costume_boxes)
+            chooser = next(w for w in walk(costume_dialog) if isinstance(w, ttk.Combobox))
+            assert len(chooser.cget('values')) == 34
+            from ttt2char.native_profiles import PROFILES
+            for index, profile in enumerate(PROFILES):
+                chooser.current(index)
+                chooser.event_generate('<<ComboboxSelected>>')
+                self.root.update()
+                boxes = [w for w in walk(costume_dialog) if isinstance(w, ttk.Checkbutton)]
+                assert len(boxes) == len(profile['presets']), (profile['code'], len(boxes))
+                if native_runtime_ready(self.settings):
+                    apply = next(w for w in walk(costume_dialog) if isinstance(w, ttk.Button) and w.cget('text') == 'Import / update fighter')
+                    assert not apply.instate(['disabled']), profile['code']
+            costume_dialog.destroy()
+            self.choose_swimsuits()
+            self.root.update()
+            swimsuit_dialog = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
+            swimsuit_list = next(w for w in walk(swimsuit_dialog) if isinstance(w, tk.Listbox))
+            assert swimsuit_list.size() == 45, swimsuit_list.size()
+            assert len(swimsuit_list.curselection()) > 0
+            restore = next(w for w in walk(swimsuit_dialog) if isinstance(w, ttk.Button) and w.cget('text') == 'Restore / update selected')
+            if swimsuit_runtime_ready(self.settings): assert not restore.instate(['disabled'])
+            swimsuit_dialog.destroy()
             rows = sum(1 for w in walk(self.characters_card) if isinstance(w, tk.Label) and w.cget('text') in
                        {f['display'] for f in (self.status or {}).get('fighters', [])})
             self.open_settings()

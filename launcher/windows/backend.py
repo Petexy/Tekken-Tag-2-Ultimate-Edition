@@ -16,7 +16,7 @@ ANSI = 'mbcs' if os.name == 'nt' else 'cp1252'
 
 
 def decoded(data):
-    """Bytes a program wrote: UTF-8, else (an à in a path, say) the ANSI code page."""
+    """Bytes a program wrote: UTF-8, else (an Ã  in a path, say) the ANSI code page."""
     try:
         return data.decode('utf-8')
     except UnicodeDecodeError:
@@ -68,7 +68,7 @@ class Settings:
 
     def found_install(self, recorded):
         """The install the setting misses: the installer's record of its folder, else the folder the setting names
-        with the letters a launcher read wrongly (an à became U+FFFD); '' when neither is one."""
+        with the letters a launcher read wrongly (an Ã  became U+FFFD); '' when neither is one."""
         candidates = [recorded] if recorded else []
         if '\ufffd' in self.values['install']:
             candidates += sorted(glob.glob(glob.escape(self.values['install']).replace('\ufffd', '?')))
@@ -135,6 +135,57 @@ class Settings:
         return [sys.executable, '-u', str(self.root / 'tools/characters/import_character.py'), *names,
                 '--game', str(self.title()), '--out', self.values['packs'], '--progress',
                 *(['--remove'] if remove else ['--outfits', outfits])]
+
+    def native_costume_command(self, names, remove=False):
+        sys.path.insert(0, str(self.root / 'tools/characters'))
+        from ttt2char.native_costumes import selection
+        from ttt2char.native_profiles import request
+        all_roster = names == ['all'] and not remove
+        fighter, selected = ('pau', []) if all_roster else request(names, remove)
+        if not remove:
+            if not all_roster: selection(selected, fighter)
+            if not native_runtime_ready(self):
+                raise ValueError('Build and update the costume-enabled game before importing roster presets.')
+        return [sys.executable, '-u', str(self.root / 'tools/characters/import_native_costumes.py'),
+                '--game', str(self.title()), '--out', self.values['packs'],
+                *(['--all-roster'] if all_roster else ['--fighter', fighter, *(['--remove'] if remove else selected)])]
+
+    def swimsuit_command(self, names, remove=False):
+        sys.path.insert(0, str(self.root / 'tools/characters'))
+        from ttt2char.swimsuits import BY_CODE
+        if not names or set(names) - BY_CODE.keys():
+            raise ValueError('Select one or more supported swimsuit fighters.')
+        if not remove and not swimsuit_runtime_ready(self):
+            raise ValueError('Build/update the swimsuit-enabled game first.')
+        return [sys.executable, '-u', str(self.root / 'tools/characters/import_swimsuits.py'),
+                '--game', str(self.title()), '--out', self.values['packs'],
+                *(['--remove'] if remove else []), *names]
+
+
+def swimsuit_runtime_ready(settings):
+    import mmap
+    installed = settings.installed()
+    if not installed: return False
+    try:
+        with (installed / 'TTT2 Ultimate.exe').open('rb') as stream:
+            with mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as image:
+                return image.find(b'ttt2: Wii U swimsuits v1:') >= 0
+    except (OSError, ValueError):
+        return False
+
+
+def native_runtime_ready(settings):
+    """Capability check on the actual installed binary, rather than a launcher version."""
+    import mmap
+    installed = settings.installed()
+    if not installed:
+        return False
+    try:
+        with (installed / 'TTT2 Ultimate.exe').open('rb') as stream:
+            with mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as image:
+                return image.find(b'ttt2: native roster costumes v2:') >= 0
+    except (OSError, ValueError):
+        return False
 
 
 def failure(lines):
@@ -236,6 +287,20 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         self_update.update_files(settings.root, branch, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
+    elif action in ('swimsuit-import', 'swimsuit-remove'):
+        from setup_game import ensure_importer
+        ensure_importer(settings, run_command)
+        command = settings.swimsuit_command(names, action == 'swimsuit-remove')
+        import runpy
+        sys.argv = command[2:]
+        runpy.run_path(command[2], run_name='__main__')
+    elif action in ('native-import', 'native-remove'):
+        from setup_game import ensure_importer
+        ensure_importer(settings, run_command)
+        command = settings.native_costume_command(names, action == 'native-remove')
+        import runpy
+        sys.argv = command[2:]
+        runpy.run_path(command[2], run_name='__main__')
     elif action in ('import', 'remove'):
         from setup_game import ensure_importer
         ensure_importer(settings, run_command)

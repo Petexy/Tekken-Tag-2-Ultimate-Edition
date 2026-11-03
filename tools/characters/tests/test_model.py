@@ -104,5 +104,35 @@ class Slots(unittest.TestCase):
         self.assertFalse(model.normal_slot(dict(fmt=2, mean=None), strict=False))
 
 
+
+
+class BearMaterialTests(unittest.TestCase):
+    def test_two_channel_bear_material_keeps_body_albedo(self):
+        import numpy as np
+        from ttt2char.convert import model
+        class Textures:
+            def linear(self, name):
+                return (np.full((2, 2, 3), .5, np.float32) if name == 'diffuse' else np.zeros((2, 2, 3), np.float32),
+                        np.ones((2, 2), np.float32))
+        eff = dict(base='M_CH_KumBase', textures={'DiffuseMap':'diffuse','MaskMap':'mask'}, scalars={},
+                   vectors={'Color01':dict(r=.3,g=.2,b=.1), 'Color02':dict(r=1.,g=1.,b=1.)})
+        rgb, alpha = model.bake_albedo(eff, Textures())
+        self.assertEqual(rgb.shape, (2, 2, 3))
+        self.assertTrue(np.isfinite(rgb).all())
+        self.assertTrue((alpha == 1).all())
+        self.assertNotIn('Color03', eff['vectors'])
+
+
+
+class DenseNativeModelTests(unittest.TestCase):
+    def test_splitting_keeps_all_triangles_and_shares_source_streams(self):
+        import numpy as np
+        triangles = np.arange(300, dtype=np.int64).reshape(-1, 3)
+        positions = np.zeros((300, 3))
+        parts = model.split_large_primitives([dict(tris=triangles, pos=positions, part='bdu')], triangles=40)
+        self.assertEqual([len(p['tris']) for p in parts], [40, 40, 20])
+        np.testing.assert_array_equal(np.concatenate([p['tris'] for p in parts]), triangles)
+        self.assertTrue(all(p['pos'] is positions for p in parts))
+
 if __name__ == '__main__':
     unittest.main()

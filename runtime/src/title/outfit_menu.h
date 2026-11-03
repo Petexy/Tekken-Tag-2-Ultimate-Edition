@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <array>
 #include <map>
@@ -14,6 +15,23 @@ namespace cafe::title::outfit_menu {
 // before our hook hides them. Ten presets therefore leave four such rows.
 constexpr size_t kMaxPresets = 14;
 static_assert(92 + 16 * kMaxPresets <= 324);
+
+// A page always repeats the native costumes and all five customization slots.
+// Only the imported portion changes; its absolute index is the body's identity.
+struct NativePage {
+    size_t originals, extras, page = 0;
+    constexpr size_t capacity() const { return kMaxPresets > originals + 5 ? kMaxPresets - originals - 5 : 0; }
+    constexpr size_t pages() const { return capacity() ? (extras + capacity() - 1) / capacity() : 0; }
+    constexpr size_t offset() const { return page * capacity(); }
+    constexpr size_t visible() const { return offset() < extras ? std::min(capacity(), extras - offset()) : 0; }
+    constexpr size_t count() const { return originals + visible() + 5; }
+    constexpr size_t outfit(uint32_t input) const {
+        return input > originals && input <= originals + visible() ? offset() + input - originals - 1 : extras;
+    }
+    constexpr void turn(bool forward) {
+        if (pages()) page = forward ? (page + 1) % pages() : (page + pages() - 1) % pages();
+    }
+};
 
 // Preflight the whole namespace before registering anything, including packs
 // appearing after an outfit owner. Reject both owners of a duplicate code.
@@ -61,6 +79,18 @@ constexpr bool confirming(uint32_t return_address) {
 constexpr uint32_t native_style(size_t outfit_count, uint32_t return_address, uint32_t input) {
     return outfit_count && confirming(return_address) ? 1 : input;
 }
+
+// Appended native-fighter presets follow the original entries. Other choices,
+// including all customization slots and opening the chooser, select no override.
+constexpr size_t native_outfit_index(size_t originals, size_t extras, uint32_t input, uint32_t return_address) {
+    return confirming(return_address) && input > originals && input <= originals + extras
+        ? input - originals - 1 : extras;
+}
+static_assert(native_outfit_index(3, 6, 4, 0x033E3B30) == 0);
+static_assert(native_outfit_index(3, 6, 9, 0x033E3BDC) == 5);
+static_assert(native_outfit_index(3, 6, 3, 0x033E3B30) == 6);
+static_assert(native_outfit_index(3, 6, 10, 0x033E3B30) == 6);
+static_assert(native_outfit_index(3, 6, 4, 0x033E2000) == 6);
 
 // Regression: forcing 1 for an opening request silently commits the fighter.
 static_assert(native_style(7, 0x033E2000, 0) == 0);

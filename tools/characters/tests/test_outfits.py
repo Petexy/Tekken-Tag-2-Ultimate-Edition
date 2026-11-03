@@ -34,6 +34,21 @@ class OutfitTests(unittest.TestCase):
         self.assertIn(katarina.TEKKEN7['parts'][0], variant.TEKKEN7['parts'])
         self.assertEqual(variant.MESHES['fac'], katarina.MESHES['fac'])
 
+    def test_story_only_costume_uses_explicit_mesh_part_tag(self):
+        base = types.SimpleNamespace(CODE='lee', MESHES={}, TEKKEN7={'merge_order': []})
+        path = '/Game/Character/DramaData/ItemMesh/LEE/T7_SK_demo_vio/Mesh/SK_CH_lee_bdl_demo_vio'
+        with patch.object(outfits.model, 'costume_items', return_value=[item(path)]):
+            variant = outfits.definition(None, base, '/Game/Demo')
+        self.assertEqual(variant.MESHES['bdl'][1], 'KOSHI_jnt')
+
+    def test_native_wings_and_makeup_use_their_body_regions(self):
+        base = types.SimpleNamespace(CODE='lil', MESHES={}, TEKKEN7={'merge_order': []})
+        with patch.object(outfits.model, 'costume_items', return_value=[
+                item('/Game/Meshes/lil/Upper_Acc/wing'), item('/Game/Meshes/lil/Make_Up/face')]):
+            variant = outfits.definition(None, base, '/Game/Sweetdevil')
+        self.assertEqual(variant.MESHES['opu'][1], 'MUNE2_jnt')
+        self.assertEqual(variant.MESHES['mak'][1], 'ATAMA_jnt_assist')
+
     def test_explicit_static_mesh_is_not_treated_as_skeletal(self):
         parts = [dict(item('/Game/Meshes/Face/face'), MeshType='StaticMeshSocket'),
                  item('/Game/Meshes/Upper/body')]

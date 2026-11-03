@@ -1,0 +1,75 @@
+ttt2: added the fighter kzm from /home/deck/.local/share/ttt2/characters/kzm (id 64)
+ttt2: added the fighter dnc from /home/deck/.local/share/ttt2/characters/dnc (id 65)
+ttt2: added the fighter ita from /home/deck/.local/share/ttt2/characters/ita (id 66)
+ttt2: added the fighter mrx from /home/deck/.local/share/ttt2/characters/mrx (id 67)
+ttt2: added the fighter crz from /home/deck/.local/share/ttt2/characters/crz (id 68)
+ttt2: added the fighter mut from /home/deck/.local/share/ttt2/characters/mut (id 69)
+ttt2: added the fighter ltn from /home/deck/.local/share/ttt2/characters/ltn (id 70)
+ttt2: added the fighter frv from /home/deck/.local/share/ttt2/characters/frv (id 71)
+ttt2: added the fighter arb from /home/deck/.local/share/ttt2/characters/arb (id 72)
+ttt2: added the fighter nsc from /home/deck/.local/share/ttt2/characters/nsc (id 73)
+ttt2: added the fighter nsb from /home/deck/.local/share/ttt2/characters/nsb (id 74)
+ttt2: added the fighter nsd from /home/deck/.local/share/ttt2/characters/nsd (id 75)
+ttt2: added the fighter kmi from /home/deck/.local/share/ttt2/characters/kmi (id 76)
+ttt2: added the fighter nsa from /home/deck/.local/share/ttt2/characters/nsa (id 77)
+ttt2: added the fighter mry from /home/deck/.local/share/ttt2/characters/mry (id 78)
+ttt2: added the fighter mrz from /home/deck/.local/share/ttt2/characters/mrz (id 79)
+ttt2: added the fighter rei from /home/deck/.local/share/ttt2/characters/rei (id 80)
+ttt2: loaded image, entry 0x08966B7C, 79564/205200 guest entries compiled
+ttt2: display: fullscreen no, resolution 1280x720, interpolation no, input delay no (from /home/deck/.config/ttt2/display.ini)
+ttt2: window: 640x360 pixels, windowed
+ttt2: keyboard: 19 of 19 keys from /home/deck/.config/ttt2/keyboard.ini
+ttt2: audio: ACP/ACP3X/ACP6x Audio Coprocessor Speaker
+[guest] Devname sim, sysDevName /vol/content
+[guest] Devname root, sysDevName /vol/content
+[guest] Devname usb0, sysDevName /vol/save/
+ttt2: GPU: AMD Custom GPU 0932 (RADV VANGOGH)
+ttt2: GPU: guest memory 0x10000000-0x4FFFFFFF imported
+ttt2: GPU: guest memory 0xF4000000-0xF5FFFFFF imported
+ttt2: GPU: rendering at 1280x720 (scale 1)
+ttt2: GPU: 60 frames/s (1 per frame the title renders)
+ttt2: GPU: presenting from a compute queue at times (a 90.00 Hz display)
+ttt2: GPU backend: Vulkan
+[guest] SWKBD: OSDynLoad_Acquire() use [80/3670016]
+[guest] OSDynLoad_Acquire() use [80]
+ttt2: gpu: 32.2 frames/s, 12 draws per frame (0 skipped), 2 targets, 15 textures, 6 shaders, 4 pipelines; 0.0 GPU waits, 0.0 ms waiting (0.6 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 91%
+ttt2: present: 33.0/s, interval mean 30.32 ms, 5% 11.16, 50% 17.69, 95% 33.30, max 1264.54; 331 more than 2 ms late, 44.86 ms late on average; lead 3.0 ms
+ttt2: gpu: 57.1 frames/s, 11 draws per frame (0 skipped), 2 targets, 19 textures, 6 shaders, 4 pipelines; 0.0 GPU waits, 0.0 ms waiting (0.5 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 57.2/s, interval mean 17.48 ms, 5% 10.03, 50% 16.90, 95% 25.39, max 34.27; 573 more than 2 ms late, 67.63 ms late on average; lead 2.9 ms
+ttt2: gpu: 45.7 frames/s, 221 draws per frame (0 skipped), 21 targets, 292 textures, 47 shaders, 58 pipelines; 0.0 GPU waits, 0.0 ms waiting (1.4 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 45.7/s, interval mean 21.89 ms, 5% 10.59, 50% 18.90, 95% 33.19, max 96.15; 457 more than 2 ms late, 19.80 ms late on average; lead 3.0 ms
+ttt2: gpu: 49.1 frames/s, 556 draws per frame (0 skipped), 34 targets, 318 textures, 49 shaders, 60 pipelines; 0.0 GPU waits, 0.0 ms waiting (1.6 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 97%
+ttt2: present: 49.0/s, interval mean 20.40 ms, 5% 10.18, 50% 17.92, 95% 28.40, max 391.01; 491 more than 2 ms late, 19.60 ms late on average; lead 2.9 ms
+ttt2: gpu: 54.7 frames/s, 558 draws per frame (0 skipped), 34 targets, 341 textures, 49 shaders, 60 pipelines; 0.0 GPU waits, 0.0 ms waiting (1.2 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 54.8/s, interval mean 18.26 ms, 5% 9.87, 50% 17.88, 95% 27.01, max 34.63; 548 more than 2 ms late, 17.41 ms late on average; lead 3.0 ms
+ttt2: input delay: 0 frames in place of the game's 2
+ttt2: gpu: 50.7 frames/s, 362 draws per frame (0 skipped), 99 targets, 521 textures, 77 shaders, 83 pipelines; 0.0 GPU waits, 0.0 ms waiting (1.3 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 94%
+ttt2: present: 50.4/s, interval mean 19.86 ms, 5% 9.92, 50% 17.90, 95% 33.94, max 197.55; 504 more than 2 ms late, 17.24 ms late on average; lead 3.1 ms
+ttt2: gpu: 37.2 frames/s, 153 draws per frame (0 skipped), 108 targets, 665 textures, 95 shaders, 98 pipelines; 0.0 GPU waits, 0.0 ms waiting (5.0 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 37.1/s, interval mean 26.92 ms, 5% 10.14, 50% 25.83, 95% 39.22, max 306.79; 372 more than 2 ms late, 16.66 ms late on average; lead 11.3 ms
+ttt2: gpu: 28.8 frames/s, 431 draws per frame (0 skipped), 120 targets, 829 textures, 169 shaders, 155 pipelines; 0.0 GPU waits, 0.0 ms waiting (4.7 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 26.6/s, interval mean 37.66 ms, 5% 24.23, 50% 27.08, 95% 35.95, max 1790.98; 288 more than 2 ms late, 16.40 ms late on average; lead 3.0 ms
+ttt2: gpu: 29.6 frames/s, 448 draws per frame (0 skipped), 146 targets, 873 textures, 189 shaders, 178 pipelines; 0.0 GPU waits, 0.0 ms waiting (4.5 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 32.7/s, interval mean 30.62 ms, 5% 24.12, 50% 27.14, 95% 37.10, max 271.04; 327 more than 2 ms late, 18.40 ms late on average; lead 3.0 ms
+ttt2: gpu: 35.4 frames/s, 389 draws per frame (0 skipped), 146 targets, 887 textures, 191 shaders, 179 pipelines; 0.0 GPU waits, 0.0 ms waiting (4.8 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 34.2/s, interval mean 29.21 ms, 5% 17.98, 50% 26.95, 95% 39.28, max 288.66; 343 more than 2 ms late, 17.92 ms late on average; lead 15.5 ms
+ttt2: gpu: 32.5 frames/s, 469 draws per frame (0 skipped), 146 targets, 893 textures, 192 shaders, 184 pipelines; 0.0 GPU waits, 0.0 ms waiting (4.9 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 33.2/s, interval mean 30.14 ms, 5% 17.87, 50% 28.27, 95% 39.07, max 257.99; 332 more than 2 ms late, 16.13 ms late on average; lead 10.9 ms
+ttt2: gpu: 32.3 frames/s, 621 draws per frame (0 skipped), 146 targets, 893 textures, 192 shaders, 185 pipelines; 0.0 GPU waits, 0.0 ms waiting (6.3 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 32.3/s, interval mean 31.01 ms, 5% 19.77, 50% 29.11, 95% 40.05, max 266.15; 323 more than 2 ms late, 15.86 ms late on average; lead 14.6 ms
+ttt2: gpu: 33.7 frames/s, 541 draws per frame (0 skipped), 146 targets, 893 textures, 192 shaders, 185 pipelines; 0.0 GPU waits, 0.0 ms waiting (6.2 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 34.4/s, interval mean 29.09 ms, 5% 20.30, 50% 28.68, 95% 38.33, max 62.48; 344 more than 2 ms late, 14.95 ms late on average; lead 13.1 ms
+ttt2: gpu: 34.6 frames/s, 512 draws per frame (0 skipped), 146 targets, 894 textures, 192 shaders, 185 pipelines; 0.0 GPU waits, 0.0 ms waiting (5.6 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 98%
+ttt2: present: 34.4/s, interval mean 29.09 ms, 5% 20.17, 50% 28.11, 95% 39.41, max 48.19; 345 more than 2 ms late, 17.01 ms late on average; lead 10.0 ms
+ttt2: gpu: 33.6 frames/s, 544 draws per frame (0 skipped), 146 targets, 909 textures, 194 shaders, 190 pipelines; 0.0 GPU waits, 0.0 ms waiting (6.3 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 33.5/s, interval mean 29.86 ms, 5% 26.51, 50% 27.93, 95% 36.31, max 410.13; 335 more than 2 ms late, 15.74 ms late on average; lead 6.0 ms
+ttt2: gpu: 34.9 frames/s, 462 draws per frame (0 skipped), 146 targets, 909 textures, 194 shaders, 190 pipelines; 0.0 GPU waits, 0.0 ms waiting (5.3 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 34.9/s, interval mean 28.65 ms, 5% 16.78, 50% 28.20, 95% 39.46, max 53.49; 350 more than 2 ms late, 15.31 ms late on average; lead 11.9 ms
+ttt2: gpu: 34.5 frames/s, 492 draws per frame (0 skipped), 146 targets, 909 textures, 194 shaders, 190 pipelines; 0.0 GPU waits, 0.0 ms waiting (5.6 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 99%
+ttt2: present: 34.5/s, interval mean 28.99 ms, 5% 19.11, 50% 27.99, 95% 42.08, max 49.04; 345 more than 2 ms late, 15.59 ms late on average; lead 10.1 ms
+ttt2: gpu: 38.2 frames/s, 323 draws per frame (0 skipped), 146 targets, 909 textures, 194 shaders, 190 pipelines; 0.0 GPU waits, 0.0 ms waiting (3.5 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 100%
+ttt2: present: 38.6/s, interval mean 25.93 ms, 5% 16.19, 50% 26.84, 95% 35.11, max 41.59; 386 more than 2 ms late, 16.30 ms late on average; lead 3.1 ms
+ttt2: gpu: 39.8 frames/s, 138 draws per frame (0 skipped), 146 targets, 914 textures, 194 shaders, 190 pipelines; 0.0 GPU waits, 0.0 ms waiting (2.3 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 100%
+ttt2: present: 39.9/s, interval mean 25.07 ms, 5% 10.43, 50% 24.96, 95% 38.45, max 43.39; 399 more than 2 ms late, 18.10 ms late on average; lead 9.0 ms
+ttt2: gpu: 36.3 frames/s, 459 draws per frame (0 skipped), 146 targets, 916 textures, 194 shaders, 191 pipelines; 0.0 GPU waits, 0.0 ms waiting (4.8 ms GPU busy) per frame; 0/0 extra frames blended (0 skipped: GPU behind, 0: command processor busy), 0.0 MB recorded; replay 0.0 ms (matching 0.0); command processor busy 100%
+ttt2: present: 35.8/s, interval mean 27.93 ms, 5% 24.08, 50% 27.41, 95% 35.80, max 50.36; 359 more than 2 ms late, 13.99 ms late on average; lead 5.4 ms

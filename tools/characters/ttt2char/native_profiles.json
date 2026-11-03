@@ -1,0 +1,697 @@
+[
+  {
+    "code": "pau",
+    "name": "Paul Phoenix",
+    "source": "pau",
+    "id": 0,
+    "originals": 3,
+    "sex": "male",
+    "index": 0,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "cb",
+      "cb_c1",
+      "cb_poncho",
+      "fire_jersey",
+      "ninjya",
+      "riders",
+      "riders_silver"
+    ]
+  },
+  {
+    "code": "law",
+    "name": "Marshall Law",
+    "source": "law",
+    "id": 1,
+    "originals": 4,
+    "sex": "male",
+    "index": 1,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "ditect_silver",
+      "ditective",
+      "dragon_jersey",
+      "glitter",
+      "glitter_c1",
+      "track"
+    ]
+  },
+  {
+    "code": "yos",
+    "name": "Yoshimitsu",
+    "source": "yos",
+    "id": 4,
+    "originals": 3,
+    "sex": "male",
+    "index": 2,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "hammer_silver",
+      "hammerhead",
+      "ho1",
+      "ho1_c1",
+      "kongo"
+    ]
+  },
+  {
+    "code": "xia",
+    "name": "Ling Xiaoyu",
+    "source": "xia",
+    "id": 7,
+    "originals": 4,
+    "sex": "female",
+    "index": 3,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "formal",
+      "formal_silver",
+      "magica",
+      "magica_c1",
+      "panda",
+      "tk4"
+    ]
+  },
+  {
+    "code": "ask",
+    "name": "Asuka Kazama",
+    "source": "ask",
+    "id": 24,
+    "originals": 4,
+    "sex": "female",
+    "index": 4,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c2",
+      "akb",
+      "akb_c1",
+      "hoodie",
+      "jpwar_silver",
+      "jpwarrior",
+      "school",
+      "sports"
+    ]
+  },
+  {
+    "code": "jin",
+    "name": "Jin Kazama",
+    "source": "jin",
+    "id": 9,
+    "originals": 3,
+    "sex": "male",
+    "index": 5,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "dougi_org",
+      "emperor",
+      "emperor_c1",
+      "gakuran",
+      "gakuran_silver",
+      "longcoat",
+      "regulus",
+      "tattered_cs",
+      "tk4"
+    ]
+  },
+  {
+    "code": "dvj",
+    "name": "Devil Jin",
+    "source": "dvj",
+    "id": 27,
+    "originals": 3,
+    "sex": "male",
+    "index": 6,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "armour",
+      "armour_silver",
+      "flln",
+      "flln_c1",
+      "oraora",
+      "tatoo_shirt"
+    ]
+  },
+  {
+    "code": "lil",
+    "name": "Lili",
+    "source": "lil",
+    "id": 31,
+    "originals": 3,
+    "sex": "female",
+    "index": 7,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "brass_band",
+      "brass_silver",
+      "gothic",
+      "gothic_c1",
+      "outfit",
+      "ruffle_bikini",
+      "sweetdevil"
+    ]
+  },
+  {
+    "code": "bob",
+    "name": "Bob",
+    "source": "bob",
+    "id": 34,
+    "originals": 4,
+    "sex": "male",
+    "index": 8,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_c3",
+      "1p_old",
+      "humpty",
+      "humpty_c1",
+      "humpty_silver",
+      "stripe_vest"
+    ]
+  },
+  {
+    "code": "dra",
+    "name": "Sergei Dragunov",
+    "source": "dra",
+    "id": 32,
+    "originals": 3,
+    "sex": "male",
+    "index": 9,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "clown",
+      "clown_silver",
+      "skull_suit",
+      "sneaking",
+      "sneaking_c1",
+      "waiter"
+    ]
+  },
+  {
+    "code": "bry",
+    "name": "Bryan Fury",
+    "source": "bry",
+    "id": 12,
+    "originals": 4,
+    "sex": "male",
+    "index": 10,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "blacksnake",
+      "blacksnake_c1",
+      "bs_t3ed",
+      "exos_silver",
+      "exoskeleton",
+      "expose",
+      "predator",
+      "prisoner"
+    ]
+  },
+  {
+    "code": "jac",
+    "name": "Jack-7 → Jack-6",
+    "source": "jac",
+    "id": 19,
+    "originals": 3,
+    "sex": "male",
+    "index": 11,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "armour",
+      "armour_silver",
+      "cuberobo",
+      "excavator",
+      "excavator_c1",
+      "rock_golem"
+    ]
+  },
+  {
+    "code": "jul",
+    "name": "Julia → Jaycee",
+    "source": "jul",
+    "id": 10,
+    "originals": 4,
+    "sex": "female",
+    "index": 12,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "nature",
+      "nature_silver",
+      "researcher",
+      "researcher_c1"
+    ]
+  },
+  {
+    "code": "kaz",
+    "name": "Kazuya Mishima",
+    "source": "kaz",
+    "id": 14,
+    "originals": 4,
+    "sex": "male",
+    "index": 13,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "dougi_org",
+      "gilet_bv",
+      "gilet_bv_c1",
+      "kamikaze",
+      "kamikaze_silver",
+      "tatoo_shirt",
+      "wagara"
+    ]
+  },
+  {
+    "code": "hei",
+    "name": "Heihachi Mishima",
+    "source": "hei",
+    "id": 13,
+    "originals": 4,
+    "sex": "male",
+    "index": 14,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "final",
+      "guardian",
+      "guardian_c2",
+      "mafia",
+      "mafia_silver",
+      "tatoo_shirt",
+      "tiger"
+    ]
+  },
+  {
+    "code": "nin",
+    "name": "Nina Williams",
+    "source": "nin",
+    "id": 5,
+    "originals": 3,
+    "sex": "female",
+    "index": 15,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "blood",
+      "blood_silver",
+      "cardigan",
+      "dancer",
+      "dancer_c1"
+    ]
+  },
+  {
+    "code": "ann",
+    "name": "Anna Williams",
+    "source": "ann",
+    "id": 21,
+    "originals": 4,
+    "sex": "female",
+    "index": 16,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "pirate",
+      "pirate_silver",
+      "python",
+      "python_c1"
+    ]
+  },
+  {
+    "code": "lar",
+    "name": "Lars Alexandersson",
+    "source": "lar",
+    "id": 38,
+    "originals": 3,
+    "sex": "male",
+    "index": 17,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "cloak",
+      "kimono",
+      "kimono_silver",
+      "njpw",
+      "outfit",
+      "outfit_c1",
+      "padding_vest"
+    ]
+  },
+  {
+    "code": "asa",
+    "name": "Alisa Bosconovitch",
+    "source": "asa",
+    "id": 39,
+    "originals": 4,
+    "sex": "female",
+    "index": 18,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c2",
+      "battle",
+      "bb",
+      "bb_c1",
+      "ruffle_bikini",
+      "winter_d_silver",
+      "winter_dress"
+    ]
+  },
+  {
+    "code": "kin",
+    "name": "King",
+    "source": "kin",
+    "id": 3,
+    "originals": 4,
+    "sex": "male",
+    "index": 19,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "beast",
+      "beast_silver",
+      "njpw",
+      "robe",
+      "tk2",
+      "western",
+      "wwe",
+      "wwe_c1"
+    ]
+  },
+  {
+    "code": "aki",
+    "name": "Armor King",
+    "source": "aki",
+    "id": 30,
+    "originals": 4,
+    "sex": "male",
+    "index": 20,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "hero",
+      "hero_c1",
+      "wild",
+      "wild_silver"
+    ]
+  },
+  {
+    "code": "edd",
+    "name": "Eddy Gordo",
+    "source": "edd",
+    "id": 33,
+    "originals": 4,
+    "sex": "male",
+    "index": 21,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "dancer",
+      "dancer_c1",
+      "stall",
+      "stall_silver"
+    ]
+  },
+  {
+    "code": "fen",
+    "name": "Feng Wei",
+    "source": "fen",
+    "id": 29,
+    "originals": 4,
+    "sex": "male",
+    "index": 22,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1P_c1",
+      "goldfish_denim",
+      "goldfish_silver",
+      "jingju",
+      "kingdom",
+      "kingdom_c1",
+      "tatoo_shirt"
+    ]
+  },
+  {
+    "code": "gan",
+    "name": "Ganryu",
+    "source": "gan",
+    "id": 23,
+    "originals": 3,
+    "sex": "male",
+    "index": 23,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "Boss_Suit",
+      "Boss_Suit_Silver",
+      "festivalguy",
+      "festivalguy_c1"
+    ]
+  },
+  {
+    "code": "hwo",
+    "name": "Hwoarang",
+    "source": "hwo",
+    "id": 6,
+    "originals": 4,
+    "sex": "male",
+    "index": 24,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "3piece_suits",
+      "exosuit",
+      "exosuit_c1",
+      "exosuit_silver",
+      "feather",
+      "skull_jersey",
+      "taekwondo"
+    ]
+  },
+  {
+    "code": "kum",
+    "name": "Kuma",
+    "source": "kum",
+    "id": 11,
+    "originals": 2,
+    "sex": "male",
+    "index": 25,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "2p_c1",
+      "2p_c2",
+      "bone",
+      "bone_tf0",
+      "siba",
+      "siba_tf0",
+      "silver",
+      "tiger",
+      "tiger_tf0"
+    ]
+  },
+  {
+    "code": "pan",
+    "name": "Panda",
+    "source": "pan",
+    "id": 43,
+    "originals": 2,
+    "sex": "female",
+    "index": 26,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_c2",
+      "cat",
+      "cat_naked",
+      "lesser",
+      "lesser_naked",
+      "patch",
+      "patch_naked",
+      "silver"
+    ]
+  },
+  {
+    "code": "lee",
+    "name": "Lee Chaolan",
+    "source": "lee",
+    "id": 15,
+    "originals": 3,
+    "sex": "male",
+    "index": 27,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_c1_vio",
+      "1p_old",
+      "1p_old_vio",
+      "demo_vio",
+      "hightech",
+      "hightech_c1",
+      "hightech_c1_vio",
+      "hightech_vio",
+      "nobleman",
+      "nobleman_silver",
+      "nobleman_silver_vio",
+      "nobleman_vio"
+    ]
+  },
+  {
+    "code": "leo",
+    "name": "Leo",
+    "source": "leo",
+    "id": 37,
+    "originals": 3,
+    "sex": "female",
+    "index": 28,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "musket",
+      "musket_c1",
+      "nehrusuits",
+      "special_forces",
+      "uniform",
+      "uniform_silver"
+    ]
+  },
+  {
+    "code": "lei",
+    "name": "Lei Wulong",
+    "source": "lei",
+    "id": 2,
+    "originals": 3,
+    "sex": "male",
+    "index": 29,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "combat_suit",
+      "combat_suit_c1",
+      "roushi",
+      "roushi_silver"
+    ]
+  },
+  {
+    "code": "mar",
+    "name": "Craig Marduk",
+    "source": "mar",
+    "id": 17,
+    "originals": 3,
+    "sex": "male",
+    "index": 30,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "crocodile",
+      "crocodile_silver",
+      "gentleman",
+      "gentleman_c1"
+    ]
+  },
+  {
+    "code": "mig",
+    "name": "Miguel",
+    "source": "mig",
+    "id": 36,
+    "originals": 5,
+    "sex": "male",
+    "index": 31,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "1p_old",
+      "metal",
+      "metal_silver",
+      "outdoor",
+      "outdoor_c1"
+    ]
+  },
+  {
+    "code": "ste",
+    "name": "Steve Fox",
+    "source": "ste",
+    "id": 16,
+    "originals": 3,
+    "sex": "male",
+    "index": 32,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "boxing",
+      "gangsta",
+      "gangsta_c1",
+      "gangsta_silver",
+      "union_jacket",
+      "visual"
+    ]
+  },
+  {
+    "code": "zaf",
+    "name": "Zafina",
+    "source": "zaf",
+    "id": 35,
+    "originals": 3,
+    "sex": "female",
+    "index": 33,
+    "presets": [
+      "DefaultCos1P",
+      "DefaultCos2P",
+      "1p_c1",
+      "2p_old",
+      "bellydress",
+      "bellydress_c1",
+      "sneakdress",
+      "sneakdress_silver",
+      "swim"
+    ]
+  }
+]

@@ -81,3 +81,22 @@ def check(tris, strip):
     a = sorted(canon(tuple(int(x) for x in t)) for t in tris if len(set(int(x) for x in t)) == 3)
     b = sorted(canon(t) for t in strip_to_tris(strip))
     return a == b
+
+
+def checked(tris, limit=0xffff):
+    """Preserve topology even when a non-manifold section defeats greedy joining.
+
+    Individual three-index strips need more indices but share the original vertex
+    buffer. Never exceed the NUD polygon's 16-bit index-count field.
+    """
+    result = stripify(tris)
+    if not check(tris, result):
+        result = []
+        for triangle in tris:
+            triangle = [int(i) for i in triangle]
+            if len(set(triangle)) != 3: continue
+            if result: result.append(0xffff)
+            result.extend(triangle)
+    if len(result) > limit or not check(tris, result):
+        raise ValueError('triangle-strip index count or topology exceeds the NUD polygon format')
+    return result

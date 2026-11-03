@@ -1,3 +1,9 @@
+
+Implementing some upgrades to the launcher including expanding the preset slot with new paging to allow Tekken 7 costume presets in Tag 2 (and possibly 8 and 6 later)
+
+<img width="1575" height="1027" alt="Screenshot 2026-10-31 09 39 38" src="https://github.com/user-attachments/assets/b728db79-cea9-4bf6-889e-f6f37180c21a" />
+
+Original 
 # Tekken Tag 2 Ultimate Edition
 
 <img width="1593" height="888" alt="image" src="https://github.com/user-attachments/assets/3bd58409-1442-4ce7-b9a6-8f036f38f4f8" />

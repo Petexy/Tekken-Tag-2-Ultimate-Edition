@@ -358,6 +358,10 @@ def bake_albedo(eff, textures, grey=False):
     the hue (a definition's GREY: Noctis's outfit, blue-grey in Tekken 7 where its textures are mauve)."""
     base = eff['base']
     t, v, s = eff['textures'], eff['vectors'], eff['scalars']
+    if base == 'M_CH_KumBase':
+        # Bears supply two tint channels; absent third/fourth channels must not
+        # make kind_of() discard the entire body when baking its colour mask.
+        v = dict(v, Color03=v.get('Color03', v['Color02']), Color04=v.get('Color04', v['Color02']))
     masked = base in MASK_MATERIALS or (not base.startswith('M_CH_AnisoHair') and t.get('DiffuseMap')
                                         and t.get('MaskMap') and 'Color01' in v and 'Color02' in v)
     if masked:                               # (M_CH_Aniso_mask, M_CH_Base_machieru_mask and the like too)
@@ -625,6 +629,17 @@ def tekken8_model(source, d, donor, log=print):
     return k, parts, colours, colours_2p
 
 
+def split_large_primitives(prims, triangles=12000):
+    """Bound NUD polygon index counts without discarding source triangles.
+
+    Source streams remain shared; the ordinary per-polygon welding below keeps
+    only the chunk's used vertices. Twelve thousand isolated triangles still fit
+    the 16-bit index-count field (including restart markers).
+    """
+    return [dict(prim, tris=prim['tris'][start:start + triangles])
+            for prim in prims for start in range(0, len(prim['tris']), triangles)]
+
+
 def convert(source, archives, d, slot=0, log=print, standing=None):
     """source: the fighter's game (source.py; Tekken 7's paks as such too: outfits.py's), d: the character definition,
     slot: its number (pack.place), standing: the fighter's standing pose (cloth.standing; the cloth rests outside its
@@ -656,6 +671,13 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
                 log('  %s: drawn as %s (worn under the costume\'s other items)' % (path.split('/')[-1],
                                                                                    now.split('/')[-1]))
         k = load_tekken7_model(paks, worn, list(t7['merge_order']) + [tag for tag, _ in extra])
+        reduced_native = False
+        if getattr(d, 'NATIVE_BUDGET', False):
+            from . import decimate
+            if decimate.count(k) > VERTEX_BUDGET:
+                k = decimate.decimate(k, 36000, part_weights=PART_WEIGHTS, log=log)
+                reduced_native = True
+                log('  dense native preset: reduced geometry; cloth remains skinned')
         log('  Tekken 7 model: %d bones, %d sections' % (len(k['bones']['names']), len(k['prims'])))
         chains = [(part, hanging.find(k, part, root), directions)
                   for part, root, directions in getattr(d, 'CHAINS', [])]
@@ -663,7 +685,7 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             moved = hanging.drape(k, [(bones, directions) for _, bones, directions in chains])
         # cloth Tekken 7 simulates: chains of bones like Lars's coat tails (cloth.py); a definition's CLOTH = False:
         # none
-        cloths = cloth.find(paks, k, worn, log) if getattr(d, 'CLOTH', True) else []
+        cloths = cloth.find(paks, k, worn, log) if getattr(d, 'CLOTH', True) and not reduced_native else []
     if cloths:                                   # (the room the other extra bones leave: weapons up to 4 each)
         room = cloth.SKELETON - len(donor['names']) - sum(len(bones) for _, bones, _ in chains) - 4 * len(
             getattr(d, 'WEAPONS', [])) - (len(t7mesh.SkeletalMesh(load(paks, d.TIGER['mesh'])).skeleton['names'])
@@ -959,6 +981,7 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         return mat, vtype
 
     meshes, dropped = {}, []
+    prims = split_large_primitives(prims)
     seen = set()                    # the triangles drawn so far (a hair material's second pass draws them again)
     for prim in prims:
         name = prim['material']
@@ -1057,9 +1080,10 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         verts['bones'] = bones
         verts['w'] = wts
         verts['uv'][:, 0, :] = uv
-        strip = strips.stripify(tris)
-        if not strips.check(tris, strip) or len(strip) >= 0x10000:
-            raise ValueError('could not make triangle strips for %s' % name)
+        try:
+            strip = strips.checked(tris)
+        except ValueError as error:
+            raise ValueError('could not make triangle strips for %s (%d triangles): %s' % (name, len(tris), error)) from error
         meshes.setdefault(prim['part'], []).append(dict(vtype=vt, uvtype=0x10, pflag=4, tail=bytes(12),
                                                         indices=np.array(strip, np.uint16), verts=verts,
                                                         materials=[mat], _order=ORDER[kind]))
