@@ -109,7 +109,7 @@ class BufferedStanceCandidate(unittest.TestCase):
         self.assertEqual(c.T['cancels'][0],row)
 
 class SafeBufferNormalization(unittest.TestCase):
-    def fixture(self, complex_capture=False, missing_dispatch=False):
+    def fixture(self, complex_capture=False, missing_dispatch=False, gate=(128,0)):
         c=types.SimpleNamespace(game='t7',kn={'kick':0},newidx={0:0},stats=collections.Counter())
         c.map_req=lambda i:{352:313,0x80a6:32918}.get(i)
         c.T={'moves':[{'cancel':0}], 'cancels':[], 'requirements':[]}
@@ -118,7 +118,7 @@ class SafeBufferNormalization(unittest.TestCase):
         def row(bt,rq,mid,dr=0):return dict(direction=dr,button=bt,req=rq,move_id=mid,win_start=1,win_end=20,start_frame=18,extradata=0,option=0)
         extra=((32771,7),) if complex_capture else ()
         c.T['cancels']=[row(0x40000002,req((313,0),(32918,1),*extra),0x8001),
-            row(0,req((313,2 if missing_dispatch else 1),(128,0)),1),row(0,req(),0x8001,M.LIST_END)]
+            row(0,req((313,2 if missing_dispatch else 1),gate),1),row(0,req(),0x8001,M.LIST_END)]
         def add(t,v):c.T[t].append(v);return len(c.T[t])-1
         c.add=add
         return c
@@ -134,6 +134,12 @@ class SafeBufferNormalization(unittest.TestCase):
     def test_unmatched_capture_is_not_changed(self):
         c=self.fixture(missing_dispatch=True);O.normalize_buffered_strings(c)
         self.assertEqual(c.T['moves'][0]['cancel'],0)
+    def test_dispatch_on_contact_keeps_the_buffer(self):
+        # Reina's Heaven's Wrath 3,4: the dispatch waits for the hit (46) or the block (49) after the press
+        for gate in O.CONTACT:
+            c=self.fixture(gate=(gate,0));O.normalize_buffered_strings(c)
+            self.assertEqual(c.T['moves'][0]['cancel'],0)
+            self.assertEqual(c.stats['buffered strings kept: their dispatch waits for the hit or block'],1)
 
 
 class BufferPriority(unittest.TestCase):
@@ -191,24 +197,6 @@ class CounterhitReaction(unittest.TestCase):
         self.assertEqual(c.T['reactions'][0],reaction)
         self.assertEqual(c.T['hit_conditions'][:2],original['hit_conditions'])
 
-class OnHitFollowup(unittest.TestCase):
-    def test_restores_timing_with_native_hit_gate_and_rejects_other_requirements(self):
-        from ttt2char.movesets import Moveset
-        k=Moveset();k.game='t7';k.aliases=[]
-        source=dict(direction=0,button=0,req=0,extradata=0,win_start=17,win_end=18,start_frame=20,move_id=1,option=0)
-        end=dict(source,direction=M.LIST_END,move_id=0)
-        k.tables={'moves':[dict(cancel=0),dict(cancel=1)],'cancels':[source,end],
-                  'requirements':[dict(condition=51,param=0),dict(condition=881,param=0)]}
-        c=types.SimpleNamespace(game='t7',k=k,kn={'first':0,'second':1},newidx={0:0,1:1},stats=collections.Counter(),extradata=lambda _:7)
-        c.T={'moves':[dict(cancel=0),dict(cancel=0)],'cancels':[dict(end)],'requirements':[]}
-        O.on_hit_followup(c,'first','second')
-        row=T.cancels(c.T,c.T['moves'][0]['cancel'])[0]
-        self.assertEqual((row['win_start'],row['win_end'],row['start_frame']),(17,18,20))
-        self.assertEqual(T.reqs(c.T,row['req']),[(47,0)])
-        self.assertEqual(row['move_id'],1)
-        k.tables['requirements'][0]['condition']=52
-        with self.assertRaises(ValueError):O.on_hit_followup(c,'first','second')
-
 class ScopedRequirementConversion(unittest.TestCase):
     def test_override_does_not_poison_normal_requirement_cache(self):
         from ttt2char.convert.moveset import Converter
@@ -218,9 +206,9 @@ class ScopedRequirementConversion(unittest.TestCase):
         c.k=k;c.game='t7';c.end=881;c.k_id=8;c.newid=70;c.cache={};c.T={'requirements':[]};c.stats=collections.Counter();c.defn=types.SimpleNamespace(MOVESET={})
         c.map_req=lambda x:{96:93}.get(x)
         self.assertEqual(c.conv_reqs(0),(None,False))
-        at,ok=c.conv_reqs(0,overrides={2:2,51:47})
+        at,ok=c.conv_reqs(0,overrides={2:2,51:46})
         self.assertTrue(ok)
-        self.assertEqual(T.reqs(c.T,at),[(2,0),(47,0),(93,0)])
+        self.assertEqual(T.reqs(c.T,at),[(2,0),(46,0),(93,0)])
         self.assertEqual(c.conv_reqs(0),(None,False))
 
 class AirHitString(unittest.TestCase):

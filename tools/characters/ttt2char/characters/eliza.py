@@ -11,7 +11,8 @@ TEKKEN7_ID = 36               # her id in Tekken 7's roster (TKMovesets2 writes 
 TEKKEN7_CODE = 'elz'          # her code in Tekken 7's files (AkBankVoiceELZ.bnk, Item/Meshes/elz/)
 CODE = 'elz'                  # her three-letter code in the pack (not a code TTT2 already has)
 SEX = 'female'
-REVISION = 2                  # her gauge (1: packs made before have her EX moves free); its full sound (2)
+REVISION = 3                  # her gauge (1: packs made before have her EX moves free); its full sound (2); her own
+                              # crouching 2 and back-turned kicks (3)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -155,7 +156,8 @@ MOVESET = {
     },
     # Preserve her own crouching / WS / back-turned attacks instead of
     # borrowing donor rows that do not contain Eliza's special-input capture.
-    'own_moves': r'^(Vp_.*|Jn_(syalp00|t_slp00)|Co_(s_tlp00|R_(rp00L|lp00R|crp00L|clp00R)))$',
+    'own_moves': (r'^(Vp_.*|Jn_(syalp00|t_slp00)|Co_(s_tlp00|syarp00|'
+                  r'R_(rp00L|lp00R|lk00L|rk00R|crp00L|clp00R|clk00L|crk00R)))$'),
     'special_cancels': {
         name: ('Vp_energyA', 'Vp_energyB', 'Vp_shoryu', 'Vp_shoryuB',
                'Vp_214A', 'Vp_214B', 'Vp_shoryuC', 'Vp_shoryuD',

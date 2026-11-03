@@ -241,14 +241,15 @@ def build_helper(cache):
 class Helper:
     """A connection to t7helper.exe (serve <port> <secret>)."""
 
-    def __init__(self, port, secret, timeout=90):
+    def __init__(self, port, secret, timeout=90, alive=None):
+        """alive(): whether what starts it still runs (else it is not waited for any longer)."""
         end = time.time() + timeout
         while True:
             try:
                 self.s = socket.create_connection(('127.0.0.1', port), timeout=5)
                 break
             except OSError:
-                if time.time() > end:
+                if time.time() > end or (alive is not None and not alive()):
                     raise DumpError('the helper did not start')
                 time.sleep(0.5)
         self.s.settimeout(180)
@@ -346,6 +347,39 @@ class Helper:
             self.s.close()
         except OSError:
             pass
+
+
+def not_started(run, gamescope, game):
+    """Why a session's helper did not start, as far as its logs in `run` tell: whether the hidden session (gamescope)
+    ended, the last lines of its log and of Proton's (the helper's), and where they are."""
+    said = []
+    if gamescope is not None and gamescope.poll() is not None:
+        said.append('gamescope ended with code %d' % gamescope.returncode)
+    for name, what in (('gamescope.log', 'gamescope'), ('helper.log', 'Proton')):
+        tail = _tail(os.path.join(run, name))
+        if tail:
+            said.append('%s said: %s' % (what, tail))
+    if not said:
+        said.append('Proton said nothing')
+    if os.path.exists('/run/.containerenv') or os.path.exists('/.dockerenv'):
+        # (in a rootless distrobox or toolbox, gamescope's Xwayland refuses the host's /tmp/.X11-unix, which the
+        # container sees owned by nobody, and ends at once)
+        said.append('this runs inside a container (distrobox, toolbox), where gamescope cannot start: start Ultimate '
+                    'Launcher outside it')
+    return DumpError('the helper did not start in %s\'s hidden session (%s; the logs are in %s)'
+                     % (game, '; '.join(said), run))
+
+
+def _tail(path, lines=3):
+    """A log's last lines (without Wine's fixme and warning noise), as one line; '' when there is none."""
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            text = f.read()[-20000:]
+    except OSError:
+        return ''
+    text = re.sub(r'\x1b\[[0-9;]*m', '', text)              # (gamescope's colours)
+    kept = [l.strip() for l in text.splitlines() if l.strip() and not re.match(r'[0-9a-f]{4}:(fixme|warn):', l)]
+    return ' | '.join(kept[-lines:])[-600:]
 
 
 # ---------------------------------------------------------------- the hidden session
@@ -669,7 +703,10 @@ class Session:
         raise DumpError('Tekken 7 did not start within %d s' % timeout)
 
     def connect(self):
-        self.helper = Helper(self.port, self.secret)
+        try:
+            self.helper = Helper(self.port, self.secret, alive=lambda: self.gamescope.poll() is None)
+        except DumpError:
+            raise not_started(self.run, self.gamescope, 'Tekken 7') from None
         return self.helper
 
     def close(self):

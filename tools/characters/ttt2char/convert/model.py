@@ -397,7 +397,7 @@ def bake_albedo(eff, textures, grey=False):
         luma = (D * np.array([0.3, 0.59, 0.11], np.float32)).sum(-1, keepdims=True)
         out = (D + s.get('Desaturation', 0.0) * (luma - D)) * s.get('Multiply', 1.0)
         return np.clip(out, 0, 1), Da
-    for slot in ('DiffuseMap', 'Diffuse', 'Color', 'ColorTexture'):
+    for slot in ('DiffuseMap', 'Diffuse', 'Diffuse_Map', 'Color', 'ColorTexture'):    # (Diffuse_Map: M_CH_Prop's)
         if textures.exists(t.get(slot)):
             return textures.linear(t[slot])
     for name in sorted(v):                       # no texture but a glow: its colour (Akuma's eyes)
@@ -772,7 +772,8 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
                                          log=lambda line: None if 'WARNING' in line else log(line))['prims']
             parts.append((tag, w['mesh']))
             prims += kept
-            mesh_order[tag] = ('%s_wpn%d' % (d.CODE, n), w['parent'], 100 + n)
+            up = skel['names'][skel['parent'][index]]          # (w['parent'], or the weapon it is carried in)
+            mesh_order[tag] = ('%s_wpn%d' % (d.CODE, n), up[4:] if up.startswith('cha:') else up, 100 + n)
         log('  weapon %s: OPT %d under %s (%s), hit points OPT %s, %d triangles drawn' % (
             w['bone'], number, w['parent'], 'pair %d' % w['pair'] if w.get('pair') is not None else 'still', points,
             sum(len(q['tris']) for q in kept)))

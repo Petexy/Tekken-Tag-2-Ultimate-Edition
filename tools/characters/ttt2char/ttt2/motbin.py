@@ -6,12 +6,18 @@ and written back byte for byte.
           id-1, -(id-1), id, -id), 19 x {u32 offset, u32 count} @0x140 (the tables), 13 x u32 @0x1D8 (embedded
           MOTAs, 0: none); offsets count from BASE (0x20C)
     BASE: the string block (names), the 19 tables (big-endian, layouts in movesets.TTT2), the embedded MOTAs.
+The game keeps the 13 slots at the moveset's +0x1D8 in memory: slot 2 (HAND_SHAPES) is the fighter's hand shapes, a
+hands container (ttt2/motion.py) of one animation whose frames are the shapes; a move's 0x82d6 / 0x82d7 (left /
+right hand) shows frame value >> 8 of it, 0x82d9 both hands' default (left frame 1, right frame 2), and so does a
+hand animation number without 0x4000 (0x82db / 0x82dc, the game's sub_037F3690); slot 3, empty in the file, is
+the motion pack's hands container then (the number with 0x4000).
 """
 import struct
 
 from ..movesets import TABLE_ORDER, TTT2, Moveset, pack_table, read_table
 
 BASE = 0x20C
+HAND_SHAPES = 2
 
 
 def read(d):
@@ -40,6 +46,30 @@ def split(m):
     used = [o for o in m.motalist if o]
     mstart = min(used) if used else end
     return d[:BASE], d[BASE:BASE + first], d[BASE + mstart:], [(o - mstart) if o else None for o in m.motalist]
+
+
+def slot_bytes(m, k):
+    """The bytes of a read moveset's embedded MOTA slot k (up to the next slot's), None if the slot is empty."""
+    _, _, blob, slots = split(m)
+    if slots[k] is None:
+        return None
+    return blob[slots[k]:min([o for o in slots if o is not None and o > slots[k]] + [len(blob)])]
+
+
+def with_slot(blob, slots, k, data):
+    """(MOTA blob, slots) as split gives them, with slot k's bytes (up to the next slot's) replaced by data; the
+    others keep their bytes and order, each 4-aligned."""
+    if slots[k] is None or sum(o == slots[k] for o in slots) > 1:
+        raise ValueError('MOTA slot %d is empty or shared' % k)
+    starts = sorted(set(o for o in slots if o is not None))
+    ends = dict(zip(starts, starts[1:] + [len(blob)]))
+    out, moved = bytearray(), {}
+    for o in starts:
+        while len(out) % 4:
+            out.append(0)
+        moved[o] = len(out)
+        out += data if o == slots[k] else blob[o:ends[o]]
+    return bytes(out), [None if o is None else moved[o] for o in slots]
 
 
 def build(header, strings, tables, mota_blob, mota_slots, name_offsets=None):

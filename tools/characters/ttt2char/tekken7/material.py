@@ -93,6 +93,8 @@ class Materials:
             eff[k].update(r[k])
         if colours and name in colours:
             eff['vectors'].update(colours[name])
+        if eff['textures'].get('Normal_Map'):       # (M_CH_Prop's name for it: the weapon items, Negan's knife)
+            eff['textures'].setdefault('Normal', eff['textures']['Normal_Map'])
         return eff
 
     def costume_colours(self, set_path):

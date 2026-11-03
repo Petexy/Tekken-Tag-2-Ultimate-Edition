@@ -9,6 +9,7 @@ SHORT_NAME = 'CLAUDIO'
 TEKKEN7_ID = 20
 TEKKEN7_CODE = 'ita'
 CODE = 'ita'
+REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15)
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -83,6 +84,10 @@ MOVESET = {
     'bounds': dict.fromkeys(('It_4lklk', 'It_4rklkrp', 'It_4rklkrpn', 'It_66rprp', 'It_chest', 'It_lrp2', 'It_lrp2n',
                              'It_rk00F', 'It_rplp', 'It_spam'), True),
     'drop_moves': r'^It_Direct$',
+    # Starburst (convert/moveset.py FLAG_ON): b+2, f,F+2,2, WS2 and others on hit when he has none go to their '...E'
+    # release, which gives it; d+1,2, d+2, 1+2, WS1 and others have a Starburst version, which uses it up, and a plain
+    # one without (d+1,2: It_2lp -> It_2lprp_n)
+    'state_flags': {'starburst': {'variable': 5, 'prop': 0x81bf, 'equals': 351}},
     'direct': [(r'^(la|mk)_s', 'anim', ['it_s%02d' % k for k in range(4)]),     # Lars's intros -> his
                (r'^la_w', 'anim', ['it_w%02d' % k for k in range(3)])],         # win poses
 }

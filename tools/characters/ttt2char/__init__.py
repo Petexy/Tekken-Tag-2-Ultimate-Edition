@@ -14,3 +14,19 @@ any game is stored in this package.
 
 class InputError(Exception):
     """An input is missing or is not what the importer needs; the message says what to do."""
+
+
+def _python_packages():
+    """numpy and Pillow as the launcher got them for this Python (python_packages.py), when it did: on the path
+    before the site-packages folders, where $PYTHONPATH would put them (an old or broken numpy of the system's does
+    not hide them). Nothing changes for a Python whose packages the launcher never got."""
+    import os
+    import sys
+    from . import paths
+    folder = paths.python_packages()
+    if folder and os.path.isdir(folder) and folder not in sys.path:
+        site = [i for i, p in enumerate(sys.path) if os.path.basename(p) in ('site-packages', 'dist-packages')]
+        sys.path.insert(site[0] if site else len(sys.path), folder)
+
+
+_python_packages()

@@ -136,6 +136,9 @@ private:
     void dlc_section(GtkWidget* card, bool usable);
     GtkWidget* fighter_row(const Fighter& fighter, bool usable);
     void start_import(const std::vector<std::string>& names);
+    // numpy and Pillow for the importer's Python, downloaded into a folder
+    // of their own (get_python_packages.py), where nothing else adds them.
+    void start_get_packages();
     void start_remove(const std::vector<std::string>& names);
     void ask_remove_all(const std::string& game);
     bool addable(const Fighter& fighter) const;
@@ -165,11 +168,13 @@ private:
     // What every import needs (the importer, Python's packages, the game).
     bool can_import(std::string* why = nullptr) const;
     // What importing a game's characters needs besides: that game, and the
-    // other game when its characters are in the game (shared_blocker).
+    // other game when characters that need it are in the game
+    // (shared_blocker).
     bool game_usable(const std::string& game, std::string* why = nullptr) const;
-    // The other game, when it is gone and its characters are in the game:
-    // what they all share is made again from each one's own game whenever
-    // one of `game`'s is added. Empty when nothing stops it.
+    // The other game, when it is gone and characters of it that need it are
+    // in the game (needs_game: what they all share is made again whenever
+    // one of `game`'s is added, and nothing else has their pictures). Empty
+    // when nothing stops it.
     std::string shared_blocker(const std::string& game) const;
     MovesBlock moves_block() const;
     std::optional<bool> owns(const Fighter& fighter) const;
@@ -257,7 +262,7 @@ private:
     void open_release_page();
 
     // ------------------------------------------------ task.cpp
-    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate };
+    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate, kPackages };
     struct Task {
         Kind kind;
         std::string title;

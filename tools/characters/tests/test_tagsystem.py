@@ -233,6 +233,58 @@ class Assault(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not found'):
             TS.add_tag_assault_strings(d.t, made, {parent: {12345}})
 
+    def continued(self, sf, extra=0x401):
+        """A string's last stage: P (and Q, sharing its list) goes on by itself at frame sf into the bound move X
+        (active from 23: its tag row 1-22), keeping the frame count (extradata `extra`)."""
+        d = self.donor()
+        tpl = TS.assault_template(d.t, d.aliases)
+        r = self.reqs
+        first = len(d.t['moves'])
+        keep = TS.write(d.t, 'cancel_extras', [dict(value=extra)])
+        x = d.move('Mx_3lprp2', first_active=23, last_active=24,
+                   hit_condition=d.hits((r['bound'], 20, self.r_bound), (r['air'], 20, self.r_air),
+                                        (r['never'], 20, self.r_ground)),
+                   cancel=d.cancels(dict(req=r['always'], extradata=7, move_id=STANCE), d.end()),
+                   extraprops=d.props())
+        p = d.move('Mx_3lprp', first_active=21, last_active=21, cancel=d.cancels(
+            dict(req=r['hit'], extradata=7, move_id=STANCE),
+            dict(req=r['always'], extradata=keep, win_start=sf, win_end=sf, start_frame=sf, move_id=x), d.end()))
+        q = d.move('Mx_3lprpB', cancel=d.t['moves'][p]['cancel'])
+
+        def string(name):
+            d.names.append(name)
+            return len(d.names) - 1
+        made = TS.add_tag_assault(d.t, tpl, first, lambda i: d.names[d.t['moves'][i]['name']], string)
+        return d, first, p, q, made
+
+    def test_continued_bound_move_tag_row_on_the_move_before(self):
+        d, first, p, q, made = self.continued(22)
+        x, xt, _ = made[0]
+        old = copy.deepcopy(TS.cancels(d.t, d.t['moves'][p]['cancel']))
+        self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 1)
+        rows = TS.cancels(d.t, d.t['moves'][p]['cancel'])
+        # P: its rows, the tag row (X's from frame 1, the continuation's frames and extradata) into XT, the
+        # continuation, its end row; Q gets the same new list, the old one is unchanged
+        self.assertEqual(rows[:1] + rows[2:], old)
+        tag = rows[1]
+        self.assertEqual((tag['direction'], tag['button'], tag['req'], tag['extradata'], tag['win_start'],
+                          tag['win_end'], tag['start_frame'], tag['move_id']),
+                         (0, TS.TAG_BUTTON, self.reqs['always'], old[1]['extradata'], 1, 22, 22, xt))
+        self.assertEqual(d.t['moves'][q]['cancel'], d.t['moves'][p]['cancel'])
+        self.assertEqual([c['move_id'] for c in TS.cancels(d.t, d.t['moves'][x]['cancel'])
+                          if c['button'] == TS.TAG_BUTTON], [xt])                         # X keeps its own
+        # a move with a tag row already is left alone
+        self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 0)
+
+    def test_continuation_left_alone(self):
+        """X keeps 3 frames of its tag row after the continuation; or the continuation starts X at its frame 1."""
+        for sf, extra in ((19, 0x401), (22, 0x1)):
+            with self.subTest(sf=sf, extra=extra):
+                d, first, p, q, made = self.continued(sf, extra)
+                cancel = d.t['moves'][p]['cancel']
+                self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 0)
+                self.assertEqual((d.t['moves'][p]['cancel'], d.t['moves'][q]['cancel']), (cancel, cancel))
+
     def test_no_triple(self):
         d = self.donor()
         for x in (1, 4):
@@ -243,6 +295,79 @@ class Assault(unittest.TestCase):
     def test_bound_shape(self):
         d = self.donor()
         self.assertEqual(TS.bound_shape(d.t), (self.reqs['bound'], self.r_air))
+
+
+class Entry(unittest.TestCase):
+    """The incoming partner's Tag Assault entry attack: the donor's ChgInJmpDA rows into its own move (Jun's b+4,
+    active from 13, at frame 45) -> the fighter's d/f+1."""
+
+    def setUp(self):
+        T = Tables()
+        self.T = T
+        always, self.flag = T.req((0, 0)), T.req((TS.ENTRY_FLAG, 1))
+        stance = T.move('Ka_sKAM00_')
+        T.aliases[1] = stance
+        self.donors = T.move('Ju_rk00B', first_active=13, last_active=14)
+        self.first = len(T.t['moves'])
+        self.df1 = T.move('Ka_t_slpF', first_active=14, last_active=15)
+        guarded = T.move('Ka_t_slpF_EX', first_active=12, last_active=13)
+        group = TS.write(T.t, 'group_cancels', [
+            dict(direction=TS.DF, button=TS.PRESS_1, req=T.req((200, 1)), extradata=0, win_start=1,
+                 win_end=32767, start_frame=1, move_id=guarded, option=0),
+            dict(direction=TS.DF, button=TS.PRESS_1, req=always, extradata=0, win_start=1, win_end=32767,
+                 start_frame=1, move_id=self.df1, option=0),
+            dict(direction=M.GROUP_END, button=0, req=0, extradata=0, win_start=0, win_end=0, start_frame=0,
+                 move_id=0, option=0)])
+        T.t['moves'][stance]['cancel'] = T.cancels(
+            dict(direction=TS.DF, button=TS.PRESS_1, req=always, move_id=self.donors),    # (the donor's move)
+            dict(direction=M.GROUP, move_id=group), T.end())
+        self.rows = [dict(req=T.req((36, 5000)), extradata=7, win_end=19, move_id=STANCE),
+                     dict(req=T.req((TS.ENTRY_FLAG, 1), (409, 900)), extradata=2, win_start=25, win_end=30,
+                          start_frame=45, move_id=self.donors),
+                     dict(button=0x20000, req=self.flag, extradata=2, win_start=25, win_end=30, start_frame=45,
+                          move_id=self.donors),
+                     dict(button=0x20000, req=always, extradata=2, win_start=25, win_end=30, start_frame=45,
+                          move_id=self.donors),
+                     T.end(30)]
+        self.entry = T.move(TS.ENTRY_MOVE, cancel=T.cancels(*self.rows))
+
+    def name_of(self, i):
+        return self.T.names[self.T.t['moves'][i]['name']]
+
+    def test_stance_input(self):
+        """The own d/f+1 without requirements (in a group), not the donor's nor the guarded one."""
+        T = self.T
+        self.assertEqual(TS.stance_input(T.t, T.aliases, self.first, TS.DF, TS.PRESS_1), self.df1)
+        self.assertIsNone(TS.stance_input(T.t, T.aliases, self.first, TS.DF, 0x40000002))
+
+    def test_entry_rows(self):
+        T = self.T
+        cancel = T.t['moves'][self.entry]['cancel']
+        old = copy.deepcopy(TS.cancels(T.t, cancel))
+        self.assertEqual(TS.set_assault_entry(T.t, self.name_of, self.df1), 2)
+        rows = TS.cancels(T.t, T.t['moves'][self.entry]['cancel'])
+        self.assertEqual(TS.cancels(T.t, cancel), old)                       # the donor's list unchanged
+        # the two 0x8081 rows: d/f+1 at 44 (its first active frame at 58, as Jun's b+4's); the others as they were
+        self.assertEqual([(c['move_id'], c['start_frame']) for c in rows[1:3]], [(self.df1, 44), (self.df1, 44)])
+        self.assertEqual(rows[:1] + rows[3:], old[:1] + old[3:])
+        self.assertEqual([dict(c, move_id=0, start_frame=0) for c in rows[1:3]],
+                         [dict(c, move_id=0, start_frame=0) for c in old[1:3]])
+
+    def test_start_frame_within_ttt2s(self):
+        T = self.T
+        for fa, sf in ((10, 45), (35, 30)):
+            with self.subTest(first_active=fa):
+                T.t['moves'][self.df1]['first_active'] = fa
+                T.t['moves'][self.entry]['cancel'] = T.cancels(*self.rows)
+                TS.set_assault_entry(T.t, self.name_of, self.df1)
+                rows = TS.cancels(T.t, T.t['moves'][self.entry]['cancel'])
+                self.assertEqual([c['start_frame'] for c in rows[1:3]], [sf, sf])
+
+    def test_no_target(self):
+        T = self.T
+        cancel = T.t['moves'][self.entry]['cancel']
+        self.assertEqual(TS.set_assault_entry(T.t, self.name_of, None), 0)
+        self.assertEqual(T.t['moves'][self.entry]['cancel'], cancel)
 
 
 class Slams(unittest.TestCase):
@@ -308,6 +433,25 @@ class Slams(unittest.TestCase):
     def test_slam_after_a_screw(self):
         i = self.t7_hits(([615], self.screw), ([614], self.slam), ([], self.ground))
         self.assertEqual(self.converted(i), [(self.r466, self.after), (self.r_none, self.ground)])
+
+    def test_slam_told_by_its_reaction(self):
+        """A slam the reaction map pairs with an air hit (Tekken 8's unnamed aDw_tataki: Reina's d/f+1,2): its
+        standing reaction lands at once (airborne and falling in frame 1 only, then down), so it is a slam too."""
+        def move(name, a, b, fall, trans):
+            self.t7.tables['moves'].append(dict(name=len(self.t7.namebuf), airborne_start=a, airborne_end=b,
+                                                ground_fall=fall, transition=trans))
+            self.t7.namebuf += name.encode() + b'\0'
+            return len(self.t7.tables['moves']) - 1
+        self.t7.tables.update(moves=[], reactions=[])
+        self.t7.namebuf, self.t7.aliases = b'', [0] * 56
+        self.t7.aliases[0x0a] = move('dwKAM_00D', 0, 0, 0, STANCE)
+        spike, spin = move('#43', 1, 1, 1, 0x800a), move('#26', 1, 38, 37, 0x800a)
+        self.t7.tables['reactions'] += [dict(default=spike), dict(default=spin)]
+        self.c.conv_reaction = lambda rx: self.air if rx in (0, 1) else rx      # (both: the reaction map's air spin)
+        i = self.t7_hits(([614], 0), ([], self.ground))            # source reaction 0: the slam
+        self.assertEqual(self.converted(i), [(self.r466, self.after), (self.r_none, self.ground)])
+        j = self.t7_hits(([614], 1), ([], self.ground))            # source reaction 1: an air hit
+        self.assertEqual(self.converted(j), [(self.r466, self.air), (self.r_none, self.ground)])
 
 
 class Landing(unittest.TestCase):
@@ -460,4 +604,22 @@ class RunningContacts(unittest.TestCase):
         self.assertEqual(TS.reqs(live,rows[1]['req']),[(122,0)])
         self.assertEqual(rows[1]['move_id'],1)
         self.assertEqual(live['cancels'][:2],before['cancels'])
+        self.assertEqual(TS.restore_running_contacts(live,names.__getitem__,donor,names.__getitem__),0)
+
+    def test_first_run_phase_contact_stop_restored_alone(self):
+        # Tekken 8 lists lack sRUN__00F's (122) -> stance row: the donor stops on contact in the run's first phase
+        import copy
+        names=['sRUN__00F','sWALK_00B']
+        end=dict(direction=M.LIST_END,button=0,req=0,extradata=None,win_start=0,win_end=0,start_frame=0,move_id=0,option=0)
+        stop=dict(end,direction=0,req=1,win_start=1,win_end=32767,start_frame=1,move_id=TS.STANDING)
+        behind=dict(stop,req=3)                      # (69) -> stance: not the contact stop, never copied
+        walk=dict(stop,direction=2,move_id=1)        # an input row the fighter has itself
+        reqs=[dict(condition=TS.TT_END,param=0),dict(condition=TS.RUN_CONTACT,param=0),dict(condition=TS.TT_END,param=0),
+              dict(condition=69,param=0),dict(condition=TS.TT_END,param=0)]
+        donor=dict(moves=[dict(cancel=0),dict(cancel=3)],cancels=[stop,behind,walk,end],requirements=reqs,cancel_extras=[])
+        live=copy.deepcopy(donor);live['cancels']=[walk,end];live['moves'][0]['cancel']=0
+        self.assertEqual(TS.restore_running_contacts(live,names.__getitem__,donor,names.__getitem__),1)
+        rows=TS.cancels(live,live['moves'][0]['cancel'])
+        self.assertEqual([r['move_id'] for r in rows[:-1]],[1,TS.STANDING])
+        self.assertEqual(TS.reqs(live,rows[1]['req']),[(TS.RUN_CONTACT,0)])
         self.assertEqual(TS.restore_running_contacts(live,names.__getitem__,donor,names.__getitem__),0)

@@ -1,6 +1,6 @@
 // The task panel at the window's bottom (see launcher.h): the one task that
 // runs (installing, updating, adding or removing characters, uninstalling,
-// updating the launcher),
+// updating the launcher, downloading numpy and Pillow),
 // its step and progress from the builder's or importer's lines, Cancel
 // (SIGTERM: they stop what they started and clean up, which can take
 // seconds; see Process::terminate), and its log in a list that opens.
@@ -90,9 +90,9 @@ void Launcher::begin_task(Kind kind, std::string title) {
     task_ = std::make_unique<Task>();
     task_->kind = kind;
     task_->title = std::move(title);
-    task_->progress = Progress(kind == Kind::kImport || kind == Kind::kRemove ? Progress::Kind::kImport
-                               : kind == Kind::kLauncherUpdate                 ? Progress::Kind::kDownload
-                                                                               : Progress::Kind::kBuild);
+    task_->progress = Progress(kind == Kind::kImport || kind == Kind::kRemove            ? Progress::Kind::kImport
+                               : kind == Kind::kLauncherUpdate || kind == Kind::kPackages ? Progress::Kind::kDownload
+                                                                                          : Progress::Kind::kBuild);
     if (status_) {
         std::map<std::string, std::string> names;
         for (const Fighter& f : status_->fighters) names[f.name] = f.display;
@@ -332,6 +332,10 @@ void Launcher::task_exited(int code) {
     case Kind::kRemove:
         title = ok ? "Removed " + t.subject : t.cancelled ? "Removing cancelled" : "Removing " + t.subject + " failed";
         detail = ok ? "They are gone from the select screen next time the game starts." : why;
+        break;
+    case Kind::kPackages:
+        title = ok ? "Downloaded numpy and Pillow" : t.cancelled ? "Download cancelled" : "Downloading them failed";
+        detail = ok ? "The character importer uses them from now on." : t.cancelled ? "Nothing was changed." : why;
         break;
     case Kind::kUninstall:
     case Kind::kLauncherUpdate: break; // (their own)

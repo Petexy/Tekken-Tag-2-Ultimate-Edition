@@ -24,14 +24,14 @@ int main() {
     for (unsigned i=0; i<6; ++i) sum += scale_hit(original[i], geese_ground_percent(i));
     check(sum == 80); // 20 + 16 + 13 + 11 + 7 + 13; formerly 109
     HitGrabContinuation warp;
-    check(warp.take(0x1000) == 0); // no initiating hit: ordinary throw stays native
+    check(warp.of(0x1000) == 0); // no initiating hit: ordinary throw stays native
     warp.remember(0x1000, 45);
-    check(scale_hit(25, warp.take(0x1000)) == 11);
-    check(warp.take(0x1000) == 0); // one continuation, no stale reapplication
+    check(scale_hit(25, warp.of(0x1000)) == 11);
+    check(scale_hit(10, warp.of(0x1000)) == 4); // the same throw's second deal
     warp.remember(0x1000, 60);
-    check(warp.take(0x2000) == 0); // another attacker/partner cannot inherit it
+    check(warp.of(0x2000) == 0); // another attacker/partner cannot inherit it
     warp.remember(0x1000, 50);
     warp.clear(); // intervening hit or grounded initiation
-    check(warp.take(0x1000) == 0);
+    check(warp.of(0x1000) == 0);
     std::puts("Grounded scaling and hit-grab continuation: PASS");
 }

@@ -275,6 +275,11 @@ Process::Environment Launcher::importer_environment() const {
     Process::Environment environment = {{"PYTHONUNBUFFERED", "1"}, {"PYTHONDONTWRITEBYTECODE", "1"}};
     if (there(kit_ / "t7helper.exe")) environment.emplace_back("TTT2_T7HELPER", (kit_ / "t7helper.exe").string());
     if (there(kit_ / "t8helper.exe")) environment.emplace_back("TTT2_T8HELPER", (kit_ / "t8helper.exe").string());
+    // (The importer's C parts, so that no C compiler is needed: ttt2char/native.py.)
+    for (const auto& [name, file] :
+         {std::pair{"TTT2_NATIVE_DECIMATE", "decimate.so"}, std::pair{"TTT2_NATIVE_OODLE", "oodle.so"}}) {
+        if (there(kit_ / "native" / file)) environment.emplace_back(name, (kit_ / "native" / file).string());
+    }
     return environment;
 }
 
@@ -550,6 +555,8 @@ void Launcher::run_next_test() {
         update_launcher();
     } else if (a.name == "add") {
         start_import(a.args);
+    } else if (a.name == "get-packages") {
+        start_get_packages();
     } else if (a.name == "add-all-base" || a.name == "add-all-owned" || a.name == "add-all") {
         const auto names = a.name == "add-all-owned" ? owned_to_add()
                                                      : base_to_add(a.name == "add-all" ? a.args[0] : kTekken7);

@@ -10,6 +10,7 @@ SHORT_NAME = 'LEROY'
 TEKKEN7_ID = 53
 TEKKEN7_CODE = 'nsb'
 CODE = 'nsb'
+REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15); effects at his cane's point
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -82,6 +83,9 @@ MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
     'bounds': dict.fromkeys(('Nb_WK_4LP', 'Nb_WK_6RK', 'Nb_jpWK02F', 'Nb_t_sWP00'), True),
     'drop_moves': r'^Nb_Direct$',
+    # the cane (convert/moveset.py FLAG_ON): d/f+2+3 brings it out once (Nb_Stick00, which uses it up), then d/f+2+3
+    # is d/f+2 (Nb_t_srpF)
+    'state_flags': {'cane': {'variable': 6, 'prop': 0x82eb, 'clear': 641, 'set': 642}},
     'direct': [(r'^(la|mk)_s', 'anim', ['nb_s%02d' % k for k in range(4)]),     # the donor's intros -> his
                (r'^la_w', 'anim', ['nb_w%02d' % k for k in range(3)])],         # win poses
 }

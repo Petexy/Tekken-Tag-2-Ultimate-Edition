@@ -54,6 +54,16 @@ def cancels(m, i, table='cancels', end=LIST_END):
     return [c for _, c in m.iter_list(table, i, lambda c: c['direction'] == end)]
 
 
+def cancel_reqs(m, i):
+    """The (condition, param) rows of the requirement lists of the cancel list at i, its groups' rows' too."""
+    out = []
+    for c in cancels(m, i):
+        out += reqs(m, c['req'])
+        if c['direction'] == GROUP:
+            out += [r for g in cancels(m, c['move_id'], 'group_cancels', GROUP_END) for r in reqs(m, g['req'])]
+    return out
+
+
 def xps(m, i):
     if i is None:
         return []
@@ -380,13 +390,41 @@ class Combined:
         return first
 
 
-def reaction_remap(ev):
-    """Tekken 7 move name -> the TTT2 move most often in the same reaction slot (where the names differ)."""
+def reaction_remap(ev, signatures=None):
+    """Tekken 7 move name -> the TTT2 move most often in the same reaction slot (where the names differ).
+    signatures: (the source's, TTT2's) frame_signatures: a source reaction that leaves the ground, which TTT2 has no
+    airborne move of that name for, takes the first (by votes) of the moves the evidence pairs it with that has its
+    very frames, a reaction both games have under other names (Azucena's while rising 2 #283 = sDw_UP_01_, 1-52 /
+    fall 51, which its side slots name, by 2 votes against the lower launch sDw_UP_00_'s 10; her u/f+4 and BT 3+4 #341
+    = dw_nog00, 1-35 / 49, a low fall back, by 8 against the face-hit pop-up sDw_KAO00_'s 12); else the most votes."""
     c = collections.defaultdict(collections.Counter)
     for (x, y), n in ev['react.move'].pairs.items():
         if isinstance(x, str) and isinstance(y, str) and x != y:
             c[x][y] += n
-    return {x: cc.most_common(1)[0][0] for x, cc in c.items()}
+    mine, theirs = signatures or ({}, {})
+    out = {}
+    for x, cc in c.items():
+        s = mine.get(x) if x not in theirs else None
+        same = [y for y, _ in cc.most_common() if s in theirs.get(y, ())] if s else []
+        out[x] = same[0] if same else cc.most_common(1)[0][0]
+    return out
+
+
+def frame_signatures(movesets, by_set=False):
+    """{move name: (airborne start, airborne end, ground fall)} of the movesets' moves that leave the ground, the first
+    of each name; unnamed ones as the evidence names them (UNNAMED + index). by_set (TTT2's movesets): {move name: the
+    set of them}, unnamed moves left out. A reaction's float is its animation's: the same frames, the same move."""
+    out = collections.defaultdict(set) if by_set else {}
+    for m in movesets:
+        for i, mv in enumerate(m.tables['moves']):
+            if mv['airborne_start'] <= 0:
+                continue
+            n = m.move_name(i)
+            if by_set and n:
+                out[n].add((mv['airborne_start'], mv['airborne_end'], mv['ground_fall']))
+            elif not by_set:
+                out.setdefault(n or UNNAMED + str(i), (mv['airborne_start'], mv['airborne_end'], mv['ground_fall']))
+    return out
 
 
 def hitbox_remap(ev, min_count=2):
@@ -593,14 +631,15 @@ def tekken8_maps(fighters, ttt2, tekken7=None, references=()):
     mine, theirs = source_values(fighters), ttt2_values(ttt2)
     for m in (req, prop):
         distrust(m, mine, theirs)
-    reactions = reaction_remap(ev)
+    sigs = (frame_signatures(fighters), frame_signatures(ttt2, by_set=True))
+    reactions = reaction_remap(ev, sigs)
     if references:
         req2, prop2 = _maps8(wider)
         for own, wide in ((req, req2), (prop, prop2)):
             distrust(wide, mine, theirs)
             outvoted(own, wide)
         req, prop = Combined(req, req2), Combined(prop, prop2)
-        reactions = dict(reaction_remap(wider), **reactions)
+        reactions = dict(reaction_remap(wider, sigs), **reactions)
         ev = wider
     if movesets7:
         ev7 = collections.defaultdict(Evidence)

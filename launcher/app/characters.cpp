@@ -2,9 +2,12 @@
 // the importer finds them, what is missing to import, each game's characters
 // (Tekken 7's DLC characters with whether the player owns them; a Tekken 8
 // character added with a stand-in's moves, and why), and adding and removing
-// them through import_character.py. Neither game needs the other: only what
-// all added characters share is made again from each one's own game, so the
-// characters of a game that is gone need it whenever another is added.
+// them through import_character.py. Neither game needs the other: what all
+// added characters share is made again from the copy of their pictures and
+// name call each pack keeps; a pack an older version made, without it, is
+// read from its own game again, or, that game gone, keeps what the shared
+// pictures there have of it. Only when they have none either does it need its
+// game whenever another character is added or removed (needs_game).
 
 #include "launcher.h"
 
@@ -77,12 +80,13 @@ GtkWidget* note_line(GtkWidget* card, const char* icon, const std::string& text,
 constexpr const char* kUnknownBuild = "Tekken 8 was updated to a version that Ultimate Launcher cannot save moves from "
                                       "yet";
 
-// Why a game's characters cannot be added while the characters of `other`,
-// a game that is gone, are in the game.
+// Why a game's characters cannot be added while characters of `other`, a
+// game that is gone, are in the game and need it (needs_game).
 std::string shared_needs(std::string_view other) {
     const std::string name = game_name(other);
     return "The " + name + " characters added need " + name + " whenever a character is added: what all of them "
-           "share is made again from each one's own game. Install " + name + " again, or remove them first.";
+           "share is made again, and neither their packs (made by an older version) nor what they share now have "
+           "their pictures. Install " + name + " again, or remove them first.";
 }
 
 } // namespace
@@ -110,12 +114,13 @@ bool Launcher::can_import(std::string* why) const {
 
 std::string Launcher::shared_blocker(const std::string& game) const {
     // (Whatever is added, what the characters share is made again for all of
-    // them, each from its own game.)
+    // them: from their packs' copies, else each from its own game, else as
+    // the shared pictures there have them.)
     if (!status_) return {};
     const std::string other = other_game(game);
     if (status_->readable(other)) return {};
     for (const Fighter& f : status_->fighters) {
-        if (f.of(other) && f.added()) return other;
+        if (f.of(other) && f.added() && f.needs_game) return other;
     }
     return {};
 }
@@ -180,12 +185,12 @@ std::string Launcher::not_addable_why(const Fighter& f) const {
 }
 
 std::string Launcher::removable(const Fighter& f) const {
-    // Removing a character the game loads makes what those left share again,
-    // from their games: one that is gone stops it (all of that game's
+    // Removing a character the game loads makes what those left share again:
+    // one left that needs its game, gone, stops it (all of that game's
     // characters go at once with Remove All).
     if (!status_ || !f.added()) return {};
     for (const Fighter& o : status_->fighters) {
-        if (o.name != f.name && o.added() && !status_->readable(o.game)) {
+        if (o.name != f.name && o.added() && o.needs_game && !status_->readable(o.game)) {
             const char* name = game_name(o.game);
             return std::string(name) + " is needed for the " + name + " characters that stay: what they share is made "
                    "again from it" + (o.of(f.game) ? ". Remove All removes them all at once." : ".");
@@ -226,16 +231,19 @@ std::vector<std::string> Launcher::to_update(const std::string& game, bool stand
 
 std::vector<std::string> Launcher::to_remove_all(const std::string& game) const {
     // Only when the game is gone and more than one of its characters is in
-    // the game: then one alone cannot go (removable), all of them can.
+    // the game, one of them needing it: then one alone cannot go (removable),
+    // all of them can.
     std::vector<std::string> names;
     if (!status_ || status_->readable(game)) return names;
     int added = 0;
+    bool needed = false;
     for (const Fighter& f : status_->fighters) {
         if (!f.of(game) || !f.installed) continue;
         names.push_back(f.name);
         added += f.added();
+        needed = needed || f.needs_game;
     }
-    if (added < 2) names.clear();
+    if (added < 2 || !needed) names.clear();
     return names;
 }
 
@@ -518,16 +526,21 @@ void Launcher::show_characters() {
     }
     gtk_grid_attach(GTK_GRID(facts), steam, 1, row++, 1, 1);
 
-    // What is missing to import, with the command that installs it.
+    // What is missing to import, with the command that installs it. (numpy
+    // and Pillow the launcher gets itself where it can: no package manager,
+    // container or pip needed.)
     std::vector<std::string> missing, names; // (as listed, and as named in a sentence)
     std::vector<Package> packages;
+    const bool get_packages = (!s.numpy || !s.pillow) && s.packages_gettable;
     if (!s.numpy || !s.pillow) {
         missing.push_back(!s.numpy && !s.pillow ? "numpy and Pillow for Python"
                           : !s.numpy            ? "numpy for Python"
                                                 : "Pillow for Python");
-        names.push_back(missing.back());
-        if (!s.numpy) packages.push_back(Package::kNumpy);
-        if (!s.pillow) packages.push_back(Package::kPillow);
+        if (!get_packages) {
+            names.push_back(missing.back());
+            if (!s.numpy) packages.push_back(Package::kNumpy);
+            if (!s.pillow) packages.push_back(Package::kPillow);
+        }
     }
     if (s.gamescope.empty() && (for7 || for8)) {
         missing.push_back(std::string("gamescope (runs ") + games + " hidden)");
@@ -564,12 +577,36 @@ void Launcher::show_characters() {
         std::string text;
         for (size_t i = 0; i < missing.size(); ++i) text += (i ? "\n" : "") + missing[i];
         gtk_box_append(GTK_BOX(needed), ui::label(text, "warning-text"));
+        if (get_packages) {
+            GtkWidget* line = ui::box(GTK_ORIENTATION_HORIZONTAL, 12);
+            char size[32];
+            std::snprintf(size, sizeof size, "%.0f MB", static_cast<double>(s.packages_size) / 1e6);
+            GtkWidget* note = ui::label(std::string("Ultimate Launcher can download them for this Python (") + size +
+                                            " from PyPI, Python's package index) into a folder of its own: nothing "
+                                            "of the system changes.",
+                                        "small dim");
+            gtk_widget_set_hexpand(note, TRUE);
+            gtk_box_append(GTK_BOX(line), note);
+            GtkWidget* download = ui::button("Download");
+            ui::set_id(download, "get-packages");
+            gtk_widget_set_valign(download, GTK_ALIGN_CENTER);
+            gtk_widget_set_sensitive(download, !task_);
+            clicked(download, [](Launcher* self) { self->start_get_packages(); });
+            gtk_box_append(GTK_BOX(line), download);
+            gtk_box_append(GTK_BOX(needed), line);
+        } else if ((!s.numpy || !s.pillow) && !s.packages_error.empty()) {
+            gtk_box_append(GTK_BOX(needed), ui::label("Ultimate Launcher cannot download them itself: " +
+                                                          s.packages_error + ".",
+                                                      "small dim"));
+        }
         std::string what;
         for (size_t i = 0; i < names.size(); ++i) {
             what += (i == 0 ? "" : i + 1 == names.size() ? " and " : ", ") + names[i];
         }
-        gtk_box_append(GTK_BOX(needed),
-                       install_hint(distro, packages, what, "Install them with your distribution's packages."));
+        if (!names.empty()) {
+            gtk_box_append(GTK_BOX(needed),
+                           install_hint(distro, packages, what, "Install them with your distribution's packages."));
+        }
         gtk_grid_attach(GTK_GRID(facts), needed, 1, row, 1, 1);
     }
     gtk_box_append(GTK_BOX(card), facts);
@@ -948,6 +985,16 @@ void Launcher::start_import(const std::vector<std::string>& names) {
         task_->update = update;
         task_->hidden = tekken7 && tekken8 ? "Tekken 7 or Tekken 8" : tekken8 ? "Tekken 8" : "Tekken 7";
     }
+}
+
+void Launcher::start_get_packages() {
+    if (task_) return refuse("Another task is running", "Wait for it to end, then download numpy and Pillow.");
+    if (importer_.empty() || python_.empty()) {
+        return refuse("Cannot download numpy and Pillow", "The character importer or Python 3 is missing.");
+    }
+    std::vector<std::string> argv = importer_command("get_python_packages.py");
+    argv.push_back("--progress");
+    start_task(Kind::kPackages, "Downloading numpy and Pillow", argv, importer_environment(), nullptr);
 }
 
 void Launcher::start_remove(const std::vector<std::string>& names) {

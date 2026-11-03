@@ -1245,3 +1245,107 @@ def shared_files(source, archives, rpx, fighters, log=None, new_row=False):
     if log:
         log('pictures in %d layouts; the big select portraits; the names and faces in fights' % count)
     return files
+
+
+# ------------------------------------------------------------------------------------------------ kept
+
+class Blank:
+    """A picture source whose pictures are empty: what shared_files makes with it for a fighter has the places and
+    sizes of what it makes from the fighter's own pictures (those come from the title's pictures and lettering), to
+    be filled from an earlier shared/'s (keep)."""
+
+    game = None
+
+    @staticmethod
+    def picture(path):
+        return np.zeros((4, 4, 4), np.uint8)
+
+
+class Lost(Exception):
+    """An earlier shared/ lacks a kept fighter's pictures, or has them at other sizes (args: the fighter's
+    definition, which pictures)."""
+
+
+def fighter_pages(lm, code, pages):
+    """The texture pages (atlas ids of `pages`) the added fighter `code` has in layout lm: those of the shapes its
+    labels (Paul's with its code: Layout.add_labels) and its grid cell (face_panel_<code>: Layout.add_cell) show."""
+    chars = set()
+    for sprite in lm.sprites():
+        labels = lm.labels_of(sprite)
+        for name in labels:
+            if re.search(r'(?:^|_)%s(?:_|$)' % code, name):
+                start, end = lm.label_span(sprite, name)
+                chars |= {c.char for f in sprite.frames + sprite.keyframes if start <= f.index < end
+                          for c in f.children if isinstance(c, lmb.Place)}
+    for _, _, place_ in lm.find_named('face_panel_' + code):
+        cell = lm.char(place_.char)
+        if isinstance(cell, lmb.Sprite):
+            chars |= {c.char for _, c in cell.all_children() if isinstance(c, lmb.Place)}
+    found = set()
+    for shape in lm.shapes():
+        if shape.id in chars:
+            found |= {g.atlas for g in shape.graphics if g.atlas in pages}
+    return found
+
+
+def keep(files, earlier, kept, archives):
+    """shared_files' `files`, made with Blank pictures for fighters `kept` [(slot, definition)], with their pictures
+    as an earlier shared_files made them (earlier(file name) -> its bytes, or None): their texture page in each
+    layout, their two big portraits and three HUD pictures (by place), as they are (BC3 blocks and all). Lost
+    when the earlier ones lack any of them or have them at other sizes."""
+    if not kept:
+        return files
+    for i, key, tkey in layout_entries(archives):
+        name, pages_name = 'keys/%08x.bin' % key, 'keys/%08x.add' % tkey
+        if pages_name not in files:
+            continue
+        lm, pages = lmb.Lmb.read(files[name]), nut.read(files[pages_name])
+        textures = {t['gidx']: t for t in pages['textures']}
+        before = None
+        for slot, d in kept:
+            mine = fighter_pages(lm, d.CODE, textures)
+            if not mine:
+                continue
+            if before is None:
+                old_lm, old_pages = earlier(name), earlier(pages_name)
+                if old_lm is None or old_pages is None:
+                    raise Lost(d, 'layout %08x' % key)
+                old_textures = {t['gidx']: t for t in nut.read(old_pages)['textures']}
+                before = lmb.Lmb.read(old_lm), old_textures
+            theirs = fighter_pages(before[0], d.CODE, before[1])
+            if len(mine) != 1 or len(theirs) != 1:
+                raise Lost(d, 'its page of layout %08x' % key)
+            new, old = textures[mine.pop()], before[1][theirs.pop()]
+            if (new['fmt'], new['w'], new['h'], len(new['mips'])) != (old['fmt'], old['w'], old['h'], len(old['mips'])):
+                raise Lost(d, 'its page of layout %08x at %dx%d, now %dx%d' % (key, old['w'], old['h'], new['w'],
+                                                                              new['h']))
+            new['mips'] = old['mips']
+        files[pages_name] = nut.write(pages)
+    # the big portraits: two frames per place after the title's (Paul's own for a place no fighter had)
+    title = archives.read(PORTRAITS)
+    first = len(container_frames(title))
+    name = 'keys/%08x.bin' % PORTRAITS
+    old = earlier(name)
+    frames = [files[name][o:o + s] for o, s in container_frames(files[name])]
+    old_frames = [old[o:o + s] for o, s in container_frames(old)] if old else []
+    paul = [title[o:o + s] for o, s in container_frames(title)[:2]]
+    for slot, d in kept:
+        at = first + 2 * slot
+        theirs = old_frames[at:at + 2]
+        if len(theirs) < 2 or theirs == paul:
+            raise Lost(d, 'its big portraits')
+        frames[at:at + 2] = theirs
+    files[name] = with_frames(title, frames[first:])
+    # the HUD's three per place
+    name = 'keys/%08x.add' % HUD
+    old = earlier(name)
+    pages = nut.read(files[name])
+    old_textures = nut.read(old)['textures'] if old else []
+    for slot, d in kept:
+        for at in range(3 * slot, 3 * slot + 3):
+            if at >= len(old_textures) or (old_textures[at]['w'], old_textures[at]['h']) != (
+                    pages['textures'][at]['w'], pages['textures'][at]['h']):
+                raise Lost(d, 'its HUD pictures')
+            pages['textures'][at]['mips'] = old_textures[at]['mips']
+    files[name] = nut.write(pages)
+    return files

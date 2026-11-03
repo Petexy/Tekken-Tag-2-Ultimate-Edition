@@ -9,7 +9,7 @@ NAME = 'Noctis'
 SHORT_NAME = 'NOCTIS'
 TEKKEN7_ID = 44
 TEKKEN7_CODE = 'mrz'
-REVISION = 6
+REVISION = 7
 CODE = 'mrz'
 SEX = 'male'
 
@@ -95,8 +95,6 @@ MOVESET = {
     # Only these finishers retain their T7 airborne slam instead of a rebound.
     'source_air_reactions': ('Mz_t_srk02', 'Mz_t_srk02Easy'),
     'air_hit_strings': ('Mz_jprp01', 'Mz_jprp01F', 'Mz_jprp02'),
-    'hitgrab_followups': ('Mz_rp00B',),
-    'on_hit_followups': {'Mz_9LK': 'Mz_9LK2'},
     'direct_buffered_strings': ('Mz_t_srk00F',),
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and Mz_jpWPF; neutral 1+2
     # (Mz_WP00) none (WS 2,2 screws without one: free_air_screws)

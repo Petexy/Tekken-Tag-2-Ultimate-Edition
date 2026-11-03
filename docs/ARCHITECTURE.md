@@ -280,6 +280,15 @@ attachment formats and blend state.
   shader samples with nothing bound reads zeros (a 1x1 image), as on the
   GPU: Fallen Garden's and Heaven Garden's water draws have one, and
   skipping them left those stages without water.
+- Targets and textures the title stopped using are freed
+  (`Renderer::evict_unused`, every 60 title frames): textures not bound
+  for 30 s (`kUnusedFrames`), and targets not used for as long whose
+  memory holds newer data (the CPU's, or another target's rendered later;
+  the others hold what only the GPU rendered and stay), once the GPU has
+  finished with them. Each match loads fighters, stages and effects at
+  other addresses: kept, their images took about 1.3 GB more video memory
+  an hour, and the scans over every target (thousands a frame) slowed the
+  command processor until after a few hours the game ran in slow motion.
 - Write-back: the title reads some render targets with the CPU, as the
   console's GPU renders into guest memory. Its exposure averages the scene
   down to one element of a 64x64 target and reads it two frames later
@@ -1261,10 +1270,15 @@ item at player +3416 (70..77, written only by items; above 77 a location
 has no position at all), so the weapon's points hit as locations 70..73 and
 the port writes their positions there every frame, made from the parent
 bone's world matrix (the title keeps none for still extra bones). That
-matrix (the hit test's skeleton) is a frame behind the animation, so the
-points take the local drawn the frame before; with the current one, Noctis's
-thrown sword (1 to 4 m from a hand swinging down) had its points fly over the
-opponent's head while the sword drawn went through him.
+matrix is the model's own (the hit test's skeleton is the model's bone
+container), and the model's update (`sub_069DF470`) makes it only after the
+posing, so the port writes the points as that update ends, from the frame's
+locals and the new matrices: the bones the hit test reads next. Written at the
+posing they were a frame off: with the frame's locals on the frame before's
+matrix, Noctis's thrown sword (1 to 4 m from a hand swinging down) had its
+points fly over the opponent's head while the sword drawn went through him;
+with the locals drawn the frame before, every weapon hit a frame late (0.4 to
+0.5 m behind Negan's bat at its active frame).
 
 **Summoned weapons (Noctis).** Noctis's mesh of weapons holds a copy of each
 for each hand (a great sword, a sword, a dagger; a spear in the right, a
@@ -1295,6 +1309,34 @@ two seconds.
 His moves hit with a weapon's tip (Tekken 7's hitbox (tip, 0, tip, hand)) and
 some with its guard: a hand's weapons share the four point slots (a point
 `n>slot`), a slot taking the summoned weapon's point, else the first listed's.
+Negan's moves show and hide his items with 0x82c4 / 0x82c5, Kunimitsu II's
+with 0x8300 / 0x8301: the same summons. Some of hers are out before any move
+takes them out (the kunai in her right fist, the sheath with her sword at her
+hips): the importer finds them from her moves that both take an item out and
+put it away (putting it away first: it was out). Tekken 7 starts a round with
+those out (an intro of hers ends with the sword drawn), which TTT2 does not:
+the moves of the definition's `WEAPON_DISMISS` (her stance, the move her
+intros end in), the donor's moves and the round-start poses start by
+dismissing all summons and taking those out again. An item carried in another
+(the sword and the knife in her sheath) is a weapon under that weapon's bone,
+collapsed with it, without points (character.ini names the fighter's bone
+carrying it: the same in every preset outfit, whose cloth bones differ). A
+summoned weapon the definition's `THROWN` item is (the kunai she throws) is
+dismissed as the projectile flying its look is spawned.
+Her fingers: a hand shows a frame of the moveset's hand shapes (MOTA slot 2
+of the moveset, one animation whose frames are the shapes; TTT2's 0x82d6
+left, 0x82d7 right, frame value >> 8, 0x82d9 both back to their defaults,
+left frame 1, right frame 2) or a hand animation (Tekken 7's 0x842e /
+0x842f, TTT2's 0x82db left / 0x82dc right: an animation of the motion pack's
+hands container), which the hand keeps until a move gives it another. Her
+stance gives only her left hand an animation (open); her right hand is the
+default shape, a fist round the kunai in Tekken 7 but open in the donor's
+shapes (Jun's). Tekken 7's hand animations are another codec and not in the
+saved moveset, but its Kunimitsu II keeps TTT2's Kunimitsu's hands: the
+definition's `HANDS` names that TTT2 row, whose hand shapes her moveset
+takes, and a Tekken 7 hand value her moves share with its moves of the same
+name becomes its animation, copied into her pack's hands container (her
+stance's open left hand).
 
 **Saving Tekken 7's movesets** (`tekken7/autodump.py`, `tekken7/memdump.py`,
 `tools/characters/t7helper/`): Tekken 7's data files are encrypted, and a
@@ -1609,8 +1651,12 @@ compiler.
   `@progress` (at most ten a second) and `@error`.
 - **The importer's side** (`tools/characters/launcher.py`): `status` is one
   JSON object, in about 0.1 s and without numpy, with what adding fighters
-  needs (numpy and Pillow, gamescope, pactl, each game's helper, a C
-  compiler, Steam, Tekken 7's folder or why it cannot be used and whether
+  needs (numpy and Pillow, and whether the launcher can download them for
+  this Python: `get_python_packages.py`, PyPI's wheels pinned per Python
+  version in `ttt2char/python_packages.lock.json`, unpacked into
+  `~/.local/share/ttt2/python/cp3XY`, which `ttt2char` puts on its path
+  before site-packages; gamescope, pactl, each game's helper, a C
+  compiler or the kit's prebuilt `native/*.so`, Steam, Tekken 7's folder or why it cannot be used and whether
   its files can be read (`readable`: what `shared/` needs even when it
   cannot run), Tekken 8's folder, whether it is the build its helper knows
   (`build_known`, read from the exe only while a fighter's own moveset is
@@ -1966,6 +2012,7 @@ debugging:
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
+| `TTT2_EVICT=0` | keep the textures and render targets the title stopped using (freed after 30 s otherwise) |
 | `TTT2_SHADOWS=0/1` | stream-out output and its draws' constants read in place (0) or from copies in video memory (1; the default on discrete GPUs) |
 | `TTT2_SHADOW_CHECK=1/2` | compare those copies with guest memory after each frame (2: also draw the stream-out draws the old way, into guest memory) |
 | `TTT2_VK_VALIDATION=1` | Khronos validation layer, if installed (synchronization checks: `khronos_validation.validate_sync = true` in a file named by `VK_LAYER_SETTINGS_PATH`) |

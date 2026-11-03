@@ -58,7 +58,6 @@ class Latches(unittest.TestCase):
 
     def test_tekken7_unchanged(self):
         self.assertNotIn(358, moveset.REQ_OVERRIDE['t7'])
-        self.assertNotIn(43, moveset.REQ_OVERRIDE['t7'])
         self.assertNotIn(0x80c5, moveset.PROP_OVERRIDE['t7'])
         self.assertFalse(moveset.OWN_INPUT['t7'])
 
@@ -66,6 +65,50 @@ class Latches(unittest.TestCase):
 def row(direction, button, move_id=0, req=None):
     return dict(direction=direction, button=button, req=req, extradata=None, win_start=1, win_end=32767,
                 start_frame=1, move_id=move_id, option=0)
+
+
+class CancelRows(unittest.TestCase):
+    """conv_cancel_list's Tekken 8 rules: REQ_OR (183, the opponent on its feet: TTT2's 63 or 64; 43, hit or block:
+    46 or 49) and ACTION_ROW."""
+
+    def setUp(self):
+        self.k = Source8(refs=[(0, 'own')] * 3)
+        self.k.tables['cancel_extras'] = [dict(value=0x2c00), dict(value=0x80)]
+        self.c = converter(self.k, req={0: 0, 44: 46, 717: 458})
+        self.c.T.update(cancels=[], cancel_extras=[])
+        self.c.extra_index = {}
+        self.c.target = lambda m, input_target=False: m
+
+    def conv(self, *rows):
+        """Source rows (requirement list, extradata, move) -> the converted rows (move, conditions, extradata)."""
+        start = len(self.k.tables['cancels'])
+        for req, ex, mid in rows:
+            self.k.tables['cancels'].append(dict(row(0, 0, mid, req), extradata=ex))
+        self.k.tables['cancels'].append(row(M.LIST_END, 0))
+        out = self.c.conv_cancel_list(start)[:-1]
+        return [(r['move_id'], converted(self.c, r['req']), self.c.T['cancel_extras'][r['extradata']]['value'])
+                for r in out]
+
+    def test_one_row_per_alternative(self):
+        """Azucena's 1,1 into Libertador on hit: [44, 183, 717] -> [46, 63, 458] and [46, 64, 458]."""
+        self.assertEqual(self.conv((self.k.req((44, 0), (183, 0), (717, 0)), 1, 2), (self.k.req((44, 0)), 1, 1)),
+                         [(2, [(46, 0), (63, 0), (458, 0)], 0x80), (2, [(46, 0), (64, 0), (458, 0)], 0x80),
+                          (1, [(46, 0)], 0x80)])
+        self.assertEqual(self.c.stats['cancels made one row per alternative (REQ_OR)'], 1)
+        self.assertEqual(moveset.REQ_OR['t7'], {43: (46, 49)})
+
+    def test_contact_rows(self):
+        """43 (hit or block) in a cancel row: a row on 46 (the hit) and one on 49 (the block); outside one, 46."""
+        self.assertEqual(self.conv((self.k.req((43, 0)), 1, 2), (self.k.req((44, 0)), 1, 1)),
+                         [(2, [(46, 0)], 0x80), (2, [(49, 0)], 0x80), (1, [(46, 0)], 0x80)])
+        self.assertEqual(converted(self.c, self.c.conv_reqs(self.k.req((43, 0)))[0]), [(46, 0)])
+
+    def test_action_rows(self):
+        """Tekken 8's 0x2c00 action rows are TTT2's 0x2800 (its hit rows after one were never taken)."""
+        self.assertEqual([x for _, _, x in self.conv((self.k.req((44, 0)), 0, 0x8001), (self.k.req((44, 0)), 1, 2))],
+                         [0x2800, 0x80])
+        self.c.game = 't7'
+        self.assertIsNone(moveset.ACTION_ROW['t7'])
 
 
 class Donor(Moveset):

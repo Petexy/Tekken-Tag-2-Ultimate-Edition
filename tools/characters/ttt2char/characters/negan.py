@@ -9,6 +9,7 @@ SHORT_NAME = 'NEGAN'
 TEKKEN7_ID = 50
 TEKKEN7_CODE = 'nsa'
 CODE = 'nsa'
+REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15); effects at his bat's point; his knife
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -73,9 +74,6 @@ VOICE_PREFIX = 'na'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
     'name': '[NEGAN]',
-    # 4,2 / 1,4,2: cover the bat through its model-defined tip.
-    # Keep the inner point; extend the outer capsule beyond the inferred 70 cm point.
-    'hitboxes': {'Na_rkrp': (0x72, 0, 0x70, 8)},
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
     'bounds': dict.fromkeys(('Na_2rp', 'Na_3lklprpkm', 'Na_4lrp', 'Na_4rprp', 'Na_Batrp', 'Na_Batrplk',
                              'Na_lprpwp'), True),
@@ -89,8 +87,16 @@ MOVESET = {
 
 # his bat (Lucille) in his right hand, posed by his animations' second extra pair (the first poses the copy for his
 # left hand, not drawn; weapons.py); the points it hits with (Tekken 7 hit locations: its tip, Tekken 7's own point;
-# the others along the bat, in cm from Tekken 7's grip)
+# 0x6f along the bat, in cm from Tekken 7's grip)
 WEAPONS = [{'mesh': _ITEM + '/Meshes/nsa/extra/nsa_exp_1p/Meshes/SK_CH_nsa_exp_1p', 'bone': 'ATH_R_weapon001',
-            'parent': 'TE_R_jnt', 'pair': 1, 'points': {0x70: 'ATH_R_weapon001_top', 0x72: 70, 0x6f: 45}}]
-# the knife and the bat in his left hand (not drawn) hit next to the hand
-HIT_LOCATIONS = {0x6b: 0x0d, 0x6e: 0x0d}
+            'parent': 'TE_R_jnt', 'pair': 1, 'points': {0x70: 'ATH_R_weapon001_top', 0x6f: 45}}]
+# the knife and the bat in his left hand (not drawn) hit next to the hand. 0x72 is no point of the bat: the moves
+# that hit with it, (0x72, 0, 0x72, elbow) as Tekken 7's lines of a fist, are punches with the bat held up and back
+# (2, 1,2, 4,2, 1,4,2: its tip 400-750 mm behind the fist at their active frames) or upright (u/f+2, d/f+1,2), so it
+# is the point past his right fist, TTT2's 40 (as a point 70 cm along the bat it lay behind the fist: 1,2, 4,2 and
+# 1,4,2 never hit)
+HIT_LOCATIONS = {0x6b: 0x0d, 0x6e: 0x0d, 0x72: 40}
+# his knife (an item of the same mesh, still in his left hand: no animation poses it), shown only while a move has it
+# out (Tekken 7's 0x82c4 1 .. 0x82c5 1: d, d/f, f + 1, a throw and two tag moves; convert/moveset.SUMMON_PROPS)
+WEAPONS.append({'mesh': WEAPONS[0]['mesh'], 'bone': 'ATH_L_weapon002', 'parent': 'TE_L_jnt', 'pair': None,
+                'summon': 1})

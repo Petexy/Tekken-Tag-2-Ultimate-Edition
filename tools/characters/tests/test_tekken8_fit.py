@@ -79,10 +79,25 @@ class Fit(unittest.TestCase):
         self.assertEqual(self.c.stats['property dropped: face animation'], 1)
 
     def test_hit_locations(self):
-        self.c.hitbox, self.c.hit_locations = {46: 37}, {}
-        self.assertEqual([self.c.hit_location(x) for x in (125, 133, 134, 46, 16)], [70, 0, 0, 37, 16])
+        self.c.hitbox, self.c.hit_locations = {46: 37, 21: 19}, {}
+        self.assertEqual([self.c.hit_location(x) for x in (125, 133, 134, 21, 16)], [70, 0, 0, 19, 16])
+        # the limb points (HIT_POINT8) before the id maps: a fist's TTT2's fist point, a foot's or knee's its bone
+        self.assertEqual([self.c.hit_location(x) for x in (41, 43, 46, 54, 55, 140, 141)], [40, 39, 19, 19, 16, 15, 18])
+        self.c.hit_locations = {43: 13}                                    # the definition's HIT_LOCATIONS first
+        self.assertEqual(self.c.hit_location(43), 13)
         self.c.game = 't7'
-        self.assertEqual(self.c.hit_location(125), 125)                    # (Tekken 7's codes as they were)
+        self.assertEqual([self.c.hit_location(x) for x in (125, 46)], [125, 37])     # (Tekken 7's as they were)
+
+    def test_airborne_side_effect(self):
+        """[723 (1, 40)]: the hit stores 40 + 1 (Tekken 8's hit-condition walk), the entry's test is [723]'s."""
+        self.c.req_map.pairs[723] = 466
+        self.c.usage['req'].add(466)
+        self.c.usage['values']['req'][466] = {0}
+        self.assertEqual(self.conv((723, 1, 40)), [(466, 0)])
+        self.assertEqual(self.conv((723, 0)), [(466, 0)])
+        self.assertIsNone(self.conv((723, 2)))                             # (FIT as before)
+        self.assertIsNone(self.conv((724, 1, 40)))                         # the screw stays false (REQ_FALSE)
+        self.assertEqual(self.c.stats['Tekken 8 airborne tests: the hit\'s side effect (1, n) left out'], 1)
 
 
 class Maps(unittest.TestCase):

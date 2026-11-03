@@ -46,6 +46,12 @@ struct Fighter {
     int outfits = 0;
     // Their pack in the game has its outfits. (Only with `added()`.)
     bool outfits_added = false;
+    // What all added characters share needs their game whenever it is made
+    // again (a character added or removed): their pack, made by an older
+    // version, keeps no copy of their pictures and name call, and, their game
+    // gone, the shared pictures there have none of theirs. (Only with
+    // `added()`.)
+    bool needs_game = false;
 
     // In the game: a pack it loads.
     bool added() const { return installed && !outdated && !newer; }
@@ -55,6 +61,12 @@ struct Fighter {
 struct ImporterStatus {
     std::string python_version;
     bool numpy = false, pillow = false;
+    // Whether the launcher can get numpy and Pillow for this Python itself
+    // (get_python_packages.py: PyPI's wheels into a folder of their own), the
+    // bytes it downloads, or why it cannot (another Python version, no glibc).
+    bool packages_gettable = false;
+    uint64_t packages_size = 0;
+    std::string packages_error;
     std::string gamescope, pactl; // their paths, empty when missing
     std::string helper;           // "prebuilt", "mingw", or empty: no way to make Tekken 7's helper
     std::string tekken8_helper;   // the same for Tekken 8's helper

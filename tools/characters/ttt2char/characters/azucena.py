@@ -23,8 +23,10 @@ MOVESET_SOURCE = 'tekken8'
 # update the helper does not know yet): the TTT2 fighter (code, motion row) whose moveset she fights with instead,
 # as it is (MOVESET_SOURCE 'donor'), the donor of everything then (importer.with_stand_in)
 STAND_IN = ('hei', 13)        # Heihachi Mishima
-# what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: her bounds
-REVISION = 1
+# what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: her bounds; 2: Tekken 8's
+# limb hit points, on-hit follow-ups (1,1 into Libertador), air reactions (d+2,3), slams after the bound, wall
+# pushbacks, the run's contact stop, her u/f+1+2's catch
+REVISION = 2
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_cat_<name> (tekken8/costume.py: its meshes, their merge order and the
@@ -102,4 +104,12 @@ MOVESET = {
     # for are '#<index>', 'Cat_#<index>' in her TTT2 moveset: indices of the game build the names were read from.)
     'bounds': {'Cat_t_slp00': True, '#1807': True, '#1677': True, '#1696': True, 'Cat_jprk00F': True,
                '#1621': True, 'Cat_66rk': True},
+    # her reactions that keep Tekken 8's move (convert/moveset.py Converter.target): f+2,1,4's and d/b+3+4's launch
+    # away from her (#391, from behind #392), which the reaction evidence (only Feng's f+2,1,4 has the same notation)
+    # made ym_y01L, a flip back over her: both launch, so neither the fall classes nor the frames tell them apart
+    'own_reactions': ('#391', '#392'),
+    # u/f+1+2 (Thrmv_B1_R0): Tekken 8's catch point is the left hand (13, 0)(13, 1), but her animation reaches with the
+    # right one (TE_R 670 mm ahead of her at the catch frame, TE_L 400 ahead and 400 to the side), so TTT2's catch
+    # at the left hand never touched anyone: the right hand, the chest kept
+    'hitboxes': {'Thrmv_B1_R0': (9, 0, 9, 1)},
 }

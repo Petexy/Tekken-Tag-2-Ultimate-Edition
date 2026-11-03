@@ -17,10 +17,11 @@
 # kit/VERSION            the launcher's version and this build's commit
 # kit/t7helper.exe       the Tekken 7 helper, when MinGW is there to build it
 # kit/t8helper.exe       the Tekken 8 helper, likewise
+# kit/native/*.so        the importer's C parts (ttt2char/native.py)
 #
 # The same layout is installed to <prefix>/lib/ttt2/kit.
 
-set(TTT2_LAUNCHER_VERSION 0.5.0)
+set(TTT2_LAUNCHER_VERSION 0.5.1)
 set(TTT2_LAUNCHER_VERSION ${TTT2_LAUNCHER_VERSION} PARENT_SCOPE)
 set(TTT2_KIT_DIR ${CMAKE_BINARY_DIR}/launcher/kit)
 set(TTT2_KIT_DIR ${TTT2_KIT_DIR} PARENT_SCOPE)
@@ -207,6 +208,21 @@ else()
                    "builds them)")
 endif()
 
+# Nor a C compiler (SteamOS has none): the importer's C parts, which
+# ttt2char/native.py otherwise builds on the player's PC (Tekken 8's imports,
+# a decimated model such as Noctis's), built here with its options; the
+# launcher names them ($TTT2_NATIVE_DECIMATE, $TTT2_NATIVE_OODLE).
+set(native_source ${CMAKE_SOURCE_DIR}/tools/characters/ttt2char)
+add_library(ttt2_native_decimate MODULE ${native_source}/convert/decimate.c)
+target_link_libraries(ttt2_native_decimate PRIVATE m)
+add_library(ttt2_native_oodle MODULE ${native_source}/tekken8/oodle.c)
+target_link_libraries(ttt2_native_oodle PRIVATE pthread)
+foreach(part decimate oodle)
+    set_target_properties(ttt2_native_${part} PROPERTIES PREFIX "" OUTPUT_NAME ${part}
+        LIBRARY_OUTPUT_DIRECTORY ${TTT2_KIT_DIR}/native C_STANDARD 11 C_EXTENSIONS ON)
+    target_compile_options(ttt2_native_${part} PRIVATE -O2 -Wall)
+endforeach()
+
 # A small program that may start other programs: ZArchive (and zstd) read
 # the .wua, OpenSSL checks the executable's hash.
 add_executable(ttt2-build
@@ -220,7 +236,8 @@ target_link_libraries(ttt2-build PRIVATE ZArchive::zarchive OpenSSL::Crypto)
 target_compile_options(ttt2-build PRIVATE -Wall -Wextra -Wpedantic)
 set_target_properties(ttt2-build PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${TTT2_KIT_DIR}/bin)
 
-add_custom_target(ttt2_kit ALL DEPENDS ${kit_files} ttt2_kit_runtime ttt2-build)
+add_custom_target(ttt2_kit ALL DEPENDS ${kit_files} ttt2_kit_runtime ttt2-build ttt2_native_decimate
+    ttt2_native_oodle)
 
 install(DIRECTORY ${TTT2_KIT_DIR}/ DESTINATION lib/ttt2/kit USE_SOURCE_PERMISSIONS)
 

@@ -747,7 +747,9 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     // all the packs together): a `keys/` folder in a pack (an early
     // importer's, made for one fighter alone) is never read, since its
     // texture pages would be joined to the title's containers before
-    // shared/'s and move every added fighter's pictures one place.
+    // shared/'s and move every added fighter's pictures one place. Nor is
+    // `source/`: the pictures and name call from its game that the importer
+    // makes shared/ from (megabytes the title never asks for).
     std::error_code ec;
     for (const auto& item : fs::recursive_directory_iterator(pack.directory, ec)) {
         if (!item.is_regular_file()) continue;
@@ -755,7 +757,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         const bool known = name == "character.ini" ||
                            std::any_of(files.begin(), files.end(), [&](const File& f) { return f.name == name; }) ||
                            std::find(bank_files.begin(), bank_files.end(), name) != bank_files.end();
-        if (known || name.compare(0, 5, "keys/") == 0) continue;
+        if (known || name.compare(0, 5, "keys/") == 0 || name.compare(0, 7, "source/") == 0) continue;
         auto contents = read_file(item.path());
         if (!contents) continue;
         ++own;
@@ -2436,6 +2438,15 @@ void with_donor_id(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PP
 }
 PPC_FUNC(sub_03D6B9F4_orig);
 PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); }
+// Each frame sub_03D6B544 sizes the 8 spheres the fighters push each other
+// apart with (sub_03A40400): the radii (+2516 + 16k) come from the select
+// id's row of 0x107C3D04 (8 floats; 288 115.2 115.2 360 and four 144 mm for
+// nearly every fighter), changed by the current move's +0x6C (a mode, spheres
+// switched off). Past that table's 63 rows an added fighter read the next
+// table's row id - 63, hurt sizes: 220 220 220 220 and four 132, or 275 for
+// all eight (a big fighter's), which held the opponent off a lunge's reach.
+PPC_FUNC(sub_03D6B544_orig);
+PPC_FUNC(sub_03D6B544) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B544_orig); }
 // The CPU's set-up at a round's start (sub_0399221C) goes through the four
 // players (kCpuPlayers) and copies each one's distances and its opponent's
 // (+152) from such a table (0x107BABD0, 12-byte rows): past it an added
@@ -3168,6 +3179,50 @@ PPC_FUNC(sub_033E265C) {
     }
 }
 
+// The '?' cell (cell 11, 34 or 54 of a grid) picks its cursor's roulette id,
+// cursor +60 (sub_033E33F4), which sub_033E1A54 (select r3, now r4) moves on
+// for each cursor (select +48, +56), every third frame or now, to the next id
+// after it that is free in the cursor's mask and available, 62 wrapping round
+// to 0: TTT2's fighters only. On the title's grid (select +76: 1, kGrid) each
+// lap goes on here, after TTT2's last, through the added fighters with a cell
+// that the cursor's team has not picked, in slot order, so '?' picks each of
+// them as often as each TTT2 fighter (the roulette holds every id three
+// frames). A pick of one needs nothing more: it is the pick of its cell.
+constexpr uint32_t kSelectGrid = 76, kSelectCursors = 48, kCursorRoulette = 60;
+// The first added fighter after id `after` that the roulette of `cursor` can stop on.
+std::optional<uint32_t> roulette_added(uint32_t cursor, uint32_t after) {
+    const std::set<uint32_t> team = team_added(cursor);
+    for (const Added& added : g_added) {
+        if (added.active && added.cell != 0 && added.id > after && team.count(added.id) == 0) return added.id;
+    }
+    return std::nullopt;
+}
+PPC_FUNC(sub_033E1A54_orig);
+PPC_FUNC(sub_033E1A54) {
+    const uint32_t select = ctx.r[3];
+    uint32_t cursors[2], before[2];
+    for (uint32_t p = 0; p < 2; ++p) {
+        cursors[p] = load(select + kSelectCursors + 8 * p);
+        before[p] = cursors[p] ? load(cursors[p] + kCursorRoulette) : 0;
+    }
+    sub_033E1A54_orig(ctx, base);
+    if (!g_active || load(select + kSelectGrid) != 1) return;
+    for (uint32_t p = 0; p < 2; ++p) {
+        const uint32_t cursor = cursors[p];
+        if (!cursor || load(cursor + kCursorRoulette) == before[p]) continue; // not moved on this frame
+        // From an added fighter the title went on from 0: the next added one comes first, if any is left. From
+        // TTT2's own, a step back (62 wrapped round to 0) ends TTT2's lap: the added fighters come first.
+        const bool was_added = slot_of_id(before[p]) >= 0;
+        std::optional<uint32_t> next;
+        if (was_added) next = roulette_added(cursor, before[p]);
+        else if (load(cursor + kCursorRoulette) < before[p]) next = roulette_added(cursor, 0);
+        if (next) store(cursor + kCursorRoulette, *next);
+        if (traces().roster && next.has_value() != was_added) // the lap goes into or out of the added fighters
+            std::fprintf(stderr, "ttt2: roster: '?' roulette of cursor %u: %u -> %u\n", p, before[p],
+                         load(cursor + kCursorRoulette));
+    }
+}
+
 // Notes the fighter a player's cursor is on for the chooser (object r3,
 // player r4, select id r5), asserting that the id is below 63: an added
 // fighter's donor's.
@@ -3245,10 +3300,16 @@ PPC_FUNC(sub_05BDC714) {
 // the points' positions are made here from the parent's world matrix (the hit
 // test's skeleton, sub_04E1A4C8(player) +32: 144-byte records, the body bones
 // by bone index, +64 world, rows the axes, row 3 the position) and the locals.
-// Those records are a frame behind the animation (as the hit test's own
-// bones), so the points take the local drawn the frame before: with this
-// frame's, a thrown sword's points (1 to 4 m from a swinging hand) flew
-// over the opponent's head while the sword drawn went through him.
+// That skeleton is the model's own bone container, whose world matrices the
+// model's update (sub_069DF470) makes after the posing: while the weapons are
+// posed they are still the frame before's (moved on by the player's step), so
+// the points are made as the update ends, from this frame's locals and those
+// matrices, the very bones the hit test reads next. (Made at the posing, from
+// this frame's locals, a thrown sword's points (1 to 4 m from a swinging hand)
+// flew over the opponent's head while the sword drawn went through him; from
+// the locals drawn the frame before, they hit a frame late: 0.4-0.5 m behind
+// Negan's swinging bat, Noctis's sword tip a metre over the opponent as his
+// slash came down.)
 // Summoned weapons (Noctis's sword, daggers, spear, shield): a move summons
 // weapon n (Tekken 7's 0x82a7, the importer's 0x822E) and dismisses it or all
 // (0x82a8 -> 0x822F, value 16: all); a weapon not summoned is collapsed into
@@ -3272,11 +3333,17 @@ constexpr int kHoldFrames = 120;   // a held weapon let go after these frames wh
 constexpr float kHeldReach = 1500.0f; // mm: a weapon always in hand (no summon) ignores a pair farther out (the
                                       // channels of another animation's use: Tekken 7's spin reactions, 20 m paths)
 struct WeaponBone {
-    std::array<uint32_t, 16> bind{}, last{}, drawn{};
-    bool shown = false; // drawn last frame (with `drawn`, not collapsed)
+    std::array<uint32_t, 16> bind{}, last{};
 };
-std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last, the one drawn
+std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last
 std::map<uint32_t, uint64_t> g_summoned; // player -> its summoned weapons (bit n: summon n)
+struct PosedWeapons {
+    uint32_t player = 0;
+    const std::vector<Weapon>* weapons = nullptr;
+    std::vector<std::array<uint32_t, 16>> locals; // by weapon: this frame's (not collapsed)
+    std::vector<bool> shown;
+};
+std::map<uint32_t, PosedWeapons> g_posed_weapons; // model -> its weapons as posed, until its update ends
 // Row-vector 4x4 matrices (rows the axes, row 3 the position), as the title's records keep them.
 using Matrix = std::array<float, 16>;
 struct WeaponHold {
@@ -3401,7 +3468,7 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     }
     const uint32_t skeleton = guest_call(ctx, base, sub_04E1A4C8, {player});
     const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
-    std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (as drawn last frame, not collapsed)
+    std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (this frame's, not collapsed)
     std::vector<bool> shown(weapons.size(), false);
     for (size_t w = 0; w < weapons.size(); ++w) {
         const Weapon& weapon = weapons[w];
@@ -3437,9 +3504,7 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         if (records != 0) {
             shown[w] = hold_weapon(player, w, shown[w], records + kRecordSize * weapon.parent + kRecordWorld, local);
         }
-        locals[w] = bone.shown ? bone.drawn : local; // the parent's record is a frame behind the animation
-        bone.drawn = local;
-        bone.shown = shown[w];
+        locals[w] = local;
         if (!shown[w]) {
             for (int row = 0; row < 3; ++row) {
                 for (int col = 0; col < 3; ++col) local[4 * row + col] = bits(0.0f);
@@ -3451,6 +3516,20 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         bone.last = local;
     }
     if (const auto hold = g_weapon_holds.find(player); hold != g_weapon_holds.end()) hold->second.requested = false;
+    g_posed_weapons[model] = {player, &weapons, std::move(locals), std::move(shown)};
+}
+
+// The points of the weapons a model's update posed, as it ends (its world matrices made: see above).
+void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
+    const auto posed = g_posed_weapons.find(model);
+    if (posed == g_posed_weapons.end()) return;
+    const uint32_t player = posed->second.player;
+    const std::vector<Weapon>& weapons = *posed->second.weapons;
+    const std::vector<std::array<uint32_t, 16>> locals = std::move(posed->second.locals);
+    const std::vector<bool> shown = std::move(posed->second.shown);
+    g_posed_weapons.erase(posed);
+    const uint32_t skeleton = guest_call(ctx, base, sub_04E1A4C8, {player});
+    const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
     if (records == 0) return;
     // the points: position = p L R + t R + T (rows: L the local axes, R the parent's world axes; p the point's
     // local translation); the summoned weapons' first, then a slot none of them wrote from the first weapon with it
@@ -3578,6 +3657,20 @@ PPC_FUNC(sub_069D8B30) {
     ctx.lr = lr;
 }
 
+// A model's update (it samples the animation, poses the bones through
+// sub_069D8B30 above, then makes their world matrices): then the added
+// fighter's weapon points, from those matrices.
+PPC_FUNC(sub_069DF470_orig);
+PPC_FUNC(sub_069DF470) {
+    const uint32_t model = ctx.r[3];
+    sub_069DF470_orig(ctx, base);
+    if (g_posed_weapons.empty()) return;
+    const uint32_t r3 = ctx.r[3], lr = ctx.lr;
+    weapon_points(ctx, base, model);
+    ctx.r[3] = r3;
+    ctx.lr = lr;
+}
+
 
 // ------------------------------------------------------------------ 2D (Street Fighter style) arcs
 
@@ -3697,7 +3790,13 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
 } // namespace
 
 namespace {
-std::map<uint32_t, damage::HitGrabContinuation> g_warp_strike_scaling;
+std::map<uint32_t, damage::HitGrabContinuation> g_hit_grab_scaling; // by defender (sub_03AE1704)
+// the percent a thrower's throw damage continues (its latest airborne hit's; 0, none)
+uint32_t hit_grab_percent(uint32_t thrower) {
+    for (const auto& [defender, continuation] : g_hit_grab_scaling)
+        if (const uint32_t percent = continuation.of(thrower)) return percent;
+    return 0;
+}
 std::string_view damage_move_name(uint32_t player) {
     const uint32_t move = player ? load(player + kPlayerMove) : 0;
     return move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
@@ -3742,21 +3841,19 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     }
     const uint32_t flags = load(result + 0x3c);
     uint32_t percent = 100;
-    auto& warp = g_warp_strike_scaling[defender];
-    const bool noctis = k >= 0 && g_added[k].code == "mrz";
-    if (load(result + 0x40) != 4) {
-        warp.clear(); // any intervening collision invalidates the continuation
-        if (noctis && damage_move_name(attacker) == "Mz_rp00F" &&
-            (flags & 0x00200000u) && !(flags & 0x80000000u)) {
-            // sub_03AE1704 @03AE1C30 uses this defender counter and table.
-            // Preserve the initiating hit's native curve through the forced
-            // victim state, whose flat property otherwise bypasses the curve.
-            const uint32_t count = load(defender + 0x1cc);
-            const uint32_t native_percent = count <= 8 ? load8(0x101ce884 + count) : 30;
-            warp.remember(attacker, native_percent);
-        }
-    } else if (noctis && damage_move_name(defender) == "Mz_rp01F_n") {
-        if (const uint32_t inherited = warp.take(attacker)) percent = inherited;
+    // An added fighter's hit-grab (a hit that cancels into a throw: Noctis's Warp-Strikes, Kunimitsu II's kunai)
+    // deals its throw part as throw damage (0x8058 / 0x8059 in its _n move, sub_03AE86A0 below), which never comes
+    // here and which the native code never scales: in a juggle it came whole. Its airborne hit is remembered for it,
+    // with the percent this calculation takes for that hit (@03AE1C30: the defender's counter, before this hit adds
+    // to it, into the table at 0x101ce884; 30 past its 9 entries). A thrower continues its latest such hit only;
+    // any other collision on the defender ends it (a standing hit, a real throw's grab).
+    auto& hit_grab = g_hit_grab_scaling[defender];
+    hit_grab.clear();
+    if (k >= 0 && (flags & 0x00200000u) && !(flags & 0x80000000u)) {
+        for (auto& [other, continuation] : g_hit_grab_scaling)
+            if (continuation.owner == attacker) continuation.clear();
+        const uint32_t count = load(defender + 0x1cc);
+        hit_grab.remember(attacker, count <= 8 ? load8(0x101ce884 + count) : 30);
     }
     if (k >= 0 && g_added[k].code == "mry" &&
         damage::ground_hit(flags, load8(defender + 0x36b))) {
@@ -3818,7 +3915,15 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const bool noctis_trace = (id == 0x8093 || id == 0x80a5) && trace_noctis_air(player);
     const uint32_t requested = noctis_trace ? load(ctx.r[4]+4) : 0;
     const uint32_t pass = ctx.r[5];
+    // Throw damage of an added fighter: 0x8058 / 0x8059 store the points (the value's low half) as the thrower's
+    // pending damage (+0x4a4, kind 1 / 2 at +0x487; @03AEFAB4, pass 0 only), which goes to the victim's health
+    // without sub_03AE1704. A hit-grab's takes the scale of the airborne hit it continues (sub_03AE1704 above).
+    const int32_t throw_points = (id == 0x8058 || id == 0x8059) && pass == 0 && added_slot(player) >= 0
+                                 ? static_cast<int16_t>(load(ctx.r[4] + 4)) : 0;
     sub_03AE86A0_orig(ctx, base);
+    if (throw_points > 0 && load(player + 0x4a4) == uint32_t(throw_points) && load8(player + 0x487) == id - 0x8057)
+        if (const uint32_t percent = hit_grab_percent(player))
+            store(player + 0x4a4, static_cast<uint32_t>(damage::scale_hit(throw_points, percent)));
     if (noctis_trace)
         std::fprintf(stderr,"noctis-air SET player=%08X frame=%u prop=%04X requested=%u stored=%u pass=%u\n",
             player,load(player+kPlayerFrame),id,requested,load(player+(id==0x80a5?0x628:0x63c)),pass);
@@ -3952,13 +4057,21 @@ bool special_assist_sequence(uint32_t player) {
     const auto window = legacy ? eliza_assist::InputWindow{} : special_assist_window(player);
     const bool glide_finisher = name == "Vp_66lklk" || name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
     const bool own_move = !glide_finisher && eliza_assist::owns_move(g_added[slot].code, name);
-    const bool starts = legacy ? eliza_assist::entry(name) :
-        ((g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last)));
+    // Only while the assist owns the pad (the Glide keeps its own rule; it
+    // holds the pad from Vp_rk00B on anyway). TTT2's own expiry
+    // (sub_04E187B8) gives the pad back to the fighter that started the Tag
+    // Assault when no window is open to defer it (Geese's qcf+2: My_ReppuuB
+    // has none, My_ReppuuB2's opens at frame 35). A window opening after that
+    // must not take it away again: that fighter, the owner by then, would be
+    // decoded on the inactive route below and crouch-walk on its TAG + d/b.
+    const bool owns_pad = load(player + 0x1e80) != 0;
+    const bool starts = legacy ? eliza_assist::entry(name) : owns_pad &&
+        (g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last));
     const uint32_t move = load(player + kPlayerMove);
     const uint32_t bridge_end = g_added[slot].code == "mry" && move ?
         eliza_assist::geese_contact_bridge(name, load(move + 0x68)) :
         g_added[slot].code == "mrz" ? window.bridge_end() : 0;
-    const bool continues = legacy ? eliza_assist::continuation(name) : bridge_end != 0;
+    const bool continues = legacy ? eliza_assist::continuation(name) : owns_pad && bridge_end != 0;
     const bool active = state.update_window(true, load(player + 0x408) == 0,
         load(player + 0x1e88) == 1, load(player + 0xac), load(player + kPlayerFrame),
         legacy ? assist_recovery(player) : std::max(window.control_end(), bridge_end), starts, continues);

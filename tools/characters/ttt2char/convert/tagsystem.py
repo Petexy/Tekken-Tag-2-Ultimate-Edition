@@ -7,7 +7,9 @@ Tekken 7 has no tag, and TTT2 keeps its tag system in the movesets, as moves and
   that hit into XDA, X's animation without a hit, whose properties bring the partner in (its Co_Change_Kam takes the
   tag-in kind 11) while it returns to the stance. The converter makes the definition's bound moves bounds
   (move_overrides.py) but has no XT or XDA to give them: add_tag_assault makes both, after the donor's own triples
-  (assault_template).
+  (assault_template); add_tag_assault_continuations gives the tag row to the move before an X a string goes on into
+  too late for X's own. The partner jumping in (ChgInJmpDA, the donor's) attacks with a move of its own, not the
+  donor's: set_assault_entry.
 * Bounds: bound_shape gives the donor's bound entry and what its air hit plays once the bound is used. Where TTT2 has
   a bound, Tekken 7 often has an air slam instead (the same move of Heihachi's in both games: [614 airborne -> slam]
   [614 -> air][default] in Tekken 7, [467 -> bound][466 -> air][default] in TTT2); the id maps make the slam the bound
@@ -409,6 +411,111 @@ def add_tag_assault_strings(tables, made, routes):
     return added
 
 
+KEEP_FRAMES = 0x400                  # cancel extradata bit: the next move goes on from this move's frame
+MIN_TAG_FRAMES = 3                   # a continued bound move keeping fewer frames of its tag window gets the row early
+
+
+def add_tag_assault_continuations(tables, made, first):
+    """A bound move X that a string's previous move P goes on into by itself, keeping the frame count (an automatic
+    row with extradata KEEP_FRAMES at frame s: the second hit of a string's last stage, Akuma's d/f+1,2 Mx_3lprp ->
+    Mx_3lprp2 at 22), starts at frame s, so X's tag row (frames 1 to first_active - 1) is open from s on only, not at
+    all when s is its last frame (Mx_3lprp2: active from 23, tag row 1-22). TTT2's own movesets give P the tag row
+    then, into X's twin at the continuation's frame (Kunimitsu's Kt_3lrp `TAG 1-19 sf19 -> Kt_3lrp2b`, Zafina's
+    Qt_fKAM_lrk00 `TAG 1-19 sf19 -> Qt_fKAM_lrk01T`; 15 such moves in its 58 movesets): P gets the tag row from X's
+    tag row's first frame to the continuation's last, at its frame, extradata and requirements (and the tag row's),
+    into XT, right before the continuation. Only where X keeps fewer than MIN_TAG_FRAMES frames of its tag row after
+    the continuation (TTT2 leaves several of its own at 3 to 5 without one: Yoshimitsu's Ym_RKatana2NG 28-31). Left
+    alone: P below `first` (the donor's), the twins and a P with a tag row already (its own Tag Assault); a list
+    several moves share is written anew once. made: add_tag_assault's [(X, XT, XDA)]. -> the rows added"""
+    moves = tables['moves']
+    twins = {x: (xt, next(c for c in cancels(tables, moves[x]['cancel'])
+                          if c['direction'] == 0 and c['button'] == TAG_BUTTON and c['move_id'] == xt))
+             for x, xt, _ in made}
+    skip = {k for _, xt, xda in made for k in (xt, xda)}
+    lists, added = {}, 0
+    for p in range(first, len(moves)):
+        old = moves[p]['cancel']
+        if p in skip or p in twins or old is None:
+            continue
+        if old in lists:
+            moves[p]['cancel'] = lists[old]
+            continue
+        rows = cancels(tables, old)
+        if any(c['direction'] == 0 and c['button'] == TAG_BUTTON for c in rows):
+            continue
+        out, n = [], 0
+        for c in rows:
+            extra = row_kind(tables, c)[1]
+            if is_automatic(c) and c['move_id'] in twins and extra is not None and extra & KEEP_FRAMES \
+                    and c['start_frame'] > 1 \
+                    and twins[c['move_id']][1]['win_end'] - c['start_frame'] < MIN_TAG_FRAMES:
+                xt, tag = twins[c['move_id']]
+                conditions = reqs(tables, c['req'])
+                more = [x for x in reqs(tables, tag['req']) if x[0] != 0 and x not in conditions]
+                req = write(tables, 'requirements', [dict(condition=k, param=q) for k, q in conditions + more]
+                            + [dict(condition=TT_END, param=0)]) if more else c['req']
+                out.append(dict(c, button=TAG_BUTTON, req=req, win_start=tag['win_start'], move_id=xt,
+                                option=tag['option']))
+                n += 1
+            out.append(dict(c))
+        if n:
+            lists[old] = moves[p]['cancel'] = write(tables, 'cancels', out)
+            added += n
+    return added
+
+
+ENTRY_MOVE = 'ChgInJmpDA'            # the incoming partner's Tag Assault jump-in (At_ChgInJmp, At_ChgInJmpNear -> it)
+ENTRY_FLAG = 0x8081                  # its attack rows' requirement (the partner of a Tag Assault: XDA's 0x8081)
+ENTRY_START = (30, 45)               # TTT2's 58 movesets start their entry attacks at ChgInJmpDA frame 30 to 45
+DF, PRESS_1 = 0x8, 0x40000001        # d/f; 1 pressed alone (one pressed + all held)
+
+
+def stance_input(tables, aliases, first, direction, button, stance=0x8001):
+    """The fighter's own move (index >= first) the stance's list (alias `stance`, its groups too) goes to on exactly
+    this input without requirements, else None."""
+    for c in cancels(tables, tables['moves'][resolve(aliases, stance)]['cancel']):
+        rows = [c]
+        if c['direction'] == M.GROUP:
+            rows = chain(tables['group_cancels'], c['move_id'], lambda g: g['direction'] == M.GROUP_END)[:-1]
+        for y in rows:
+            if (y['direction'], y['button']) == (direction, button) and \
+                    all(cond == 0 for cond, _ in reqs(tables, y['req'])):
+                t = resolve(aliases, y['move_id'])
+                if first <= t < len(tables['moves']):
+                    return t
+    return None
+
+
+def set_assault_entry(tables, name_of, target):
+    """The incoming partner's Tag Assault entry attack. The partner jumping in (ChgInJmpDA) attacks when Tag is held
+    in its frames 25-30 (and as the CPU, at random), with a move each of TTT2's 58 movesets names itself (Jun's b+4
+    Ju_rk00B, Lars's b+1+2 La_RPsLP, Kunimitsu's d/f+1 Co_t_slpF, King's d/f+2 Kg_t_srpF ...); a converted moveset
+    keeps the donor's ChgInJmpDA, so the added fighter came in with the donor's move, in the donor's animation.
+    Those rows (requirement ENTRY_FLAG, into a move) go to move `target` instead (None: left alone), at the start
+    frame that brings its first active frame where the donor's was (start frame + first active: Jun 45 + 13, Lars
+    40 + 21), within TTT2's ENTRY_START; in a new list (the donor's can be shared). -> the rows changed"""
+    moves = tables['moves']
+    if target is None:
+        return 0
+    changed = 0
+    for i in range(len(moves)):
+        if name_of(i) != ENTRY_MOVE or moves[i]['cancel'] is None:
+            continue
+        rows = [dict(c) for c in cancels(tables, moves[i]['cancel'])]
+        n = 0
+        for c in rows:
+            if c['direction'] >= M.LIST_END or c['move_id'] >= len(moves) or not has(tables, c['req'], ENTRY_FLAG):
+                continue
+            hit = c['start_frame'] + moves[c['move_id']]['first_active']
+            c['start_frame'] = min(max(hit - moves[target]['first_active'], ENTRY_START[0]), ENTRY_START[1])
+            c['move_id'] = target
+            n += 1
+        if n:
+            moves[i]['cancel'] = write(tables, 'cancels', rows)
+            changed += n
+    return changed
+
+
 # ------------------------------------------------------------------------------------------------ Tag Crash
 def landing_template(tables, aliases):
     """The donor's Tag Crash rows, learnt from its reactions: the Tag Crash row (HELP_BUTTON: requirements,
@@ -599,29 +706,43 @@ def preserve_grounded_screw_bound(tables, move_name):
     return changed
 
 
+STANDING, RUN_CONTACT = 0x8001, 122     # the stance's alias slot; the run touching the opponent
+
+
 def restore_running_contacts(tables, move_name, donor_tables, donor_name):
     """Retain native running collision exits lost to T7-only requirement 640.
 
     Copy the donor's generic tackle/body-check rows and gates, never its own
     running attacks. Repoint new lists so shared cancel/requirement rows survive.
+    The run's first phase (sRUN__00F) gets the donor's stop on contact alone
+    (`auto [RUN_CONTACT] -> stance`), which Tekken 8's lists lack: its fighters
+    pushed the opponent on into the tackle where TTT2's fighters stop.
     """
     names = {move_name(i): i for i in range(len(tables['moves']))}
     donor = {donor_name(i): i for i in range(len(donor_tables['moves']))}
     restored = 0
-    for name in ('sRUN__01F', 'sRUN__02F', 'sRUN__03F'):
+    for name in ('sRUN__00F', 'sRUN__01F', 'sRUN__02F', 'sRUN__03F'):
         if name not in names or name not in donor:
             continue
         move = tables['moves'][names[name]]
         rows = [dict(r) for r in cancels(tables, move['cancel'])]
         changed = False
         for original in cancels(donor_tables, donor_tables['moves'][donor[name]]['cancel']):
-            target = donor_name(original['move_id']) if original['move_id'] < len(donor_tables['moves']) else ''
-            if not is_automatic(original) or target not in ('Co_runtac00', 'Co_runspA00') or target not in names:
+            if not is_automatic(original):
                 continue
             required = reqs(donor_tables, original['req'])
-            if any(r['move_id'] == names[target] and is_automatic(r) and reqs(tables, r['req']) == required for r in rows[:-1]):
+            if original['move_id'] == STANDING:     # (the alias slot: the fighter's own stance)
+                if required != [(RUN_CONTACT, 0)]:
+                    continue
+                to = STANDING
+            else:
+                target = donor_name(original['move_id']) if original['move_id'] < len(donor_tables['moves']) else ''
+                if target not in ('Co_runtac00', 'Co_runspA00') or target not in names:
+                    continue
+                to = names[target]
+            if any(r['move_id'] == to and is_automatic(r) and reqs(tables, r['req']) == required for r in rows[:-1]):
                 continue
-            row = dict(original, move_id=names[target])
+            row = dict(original, move_id=to)
             row['req'] = write(tables, 'requirements', [dict(condition=c,param=p) for c,p in required] +
                                [dict(condition=TT_END,param=0)])
             if original['extradata'] is not None:

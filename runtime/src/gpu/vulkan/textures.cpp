@@ -6,6 +6,7 @@
 // GX2Invalidate (SURFACE_SYNC) marks textures whose memory the CPU wrote;
 // a dirty texture reloads if the data's hash changed. Textures matching a
 // replacement (gpu/replacements.h) show its RGBA8 contents instead.
+// Textures and targets the title stopped using are freed (evict_unused).
 
 #include "gpu/vulkan/renderer.h"
 
@@ -162,6 +163,7 @@ Texture* Renderer::texture(const uint32_t words[7]) {
         }
         entry = std::move(t);
     }
+    note_used(*entry);
     load_texture(*entry);
     return entry.get();
 }
@@ -608,6 +610,82 @@ const Image& Renderer::null_texture() {
         barrier();
     }
     return null_texture_;
+}
+
+// ------------------------------------------------------------ unused images
+
+// Forgets a target wherever it is named and frees its images.
+void Renderer::drop_target(Target* t) {
+    for (auto& [key, x] : textures_) {
+        if (x->source != t) continue;
+        x->source = nullptr; // (loaded again: from guest memory or another target)
+        x->dirty = true;
+        x->hash = 0;
+    }
+    for (auto& c : pass_colors_) {
+        if (c == t) c = nullptr;
+    }
+    if (pass_depth_ == t) pass_depth_ = nullptr;
+    std::erase(write_back_targets_, t);
+    std::erase(carried_, t);
+    std::erase(view_kept_, t);
+    destroy_image(t->image);
+    destroy_image(t->start_copy);
+    destroy_image(t->end_copy);
+    destroy_image(t->view_copy);
+}
+
+// Every 60 title frames (renderer.h). A target goes only when its memory
+// holds newer data too, the CPU's or that of another target over it
+// rendered later: the others hold what only the GPU rendered, which the
+// title may sample again (50-120 of them, mostly small mip chains rendered
+// at a load).
+void Renderer::evict_unused() {
+    if (!evict_ || frame_number_ % 60 != 0) return;
+    uint64_t done = 0;
+    VK_CHECK(vkGetSemaphoreCounterValue(ctx_.device, timeline_, &done));
+    const auto unused = [&](uint64_t frame, uint64_t value) {
+        return frame_number_ - frame >= kUnusedFrames && value <= done;
+    };
+    // Targets first: the textures copied from them forget them.
+    std::vector<Target*> drop;
+    for (const auto& owned : targets_) {
+        Target* t = owned.get();
+        if (!unused(t->used_frame, t->used_value)) continue;
+        bool newer = t->overwritten > t->written;
+        for (size_t i = 0; !newer && i < targets_.size(); ++i) {
+            const Target* o = targets_[i].get();
+            newer = o != t && o->written > t->written && o->address < t->end && o->end > t->address;
+        }
+        if (newer) drop.push_back(t);
+    }
+    if (!drop.empty()) {
+        for (Target* t : drop) drop_target(t);
+        std::erase_if(targets_, [&](const std::unique_ptr<Target>& t) {
+            return std::find(drop.begin(), drop.end(), t.get()) != drop.end();
+        });
+        evicted_targets_ += drop.size();
+    }
+    for (auto it = textures_.begin(); it != textures_.end();) {
+        Texture* t = it->second.get();
+        if (!unused(t->used_frame, t->used_value)) {
+            ++it;
+            continue;
+        }
+        for (const auto& range : t->memory) {
+            if (range[1] <= range[0]) continue;
+            for_pages(range[0], range[1], [&](uint32_t page) {
+                const auto p = texture_pages_.find(page);
+                if (p == texture_pages_.end()) return;
+                std::erase(p->second, t);
+                if (p->second.empty()) texture_pages_.erase(p);
+            });
+        }
+        vkDestroyImageView(ctx_.device, t->view, nullptr);
+        destroy_image(t->image);
+        it = textures_.erase(it);
+        ++evicted_textures_;
+    }
 }
 
 // ---------------------------------------------------------------- samplers

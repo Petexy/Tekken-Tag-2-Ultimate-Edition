@@ -15,3 +15,12 @@ def cache_root():
 
 def movesets():
     return os.path.join(data_root(), 'tekken7', 'movesets')
+
+def python_packages():
+    """Where the launcher puts numpy and Pillow for this Python (python_packages.py): one folder per Python version;
+    None on Windows (its launcher has its own)."""
+    if os.name == 'nt':
+        return None
+    import sys
+    return os.path.join(data_root(), 'python', 'cp%d%d%s' % (sys.version_info[0], sys.version_info[1],
+                                                             getattr(sys, 'abiflags', '')))

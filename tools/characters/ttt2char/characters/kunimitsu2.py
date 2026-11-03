@@ -80,11 +80,12 @@ VOICE_PREFIX = 'kt'
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 # Keep both BT 1 stance-side variants: their generic names hide Kunimitsu's
-# own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups.
-REVISION = 3
+# own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups; likewise her own
+# BT 4 and crouching 2, d/f+3 and d/f+4 (4).
+REVISION = 4
 
 MOVESET = {
-    'own_moves': r'^Co_R_(?:rp00L|lp00R)$',
+    'own_moves': r'^Co_(?:R_(?:rp00L|lp00R|rk00R)|syarp00|syalkF|syarkF)$',
     # Native movement/tag groups also reference the donor's BT jab directly.
     # Only exact 1 presses should use her attack, not native 2 or 1+2 turns.
     'generic_input_replacements': {'Co_R_rp00L': 0x40000001, 'Co_R_lp00R': 0x40000001},
@@ -110,23 +111,38 @@ HIDE = [('gla', 'ATH_L_hand_mask_knm')]
 # no scalp); Tekken 7 shows the mask over it: the hair in front of the mask's face is left out
 COVERED = [('har', 'MI_CH_knm_gla_1p_Mask')]
 
-# her blades, drawn and posed by her animations' extra pairs (weapons.py): the left hand's short sword (pair 0; with
-# the other left-hand pairs it is the kunai she throws, which Tekken 7 flies by these pairs, up to 7 m out) and the
-# right hand's (pair 3); the points they hit with (Tekken 7 hit locations) are Tekken 7's own: the swords' tips, the
-# kunai's ends
+# her blades (weapons.py), posed by her animations' extra pairs. Her weapon mesh holds eight items, which her moves
+# show and hide by number (Tekken 7's 0x8300 n .. 0x8301 n: moveset.SUMMON_PROPS): 0 the short sword (ATH_L_weapon001,
+# pair 0: 1,1,1 and the other strings ending in a slash, d, d/f, f + 1 + 2, her Rage Drive and Rage Art) and 1 the
+# kunai (ATH_L_weapon002, pair 1: her two kunai throws, until it flies) in her left hand; 3 her kunai in her right
+# fist (ATH_R_weapon001, pair 3), 2 the sheathed sword she holds in that hand in an intro (ATH_R_weapon_spear, pair 5,
+# its sword ATH_R_weapon_spear_top in it); 7 the sheath at her hips (ATH_R_weapon002, pair 4) with 6 the sword and 5
+# the knife in it (ATH_R_weapon002_top, _hilp: carried in the sheath, they go where it goes). 3, 6 and 7 are out
+# before any move takes them out (moveset.default_summons): her stance holds the kunai in her right fist (her hand
+# shapes: HANDS) and the sheath with the sword at her hips. The points they hit with (Tekken 7 hit locations) are
+# Tekken 7's own, on the sword and the kunai in her fist, written whether they are shown or not.
 _WEAPONS = _ITEM + '/Meshes/knm/extra/knm_exp_1p/Meshes/SK_CH_knm_exp_1p'
 WEAPONS = [
-    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon001', 'parent': 'TE_L_jnt', 'pair': 0,
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon001', 'parent': 'TE_L_jnt', 'pair': 0, 'summon': 0,
      'points': {0x74: 'ATH_L_weapon001_top', 0x76: 'ATH_L_weapon001_top', 0x77: 'ATH_L_weapon001_hilp'}},
-    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3,
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon001', 'parent': 'TE_R_jnt', 'pair': 3, 'summon': 3,
      'points': {0x75: 'ATH_R_weapon001_top'}},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_L_weapon002', 'parent': 'TE_L_jnt', 'pair': 1, 'summon': 1},
 ]
+# Tekken 7 starts a round with only the kunai in her fist and the sheath with the sword out (one intro ends with the
+# sword drawn): her stance and the move her intros and win poses end in start so (moveset.dismiss_at_start)
+WEAPON_DISMISS = r'^Kt_(sKAM00_|KAM)$'
+# her fingers are TTT2 Kunimitsu's (row 44; moveset.HAND_PROPS): its hand shapes, whose default right hand is the
+# fist round her kunai Tekken 7 shows (the donor's are Jun's open hands), and its stance's open left hand (Tekken 7
+# kept her stance animation and its hand property)
+HANDS = 44
 # her Piercing Kunai Throw (d, d/f, f + 1) and the kunai ending her low-high kicks: Tekken 7 flies the kunai by those
 # pairs, which TTT2 cannot follow at range; a TTT2 projectile instead (convert/moveset.py thrown_rows), flying as the
 # kunai does: from 1.2 m ahead of her hips at its first active frame, 1.1 m up, 460 mm a frame for 13 frames
-# The kunai is seen flying with it: the blade of her left hand (its triangles in her weapon mesh, tip forward), with
-# the speed line Tekken 7 trails behind it (her effect 40)
-_KUNAI = {'mesh': _WEAPONS, 'bone': 'ATH_L_weapon001', 'tip': 'ATH_L_weapon001_top'}
+# The kunai is seen flying with it: her kunai (its triangles in her weapon mesh, tip forward: it has no point bone of
+# its own, and in the bind it points as the sword beside it does), with the speed line Tekken 7 trails behind it (her
+# effect 40); the kunai drawn in her hand goes as the projectile is spawned (moveset.thrown_rows)
+_KUNAI = {'mesh': _WEAPONS, 'bone': 'ATH_L_weapon002', 'tip': 'ATH_L_weapon001_top'}
 THROWN = {'Kt_236LP': dict(frame=15, forward=1200, up=350, speed=460, frames=13, radius=150, height=250,
                            item=_KUNAI, trail=40),
           'Kt_2lkrk_LP': dict(frame=26, forward=1200, up=350, speed=470, frames=13, radius=150, height=250,
@@ -143,4 +159,15 @@ WEAPONS += [
      'points': {0xfe: ({'parent_local_offset': (87.579403, -313.689518, 128.174626)}, 1)}},
     {'bone': 'L_Leg', 'parent': 'HIZA_L_jnt', 'pair': None,
      'points': {0xfd: ({'parent_local_offset': (-46.328674, -88.211068, -8.512432)}, 2)}},
+]
+# her sheathed blades (after the points above, which keep their numbers): the sheath at her hips and the sword and
+# the knife in it, the sheathed sword in her right hand and its sword
+WEAPONS += [
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002', 'parent': 'KOSHI_jnt', 'pair': 4, 'summon': 7},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002_hilp', 'parent': 'ATH_R_weapon002', 'pair': None,
+     'summon': 5},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon002_top', 'parent': 'ATH_R_weapon002', 'pair': None,
+     'summon': 6},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon_spear', 'parent': 'TE_R_jnt', 'pair': 5, 'summon': 2},
+    {'mesh': _WEAPONS, 'draw': True, 'bone': 'ATH_R_weapon_spear_top', 'parent': 'ATH_R_weapon_spear', 'pair': None},
 ]

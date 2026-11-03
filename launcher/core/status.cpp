@@ -21,6 +21,10 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
     s.python_version = d["python"]["version"].string();
     s.numpy = d["python"]["numpy"].boolean();
     s.pillow = d["python"]["pillow"].boolean();
+    const json::Value& packages = d["python"]["packages"];
+    s.packages_error = packages["error"].string();
+    s.packages_gettable = packages.is_object() && packages["error"].is_null();
+    s.packages_size = static_cast<uint64_t>(packages["size"].number(0));
     s.gamescope = d["tools"]["gamescope"].string();
     s.pactl = d["tools"]["pactl"].string();
     s.helper = d["tools"]["helper"].string();
@@ -57,6 +61,8 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
         fighter.stand_in = fighter.added() && f["stand_in"].boolean();
         fighter.outfits = static_cast<int>(f["outfits"].number(0));
         fighter.outfits_added = fighter.added() && f["outfits_added"].boolean();
+        // (An importer without "needs_game": every pack needs its game.)
+        fighter.needs_game = fighter.added() && f["needs_game"].boolean(true);
         s.fighters.push_back(std::move(fighter));
     }
     return s;

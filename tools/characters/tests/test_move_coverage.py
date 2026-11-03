@@ -19,7 +19,7 @@ def source(names, reqs=()):
         offsets.append(len(k.namebuf))
         k.namebuf += name.encode() + b'\0'
     k.aliases = [0] * 56
-    k.tables = dict(moves=[dict(name=o) for o in offsets], requirements=[
+    k.tables = dict(moves=[dict(name=o, transition=0x8000, airborne_start=0) for o in offsets], requirements=[
         dict(condition=a, param=b) for a, b in reqs] + [dict(condition=881, param=0)],
         input_sequences=[], cancels=[])
     return k
@@ -30,6 +30,7 @@ def converter(k):
     c.k, c.k_id = k, k.character_id
     c.newid, c.stats, c.cache = 80, collections.Counter(), {}
     c.newidx, c.dn, c.delta_move, c.react_remap = {}, {}, {}, {}
+    c.d = source([])                                    # (the donor: its moves where a test needs them)
     c.cls, c.queue, c.alloc_ok = ['T'] * len(k.tables['moves']), [], 0
     c.T = dict(moves=[], requirements=[])
     c.conv_move = lambda i: dict(name=k.tables['moves'][i]['name'])
@@ -67,8 +68,9 @@ class SharedAttacks(unittest.TestCase):
                 self.assertIsNone(c.target(0, input_target=True))
                 self.assertEqual(c.queue, [])
 
-    def test_ch_crumple_chain_is_imported_instead_of_stagger_remap(self):
-        for name in ('sDm_nkdoBxC', 'sDm_nkd2BxC'):
+    def test_preserved_reactions_are_imported_instead_of_the_remap(self):
+        # the high spinning launch, the flip over, the CH stun fall (the same kinds as their remaps': PRESERVE)
+        for name in ('dw_daiten', 'dw_He_shoryuZ', 'sDm_naraHd_L', 'sDm_naraHd_R'):
             with self.subTest(move=name):
                 c = converter(source([name]))
                 c.react_remap[name] = 'ym_y01L'
@@ -79,6 +81,22 @@ class SharedAttacks(unittest.TestCase):
                 self.assertEqual(c.target(0), 0)
                 self.assertEqual(len(c.T['moves']), 1)
 
+    def test_a_reaction_of_another_kind_is_imported_instead_of_the_remap(self):
+        # Tekken 7's CH crumple (to the floor) and TTT2's flip launch, its crumple
+        k = source(['sDm_nkdoBxC', 'sDm_nkd2BxC', 'dwDWN_01D'])
+        k.tables['moves'][0]['transition'], k.tables['moves'][1]['transition'] = 1, 2
+        d = source(['ym_y01L', 'dwDWN_00U', 'sDm_KAKCca', 'dwKAM_00D'])
+        d.tables['moves'][0].update(airborne_start=1, transition=1)
+        d.tables['moves'][2]['transition'] = 3
+        c = converter(k)
+        c.d, c.alloc_ok = d, 1
+        c.dn.update(ym_y01L=0, sDm_KAKCca=2)
+        c.react_remap.update(sDm_nkdoBxC='ym_y01L', sDm_nkd2BxC='sDm_KAKCca')
+        self.assertEqual(c.target(0), 0)                        # crumple -> launch: refused, converted
+        self.assertEqual(c.target(1), 2)                        # crumple -> crumple: remapped
+        self.assertEqual(c.queue, [0])
+        self.assertEqual(sum(n for s, n in c.stats.items() if s.startswith('reaction remap refused')), 1)
+
     def test_other_reaction_remaps_and_native_crumples_are_preserved(self):
         c = converter(source(['other_reaction', 'sDm_nkdoBxC']))
         c.react_remap['other_reaction'] = 'ym_y01L'
@@ -86,6 +104,15 @@ class SharedAttacks(unittest.TestCase):
         self.assertEqual(c.target(0), 42)
         self.assertEqual(c.target(1), 43)
         self.assertEqual(c.queue, [])
+
+    def test_own_reactions_are_imported_instead_of_the_remap(self):
+        c = converter(source(['#391', '#392']))
+        c.react_remap.update({'#391': 'ym_y01L', '#392': 'ym_y01L'})
+        c.dn['ym_y01L'] = 42
+        c.own_reactions, c.alloc_ok = frozenset({'#391'}), 1     # (MOVESET['own_reactions'])
+        self.assertEqual(c.target(0), 0)
+        self.assertEqual(c.target(1), 42)
+        self.assertEqual(c.queue, [0])
 
     def test_cancel_list_retains_input_window_and_target_zero(self):
         k = source(['Co_syalp00'])

@@ -9,6 +9,7 @@ SHORT_NAME = 'MASTER RAVEN'
 TEKKEN7_ID = 29
 TEKKEN7_CODE = 'frv'
 CODE = 'frv'
+REVISION = 1                  # her moves' sound effects (Tekken 7's bank 15)
 SEX = 'female'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.

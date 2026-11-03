@@ -236,6 +236,8 @@ class RunStandIn(unittest.TestCase):
                    mock.patch.object(importer.itemdb, 'body_only', side_effect=lambda xml: xml + b' body'),
                    mock.patch.object(importer, 'spring_file', return_value=None),
                    mock.patch.object(importer.art, 'pack_files', return_value={'art/x.nut': b'art'}),
+                   mock.patch.object(importer.shared, 'source_files', side_effect=lambda source, d, clips: {
+                       'source/a.png': repr((source, clips)).encode()}),
                    mock.patch.object(importer.voice, 'voice_list', return_value='vlist'),
                    mock.patch.object(importer.voice, 'merge', return_value=(b'merged', 39)),
                    mock.patch.object(importer.bone, 'read', return_value={}),
@@ -268,7 +270,7 @@ class RunStandIn(unittest.TestCase):
         src.clips.assert_called_once()
         self.assertNotIn('rei.mvl', files)
         self.assertLessEqual({'rei.nud', 'rei.nut', 'rei.bon', 'se_Chr_rei.nus3bank', 'rm_Dst_rei.nus3bank',
-                              'alo', 'art'}, files)
+                              'alo', 'art', 'source'}, files)     # (source/: her pictures and name call for shared/)
         self.assertEqual((ini['donor'], ini['code'], ini['slot']), ('hei', 'rei', '0'))
         self.assertEqual(ini['stand_in'], 'hei')                    # (the launcher offers an update for her own)
         self.assertTrue(any(line.startswith('WARNING: Reina\'s own moveset cannot be had: not saved') for line in lines))
@@ -325,6 +327,7 @@ class RunOwnVoice(unittest.TestCase):
                    mock.patch.object(importer.itemdb, 'effect_names', return_value=[]),
                    mock.patch.object(importer, 'spring_file', return_value=None),
                    mock.patch.object(importer.art, 'pack_files', return_value={}),
+                   mock.patch.object(importer.shared, 'source_files', return_value={}),
                    mock.patch.object(importer.voice, 'voice_list', return_value='vlist'),
                    mock.patch.object(importer.voice, 'merge', return_value=(b'merged', 39)),
                    mock.patch.object(importer.bone, 'read', return_value={}),
@@ -485,7 +488,7 @@ class Launcher(unittest.TestCase):
         self.assertEqual(fighters['reina'], {'name': 'reina', 'display': 'Reina', 'dlc': None, 'installed': False,
                                              'outdated': False, 'newer': False, 'update': False,
                                              'moveset_saved': False, 'outfits': 0, 'outfits_added': False,
-                                             'stand_in': False, 'game': 'tekken8'})
+                                             'needs_game': False, 'stand_in': False, 'game': 'tekken8'})
         self.assertNotIn('game', fighters['kazumi'])
         self.assertEqual(s['tekken8'], {'found': False, 'path': None,
                                         'error': 'Tekken 8 is not installed in any Steam library',
