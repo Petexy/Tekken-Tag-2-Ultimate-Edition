@@ -521,6 +521,40 @@ EFFECT_SPARE = range(229, 160, -1)   # ids for the copies: above Tekken 7's (100
 DAMAGE_AMOUNT = {'t7': 0x821b, 't8': 0x828b}
 DAMAGE_DEAL = {'t7': {0x821c: 0x8058, 0x821d: 0x8059}, 't8': {0x828c: 0x8058, 0x838a: 0x8058, 0x838f: 0x8058,
                                                               0x828d: 0x8059}}
+# Floor breaks. TTT2 breaks a stage's breakable floor when a row 0x8138 of the victim's move fires (sub_03AE6B6C; then
+# every player above the hole falls, the victim by the row's value: 0 a hit's fall, 1 a thrown one, 10 points): its
+# throws have the row some 20 frames after the victim lands (He_FRnage_y lands at 81 and breaks at 100, Jack's pile_y
+# 139 and 160), its bound reactions 20 frames in. Tekken 7's 0x81e4 is the same row (the id maps carry it over).
+# Tekken 8 marks the victim's move for its whole length instead (FLOOR_BREAK8 at frame 0x8001) with a strength, and
+# the moment by a ground-impact row (FLOOR_IMPACT8) where the body hits the floor (He_FRnage_y's at 81): 80 (a few 90,
+# 100) on throws, attack throws and Heat slams, all of them ending with the victim down; 70 (a few 50) on spikes and
+# staggers that end on its feet, below a floor's strength. Its values are no TTT2 values (the id maps leave it out:
+# idmaps.distrust), and a row at the move's start would break the floor as the throw begins. So a move with a row of
+# at least FLOOR_BREAK8_MIN gets TTT2's row (value 1) FLOOR_BREAK_WAIT frames after its impact, else (a hit's
+# reaction, below) after its landing row (LANDING, where TTT2's throws have theirs: the same frame in both games), else
+# after the frame its animation's hips first come down below LYING_HIPS from STANDING_HIPS or above; a Tekken 8 row
+# with a frame of its own (100 at 80 on Jack's hataki_y, TTT2's frame) keeps it; one past the animation's end (it
+# would never fire) sits on its last frame. A move with no such moment gets none, nor does a weaker one
+# (Converter.floor_break_rows).
+# The impact rows are where Tekken 7 had its floor break: its air slam aDw_tataki and bound dwup_hei_xe break at 18 /
+# 20, Tekken 8's same moves have an impact there instead and no mark (those reactions become the donor's dwup_hei_x*,
+# which break the floor at 20 already). A throw (THROW_LEVEL) breaks the floor where its victim's move has the
+# impact, marked or not: King's Jaguar Bombs (Kg_AirRRbom_y, Kg_AirRollbom_y), his Neck Breaker (Kg_kinstn_y) and
+# Reina's SSH CH 3 attack throw (Zbr_6WP_LK_y) have no mark, and are floor breaks in Tekken 8; the 12 with a TTT2 move
+# of the same name (Kg_kinstn_y, Fu_houounage_y, I_GJ_B_y, ...) break the floor in TTT2 too. A marked throw victim
+# without an impact is a toss that breaks balconies, not floors (Reina's u/f+1+2 He_hp2_y and d,d/b,b,f+2
+# Zbr_2146RP_y, Miary Zo's u/f+1+2; the 12 with a TTT2 move of the same name, He_hp2_y, Kz_hp2_y, ..., do not break
+# the floor in TTT2 either): no row. A hit's reaction breaks by its mark only (a Heat slam's); one with an impact and no
+# mark is a spike on a standing opponent (Reina's d+2 on counter hit): no row.
+FLOOR_BREAK = 0x8138
+FLOOR_BREAK8 = {'t7': None, 't8': 0x83ce}
+FLOOR_BREAK8_MIN = 80
+FLOOR_IMPACT8 = 0x8379
+LANDING = 0x800e
+FLOOR_BREAK_WAIT = 20                # TTT2's own throws: 19 .. 26 frames after the landing
+LYING_HIPS, STANDING_HIPS = 350.0, 600.0     # mm (an animation's hips height: channel 1 y)
+PLAIN_FRAME = 0x4000                 # Tekken 8 row frames from here on are no plain frame of the move (0x8001: all)
+THROW_LEVEL = 0xA00                  # a throw's hit level (its low half), in both games
 # Tekken 7's 2D arcs (convert/arcs.py; Tekken 8 has no 2D fighter, and its 0x8226 / 0x8227 are other properties)
 ARCS = {'t7': (arcs.ARC, arcs.AIR_MOVE), 't8': (None, None)}
 # A projectile row, Tekken 7 (42 x u32) -> TTT2 (34 x u32): (TTT2 field, Tekken 7 field, count). TTT2's fields as
@@ -666,6 +700,7 @@ class Converter:
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
     hands_reference = None              # the definition's HANDS row: (its motbin, its motion pack), by the importer
     _hands = None                       # hand_map's map
+    _throw_victims = None               # throw_victims' set
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
         """k: the fighter's moveset (Tekken 7: tkmvst.read; Tekken 8: tekken8.motbin.read, its moves named),
@@ -1356,6 +1391,73 @@ class Converter:
         return [dict(frame=max(1, mv['first_active'] - ELECTRIC_LEAD), id=EFFECT_PROP,
                      value=root << 8 | ELECTRIC_EFFECT)]
 
+    def floor_break_rows(self, breaks, xp, move):
+        """TTT2's floor break of Tekken 8 move `move` (FLOOR_BREAK8): breaks, its rows' (frame, strength), none for a
+        move without; xp, all its extra property rows [(frame, id, value, requirement list)] -> [the row] or []. A
+        throw's victim breaks the floor by its impact row, marked or not, and without one not at all."""
+        if move in self.throw_victims():
+            if not any(idv == FLOOR_IMPACT8 and f < PLAIN_FRAME for f, idv, _, _ in xp):
+                if breaks:
+                    self.stats['floor breaks left out: a throw without an impact (a toss: balcony breaks)'] += 1
+                return []
+            if not breaks:
+                breaks = [(0x8001, FLOOR_BREAK8_MIN)]
+                self.stats['floor breaks of throws marked by their impact only'] += 1
+        elif not breaks:
+            return []
+        if max(v for _, v in breaks) < FLOOR_BREAK8_MIN:
+            self.stats['floor breaks left out: weaker than a floor (spikes, staggers)'] += 1
+            return []
+        own = [f for f, v in breaks if f < PLAIN_FRAME and v >= FLOOR_BREAK8_MIN]
+        anchors = [(sorted(f for f, idv, _, _ in xp if idv == a and f < PLAIN_FRAME), how)
+                   for a, how in ((FLOOR_IMPACT8, 'its impact'), (LANDING, 'its landing'))]
+        if own:
+            frame, how = min(own), 'their own frame'
+        else:
+            frame, how = next(((at[0] + FLOOR_BREAK_WAIT, how) for at, how in anchors if at), (None, None))
+            if frame is None:
+                down = self.landing_frame(move)
+                if down is None:
+                    self.stats['floor breaks left out: no moment the victim lands'] += 1
+                    return []
+                frame, how = down + FLOOR_BREAK_WAIT, 'its animation\'s landing'
+        last = self.anim_frames(move)
+        if last and frame >= last:
+            frame = last - 1
+        self.stats['floor breaks (after %s)' % how] += 1
+        return [dict(frame=max(1, frame), id=FLOOR_BREAK, value=1)]
+
+    def throw_victims(self):
+        """The Tekken 8 moves a throw (THROW_LEVEL) puts its victim in: the moves of its hit conditions' reactions."""
+        if self._throw_victims is None:
+            k, moves = self.k, self.k.tables['moves']
+            self._throw_victims = {r[f] for mv in moves if mv.get('hitlevel', 0) & 0xFFFF == THROW_LEVEL
+                                   for _, _, rx in M.hitconds(k, mv.get('hit_condition')) if rx is not None
+                                   for r in (k.tables['reactions'][rx],) for f in REACTION_MOVE_FIELDS
+                                   if f != 'standing' and r[f] is not None and r[f] < len(moves)}
+        return self._throw_victims
+
+    def landing_frame(self, move):
+        """The first frame Tekken 8 move `move`'s TTT2 animation has its hips below LYING_HIPS after they were at
+        STANDING_HIPS or above (the victim of a throw hits the floor), else None."""
+        if move is None:
+            return None
+        buf, e, off = self.animation_bytes(self.move_anim(move))
+        hips = animation.decode(buf, e, off)['values'][:, 1, 1]
+        up = False
+        for f, y in enumerate(hips):
+            up = up or y >= STANDING_HIPS
+            if up and y < LYING_HIPS:
+                return f
+        return None
+
+    def anim_frames(self, move):
+        """The frame count of Tekken 8 move `move`'s TTT2 animation, else None."""
+        if move is None:
+            return None
+        buf, e, off = self.animation_bytes(self.move_anim(move))
+        return animation.header(buf, e, off)['frames']
+
     def voice_req(self, row):
         """A Tekken 8 property row's requirement list; for a voice said against one fighter only (VERSUS8) or by
         a chance below CHANCE8 False (the row left out), for its line against any other None (said always: TTT2's rows
@@ -1428,6 +1530,7 @@ class Converter:
         air = any(idv == ARCS[g][1] for _, idv, _, _ in t7)     # a 2D air move (convert/arcs.py)
         amounts = sorted((0 if f >= 0x8000 else f, v) for f, idv, v, _ in t7 if idv == DAMAGE_AMOUNT[g])
         dealt = collections.Counter()                       # points dealt so far (amount's frame, property)
+        breaks = []                                         # Tekken 8's floor breaks (floor_break_rows)
         for f, idv, v, req in t7:
             if idv == 0 and f == 0:
                 break
@@ -1443,6 +1546,9 @@ class Converter:
                 rows += [r for r in self.arc_rows(move, air, f, idv, v) if r not in rows]
                 continue
             if idv == DAMAGE_AMOUNT[g]:
+                continue
+            if idv == FLOOR_BREAK8[g]:
+                breaks.append((f, v))
                 continue
             if idv in SUMMON_PROPS[g] or idv == SUMMON_EFFECT[g]:  # summoned weapons
                 rows += self.summon_rows([(f, idv, v)], move)
@@ -1490,6 +1596,8 @@ class Converter:
                     rows.append(dict(frame=f, id=EFFECT_PROP, value=look))
         if ELECTRIC_MARK[g] is not None and any(r['id'] == ELECTRIC_PROP and r['value'] == 1 for r in rows):
             rows += self.electric_rows(move)                # a Tekken 8 electric: Kazuya's lightning
+        if breaks or FLOOR_BREAK8[g] is not None and move is not None:
+            rows += self.floor_break_rows(breaks, t7, move)
         rows += extra
         if not rows:
             return None
