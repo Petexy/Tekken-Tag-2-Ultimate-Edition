@@ -9,7 +9,7 @@ SHORT_NAME = 'GIGAS'
 TEKKEN7_ID = 25
 TEKKEN7_CODE = 'crz'
 CODE = 'crz'
-REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15)
+REVISION = 2                  # his moves' sound effects (Tekken 7's bank 15); his Overkill throw at his own frames (2)
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.

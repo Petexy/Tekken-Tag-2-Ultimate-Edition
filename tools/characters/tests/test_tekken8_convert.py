@@ -1,7 +1,7 @@
 """Unit tests of the converter's Tekken 8 path (convert/moveset.py: classify8, the Tekken 8-only requirements, split
-sound values, extra properties with their own requirement lists, the animation provider, unnamed moves) and of the id
-maps' Tekken 8 parts (convert/idmaps.py: the wide alignment, near_anchors, Chained / Combined), on made-up tables (no
-game files needed).
+sound values, extra properties with their own requirement lists, the animation provider, unnamed moves; rebuild_hubs'
+generic moves taking the fighter's active frames, Tekken 7's too) and of the id maps' Tekken 8 parts
+(convert/idmaps.py: the wide alignment, near_anchors, Chained / Combined), on made-up tables (no game files needed).
 
     python3 -m pytest -q tools/characters/tests/test_tekken8_convert.py
 """
@@ -423,6 +423,73 @@ class SpecialCancels(unittest.TestCase):
         c.kn, c.newidx = {'Zbr_lp00': 0}, {0: 0}
         specialcancels.restore_unbuffered_normal_strings(c)              # (returns: Tekken 8 has no such buffer)
         self.assertFalse(c.stats)
+
+
+class GenericHubs(unittest.TestCase):
+    """rebuild_hubs (Tekken 7 and Tekken 8 alike): a generic move keeps the donor's row (its frames) and takes the
+    fighter's list; where that list tests the move's own contact before the donor's row is active, the row takes the
+    fighter's frames."""
+
+    def source(self, game, frames, window):
+        """The fighter's moveset of `game`: generic Thr_B (active `frames`) going on to its own toss in `window`."""
+        if game == 't8':
+            k = Source8({0: 'Thr_B', 1: 'Zbr_toss'}, [(0, 'own'), (1, 'own')])
+            k.tables['moves'][0].update(cancel=0, first_active=frames[0], last_active=frames[1])
+            k.tables['moves'][1].update(cancel=None)
+            k.tables['cancels'] = [dict(direction=0, button=0, move_id=1, req=0, win_start=window[0],
+                                        win_end=window[1], start_frame=window[0]),
+                                   dict(direction=M.LIST_END, button=0, move_id=0, req=0, win_start=39,
+                                        win_end=32767, start_frame=39)]
+            return k, 'Zbr_toss'
+        t = Tables()
+        t.move('Thr_B', cancel=t.cancels(dict(move_id=1, req=t.req((3, 1600)), win_start=window[0],
+                                              win_end=window[1], start_frame=window[0]), t.end(39)),
+               first_active=frames[0], last_active=frames[1])
+        t.move('Qz_toss')
+        k = moveset_of(t, 't7')
+        k.character_id = 28
+        return k, 'Qz_toss'
+
+    def hub(self, frames, donor_frames, test, window, game='t8'):
+        """Generic Thr_B (`game`'s active frames) whose list goes on to the fighter's toss on contact test `test` (a
+        TTT2 requirement) in `window`; the donor's Thr_B is active donor_frames. -> (row, stats)."""
+        k, toss = self.source(game, frames, window)
+        d = Tables()
+        d.move('Thr_B', cancel=d.cancels(d.end(40)), first_active=donor_frames[0], last_active=donor_frames[1])
+        d = moveset_of(d)
+        c = converter(k)
+        c.game, c.end = game, M.END_REQ[game]
+        c.d, c.cls, c.newidx, c.dn, c.ttt2_only_generic = d, ['G', 'K'], {1: 1}, {'Thr_B': 0}, set()
+        c.kn = {'Thr_B': 0, toss: 1}
+        c.T = {'moves': [dict(r) for r in d.tables['moves']], 'cancels': [], 'requirements': []}
+        req = len(c.T['requirements'])
+        c.T['requirements'] += [dict(condition=test, param=1600), dict(condition=moveset.TT_END, param=0)]
+        rows = [dict(direction=0, button=0, move_id=1, req=req, win_start=window[0], win_end=window[1],
+                     start_frame=window[0]), dict(direction=M.LIST_END, button=0, move_id=0, req=None)]
+        c.conv_cancel_list = lambda i: [dict(r) for r in rows]
+        c.merge_donor_extras = lambda cl, dc: cl
+        c.rebuild_hubs()
+        return c.T['moves'][0], c.stats
+
+    def test_contact_before_the_donors_frames(self):
+        """A generic throw whose donor row is active later than the fighter's own frames: the donor's grab at 14,
+        the fighter's rows into the throws (3: connected from the front) at 12 (Tekken 8), at 11 against 12
+        (Tekken 7)."""
+        for game, frames, donor_frames in (('t8', (12, 12), (14, 14)), ('t7', (11, 11), (12, 12))):
+            row, stats = self.hub(frames, donor_frames, 3, frames, game)
+            self.assertEqual((row['first_active'], row['last_active'], row['cancel']), frames + (0,), game)
+            self.assertEqual(stats['hub moves taking the fighter\'s active frames (its contact tests)'], 1, game)
+
+    def test_what_keeps_the_donors_frames(self):
+        for game, frames, test, window in (('t8', (12, 12), 3, (12, 20)),       # (the window still sees the grab)
+                                           ('t7', (12, 12), 3, (12, 20)),
+                                           ('t8', (12, 12), 0x8001, (12, 12)),  # (not a contact test)
+                                           ('t8', (14, 14), 3, (12, 12)),       # (the same frames)
+                                           ('t7', (14, 14), 3, (12, 12)),
+                                           ('t8', (16, 16), 46, (12, 12))):     # (not the fighter's frames either)
+            row, stats = self.hub(frames, (14, 14), test, window, game)
+            self.assertEqual((row['first_active'], row['last_active']), (14, 14), (game, frames, test, window))
+            self.assertEqual(stats['hub moves rebuilt'], 1)
 
 
 if __name__ == '__main__':

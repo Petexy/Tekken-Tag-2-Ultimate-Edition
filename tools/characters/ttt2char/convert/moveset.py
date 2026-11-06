@@ -599,6 +599,12 @@ def own_prefix(k):
     return p
 
 
+# A move's tests of its own contact: TTT2's throw connected from a side (requirements 3 .. 9, sub_0404FF30: this
+# player's hit from the front, back, left, right ..., the bodies within param mm) and the hit and block latches
+# (move_overrides.CONTACT)
+OWN_CONTACT = frozenset(range(3, 10)) | {46, 49}
+
+
 def classify8(k, donor):
     """Per move of a Tekken 8 fighter (no Tekken 7 needed): 'G' the donor has its name, 'T' a generic name (not the
     fighter's own prefix) the donor lacks, 'K' the fighter's own (its own prefix, in lower case too: its intros and
@@ -2369,9 +2375,32 @@ class Converter:
                 self.stats['hub moves keeping the donor\'s list (tag system)'] += 1
             else:
                 cl = self.merge_donor_extras(self.conv_cancel_list(mv['cancel']), dc)
+                row = self.T['moves'][dj]
+                if self.contact_unseen(cl, row, mv):
+                    row['first_active'], row['last_active'] = mv['first_active'], mv['last_active']
+                    self.stats['hub moves taking the fighter\'s active frames (its contact tests)'] += 1
             self.T['moves'][dj]['cancel'] = len(self.T['cancels'])
             self.T['cancels'] += cl
             self.stats['hub moves rebuilt'] += 1
+
+    def contact_unseen(self, cl, row, mv):
+        """Whether converted cancel list cl has a row testing the move's own contact (OWN_CONTACT) whose frames end
+        before the donor's row is active, though not before the fighter's move (mv) is: a generic move keeps the
+        donor's row, its frames too, but takes the fighter's list, timed to the fighter's frames. A generic throw
+        whose donor row is active later than the fighter's own frames grabs after its own test, and the throw never
+        happens (Tekken 7 and Tekken 8 alike: Josie's f,F+3+4, Thrmv_B2_01, Jun's grab at 14, her rows into the
+        throws at 12; Gigas's Overkill and Kunimitsu's f+1+4, the donor's at 12, theirs at 11). The donor's row then
+        takes the fighter's frames (rebuild_hubs), as the game the fighter comes from has them."""
+        if not mv['first_active'] or (mv['first_active'], mv['last_active']) == (row['first_active'],
+                                                                                 row['last_active']):
+            return False
+        for x in cl:
+            if x['direction'] in (M.LIST_END, M.GROUP, M.GROUP_END):
+                continue
+            if any(c in OWN_CONTACT for c, _ in tagsystem.reqs(self.T, x['req'])) and \
+                    mv['first_active'] <= x['win_end'] < row['first_active']:
+                return True
+        return False
 
     def own_transitions(self):
         """Generic moves keep the donor's move row, its transition too: where that ends in the donor's own movement
