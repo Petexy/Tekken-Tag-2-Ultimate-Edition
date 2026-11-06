@@ -111,6 +111,45 @@ def fit(c1, c2, palette, max_error=None):
     return dict(alpha=changed.astype(np.float64), shade=out_shade, b=b, groups=groups)
 
 
+def drawn_triangles(uv, tris, alpha, ref, margin=0, budget=1 << 22):
+    """Which triangles (tris (t, 3) into uv (n, 2)) a layer alpha-tested at `ref` draws anything of: those with a
+    texel of `alpha` ((H, W), the layer texture's top level, repeated as the game repeats it; texel (x, y) at
+    u = x / W, v = y / H) at or above ref in their UV footprint or within `margin` texels of it -> bool (t,).
+    The layer's other triangles never pass its alpha test: a layer over a costume whose colours change only in its
+    trims (Miary Zo's: most of her cloth) leaves them out (model.py). Each triangle's footprint is
+    sampled at most a texel apart (the texels grown by one more cover the gaps), `budget` samples at a time."""
+    tris = np.asarray(tris, np.int64)
+    out = np.zeros(len(tris), bool)
+    if not len(tris):
+        return out
+    height, width = alpha.shape
+    grown = np.asarray(alpha) >= ref
+    for axis in (1, 0):                              # (a square margin + 1 round each texel, wrapping)
+        hit = grown.copy()
+        for step in range(1, int(margin) + 2):
+            grown |= np.roll(hit, step, axis) | np.roll(hit, -step, axis)
+    if not grown.any():
+        return out
+    if grown.all():
+        return ~out
+    corners = np.asarray(uv, np.float64)[tris] * (width, height)          # (t, 3, 2) in texels
+    edges = np.linalg.norm(corners - corners[:, [1, 2, 0]], axis=2).max(1)
+    n = 2 ** np.ceil(np.log2(np.maximum(edges, 1.0))).astype(np.int64)    # (samples along an edge, as powers of 2)
+    for size in np.unique(n):
+        i, j = np.meshgrid(np.arange(size + 1), np.arange(size + 1), indexing='ij')
+        keep = i + j <= size
+        bary = np.stack([i[keep], j[keep], size - i[keep] - j[keep]], 1) / float(size)     # (k, 3)
+        which = np.nonzero(n == size)[0]
+        chunk = max(1, budget // len(bary))
+        for a in range(0, len(which), chunk):
+            sel = which[a:a + chunk]
+            points = np.einsum('kc,tcd->tkd', bary, corners[sel])
+            x = np.floor(points[..., 0]).astype(np.int64) % width
+            y = np.floor(points[..., 1]).astype(np.int64) % height
+            out[sel] = grown[y, x].any(1)
+    return out
+
+
 def palette_xml(text, select_id, entries):
     """A palette XML with entries {palette number: (x, y, s)} for select_id (replacing any it has)."""
     nl = '\r\n' if '\r\n' in text else '\n'

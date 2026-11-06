@@ -139,6 +139,108 @@ class Lids(unittest.TestCase):
         self.assertEqual(face.tekken7_lids([]), {})
 
 
+PIVOTS = {'L': (30.0, 40.0, 80.0), 'R': (-30.0, 40.0, 80.0)}
+RADIUS = 16.0
+
+
+def lid_skeleton():
+    """made_skeleton's, both eyes' lid joints at the eye centres PIVOTS."""
+    s = made_skeleton((0, 0, 0))
+    for name in face.LIDS:
+        s['t'][s['names'].index(name)] = PIVOTS[name[0]]
+    return s
+
+
+def lid_model(skel, upper, lower, weights=(1.0, 1.0), wtype='>f4'):
+    """A nud.read()-like model: each eye's upper / lower lid margin a row of points across the eye (x within 12 mm of
+    its centre) on a sphere of RADIUS about it, `upper` / `lower` degrees above its front, weighted weights[0] /
+    weights[1] to the lid joint (the rest to the head, bone 0)."""
+    rows = []
+    for side, pv in PIVOTS.items():
+        for name, deg, w in ((side + '_UwaMabuta_Joint', upper, weights[0]), (side + '_SitaMabuta_Joint', lower,
+                                                                                weights[1])):
+            for x in np.linspace(-12, 12, 13):
+                a = np.radians(deg)
+                rows.append((np.add(pv, (x, RADIUS * np.sin(a), RADIUS * np.cos(a))), skel['names'].index(name), w))
+    v = np.zeros(len(rows), [('pos', '>f4', 3), ('bones', 'u1', 4), ('w', wtype, 4)])
+    for k, (p, j, w) in enumerate(rows):
+        v[k]['pos'] = p
+        v[k]['bones'] = (j, 0, 0, 0)
+        v[k]['w'] = (round(w * 255), 255 - round(w * 255), 0, 0) if wtype == 'u1' else (w, 1 - w, 0, 0)
+    return {'meshes': [{'name': 'face', 'polys': [{'verts': v}]}]}
+
+
+def closed_share(up_deg, w, turn):
+    """Degrees a margin point `up_deg` above the front closes when its joint turns `turn` degrees (linear blend w)."""
+    a, b = np.radians(up_deg), np.radians(up_deg - turn)
+    return up_deg - np.degrees(np.arctan2((1 - w) * np.sin(a) + w * np.sin(b), (1 - w) * np.cos(a) + w * np.cos(b)))
+
+
+class MeshLids(unittest.TestCase):
+    """Tekken 8's lids: the donor's turns scaled so that each lid closes the same share of the fighter's eye opening
+    (TTT2 weights a lid half to its joint, Tekken 8 fully)."""
+
+    def anims(self):
+        _, pack, vals = made_files()
+        at, size = motion.pack_items(pack)[face.PACK_ITEM]
+        endian, _, anims = face._animations(pack, at, at + size)
+        for v in vals:                      # (the upper lids close with negative turns about +x, as Jun's)
+            for name in face.LIDS[:2]:
+                c = 2 * skeleton.FACE.index(name) + 1
+                v[:, c, 2] = -np.abs(v[:, c, 2])
+        return [(endian, A.encode_compressed(DESCRIPTORS, v)) for v in vals], vals
+
+    def test_axes(self):
+        anims, vals = self.anims()
+        axes, turns = face.lid_axes(anims)
+        self.assertEqual(sorted(axes), sorted(face.LIDS))
+        np.testing.assert_allclose(axes['L_UwaMabuta_Joint'], (1, 0, 0), atol=1e-6)    # (turned by -z: closes down)
+        np.testing.assert_allclose(axes['L_SitaMabuta_Joint'], (-1, 0, 0), atol=1e-6)
+        self.assertAlmostEqual(turns['L_UwaMabuta_Joint'], np.degrees(1.0), 1)
+        self.assertAlmostEqual(turns['L_SitaMabuta_Joint'], np.degrees(0.3), 1)
+        self.assertEqual(face.lid_axes([]), ({}, {}))
+
+    def test_motion(self):
+        anims, _ = self.anims()
+        axes, turns = face.lid_axes(anims)
+        skel = lid_skeleton()
+        opening, rates = face.lid_motion(lid_model(skel, 10, -25, (0.5, 0.7)), skel, axes, turns)
+        self.assertAlmostEqual(opening, 35.0, 3)
+        self.assertAlmostEqual(rates['UwaMabuta_Joint'], 0.5, 3)          # half weighted: half the turn
+        t = turns['L_SitaMabuta_Joint']
+        self.assertAlmostEqual(rates['SitaMabuta_Joint'], -closed_share(-25, 0.7, -t) / t, 3)
+        self.assertEqual(face.lid_motion({'meshes': []}, skel, axes, turns), (None, {}))
+
+    def test_scales(self):
+        anims, _ = self.anims()
+        skel = lid_skeleton()
+        donor = lid_model(skel, 10, -25, (0.5, 0.7), wtype='u1')        # (u8 weights: 255ths)
+        mine = lid_model(skel, 6, -30, (1.0, 1.0))
+        scales = face.lid_turns_on_meshes(mine, skel, donor, skel, anims)
+        self.assertEqual(sorted(scales), sorted(face.LIDS))
+        self.assertAlmostEqual(scales['L_UwaMabuta_Joint'], scales['R_UwaMabuta_Joint'])
+        # each lid closes the same share of its eye's opening (36 degrees, the donor's 35) as the donor's
+        _, turns = face.lid_axes(anims)
+        for name, (up, w) in (('L_UwaMabuta_Joint', (10, round(0.5 * 255) / 255)),
+                              ('L_SitaMabuta_Joint', (-25, round(0.7 * 255) / 255))):
+            t = turns[name] * (1 if 'Uwa' in name else -1)
+            donor_share = abs(closed_share(up, w, t)) / 35.0
+            self.assertAlmostEqual(abs(t) * scales[name] / 36.0, donor_share, 2)
+        self.assertEqual(face.lid_turns_on_meshes(donor, skel, donor, skel, anims), {})   # the donor's own lids
+        self.assertEqual(face.lid_turns_on_meshes(mine, skel, donor, skel, []), {})
+
+    def test_retarget_with_meshes(self):
+        moveset, pack, vals = made_files()
+        skel = lid_skeleton()
+        mine, donor = lid_model(skel, 6, -30), lid_model(skel, 10, -25, (0.5, 0.7))
+        _, _, changed, scales = face.retarget(moveset, pack, skel, skel, None, (mine, donor))
+        self.assertTrue(changed)
+        self.assertEqual(sorted(scales), sorted(face.LIDS))
+        self.assertLess(scales['L_UwaMabuta_Joint'], 0.6)
+        _, _, _, kept = face.retarget(moveset, pack, skel, skel, dict.fromkeys(face.LIDS, 30.0), (mine, donor))
+        self.assertNotEqual(kept, scales)                  # (a Tekken 7 fighter's own turns win)
+
+
 class SameJoints(unittest.TestCase):
     def test_face_joints_copied(self):
         mine, ref = made_skeleton((0, 0, 0)), made_skeleton((3, 3, 3))

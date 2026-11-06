@@ -312,6 +312,22 @@ class Colours(unittest.TestCase):
         self.assertLess(worst_1p(f).max(), 1 / 255)
 
 
+    def test_drawn_triangles(self):
+        """Two triangles side by side over a mask drawn in a band of the left one: the right one draws nothing; with a
+        margin reaching it, both; UVs past 1 repeat the texture; a triangle smaller than a texel finds its texel."""
+        mask = np.zeros((64, 64), np.uint8)
+        mask[:, 20:28] = 255                                    # texels x 20..27 drawn
+        uv = np.array([[0, 0], [0.5, 0], [0, 1], [0.5, 1], [1.0, 0]], np.float64)
+        left, right = [0, 1, 2], [1, 4, 3]                       # (texels x 0..32 / x 32..64)
+        self.assertEqual(colours.drawn_triangles(uv, [left, right], mask, 150).tolist(), [True, False])
+        self.assertEqual(colours.drawn_triangles(uv, [left, right], mask, 150, margin=6).tolist(), [True, True])
+        self.assertEqual(colours.drawn_triangles(uv + [1.0, 0], [left, right], mask, 150).tolist(), [True, False])
+        tiny = np.array([[0.375, 0.5], [0.3751, 0.5], [0.375, 0.5001], [0.7, 0.5], [0.7001, 0.5], [0.7, 0.5001]])
+        self.assertEqual(colours.drawn_triangles(tiny, [[0, 1, 2], [3, 4, 5]], mask, 150).tolist(), [True, False])
+        self.assertFalse(colours.drawn_triangles(uv, [left, right], mask // 2, 150).any())   # (under the ref)
+        self.assertEqual(colours.drawn_triangles(uv, np.zeros((0, 3), np.int64), mask, 150).tolist(), [])
+
+
 class Lettering(unittest.TestCase):
     @staticmethod
     def name(widths, spaces=()):
@@ -590,6 +606,21 @@ class Materials(unittest.TestCase):
         self.assertEqual([t['gidx'] for t in bank.textures], [bank.first, bank.first + 1])
         self.assertEqual(bank.normals, {0})
         self.assertEqual(len(bank.sources), 2)
+
+    def test_texture_budget_dry_run(self):
+        """fit(dry=True) halves nothing and says what fit() would; halved() is the image fit() leaves."""
+        from ttt2char.convert.model import TextureBank
+        bank = TextureBank()
+        rng = np.random.default_rng(1)
+        for i, side in enumerate((256, 128, 128)):
+            bank.add(('img', i, 2, True), rng.integers(0, 256, (side, side, 4), dtype=np.uint8), 2)
+        size = sum(len(m) for t in bank.textures for m in t['mips'])
+        dry = bank.fit(size // 3, dry=True)
+        self.assertEqual([t['w'] for t in bank.textures], [256, 128, 128])
+        expect = [bank.halved(i, dry.get(i, 0)) for i in range(3)]
+        self.assertEqual(bank.fit(size // 3), sum(dry.values()))
+        self.assertTrue(all((bank.sources[i] == expect[i]).all() for i in range(3)))
+        self.assertEqual(bank.textures[0]['w'], 256 >> dry.get(0, 0))
 
 
 class Cells(unittest.TestCase):

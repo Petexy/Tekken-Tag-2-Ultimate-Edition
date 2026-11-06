@@ -374,6 +374,749 @@ class Decimate(unittest.TestCase):
         self.assertLess(time.time() - t0, 30.0)
 
 
+def tube(rings=61, around=12, length=300.0, radius=30.0):
+    """An open tube along +x -> (points, normals, triangles facing out)."""
+    a = 2 * np.pi * np.arange(around) / around
+    pts = np.array([(x, radius * np.cos(t), radius * np.sin(t)) for x in np.linspace(0, length, rings) for t in a])
+    nrm = np.array([(0.0, np.cos(t), np.sin(t)) for _ in range(rings) for t in a])
+    tris = []
+    for r in range(rings - 1):
+        for k in range(around):
+            p, q = r * around + k, r * around + (k + 1) % around
+            tris += [(p, p + around, q), (q, p + around, q + around)]
+    return pts, nrm, np.array(tris)
+
+
+def turn_about_z(pivot, degrees):
+    t = np.radians(degrees)
+    m = np.eye(4)
+    m[:3, :3] = [[np.cos(t), -np.sin(t), 0], [np.sin(t), np.cos(t), 0], [0, 0, 1]]
+    m[:3, 3] = np.asarray(pivot, np.float64) - m[:3, :3] @ pivot
+    return m
+
+
+def skinned(p, pose):
+    """A prim's vertices skinned by one pose ((bones, 4, 4) changes; model_of's two influences)."""
+    w = p['weights'] / p['weights'].sum(1, keepdims=True)
+    M = np.einsum('vk,vkij->vij', w, pose[p['joints']])
+    return np.einsum('vij,vj->vi', M[:, :3, :3], p['pos']) + M[:, :3, 3]
+
+
+def off_surface(points, pos, tris, n=10):
+    """The farthest of `points` from the triangles (pos, tris), measured to points sampled on them."""
+    a, b = np.meshgrid(np.arange(n + 1), np.arange(n + 1))
+    keep = a + b <= n
+    u, v = a[keep] / n, b[keep] / n
+    s = ((1 - u - v)[None, :, None] * pos[tris[:, 0]][:, None] + u[None, :, None] * pos[tris[:, 1]][:, None] +
+         v[None, :, None] * pos[tris[:, 2]][:, None]).reshape(-1, 3)
+    return max(float(np.min(np.linalg.norm(s - x, axis=1))) for x in points)
+
+
+@unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+class Folds(unittest.TestCase):
+    """A tube skinned to bone A at one end and to B at the other, the weights passing from A to B over a long band
+    in the middle (x 90..210, as along an arm), and a test pose that turns B by 90 degrees about the band's middle."""
+
+    def setUp(self):
+        self.pts, self.nrm, self.tris = tube()
+        self.wa = np.clip((210.0 - self.pts[:, 0]) / 120.0, 0, 1)          # A's weight
+        self.bent = np.stack([np.eye(4), turn_about_z([150.0, 0, 0], 90)])
+        self.full = skinned(self.model()['prims'][0], self.bent)
+
+    def model(self):
+        return model_of(self.pts, [('bdf', 'MI_skin', self.tris)], nrm=self.nrm, weights=self.wa)
+
+    def test_band_keeps_its_vertices_and_the_ends_give_theirs(self):
+        out = decimate.decimate(self.model(), 60, log=quiet, poses=[self.bent])
+        p = out['prims'][0]
+        self.assertLessEqual(decimate.count(out), 60)
+        used = np.unique(p['tris'])
+        x = p['pos'][used, 0]
+        # inside the one-bone ends nothing but their rims is left (they only turn: their middles are free to go)
+        self.assertFalse(((x > 1) & (x < 89)).any() or ((x > 211) & (x < 299)).any())
+        # the band's weights still pass in steps of at most twice the fold step
+        w = np.unique(np.round(p['weights'][used, 0], 6))
+        self.assertLessEqual(np.diff(w).max(), 2 * decimate.FOLD_STEP + 1e-6)
+        self.assertGreaterEqual(((w > 0.2) & (w < 0.8)).sum(), 2)
+
+    def test_the_ranges_hold_from_pass_to_pass(self):
+        # a six-sided tube that may lose only 30% a pass (seven passes): what each survivor stands for carries over
+        # to the next pass, so the band keeps its rings until the rule gives way, and says so (started afresh in each
+        # pass, the steps added up and the band wore down to the target without a word)
+        pts, nrm, tris = tube(61, 6)
+        m = model_of(pts, [('bdf', 'MI_skin', tris)], nrm=nrm, weights=np.clip((210.0 - pts[:, 0]) / 120.0, 0, 1))
+        said = []
+        with mock.patch.object(decimate, 'MOST_REMOVED', 0.3):
+            out = decimate.decimate(m, 22, {'bdf': 1.0}, log=said.append, poses=[self.bent])
+        self.assertLessEqual(decimate.count(out), 22)
+        held = [int(s.split()[1]) for s in said if 'folds kept' in s]
+        self.assertTrue(held and held[0] >= 24, said)
+
+    def test_bent_it_stays_closer_to_the_full_model(self):
+        dist = []
+        for poses in (None, [self.bent]):
+            p = decimate.decimate(self.model(), 60, log=quiet, poses=poses)['prims'][0]
+            dist.append(off_surface(self.full, skinned(p, self.bent), p['tris']))
+        self.assertLess(dist[1], 0.8 * dist[0])
+
+    def test_one_bone_is_as_without_poses(self):
+        m = model_of(self.pts, [('bdf', 'MI_skin', self.tris)], nrm=self.nrm)            # all on A: the pose
+        a = decimate.decimate(m, 60, log=quiet)                                         # moves nothing of it
+        b = decimate.decimate(m, 60, log=quiet, poses=[self.bent])
+        self.assertEqual(a['source'].tolist(), b['source'].tolist())
+        self.assertEqual(a['prims'][0]['tris'].tolist(), b['prims'][0]['tris'].tolist())
+
+    def test_a_part_short_of_its_quota_with_folds_kept_passes_them_on(self):
+        tube_pts, tube_nrm, tube_tris = tube(31, 8)                      # (a coarser one: 95% of it may go)
+        grid_pts, grid_tris = grid(16, 200.0)
+        pts = np.concatenate([tube_pts, grid_pts + [0, 0, 200.0]])
+        nrm = np.concatenate([tube_nrm, np.tile([0, 0, 1.0], (len(grid_pts), 1))])
+        wa = np.clip((210.0 - tube_pts[:, 0]) / 120.0, 0, 1)
+        m = model_of(pts, [('bdf', 'MI_skin', tube_tris), ('fac', 'MI_face', grid_tris + len(tube_pts))], nrm=nrm,
+                     weights=np.concatenate([wa, np.ones(len(grid_pts))]))
+        plain = decimate.decimate(m, 150, {'bdf': 1.0, 'fac': 0.1}, log=quiet)
+        folds = decimate.decimate(m, 150, {'bdf': 1.0, 'fac': 0.1}, log=quiet, poses=[self.bent])
+        sizes = [[len(np.unique(p['tris'])) for p in o['prims']] for o in (plain, folds)]
+        self.assertLessEqual(sum(sizes[1]), 150)
+        self.assertGreater(sizes[1][0], sizes[0][0])                    # the tube keeps more, the grid gives more
+        self.assertLess(sizes[1][1], sizes[0][1])
+
+    def test_folds_give_way_when_nothing_else_fits(self):
+        said = []
+        out = decimate.decimate(self.model(), 12, log=said.append, poses=[self.bent])
+        self.assertLessEqual(decimate.count(out), 12)
+        self.assertTrue(any('folds' in s for s in said))
+
+
+class BendPoses(unittest.TestCase):
+    def skeleton(self):
+        """Shoulder (L_Arm) -> elbow (L_ForeArm) -> wrist (L_Hand) along +x, a twist helper under the forearm and an
+        elbow helper under the upper arm that follows the forearm by half."""
+        names = ['L_Arm', 'L_ForeArm', 'L_Hand', 'L_ForeArm_twist', 'L_Elbow_half']
+        at = [(0.0, 0, 0), (300.0, 0, 0), (550.0, 0, 0), (420.0, 0, 0), (300.0, 0, 0)]
+        world = np.tile(np.eye(4), (5, 1, 1))
+        world[:, :3, 3] = at
+        return {'names': names, 'parents': [-1, 0, 1, 1, 0], 'world': world,
+                'follow': [None, None, None, None, (1, 0.5)]}
+
+    def test_poses_turn_the_bent_joints_and_carry_the_rest(self):
+        from ttt2char.convert import skeleton
+        bones = self.skeleton()
+        with mock.patch.object(skeleton, 'BENDS', [('L_ForeArm', 'L_Hand', 90)]):
+            poses = skeleton.bend_poses(bones)
+        self.assertEqual(len(poses), 2)
+        for D in poses:
+            np.testing.assert_allclose(D[0], np.eye(4), atol=1e-9)                       # the shoulder stays
+            hand = (D[2] @ bones['world'][2])[:3, 3]
+            self.assertAlmostEqual(np.linalg.norm(hand - [300.0, 0, 0]), 250.0, places=6)  # turned about the elbow
+            self.assertAlmostEqual(float((hand - [300.0, 0, 0]) @ [1.0, 0, 0]), 0.0, places=6)
+            np.testing.assert_allclose(D[3], D[1], atol=1e-9)                          # the twist helper with it
+        groups, bends = decimate.skin_groups(bones, poses)
+        self.assertEqual(groups[3], groups[1])
+        self.assertEqual(len({groups[0], groups[1], groups[4]}), 3)
+        self.assertAlmostEqual(bends[groups[1]], 1.0, places=6)                        # 90 of FOLD_BEND's 90
+        self.assertAlmostEqual(bends[groups[4]], 0.5, places=6)                        # the half helper
+        self.assertEqual(bends[groups[0]], 0.0)
+
+    def test_no_bent_joint_no_poses(self):
+        from ttt2char.convert import skeleton
+        bones = self.skeleton()
+        bones['names'] = ['a', 'b', 'c', 'd', 'e']
+        self.assertEqual(skeleton.bend_poses(bones), [])
+
+
+@unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+class Classes(unittest.TestCase):
+    """decimate(classes=): in a part, each skin material and each large piece keeps a floor share of its vertices
+    while anything else can give; its small pieces go down to their allowances first."""
+
+    def body(self):
+        """A body part with bare skin (a grid) and cloth (a grid), and a face part (a grid), side by side."""
+        pa, ta = grid(12)
+        pb, tb = grid(12, 100.0, 300.0)
+        pc, tc = grid(12, 100.0, 600.0)
+        return model_of(np.concatenate([pa, pb, pc]), [('bdf', 'MI_CH_xyz_arm_skin', ta),
+                                                       ('bdf', 'MI_CH_xyz_cloth', tb + len(pa)),
+                                                       ('fac', 'MI_CH_xyz_face_skin', tc + 2 * len(pa))])
+
+    @staticmethod
+    def kept(out, material):
+        return sum(len(np.unique(p['tris'])) for p in out['prims'] if p['material'] == material)
+
+    def test_quotas_keep_the_floors(self):
+        quota = decimate._quotas(np.array([100, 100]), np.array([1.0, 1.0]), 120, np.zeros(2, bool),
+                                 np.array([80.0, 0.0]))
+        self.assertEqual(quota.tolist(), [80, 40])                          # (60 / 60 without the floor)
+        self.assertEqual(decimate._quotas(np.array([100, 100]), np.array([1.0, 1.0]), 120,
+                                          np.zeros(2, bool)).tolist(), [60, 60])
+
+    def test_skin_keeps_its_floor_while_others_give(self):
+        m = self.body()
+        weights = {'bdf': 1.0, 'fac': 1.0}
+        plain = decimate.decimate(m, 200, weights, log=quiet)
+        self.assertLess(self.kept(plain, 'MI_CH_xyz_arm_skin'), 72)        # (the errors share it out: ~1/3 each)
+        out = decimate.decimate(m, 200, weights, log=quiet, classes={'bdf': {'skin': 0.5}})
+        self.assertGreaterEqual(self.kept(out, 'MI_CH_xyz_arm_skin'), 72)  # (half of its 144)
+        self.assertLessEqual(decimate.count(out), 200)
+        # the face's skin is in a part without classes: no floor
+        self.assertLess(self.kept(out, 'MI_CH_xyz_face_skin'), self.kept(plain, 'MI_CH_xyz_face_skin'))
+
+    def test_floors_give_way_when_nothing_else_fits(self):
+        lines = []
+        out = decimate.decimate(self.body(), 120, {'bdf': 1.0, 'fac': 1.0}, log=lines.append,
+                                classes={'bdf': {'skin': 0.9}})                # (the grids' corners and 130)
+        self.assertLessEqual(decimate.count(out), 120)
+        self.assertTrue(any('floors kept; going on without' in line for line in lines))
+
+    def test_each_large_piece_keeps_its_floor(self):
+        """Two large pieces (150 mm) of one material and a face: each piece keeps its share, however the errors would
+        share the part out (one of them is finely made: errors favour taking the other)."""
+        pa, ta = grid(12, 150.0)
+        pb, tb = grid(20, 150.0, 300.0)
+        pc, tc = grid(12, 100.0, 600.0)
+        m = model_of(np.concatenate([pa, pb, pc]), [('bdf', 'MI_CH_xyz_cloth', np.concatenate([ta, tb + len(pa)])),
+                                                    ('fac', 'MI_CH_xyz_face_skin', tc + len(pa) + len(pb))])
+        out = decimate.decimate(m, 300, {'bdf': 1.0, 'fac': 1.0}, log=quiet, classes={'bdf': {'big': 0.4}})
+        q = out['prims'][0]
+        used = np.unique(q['tris'])
+        left = (q['pos'][used, 0] < 200).sum()
+        self.assertGreaterEqual(left, int(0.4 * 144))
+        self.assertGreaterEqual(len(used) - left, int(0.4 * 400))
+        self.assertLessEqual(decimate.count(out), 300)
+
+    def test_small_pieces_go_to_their_allowance_first(self):
+        """Six beads (spheres 10 mm across, 162 vertices) and a sheet: the beads go down to SMALL_LEAST + 1 per mm
+        first, then keep it while the sheet gives the rest (without: the beads' share)."""
+        bead, btris, bnrm = icosphere(2, 5.0)
+        pa, ta = grid(12, 150.0)
+        pos, tris, nrm = [pa], [ta], [np.tile([0.0, 0, 1], (len(pa), 1))]
+        for i in range(6):
+            tris.append(btris + sum(len(x) for x in pos))
+            pos.append(bead + [30.0 * i, 0, 50.0])
+            nrm.append(bnrm)
+        pos, nrm = np.concatenate(pos), np.concatenate(nrm)
+        m = model_of(pos, [('bdf', 'MI_CH_xyz_cloth', np.concatenate(tris))], nrm=nrm, uv=nrm[:, :2])
+        lines = []
+        out = decimate.decimate(m, 200, {'bdf': 1.0}, log=lines.append, classes={'bdf': {'small': 1.0}})
+        q = out['prims'][0]
+        used = np.unique(q['tris'])
+        on_beads = q['pos'][used, 2] > 25
+        allowance = decimate.SMALL_LEAST + 10
+        self.assertLessEqual(on_beads.sum(), 6 * allowance)
+        self.assertGreaterEqual(on_beads.sum(), 6 * 4)
+        self.assertLessEqual(len(used), 200)
+        self.assertTrue(any('bdf small %d ->' % (6 * 162) in line for line in lines))
+        plain = decimate.decimate(m, 200, {'bdf': 1.0}, log=quiet)['prims'][0]
+        sheet = (plain['pos'][np.unique(plain['tris']), 2] < 25).sum()
+        self.assertLess(sheet, (~on_beads).sum())                             # (the beads kept more of theirs)
+
+
+def ribbon(around=61, across=5, width=20.0, radius=61.0, arc=2.6, length=300.0):
+    """A strap round tube()'s axis: a ribbon `width` wide over `arc` radians of a circle of `radius`, across the tube's
+    middle -> (points, normals, triangles facing out)."""
+    a = np.linspace(0.0, arc, around)
+    xs = length / 2 + np.linspace(-width / 2, width / 2, across)
+    pts = np.array([(x, radius * np.cos(t), radius * np.sin(t)) for t in a for x in xs])
+    nrm = np.array([(0.0, np.cos(t), np.sin(t)) for t in a for _ in xs])
+    tris = []
+    for r in range(around - 1):
+        for k in range(across - 1):
+            p, q = r * across + k, r * across + k + 1
+            tris += [(p, q, p + across), (q, q + across, p + across)]
+    return pts, nrm, np.array(tris)
+
+
+def surface_samples(pos, tris, n=6):
+    a, b = np.meshgrid(np.arange(n + 1), np.arange(n + 1))
+    keep = a + b <= n
+    u, v = a[keep] / n, b[keep] / n
+    return ((1 - u - v)[None, :, None] * pos[tris[:, 0]][:, None] + u[None, :, None] * pos[tris[:, 1]][:, None] +
+            v[None, :, None] * pos[tris[:, 2]][:, None]).reshape(-1, 3)
+
+
+@unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+class Lying(unittest.TestCase):
+    """decimate(classes={'lying': ...}): a strap lying on the skin stays on it; 'reach', 'skin_reach' bound a piece's
+    and the skin's points; the skin ends under what lies on it."""
+
+    def body(self):
+        """A smooth tube of skin (radius 60), a strap over it by 1 mm, a face part with room to give (a fine sphere)."""
+        ps, ns, ts = tube(rings=61, around=48, radius=60.0)
+        pr, nr, tr = ribbon()
+        pc, tc, nc = icosphere(levels=4, radius=50.0)
+        pc = pc + [0.0, 500.0, 0.0]
+        pos = np.concatenate([ps, pr, pc])
+        nrm = np.concatenate([ns, nr, nc])
+        return model_of(pos, [('bdf', 'MI_CH_xyz_body_skin', ts), ('bdf', 'MI_CH_xyz_strap', tr + len(ps)),
+                              ('fac', 'MI_CH_xyz_face', tc + len(ps) + len(pr))], nrm=nrm)
+
+    @staticmethod
+    def prim(out, material):
+        return [p for p in out['prims'] if p['material'] == material][0]
+
+    def strap_inside(self, out):
+        """How deep the new strap goes under the skin's radius (mm; < 0: nowhere under)."""
+        q = self.prim(out, 'MI_CH_xyz_strap')
+        s = surface_samples(q['pos'], q['tris'])
+        return 60.0 - float(np.hypot(s[:, 1], s[:, 2]).min())
+
+    def test_surface_gap(self):
+        c = np.array([[[0.0, 0, 0], [10, 0, 0], [0, 10, 0]]])
+        n = np.array([[0.0, 0, 1]])
+        pts = np.array([[1.0, 1, 2], [1, 1, -2], [1, 1, -0.5], [1, 1, 20], [30, 1, 2], [13, 1, 1]])
+        g = decimate.surface_gap(pts, c, n, 8.0)
+        self.assertAlmostEqual(g[0], 2.0)
+        self.assertAlmostEqual(g[1], -2.0)
+        self.assertTrue(np.isnan(g[3]) and np.isnan(g[4]))                 # (too far)
+        self.assertTrue(np.isnan(g[5]))                                    # (beside it: past its edge, not over it)
+        g, tri = decimate.surface_gap(pts, c, n, 8.0, under=1.0, which=True)
+        self.assertTrue(np.isnan(g[1]))                                    # (under it by more than `under`)
+        self.assertAlmostEqual(g[2], -0.5)
+        self.assertEqual(tri.tolist(), [0, -1, 0, -1, -1, -1])
+        own = decimate.surface_gap(pts[:1], c, n, 8.0, np.array([7]), np.array([7]))
+        self.assertTrue(np.isnan(own[0]))                                  # (not on its own piece)
+
+    def test_strap_without_the_rule_sinks_with_it_stays_on_the_skin(self):
+        m = self.body()
+        weights = {'bdf': 1.0, 'fac': 1.0}
+        target = decimate.count(m) // 24
+        plain = decimate.decimate(m, target, weights, log=quiet, classes={'bdf': {'skin': 0.1, 'big': 0.05}})
+        self.assertGreater(self.strap_inside(plain), 1.0)
+        lying = decimate.decimate(m, target, weights, log=quiet,
+                                  classes={'bdf': {'skin': 0.1, 'big': 0.05, 'lying': 1.0}})
+        self.assertLessEqual(decimate.count(lying), target)
+        self.assertLess(self.strap_inside(lying), 0.0)
+        self.assertGreater(len(np.unique(self.prim(lying, 'MI_CH_xyz_strap')['tris'])),
+                           len(np.unique(self.prim(plain, 'MI_CH_xyz_strap')['tris'])))
+
+    def test_reach_bounds_a_piece_past_its_floor(self):
+        """A large piece away from anything: its floor keeps a few of its vertices; with 'reach' it keeps what stays
+        within that many mm of its shape, the other part giving up the rest."""
+        ps, ts, ns = icosphere(levels=4, radius=60.0)
+        pf, tf, nf = icosphere(levels=4, radius=50.0)
+        pos = np.concatenate([ps, pf + [0.0, 500.0, 0.0]])
+        nrm = np.concatenate([ns, nf])
+        m = model_of(pos, [('bdf', 'MI_CH_xyz_cloth', ts), ('fac', 'MI_CH_xyz_face', tf + len(ps))], nrm=nrm)
+        target = decimate.count(m) // 8
+        weights = {'bdf': 1.0, 'fac': 0.1}
+        a = decimate.decimate(m, target, weights, log=quiet, classes={'bdf': {'big': 0.02, 'lying': 1.0}})
+        b = decimate.decimate(m, target, weights, log=quiet, classes={'bdf': {'big': 0.02, 'lying': 1.0, 'reach': 1.0}})
+        qa, qb = self.prim(a, 'MI_CH_xyz_cloth'), self.prim(b, 'MI_CH_xyz_cloth')
+        self.assertLessEqual(decimate.count(b), target)
+        self.assertGreater(len(np.unique(qb['tris'])), len(np.unique(qa['tris'])))
+        self.assertLess(off_surface(ps[::37], qb['pos'], qb['tris']), off_surface(ps[::37], qa['pos'], qa['tris']))
+
+    def test_skin_reach_alone_bounds_a_part_without_floors(self):
+        """A face's class with only 'skin_reach': no floors, no post pass, but its skin stays within that many mm of
+        its shape, the other part giving up the rest; its other materials (an eye) are not bounded."""
+        ps, ts, ns = icosphere(levels=4, radius=60.0)
+        pe, te, ne = icosphere(levels=3, radius=12.0)
+        pb, tb, nb = icosphere(levels=4, radius=70.0)
+        pos = np.concatenate([ps, pe + [0.0, 200.0, 0.0], pb + [0.0, 500.0, 0.0]])
+        nrm = np.concatenate([ns, ne, nb])
+        m = model_of(pos, [('fac', 'MI_CH_xyz_face_skin', ts), ('fac', 'MI_CH_xyz_eye', te + len(ps)),
+                           ('bdf', 'MI_CH_xyz_cloth', tb + len(ps) + len(pe))], nrm=nrm)
+        target = decimate.count(m) // 8
+        weights = {'fac': 0.5, 'bdf': 1.0}
+        a = decimate.decimate(m, target, weights, log=quiet)
+        b = decimate.decimate(m, target, weights, log=quiet, classes={'fac': {'skin_reach': 0.5}})
+        qa, qb = self.prim(a, 'MI_CH_xyz_face_skin'), self.prim(b, 'MI_CH_xyz_face_skin')
+        self.assertLessEqual(decimate.count(b), target)
+        self.assertLess(off_surface(ps[::37], qb['pos'], qb['tris']), off_surface(ps[::37], qa['pos'], qa['tris']))
+        self.assertGreater(len(np.unique(qb['tris'])), len(np.unique(qa['tris'])))
+        self.assertLess(len(np.unique(self.prim(b, 'MI_CH_xyz_eye')['tris'])),
+                        len(np.unique(self.prim(a, 'MI_CH_xyz_eye')['tris'])))
+
+    def test_bounds_give_way_when_nothing_else_fits(self):
+        lines = []
+        m = self.body()
+        out = decimate.decimate(m, 150, {'bdf': 1.0, 'fac': 1.0}, log=lines.append,
+                                classes={'bdf': {'lying': 1.0, 'reach': 0.01, 'skin_reach': 0.01}})
+        self.assertLessEqual(decimate.count(out), 150)
+        self.assertTrue(any('lying on others kept on them; going on without' in line for line in lines))
+
+    def _under(self, new_y, source_y=-5.0, cloth_y=-3.0, most=None):
+        """A skin triangle at new_y (it was at source_y) over a small strap at cloth_y (normals +y): _skin_under's
+        inputs -> (the skin's y, the strap's y, what it returned)."""
+        size = 200.0
+        skin_old = [[-size, source_y, -size], [size, source_y, -size], [0.0, source_y, size]]
+        skin_new = [[-size, new_y, -size], [size, new_y, -size], [0.0, new_y, size]]
+        cloth = [[-20.0, cloth_y, -20.0], [20.0, cloth_y, -20.0], [0.0, cloth_y, 20.0]]
+        pos = np.array(skin_old + cloth, np.float64)
+        nrm = np.tile([0.0, 1.0, 0.0], (6, 1))
+        tris = np.array([[0, 2, 1]]), np.array([[3, 5, 4]])
+        pid = np.arange(6)
+        prims = [dict(part='bdf', material='MI_CH_xyz_body_skin', tris=tris[0]),
+                 dict(part='bdf', material='MI_CH_xyz_strap', tris=tris[1])]
+        streams = dict(pos=np.array(skin_new + cloth, np.float64), nrm=nrm.copy())
+        lines = []
+        moved = decimate._skin_under(streams, prims, np.arange(6), pid, prims, pos, nrm, {'bdf': {'lying': 1.0}}, set(),
+                                     lines.append)
+        return streams['pos'][:3, 1], streams['pos'][3:, 1], moved
+
+    def test_skin_is_taken_back_under_the_strap_on_it(self):
+        skin, strap, moved = self._under(0.0)                        # (3 mm over the strap: was 2 under it)
+        self.assertEqual(moved, 3)
+        self.assertEqual(strap.tolist(), [-3.0, -3.0, -3.0])         # (the strap stays)
+        self.assertLess(skin.max(), 0.0)
+        self.assertLessEqual(skin.max(), decimate.UNDER_MOST)
+        # under the strap at its middle by UNDER_CLEAR, as near as the corners' least move gets it
+        self.assertGreaterEqual(-skin.mean(), 3.0)
+
+    def test_skin_below_the_strap_stays(self):
+        skin, _, moved = self._under(-6.0)                           # (3 under it already)
+        self.assertEqual(moved, 0)
+        self.assertEqual(skin.tolist(), [-6.0, -6.0, -6.0])
+
+    def test_an_end_tucked_into_the_skin_stays_tucked(self):
+        skin, _, moved = self._under(-5.0, source_y=-5.0, cloth_y=-7.0)      # (2 mm under the skin as it was)
+        self.assertEqual(moved, 0)
+        self.assertEqual(skin.tolist(), [-5.0, -5.0, -5.0])
+
+    def test_the_move_has_a_limit(self):
+        skin, _, _ = self._under(10.0, source_y=-5.0, cloth_y=-3.0)  # (13 mm over: out of LIE_NEAR's reach, left)
+        self.assertEqual(skin.tolist(), [10.0, 10.0, 10.0])
+        skin, _, _ = self._under(4.5, source_y=-5.0, cloth_y=-3.0)
+        self.assertGreaterEqual(skin.min(), 4.5 - decimate.UNDER_MOST - 1e-9)
+
+    def test_decimated_skin_is_under_the_strap(self):
+        """The whole way: nothing of the strap under the new skin where it lay over the skin."""
+        m = self.body()
+        target = decimate.count(m) // 12
+        out = decimate.decimate(m, target, {'bdf': 1.0, 'fac': 1.0}, log=quiet,
+                                classes={'bdf': {'skin': 0.05, 'big': 0.05, 'lying': 1.0}})
+        skin, strap = self.prim(out, 'MI_CH_xyz_body_skin'), self.prim(out, 'MI_CH_xyz_strap')
+        c = skin['pos'][skin['tris']]
+        n = decimate._outward(c, skin['nrm'][skin['tris']])
+        gap = decimate.surface_gap(surface_samples(strap['pos'], strap['tris']), c, n, decimate.LIE_NEAR)
+        gap = gap[~np.isnan(gap)]
+        self.assertTrue(len(gap))
+        self.assertGreater(gap.min(), 0.0)
+
+
+def strand_cards(n=12, rows=30, cols=3, length=150.0, width=12.0, bend=60.0, z=0.0, x0=0.0, gutter=0.0, seed=1):
+    """n hair cards side by side: strips `cols` vertices across (u: 0.1 wide, its own column of the atlas) and `rows`
+    along (v: 0..1), each hanging down and bending forward along a circle (`bend`: its radius; 0: straight), lying
+    over the plane z = `z` (its centre column `gutter` mm further out) -> (points, triangles, uvs)."""
+    rng = np.random.default_rng(seed)
+    pts, tris, uv = [], [], []
+    for k in range(n):
+        base = len(pts)
+        for r in range(rows):
+            s = length * r / (rows - 1)
+            y, dz = (-s, 0.0) if not bend else (-bend * np.sin(s / bend), bend * (1 - np.cos(s / bend)))
+            for c in range(cols):
+                f = c / (cols - 1.0)
+                pts.append((x0 + k * width * 1.2 + f * width, y,
+                            z + dz + gutter * np.sin(np.pi * f) + rng.normal(0, 0.01)))
+                uv.append((0.1 * (k % 8) + 0.1 * f, r / (rows - 1.0)))
+        for r in range(rows - 1):
+            for c in range(cols - 1):
+                a = base + r * cols + c
+                b, cc, d = a + 1, a + cols, a + cols + 1
+                tris += [(a, b, d), (a, d, cc)]
+    return np.array(pts), np.array(tris), np.array(uv)
+
+
+@unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+class Strands(unittest.TestCase):
+    """decimate(classes={'har': {'strands': mm}}): hair cards' strips are reduced as strands (rows by their bend, inner
+    columns by their cross-section, the strips that show least left out), not collapsed; the floor keeps them within
+    that many mm."""
+
+    def model(self, **kw):
+        """Bent cards (part har) and a body sheet with room to give (part bdf)."""
+        pc, tc, uc = strand_cards(**kw)
+        pb, tb = grid(14, 100.0, 400.0)
+        ub = pb[:, :2] / 100.0
+        return model_of(np.concatenate([pc, pb]), [('har', 'MI_CH_xyz_har_1p', tc),
+                                                   ('bdf', 'MI_CH_xyz_cloth', tb + len(pc))],
+                        uv=np.concatenate([uc, ub])), len(pc)
+
+    def test_strips_are_the_uv_grids(self):
+        pts, tris, uv = strand_cards(n=3, rows=5, cols=3)
+        # a fourth piece that is no grid: a fan
+        fan = np.array([(0.0, 0, 50), (10, 0, 50), (10, 10, 50), (0, 10, 50), (5, 5, 52)])
+        ftris = np.array([(4, 0, 1), (4, 1, 2), (4, 2, 3), (4, 3, 0)]) + len(pts)
+        m = model_of(np.concatenate([pts, fan]), [('har', 'MI_CH_xyz_har_1p', np.concatenate([tris, ftris]))],
+                     uv=np.concatenate([uv, fan[:, :2] / 10.0]))
+        found, share = decimate.strips(m['prims'][0])
+        self.assertEqual(len(found), 3)
+        self.assertAlmostEqual(share, 45 / 50.0)
+        g, rv, cu, turn = found[0]
+        self.assertEqual(g.shape, (5, 3))
+        self.assertEqual(g[0].tolist(), [0, 1, 2])                          # (rows by v, columns by u)
+        self.assertEqual(turn, 1)
+        flipped = model_of(pts, [('har', 'MI_CH_xyz_har_1p', tris[:, ::-1])], uv=uv)
+        self.assertEqual(decimate.strips(flipped['prims'][0])[0][0][3], -1)
+
+    def test_a_tube_is_no_strip(self):
+        # four columns round a square tube, the first and the last at one place (a seam)
+        ring = [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0), (0.0, 0.0)]
+        pts = np.array([(x, -10.0 * r, z) for r in range(4) for x, z in ring])
+        uv = np.array([(c / 3.0, r / 3.0) for r in range(4) for c in range(4)])
+        tris = []
+        for r in range(3):
+            for c in range(3):
+                a = r * 4 + c
+                tris += [(a, a + 1, a + 5), (a, a + 5, a + 4)]
+        p = model_of(pts, [('har', 'MI_CH_xyz_har_1p', tris)], uv=uv)['prims'][0]
+        self.assertEqual(len(decimate.strips(p)[0]), 1)
+        pid = np.unique(np.round(pts, 3), axis=0, return_inverse=True)[1].reshape(-1)
+        self.assertEqual(decimate.strips(p, pid)[0], [])
+
+    def test_splits_keep_the_bend(self):
+        pts, tris, uv = strand_cards(n=1, rows=40, bend=60.0)
+        P = pts.reshape(40, 3, 3)
+        err = decimate._splits(P, uv[::3, 1], 0.0)
+        self.assertTrue(np.isinf(err[0]) and np.isinf(err[-1]))
+        for tol in (0.5, 2.0, 5.0):
+            keep = np.nonzero(err > tol)[0]
+            # every row lies within tol of the line between the kept rows round it
+            for a, b in zip(keep[:-1], keep[1:]):
+                for r in range(a + 1, b):
+                    t = (r - a) / float(b - a)
+                    self.assertLessEqual(np.linalg.norm(P[r] - (1 - t) * P[a] - t * P[b], axis=1).max(), tol + 1e-6)
+        self.assertGreater((err > 0.5).sum(), (err > 5.0).sum())
+        straight = decimate._splits(strand_cards(n=1, rows=40, bend=0.0)[0].reshape(40, 3, 3), uv[::3, 1], 0.0)
+        self.assertEqual((straight > 0.1).sum(), 2)                        # (a straight strip: its two ends)
+        # the length share: a straight strip keeps a row at least every 1 / share of the tolerance
+        long = decimate._splits(strand_cards(n=1, rows=40, bend=0.0)[0].reshape(40, 3, 3), uv[::3, 1], 0.04)
+        keep = np.nonzero(long > 2.0)[0]
+        self.assertLessEqual(np.diff(keep).max() * 150.0 / 39, 2.0 / 0.04 + 1e-6)
+
+    def test_strands_keep_their_bend_ends_and_texture_span(self):
+        m, nc = self.model(gutter=1.0)
+        lines = []
+        out = decimate.decimate(m, 420, {'har': 1.0, 'bdf': 1.0}, log=lines.append, classes={'har': {'strands': 3.0}})
+        self.assertLessEqual(decimate.count(out), 420)
+        q = [p for p in out['prims'] if p['part'] == 'har'][0]
+        src = out['source']
+        cards = src[q['tris']] // 90                                        # (each card's 90 vertices)
+        self.assertTrue((cards == cards[:, :1]).all())                      # no triangle joins two cards
+        tol = float([x for x in lines if 'strands:' in x][0].split('within ')[1].split(' mm')[0])
+        self.assertLessEqual(tol, 3.0 + 1e-9)
+        P = m['prims'][0]['pos'][:nc].reshape(12, 30, 3, 3)
+        kept = np.zeros(len(m['prims'][0]['pos']), bool)
+        kept[src[np.unique(q['tris'])]] = True
+        kept = kept[:nc].reshape(12, 30, 3)
+        for k in range(12):
+            if not kept[k].any():
+                continue
+            rows = np.nonzero(kept[k].any(1))[0]
+            cols = np.nonzero(kept[k].any(0))[0]
+            self.assertEqual((rows[0], rows[-1], cols[0], cols[-1]), (0, 29, 0, 2))     # its ends, its UV span
+            self.assertTrue(kept[k][np.ix_(rows, cols)].all())               # a grid
+            for a, b in zip(rows[:-1], rows[1:]):                            # the bend within the tolerance
+                for r in range(a + 1, b):
+                    t = (r - a) / float(b - a)
+                    edge = (1 - t) * P[k, a][cols] + t * P[k, b][cols]
+                    self.assertLessEqual(np.linalg.norm(P[k, r][cols] - edge, axis=1).max(), tol + 0.05)
+        # turning as before: from the row's direction to the column's in (column, row), as strand_cards makes them
+        t = src[q['tris']] % 90
+        r, c = t // 3, t % 3
+        turn = (c[:, 1] - c[:, 0]) * (r[:, 2] - r[:, 0]) - (r[:, 1] - r[:, 0]) * (c[:, 2] - c[:, 0])
+        self.assertTrue((turn > 0).all())
+        self.assertTrue(any('har strands 1080 ->' in x for x in lines))
+
+    def test_strands_give_way_as_their_quota_falls(self):
+        m, _ = self.model()
+        counts = []
+        for target in (700, 450, 300):
+            out = decimate.decimate(m, target, {'har': 1.0, 'bdf': 1.0}, log=quiet, classes={'har': {'strands': 0.5}})
+            self.assertLessEqual(decimate.count(out), target)
+            counts.append(len(np.unique([p for p in out['prims'] if p['part'] == 'har'][0]['tris'])))
+        self.assertGreater(counts[0], counts[1])
+        self.assertGreater(counts[1], counts[2])
+
+    def test_without_the_class_the_cards_collapse_as_before(self):
+        m, _ = self.model()
+        plain = decimate.decimate(m, 420, {'har': 1.0, 'bdf': 1.0}, log=quiet)
+        other = decimate.decimate(m, 420, {'har': 1.0, 'bdf': 1.0}, log=quiet, classes={'bdf': {'skin': 0.4}})
+        self.assertEqual(plain['source'].tolist(), other['source'].tolist())
+
+    def test_hidden_strips_go_first(self):
+        """An outer layer of cards over an inner one (narrower, 2 mm under it), both over an opaque sheet: at a target
+        below what the rows can give, the inner cards are left out, the outer ones stay."""
+        po, to, uo = strand_cards(n=8, rows=10, bend=0.0, z=6.0, length=100.0, width=16.0)
+        pi, ti, ui = strand_cards(n=8, rows=10, bend=0.0, z=4.0, length=100.0, width=8.0, x0=4.0)
+        pi[:, 0] += np.repeat(np.arange(8) * (16.0 * 1.2 - 8.0 * 1.2), 30)       # (each under its outer card)
+        pb, tb = grid(6, 200.0, -20.0)
+        pb = pb - [0.0, 150.0, 0.0]
+        pos = np.concatenate([po, pi, pb])
+        m = model_of(pos, [('har', 'MI_CH_xyz_har_1p', np.concatenate([to, ti + len(po)])),
+                           ('bdf', 'MI_CH_xyz_body_skin', tb + len(po) + len(pi))],
+                     uv=np.concatenate([uo, ui, pb[:, :2] / 100.0]))
+        lines = []
+        out = decimate.decimate(m, 36 + 34, {'har': 1.0, 'bdf': 0.0}, log=lines.append,
+                                classes={'har': {'strands': 0.0}})     # (the sheet's 36, 4 for each outer card)
+        self.assertLessEqual(decimate.count(out), 70)
+        src = out['source']
+        q = [p for p in out['prims'] if p['part'] == 'har'][0]
+        used = src[np.unique(q['tris'])]
+        self.assertEqual(len(np.unique(used[used < len(po)] // 30)), 8)                  # (every outer card)
+        self.assertEqual(((used >= len(po)) & (used < len(po) + len(pi))).sum(), 0)    # (no inner card)
+
+    def test_left_out_uncovers_what_was_under_it(self):
+        """Peeling: a strip judged half hidden by one that goes before it is judged again without it."""
+        corners = np.array([[[0.0, 0, 0], [10, 0, 0], [0, 10, 0]], [[0.0, 0, 1], [10, 0, 1], [0, 10, 1]]])
+        strip, layer, opaque = np.array([0, 1]), np.array([0, 1]), np.zeros(2, bool)
+
+        def seen(points, layer, opaque, strip, n):          # (the second shows half while the first is there)
+            return np.array([1.0, 0.5 if (strip == 0).any() else 1.0])
+        length = np.array([10.0, 100.0])
+        d = decimate.STRAND_DROP
+        with mock.patch.object(decimate, 'shown', seen):
+            with mock.patch.object(decimate, 'STRAND_PEEL', ()):
+                once = decimate.drop_errors(corners, layer, opaque, strip, length)
+            with mock.patch.object(decimate, 'STRAND_PEEL', (d * 10.0 + 1.0,)):     # (a round the first goes in)
+                peeled = decimate.drop_errors(corners, layer, opaque, strip, length)
+        self.assertEqual(once.tolist(), [d * 10.0, d * 50.0])
+        self.assertEqual(peeled.tolist(), [d * 10.0, d * 100.0])
+
+    def test_what_shows(self):
+        """shown(): a card alone shows whole; one under another card by STRAND_COVER less from that side; one under
+        an opaque sheet from its open side only."""
+        a, ta, _ = strand_cards(n=1, rows=6, bend=0.0, z=4.0, length=50.0, width=20.0)
+        b, tb, _ = strand_cards(n=1, rows=6, bend=0.0, z=0.0, length=50.0, width=20.0)
+        corners = np.concatenate([a[ta], b[tb]])
+        strip = np.repeat([0, 1], len(ta))
+        points, owner = decimate._samples(corners)
+        alone = decimate.shown(points[owner < len(ta)], strip[owner][owner < len(ta)],
+                               np.zeros((owner < len(ta)).sum(), bool), strip[owner][owner < len(ta)], 2)
+        self.assertAlmostEqual(alone[0], 1.0)
+        both = decimate.shown(points, strip[owner], np.zeros(len(points), bool), strip[owner], 2)
+        self.assertAlmostEqual(both[0], 1.0)
+        self.assertAlmostEqual(both[1], 1.0, 1)             # (seen from behind, it is the front one)
+        opaque = decimate.shown(points, strip[owner], strip[owner] == 0, np.where(strip[owner] == 1, 1, -1), 2)
+        self.assertAlmostEqual(opaque[1], 1.0, 1)           # (from behind: nothing over it)
+        # closed in: a sheet in front and one behind
+        c, tc = grid(8, 60.0, -20.0)
+        front, back = c + [0.0, -55.0, 8.0], c + [0.0, -55.0, -4.0]
+        walls = np.concatenate([front[tc], back[tc]])
+        corners = np.concatenate([b[tb], walls])
+        strip = np.concatenate([np.zeros(len(tb), int), np.full(len(walls), -1)])
+        points, owner = decimate._samples(corners)
+        boxed = decimate.shown(points, np.where(strip[owner] >= 0, 0, 1), strip[owner] < 0, strip[owner], 1)
+        self.assertLess(boxed[0], 0.8)                     # (edge-on from the sides and above only)
+
+    def test_tolerance_is_the_least_that_fits(self):
+        m, nc = self.model()
+        p = m['prims'][0]
+        found, _ = decimate.strips(p)
+        s = decimate._Strands(found, np.arange(len(p['pos'])), p['pos'], np.full(len(found), np.inf))
+        for most in (1080, 600, 200, 48):
+            tol = s.tolerance(most)
+            self.assertLessEqual(s.count(tol), most)
+            lower = s.levels[s.levels < tol]
+            if len(lower):
+                self.assertGreater(s.count(lower[-1]), most)
+            t = s.triangles(tol)
+            self.assertEqual(len(np.unique(t)), s.count(tol))
+
+
+
+def wire(rings=49, sides=6, radius=1.5, sag=120.0, width=240.0, x0=0.0, order=None):
+    """A wire hanging in a loop (a necklace): `rings` rings of `sides` sides `radius` mm round a centre line that sags
+    `sag` mm over `width` mm (a parabola in x, y), each ring's first vertex again at its end (u 1: a seam) ->
+    (points, triangles facing out, uvs); order: the vertices' numbers shuffled by this permutation."""
+    cols = sides + 1
+    x = np.linspace(-width / 2, width / 2, rings)
+    centre = np.stack([x + x0, sag * (2 * x / width) ** 2, np.zeros(rings)], 1)
+    ahead = np.gradient(centre, axis=0)
+    ahead /= np.linalg.norm(ahead, axis=1, keepdims=True)
+    side = np.cross(ahead, [0.0, 0.0, 1.0])
+    up = np.cross(side, ahead)
+    a = 2 * np.pi * np.arange(cols) / sides
+    pts = centre[:, None] + radius * (np.cos(a)[None, :, None] * side[:, None] + np.sin(a)[None, :, None] * up[:, None])
+    uv = np.stack(np.meshgrid(np.arange(cols) / float(sides), np.arange(rings) / (rings - 1.0)), 2)
+    tris = []
+    for r in range(rings - 1):
+        for c in range(sides):
+            p, q = r * cols + c, r * cols + c + 1
+            tris += [(p, q, p + cols), (q, q + cols, p + cols)]
+    pts, uv, tris = pts.reshape(-1, 3), uv.reshape(-1, 2), np.array(tris)
+    if order is not None:
+        back = np.argsort(order)
+        pts, uv, tris = pts[order], uv[order], back[tris]
+    return pts, tris, uv
+
+
+@unittest.skipUnless(HAVE_CC, 'needs a C compiler')
+class Wires(unittest.TestCase):
+    """decimate(classes={'bdf': {'tubes': mm}}): a part's thin tubes are reduced as whole rings kept where they bend
+    (every other side of six), not collapsed across their rings into flat ribbons."""
+
+    def model(self):
+        """A wire (part bdf, 49 rings of 6 sides) and a body sheet with room to give."""
+        pw, tw, uw = wire()
+        pb, tb = grid(14, 100.0, 400.0)
+        return model_of(np.concatenate([pw, pb]), [('bdf', 'MI_CH_xyz_chest', tw),
+                                                   ('bdf', 'MI_CH_xyz_cloth', tb + len(pw))],
+                        uv=np.concatenate([uw, pb[:, :2] / 100.0])), len(pw)
+
+    def test_wires_are_the_grids_of_rings(self):
+        parts = [wire(), wire(radius=8.0, x0=400.0), wire(rings=5, width=20.0, sag=2.0, x0=800.0)]
+        pf, tf = grid(5, 40.0, 1200.0)                                       # (an open sheet: no rings)
+        parts.append((pf, tf, pf[:, :2] / 40.0))
+        pts, tris, uv, base = [], [], [], 0
+        for p, t, u in parts:
+            pts.append(p), tris.append(t + base), uv.append(u)
+            base += len(p)
+        m = model_of(np.concatenate(pts), [('bdf', 'MI_CH_xyz_chest', np.concatenate(tris))], uv=np.concatenate(uv))
+        _, pid = np.unique(np.round(m['prims'][0]['pos'] / decimate.WELD), axis=0, return_inverse=True)
+        found = decimate.tubes(m['prims'][0], pid.reshape(-1), m['prims'][0]['pos'])
+        self.assertEqual(len(found), 1)                                      # (too thick, too short, no rings)
+        g, along, turn = found[0]
+        self.assertEqual(g.shape, (49, 7))
+        self.assertEqual(sorted(g.reshape(-1).tolist()), list(range(343)))
+        self.assertTrue((pid[g[:, 0]] == pid[g[:, -1]]).all())               # (the seam)
+        self.assertTrue((np.diff(along) > 0).all())
+        self.assertGreater(along[-1], 240.0)
+        # numbered in any order, the same rings
+        order = np.random.default_rng(3).permutation(343)
+        p, t, u = wire(order=order)
+        m = model_of(p, [('bdf', 'MI_CH_xyz_chest', t)], uv=u)
+        _, pid = np.unique(np.round(p / decimate.WELD), axis=0, return_inverse=True)
+        (g2, _, _), = decimate.tubes(m['prims'][0], pid.reshape(-1), p)
+        self.assertEqual({frozenset(x) for x in order[g2].tolist()}, {frozenset(x) for x in g.tolist()})
+
+    def test_wires_keep_whole_rings(self):
+        m, nw = self.model()
+        lines = []
+        out = decimate.decimate(m, 220, {'bdf': 1.0}, log=lines.append, classes={'bdf': {'tubes': 1.0}})
+        self.assertLessEqual(decimate.count(out), 220)
+        q = [p for p in out['prims'] if p['material'] == 'MI_CH_xyz_chest'][0]
+        src = out['source'][q['tris']]
+        self.assertTrue((src < nw).all())
+        ring, col = src // 7, src % 7
+        kept = np.unique(ring)
+        self.assertEqual((kept[0], kept[-1]), (0, 48))                       # (its ends)
+        self.assertLess(len(kept), 49)
+        self.assertEqual(sorted(np.unique(col).tolist()), [0, 2, 4, 6])      # (every other side)
+        for r in kept:                                                       # each kept ring whole
+            self.assertEqual(sorted(np.unique(col[ring == r]).tolist()), [0, 2, 4, 6])
+        step = np.searchsorted(kept, ring)                                   # no triangle across a ring
+        self.assertTrue(((step.max(1) - step.min(1)) == 1).all())
+        self.assertTrue(((col.max(1) - col.min(1)) == 2).all())
+        tol = float([x for x in lines if 'wires:' in x][0].split('within ')[1].split(' mm')[0])
+        self.assertLessEqual(tol, 1.0 + 1e-9)
+        # the centre line within the tolerance of the kept rings' (the bottom of the loop kept closer)
+        P = m['prims'][0]['pos'][:nw].reshape(49, 7, 3)[:, [0, 2, 4, 6]]
+        for a, b in zip(kept[:-1], kept[1:]):
+            for r in range(a + 1, b):
+                t = (r - a) / float(b - a)
+                self.assertLessEqual(np.linalg.norm(P[r] - ((1 - t) * P[a] + t * P[b]), axis=1).max(), tol + 0.05)
+
+    def test_without_the_class_the_rings_collapse(self):
+        m, nw = self.model()
+        out = decimate.decimate(m, 220, {'bdf': 1.0}, log=quiet)
+        q = [p for p in out['prims'] if p['material'] == 'MI_CH_xyz_chest'][0]
+        src = out['source'][np.unique(q['tris'])]
+        whole = [len(np.unique(src[src // 7 == r] % 7)) for r in np.unique(src // 7)]
+        self.assertLess(min(whole), 4)                                       # (a ring cut across: a ribbon)
+
+
 class Budget(unittest.TestCase):
     def test_count_is_per_primitive(self):
         pts, tris = grid(4)

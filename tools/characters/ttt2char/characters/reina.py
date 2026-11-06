@@ -25,8 +25,9 @@ MOVESET_SOURCE = 'tekken8'
 STAND_IN = ('hei', 13)        # Heihachi Mishima
 # Revision 5 combines our Bound/Sentai fixes with the incoming T8 cloth fixes; 6: Tekken 8's limb hit points (her
 # jab's), on-hit follow-ups (WS1 into Sentai), the sweeps' Sentai rows, Heaven's Wrath 3,4, air reactions, slams after
-# the bound, wall pushbacks, the run's contact stop
-REVISION = 6
+# the bound, wall pushbacks, the run's contact stop; 7: with Miary Zo's work: her model's elbow and knee rings, her
+# eyelids' turn, hit points from her ground origin
+REVISION = 7
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_zbr_<name> (tekken8/costume.py: its meshes, their merge order and the

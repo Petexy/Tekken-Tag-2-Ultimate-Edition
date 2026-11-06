@@ -31,7 +31,12 @@ layout below). So for each clothing asset whose vertices may move at least FREE_
 Tekken 8's cloth (tekken8/cloth.py: what its Catwalk Cloth lets swing, from the particles' max distances: Reina's
 jacket below her chest, its cords, Azucena's sleeves' fringes) comes in as such cloths too, strands with their own
 link length, shortest chain, how they hang and, hung from an arm, their own spring entries ('spring'), all hung from
-body joints ('body_parent').
+body joints ('body_parent'); what of a Tekken 8 fighter's hair swings ('hair': Miary Zo's braids and back hair) has
+its own spring entries too and touches no capsule: the capsules are fitted to the cloth alone (hair resting on the
+back and chest would scale the chest's to twice the body's). A wide piece Tekken 8 skins to a thigh hangs from that
+thigh ('leg_parent': its solver moves the cloth from where the skin puts it, and a fighter's stance turns the thigh off
+the hips), its own weights kept over LEG_BLEND; cloth hung from a leg moves with it, so no capsule grows to reach it
+('leg_moves', springs()).
 
 The spring file (big-endian), as the game's files have it (1572 of its 1607 spring files read this way to the byte):
     f32 5.0, 28 zero bytes | u32 entry count, 12 zero bytes | entries of 0x60 bytes: u32 OPT number, 11 f32
@@ -68,6 +73,16 @@ HANG = np.radians(5.0)          # ... this far from straight down
 REACH = 150.0                   # mm: shorter chains are left out (sleeve ends)
 MARGIN = 15.0                   # mm the draped chains keep outside the body
 BLEND = 40.0                    # mm below the pinned line over which the cloth's own skin weights give way
+CROSSED = 0.1                   # rig: a vertex skinned to one arm or leg with at most this share of its weights on
+                                # another goes on no chain hung from that other one
+LEG_HANG = 0.5                  # rig 'leg_parent': a chain whose vertices' own skin weights give at least this share
+                                # to one leg hangs from that leg (Tekken 8 skins Miary Zo's sarong below her hip to her
+                                # left thigh alone, her hip's tassels 0.9 to her right one: hung from the hips, her
+                                # stance turned the thighs into the cloth's rest, it fell between and behind the legs)
+LEG_BLEND = 150.0               # mm below the pinned line over which such a chain's cloth keeps some of its own skin
+                                # weights (BLEND's for the rest): they go from the hips to the thigh over its first
+                                # link, and the chain's root rides the thigh: on BLEND's 40 mm the waist's edges stretched
+                                # by 70 mm in her stance
 MAX_BONES = 100                 # cloth bones of a fighter
 SKELETON = 249                  # bones of a fighter's skeleton at most: the most a skeleton of the game's own has
 NAME = 'cloth%d_%d_%d'          # the bones' names: (cloth, chain, link)
@@ -250,6 +265,45 @@ def _body(k, b):
     return b
 
 
+LIMB_JOINTS = re.compile(r'^(MOMO|HIZA|SUNE|ASHI|TSUMASAKI|HIP_|slide_fukura|SAKOTSU|KENKO|KATA|UDE|TE_|slide_|'
+                        r'OYA|HITO|NAKA|KUSU|KO_)')      # (TTT2's names of the legs' and arms' joints)
+
+
+def _limb(k, b):
+    """The arm or leg bone b is on: ('arm' or 'leg', its side) of the nearest of it and its ancestors that is a
+    limb's joint (LIMB_JOINTS, by its TTT2 name), or None on the trunk and head."""
+    names, parents = k['bones']['names'], k['bones']['parents']
+    while b >= 0:
+        target = skeleton.t7_weight_target(names[b], None) or ''
+        side = re.search(r'_([LR])(_|$)', target) or re.search(r'_([lr])$', target)
+        if LIMB_JOINTS.match(target) and side:
+            arm = not re.match(r'(MOMO|HIZA|SUNE|ASHI|TSUMASAKI|HIP_|slide_fukura)', target)
+            return ('arm' if arm else 'leg', side.group(1).upper())
+        b = parents[b]
+    return None
+
+
+def _leg(k, vertices, joints, weights, limbs):
+    """The leg bone a chain's vertices (their own skin weights: joints, weights) hang from when at least LEG_HANG of
+    their weights goes to one leg (_limb; limbs: its cache): that leg's bone with the most of them (_body: not one the
+    game swings); None when no leg holds them so."""
+    n = len(k['bones']['names'])
+    if not len(vertices):
+        return None
+    j = joints[vertices]
+    w = weights[vertices] / np.maximum(weights[vertices].sum(1, keepdims=True), 1e-12)
+    w = np.where(j < n, w, 0.0)
+    for b in np.unique(j[j < n]):
+        if b not in limbs:
+            limbs[b] = _limb(k, int(b))
+    for side in 'LR':
+        on = np.array([[b < n and limbs[b] == ('leg', side) for b in row] for row in j])
+        if (w * on).sum() >= LEG_HANG * len(vertices):
+            most = np.bincount(j[on], w[on], minlength=n)
+            return _body(k, int(most.argmax()))
+    return None
+
+
 def _frame(x, outward):
     x = x / max(np.linalg.norm(x), 1e-9)
     y = outward - x * float(outward @ x)
@@ -293,7 +347,10 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     space), the drawn vertices skinned to them, the chains draped. A cloth's own 'link' and 'reach' (mm), 'flowing'
     and 'down' (_drape's; Tekken 8's strands: tekken8/cloth.py) stand for LINK, REACH, FLOWING and straight down
     (`link` scales its link as it scales LINK); its 'body_parent' hangs its chains from body joints only (_body:
-    Reina's jacket is skinned to her busts where it starts to swing), its 'spring' goes with its chains (springs()).
+    Reina's jacket is skinned to her busts where it starts to swing), its 'leg_parent' a chain from the leg its
+    vertices' own weights hold (_leg), its 'spring' goes with its chains (springs()), and 'leg_moves' marks those on a
+    leg (chain 'leg': its side; springs()). A vertex skinned to one arm or leg stays off a chain hung from another
+    (CROSSED).
     -> [{'part', 'bones' (k bone indices), 'neighbours' (chain numbers)}] in chain number order."""
     s0 = k['prims'][0]
     pos, nrm, joints, weights = s0['pos'], s0['nrm'], s0['joints'], s0['weights']
@@ -302,6 +359,9 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     cloth_vertices = np.zeros(len(pos), bool)
     for c in cloths:
         cloth_vertices[c['vertices']] = True
+    main = joints[np.arange(len(pos)), np.argmax(weights, 1)].copy()    # each vertex's own bone (before any chain)
+    limbs = {}                                       # bone -> _limb
+    crossed = 0
     used = np.unique(np.concatenate([p['tris'].reshape(-1) for p in k['prims']]))
     body = used[~cloth_vertices[used]]
     body_pos, body_nrm = pos[body], nrm[body]
@@ -339,6 +399,7 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
         dchain = chain[near]
         first = len(out)
         made = []
+        blends = {}                                  # (a chain's own blend: LEG_BLEND)
         for r, members in enumerate(chains):
             reach = float(g[members].max()) if len(members) else 0.0
             if reach < shortest:
@@ -365,6 +426,11 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             parent = int(acc[:len(k['bones']['names'])].argmax())
             if c.get('body_parent'):                 # (not a bone the game swings: a bust's)
                 parent = _body(k, parent)
+            if c.get('leg_parent'):                  # (skinned to a thigh: it hangs where the thigh puts it)
+                leg = _leg(k, drawn[(dchain == r) & (dg > 0)], joints, weights, limbs)
+                parent = parent if leg is None else leg
+                if leg is not None:
+                    blends[len(out)] = LEG_BLEND
             axis = world[_anatomical(k, parent)][:3, 3]
             bones = []
             for j, p in enumerate(nodes):
@@ -382,6 +448,11 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             out.append(dict(part=c['part'], bones=bones, neighbours=set(), parent=parent))
             if c.get('spring'):                      # (its own spring entries: springs())
                 out[-1]['spring'] = c['spring']
+            if c.get('hair'):                        # (hair: touches no capsule, springs())
+                out[-1]['hair'] = True
+            on = _limb(k, parent) if c.get('leg_moves') else None
+            if on is not None and on[0] == 'leg':    # (it moves with that leg: grows no capsule, springs())
+                out[-1]['leg'] = on[1]
         number = {r: m[0] for r, m in enumerate(made) if m is not None}
         # neighbours: chains whose vertices share edges
         e, _ = _edges(a.triangles, n)
@@ -401,6 +472,22 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
         moved = 0
         for chain_r, own in number.items():
             sel = np.nonzero((dchain == chain_r) & (dg > 0))[0]
+            # never onto a chain hung from another arm or leg than the one the vertex is skinned to (_limb: its own
+            # bone's, with at most CROSSED of its weights on the chain's limb): it would follow the other limb's
+            # chain wherever it swings, a stick across between the two (Miary Zo's ankle boards: tekken8/cloth.py had
+            # matched a few to the other leg's strand); it stays skinned as it was. (A skirt's middle, skinned to
+            # both thighs, follows either.)
+            side = _limb(k, out[own]['parent'])
+            if side is not None and len(sel):
+                v = drawn[sel]
+                for b in np.unique(np.concatenate([main[v], joints[v].reshape(-1)])):
+                    if b not in limbs:
+                        limbs[b] = _limb(k, int(b))
+                on_side = np.array([[limbs[b] == side for b in row] for row in joints[v]])
+                share = (weights[v] * on_side).sum(1) / np.maximum(weights[v].sum(1), 1e-12)
+                wrong = np.array([limbs[b] not in (None, side) for b in main[v]]) & (share <= CROSSED)
+                crossed += int(wrong.sum())
+                sel = sel[~wrong]
             if not len(sel):
                 continue
             v = drawn[sel]
@@ -416,7 +503,7 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             near2 = (other >= 0) & (best2 < 2 * spacing)
             d2 = np.where(near2, best2, 0.0)
             lateral = np.where(near2, d2 / np.maximum(d1 + d2, 1e-9), 1.0)
-            blend = np.clip(dg[sel] / BLEND, 0, 1)
+            blend = np.clip(dg[sel] / blends.get(own, BLEND), 0, 1)
             for i, vi in enumerate(v):
                 acc = {}
                 b1 = bones_of[own]
@@ -441,9 +528,13 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                     weights[vi, q] = w / total
                 moved += 1
         drapes += [(bones_of[m[0]], m[1], c.get('flowing', FLOWING), c.get('down')) for m in made if m is not None]
+        if not number:                               # (every chain too short: nothing hangs from it)
+            continue
         log('  %s: %d chains (%s bones) hang from %s; %d vertices skinned to them' % (
             c['name'], len(number), '+'.join(str(len(bones_of[x])) for x in sorted(bones_of)),
             ', '.join(sorted({names[out[x]['parent']].split('@')[0] for x in bones_of})), moved))
+    if crossed:
+        log('  cloth: %d vertices left skinned to their own arm or leg (nearest a chain hung from another)' % crossed)
     k['bones']['names'], k['bones']['parents'] = names, parents
     k['bones']['world'] = np.array(world)
     draped = []
@@ -457,8 +548,9 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     return out
 
 
-def add(k, cloths, room=MAX_BONES, log=print):
-    """rig() with chains far enough apart that the fighter gets at most `room` (and MAX_BONES) cloth bones."""
+def add(k, cloths, room=MAX_BONES, log=print, most=MAX_BONES):
+    """rig() with chains far enough apart that the fighter gets at most `room` (and `most`: MAX_BONES, a
+    definition's CLOTH_BONES) cloth bones."""
     s0 = k['prims'][0]
     saved = ({key: list(v) if isinstance(v, list) else v.copy() for key, v in k['bones'].items()},
              {key: s0[key].copy() for key in ('pos', 'nrm', 'tan', 'joints', 'weights')})
@@ -467,7 +559,7 @@ def add(k, cloths, room=MAX_BONES, log=print):
         lines = []
         chains = rig(k, cloths, lines.append, SPACING * scale, LINK * min(scale, 1.5))
         count = sum(len(c['bones']) for c in chains)
-        if count <= min(room, MAX_BONES, OPT_END - OPT_FIRST):
+        if count <= min(room, most, OPT_END - OPT_FIRST):
             break
         if scale > 4:
             log('  cloth: no room for its bones (%d, room for %d): left skinned' % (count, room))
@@ -482,7 +574,7 @@ def add(k, cloths, room=MAX_BONES, log=print):
     for line in lines:
         log(line)
     if scale > 1:
-        log('  cloth: chains %.0f mm apart (%d bones; room for %d)' % (SPACING * scale, count, min(room, MAX_BONES)))
+        log('  cloth: chains %.0f mm apart (%d bones; room for %d)' % (SPACING * scale, count, min(room, most)))
     return chains
 
 
@@ -632,7 +724,8 @@ def springs(skel, made, chains, body):
     chain order; chains: rig()'s result), body: the body's vertices without the cloth ((n, 3) bind positions, mm).
     -> {'entries': [(OPT number, link, length, (outward, inward limit or None) or None: Lars's, or the chain's own
     'spring' {'flags', 'parameters', 'limits', 'last'})], 'capsules': [(bone index, offset, sizes)], 'pairs': [(OPT
-    number, capsule)], 'links': [(OPT number, other OPT number, link)]}."""
+    number, capsule)], 'links': [(OPT number, other OPT number, link)]}. The hair's chains (rig 'hair') touch no
+    capsule: no pairs, and the capsules are not fitted to them."""
     world = bone.world_matrices(skel)
     names = list(skel['names'])
     chest = world[names.index('cha:MUNE2_jnt')][1, 3]
@@ -659,24 +752,37 @@ def springs(skel, made, chains, body):
                                                                         BODY[:LEGS]] or inside(p, c) < TRUNK_REACH]
         return out
 
-    candidates = [x for bones in made for x in touches(bones)]
+    candidates = [x for bones, chain in zip(made, chains) if not chain.get('hair') for x in touches(bones)]
+    hung = {b: chain['leg'] for bones, chain in zip(made, chains) if chain.get('leg') for b in bones}
     for c in range(len(caps)):                   # thickness: touching the nearest cloth bone at rest
         b, offset, size = caps[c]
         m = world[b]
         rot = m[:3, :3] / np.linalg.norm(m[:3, :3], axis=0)
         limb = names[b][4:] in [BODY[i][0] for i in LIMB]
-        scales = []
+        side = re.search(r'_([LR])_jnt$', names[b])
+        scales, own = [], []                     # (own: of cloth hung from this capsule's leg, rig 'leg')
         for bb, cc in candidates:
             if cc != c:
                 continue
             q = ((world[bb][:3, 3] - m[:3, 3]) @ rot - offset) / size
             if limb:                             # (along a limb its length stays: only its thickness scales)
                 if abs(q[0]) < 1.0:
-                    scales.append(float(np.sqrt((q[1] ** 2 + q[2] ** 2) / (1.0 - q[0] ** 2))))
+                    s = float(np.sqrt((q[1] ** 2 + q[2] ** 2) / (1.0 - q[0] ** 2)))
+                else:
+                    continue
             else:
-                scales.append(float(np.linalg.norm(q)))
-        if scales:
-            k = min(max(min(scales) / TOUCH, SHRINK), GROW)
+                s = float(np.linalg.norm(q))
+            # cloth hung from a leg (Tekken 8's: Miary Zo's sarong from her thigh, her ankle boards' strands from
+            # the shins) moves with it, so no capsule grows to reach it: a leg's own may shrink to it, the other
+            # leg's and the trunk's are left as the body is (grown to reach her sarong's tip at the knee and the
+            # other foot's strands the shins' were eggs 23 cm thick, pushing the sarong between the legs)
+            if bb not in hung:
+                scales.append(s)
+            elif side and hung[bb] == side.group(1):
+                own.append(s)
+        if scales or own:
+            k = min(scales + own) if scales else min(min(own), 1.0)
+            k = min(max(k / TOUCH, SHRINK), GROW)
             size = size * (np.array([1.0, k, k]) if limb else k)
             caps[c] = (b, offset, size)
     touching = set(candidates)

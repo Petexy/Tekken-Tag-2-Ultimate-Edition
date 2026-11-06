@@ -14,6 +14,23 @@
  *   (Garland and Heckbert 1998), evaluated at V's position and V's attributes;
  * - skin: the squared difference of U's and V's skin weights times U's area; the whole cost times U's factor
  *   (pfactor: decimate.py's scale correction);
+ * - folds (decimate.py's skin groups: the bones that move together when the model's joints bend): each wedge holds
+ *   the range of every group's weight (its share of the skin weights) over the original wedges it stands for
+ *   (gmin, gmax: decimate.py's, kept from pass to pass; at first its own, gw); a collapse that would leave one of
+ *   them further from V's group weights than the part's step (pstep; per group times its bend gsens) is not
+ *   allowed, and V's ranges take U's in. Where the weights pass from one group to the next (an elbow, a knee: the
+ *   skin folds there) vertices stay at least every two steps of the passing weight; inside a group (a forearm and
+ *   its twist helpers, the head) the rule is never in the way;
+ * - bent poses (decimate.py's poses: the model skinned with its elbows, knees, ... turned): each vertex has a quadric
+ *   of its triangles' planes in each pose too (the triangles posed with their own vertices' skin weights) and one
+ *   of them in the bind pose (without the feature planes); V's posed position is judged by U's posed quadrics as
+ *   V's position is by U's quadric, and what a pose adds to the bind pose's error (pose_w times) adds to the cost:
+ *   inside a group the pose only turns the surface (nothing added), at a fold V lies off U's posed planes;
+ * - bounds (decimate.py's: the points of a piece lying on the skin, a strap or a band, as far as the gap between
+ *   them lets them move): a collapse may not leave U, nor what U stands for (dev: how far the points it took in
+ *   lie off its surface, carried over), further from the new triangles round V than the tighter of U's and V's
+ *   bounds; V then stands for both (dev: the larger, bound: the tighter). A thin strap is cheap to flatten by the
+ *   quadrics (its triangles' area is small) and sank into the skin under it;
  * - quotas: a point with a wedge in a part (wpart) that has no more than its quota of live wedges stays;
  * - the link condition (no non-manifold results) and, on every triangle that changes, a test of its face normal
  *   (no flips, no turning to the other side of its corners' normals) and of its corners' normals (none may come
@@ -30,17 +47,20 @@
 #define MAXC 512                /* triangles / neighbours around one vertex the scratch arrays hold */
 
 /* params[] indices */
-enum { P_FEATURE, P_FLIP, P_CORNER, P_SKIN, P_REG, P_MAXCOST, P_NORMAL, P_COUNT };
+enum { P_FEATURE, P_FLIP, P_CORNER, P_SKIN, P_REG, P_MAXCOST, P_NORMAL, P_POSE, P_COUNT };
 /* stats[] indices */
 enum { S_COLLAPSES, S_LASTCOST, S_LOCKED, S_FEATURE, S_NONMANIFOLD, S_COUNT };
 
 typedef struct {
-    int npos, nw, ntri, k, aq;
-    const double *pos, *attr, *sw, *pfactor, *wnrm;
+    int npos, nw, ntri, k, aq, npose, ngroup;
+    const double *pos, *attr, *sw, *pfactor, *wnrm, *ppose, *gsens, *pstep;
+    double *bound, *dev;             /* (npos) the bounds and what each point stands for (in/out), or NULL */
+    const float *gw;
+    float *gmin, *gmax;              /* (nw, ngroup) the group weights' ranges each wedge stands for (in/out) */
     const int *wpos, *sj, *wpart;
     const int64_t *quota;        /* numpy.int64 on both LP64 Linux and LLP64 Windows */
     int *tri;
-    double *q, *aqd, *warea;
+    double *q, *aqd, *warea, *qp;   /* qp: (npose + 1, npos, 10): the bind pose's planes, then the bent poses' */
     int *wref;
     long live, *plive;
     unsigned char *lock, *dead, *tdead;
@@ -52,7 +72,7 @@ typedef struct {
     double *hc;
     int *hv, *hver;
     long hn, hcap;
-    double feature_w, flip_cos, corner_cos, skin_w, reg, maxcost, normal_cos;
+    double feature_w, flip_cos, corner_cos, skin_w, reg, maxcost, normal_cos, pose_w;
 } D;
 
 /* ------------------------------------------------------------------------------------------------ quadrics */
@@ -96,6 +116,54 @@ static double dot(const double *a, const double *b) { return a[0] * b[0] + a[1] 
 static void sub(const double *a, const double *b, double *o)
 {
     o[0] = a[0] - b[0]; o[1] = a[1] - b[1]; o[2] = a[2] - b[2];
+}
+
+/* the distance from p to the triangle a b c (its closest point by the regions of the triangle's corners, edges and
+ * face) */
+static double tri_dist(const double *p, const double *a, const double *b, const double *c)
+{
+    double ab[3], ac[3], ap[3], bp[3], cp[3], q[3];
+    sub(b, a, ab); sub(c, a, ac); sub(p, a, ap);
+    double d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0)
+        return sqrt(dot(ap, ap));
+    sub(p, b, bp);
+    double d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3)
+        return sqrt(dot(bp, bp));
+    double vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+        double t = d1 / (d1 - d3);
+        for (int i = 0; i < 3; i++)
+            q[i] = a[i] + t * ab[i];
+        sub(p, q, q);
+        return sqrt(dot(q, q));
+    }
+    sub(p, c, cp);
+    double d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6)
+        return sqrt(dot(cp, cp));
+    double vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+        double t = d2 / (d2 - d6);
+        for (int i = 0; i < 3; i++)
+            q[i] = a[i] + t * ac[i];
+        sub(p, q, q);
+        return sqrt(dot(q, q));
+    }
+    double va = d3 * d6 - d5 * d4;
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+        double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        for (int i = 0; i < 3; i++)
+            q[i] = b[i] + t * (c[i] - b[i]);
+        sub(p, q, q);
+        return sqrt(dot(q, q));
+    }
+    double den = 1.0 / (va + vb + vc), v = vb * den, w = vc * den;
+    for (int i = 0; i < 3; i++)
+        q[i] = a[i] + ab[i] * v + ac[i] * w;
+    sub(p, q, q);
+    return sqrt(dot(q, q));
 }
 
 /* ------------------------------------------------------------------------------------- triangle lists */
@@ -274,6 +342,35 @@ static double skin_dist(const D *d, int a, int b)
     return s;
 }
 
+/* U -> V in the bent poses: the sum of what each pose adds to the bind pose's error (V's posed position in U's
+ * posed quadric against V's position in U's bind-pose planes) */
+static double pose_err(const D *d, int u, int v)
+{
+    double s = 0, e0 = q_eval(d->qp + 10 * (long)u, d->pos + 3 * (long)v);
+    for (int k = 0; k < d->npose; k++) {
+        double e = q_eval(d->qp + 10 * ((long)(k + 1) * d->npos + u), d->ppose + 3 * ((long)k * d->npos + v)) - e0;
+        if (e > 0)
+            s += e;
+    }
+    return s;
+}
+
+/* may wedge a (what it stands for) take wedge b's group weights: none of its ranges further than its part's step? */
+static int fold_ok(const D *d, int a, int b)
+{
+    double step = d->pstep[d->wpart[a]];
+    if (step >= 1e300)
+        return 1;
+    const float *lo = d->gmin + (long)d->ngroup * a, *hi = d->gmax + (long)d->ngroup * a,
+                *to = d->gw + (long)d->ngroup * b;
+    for (int g = 0; g < d->ngroup; g++) {
+        double x = fabs((double)hi[g] - to[g]), y = fabs((double)lo[g] - to[g]);
+        if ((x > y ? x : y) * d->gsens[g] > step)
+            return 0;
+    }
+    return 1;
+}
+
 static double cost(D *d, int u, int v, const int *uw, const int *vw, int m)
 {
     const double *pu = d->pos + 3 * u, *pv = d->pos + 3 * v;
@@ -286,6 +383,8 @@ static double cost(D *d, int u, int v, const int *uw, const int *vw, int m)
     double t[3];
     sub(pu, pv, t);
     e += d->reg * area * dot(t, t);
+    if (d->npose)
+        e += d->pose_w * pose_err(d, u, v);
     return e * d->pfactor[u];
 }
 
@@ -302,7 +401,7 @@ static double spread(const D *d, int t, int c, int w)
     return a < b ? a : b;
 }
 
-/* the link condition, the feature rules, the flip test and the normal test for U -> V */
+/* the link condition, the feature rules, the folds' rule, the flip test and the normal test for U -> V */
 static int valid(D *d, int u, int v)
 {
     if (d->fcount[u] == 2) {
@@ -352,7 +451,13 @@ static int valid(D *d, int u, int v)
     int m = wedge_map(d, u, v, uw, vw);
     if (m < 0)
         return 0;
+    for (int j = 0; j < m && d->ngroup; j++)
+        if (!fold_ok(d, uw[j], vw[j]))
+            return 0;
     const double *pv = d->pos + 3 * v;
+    double most = 1e300, near = 1e300;
+    if (d->bound)
+        most = d->bound[u] < d->bound[v] ? d->bound[u] : d->bound[v];
     for (int i = 0; i < nu; i++) {
         int t = lu[i];
         if (corner(d, t, v) >= 0)
@@ -362,6 +467,11 @@ static int valid(D *d, int u, int v)
             int x = pos_of(d, t, c);
             p[c] = d->pos + 3 * x;
             q[c] = x == u ? pv : p[c];
+        }
+        if (most < 1e300) {                  /* (U's distance to the new triangles round V) */
+            double e = tri_dist(d->pos + 3 * u, q[0], q[1], q[2]);
+            if (e < near)
+                near = e;
         }
         double e1[3], e2[3], n0[3], n1[3];
         sub(p[1], p[0], e1); sub(p[2], p[0], e2); cross(e1, e2, n0);
@@ -388,6 +498,8 @@ static int valid(D *d, int u, int v)
         if ((s0 > 0) != (s1 > 0))
             return 0;
     }
+    if (most < 1e300 && (near < 1e300 ? near : 0) + d->dev[u] > most)
+        return 0;
     return 1;
 }
 
@@ -455,6 +567,28 @@ static int collapse(D *d, int u, int v)
         return 0;
     memcpy(own, l, n * sizeof(int));         /* (add_tri may move the pool) */
     l = own;
+    if (d->bound) {                          /* V stands for U and what U stood for */
+        double near = 1e300;
+        const double *pu = d->pos + 3 * u, *pv = d->pos + 3 * v;
+        for (int i = 0; i < n; i++) {
+            int t = l[i];
+            if (corner(d, t, v) >= 0)
+                continue;
+            const double *q[3];
+            for (int c = 0; c < 3; c++) {
+                int x = pos_of(d, t, c);
+                q[c] = x == u ? pv : d->pos + 3 * x;
+            }
+            double e = tri_dist(pu, q[0], q[1], q[2]);
+            if (e < near)
+                near = e;
+        }
+        double e = (near < 1e300 ? near : 0) + d->dev[u];
+        if (e > d->dev[v])
+            d->dev[v] = e;
+        if (d->bound[u] < d->bound[v])
+            d->bound[v] = d->bound[u];
+    }
     for (int i = 0; i < n; i++) {
         int t = l[i], *w = d->tri + 3 * t;
         if (corner(d, t, v) >= 0) {
@@ -477,9 +611,20 @@ static int collapse(D *d, int u, int v)
         for (int j = 0; j < d->aq; j++)
             a[j] += b[j];
         d->warea[vw[i]] += d->warea[uw[i]];
+        float *lo = d->gmin + (long)d->ngroup * vw[i], *hi = d->gmax + (long)d->ngroup * vw[i];
+        const float *ulo = d->gmin + (long)d->ngroup * uw[i], *uhi = d->gmax + (long)d->ngroup * uw[i];
+        for (int g = 0; g < d->ngroup; g++) {
+            if (ulo[g] < lo[g])
+                lo[g] = ulo[g];
+            if (uhi[g] > hi[g])
+                hi[g] = uhi[g];
+        }
     }
     for (int j = 0; j < 10; j++)
         d->q[10 * v + j] += d->q[10 * u + j];
+    for (int k = 0; k <= d->npose && d->npose; k++)
+        for (int j = 0; j < 10; j++)
+            d->qp[10 * ((long)k * d->npos + v) + j] += d->qp[10 * ((long)k * d->npos + u) + j];
     d->dead[u] = 1;
     d->tn[u] = 0;
     if (d->fcount[u] == 2) {                 /* the feature curve skips U */
@@ -615,6 +760,18 @@ static int setup(D *d, const unsigned char *lock_in, double *stats)
             q_plane(d->q + 10 * d->wpos[w[c]], un, -dot(un, p0), area);
             d->warea[w[c]] += area;
         }
+        for (int k = 0; k <= d->npose && d->npose; k++) {   /* its plane in the bind pose and each bent one */
+            const double *base = k ? d->ppose + 3 * (long)(k - 1) * d->npos : d->pos,
+                         *r0 = base + 3 * d->wpos[w[0]], *r1 = base + 3 * d->wpos[w[1]], *r2 = base + 3 * d->wpos[w[2]];
+            double f1[3], f2[3], m[3];
+            sub(r1, r0, f1); sub(r2, r0, f2); cross(f1, f2, m);
+            double mm = dot(m, m);
+            if (mm <= 1e-30)
+                continue;
+            double ml = sqrt(mm), um[3] = {m[0] / ml, m[1] / ml, m[2] / ml};
+            for (int c = 0; c < 3; c++)
+                q_plane(d->qp + 10 * ((long)k * d->npos + d->wpos[w[c]]), um, -dot(um, r0), 0.5 * ml);
+        }
         double g1[3], g2[3];                 /* gradient basis: g = (da1 (e2 x n) + da2 (n x e1)) / |n|^2 */
         cross(e2, n, g1);
         cross(n, e1, g2);
@@ -708,12 +865,19 @@ static int setup(D *d, const unsigned char *lock_in, double *stats)
  * pos (npos, 3); wpos (nw): each wedge's position vertex; attr (nw, k) weighted attributes; sj, sw (nw, 8) skin;
  * wnrm (nw, 3) unit normals; pfactor (npos) cost factors; lock_in (npos) or NULL; tri (ntri, 3) wedges, rewritten
  * in place (a removed triangle gets -1 in all three); wpart (nw) in 0..nparts-1, quota (nparts); params[P_COUNT];
- * stats[S_COUNT] out.
+ * stats[S_COUNT] out; ppose (npose, npos, 3) the points' positions in the bent poses (npose 0: none); gw (nw,
+ * ngroup) the wedges' group weights, gmin, gmax (nw, ngroup) the ranges each wedge stands for, updated in place (the
+ * caller starts them at gw and keeps them for its next pass), gsens (ngroup) the groups' bends, pstep (nparts) the
+ * parts' steps (1e300: no rule; ngroup 0: none); bound, dev (npos) the points' bounds (1e300: none) and how far
+ * what each one stands for lies off its surface (0 at first), updated in place and kept for the next pass, or both
+ * NULL: no bounds.
  * Returns the count, -1 on no memory. */
 int64_t ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int k, const double *attr, const int *sj,
                    const double *sw, const double *wnrm, const double *pfactor, const unsigned char *lock_in,
                    int ntri, int *tri, const int *wpart, int nparts, const int64_t *quota, const double *params,
-                   int64_t target, double *stats)
+                   int64_t target, double *stats, int npose, const double *ppose, int ngroup, const float *gw,
+                   float *gmin, float *gmax,
+                   const double *gsens, const double *pstep, double *bound, double *dev)
 {
     D d;
     long result = -1;
@@ -726,12 +890,23 @@ int64_t ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int 
     d.tri = tri;
     d.feature_w = params[P_FEATURE]; d.flip_cos = params[P_FLIP]; d.corner_cos = params[P_CORNER];
     d.skin_w = params[P_SKIN]; d.reg = params[P_REG]; d.maxcost = params[P_MAXCOST];
-    d.normal_cos = params[P_NORMAL];
+    d.normal_cos = params[P_NORMAL]; d.pose_w = params[P_POSE];
+    d.npose = npose; d.ppose = ppose;
+    d.ngroup = ngroup; d.gw = gw; d.gsens = gsens; d.pstep = pstep;
+    d.bound = NULL;
+    d.dev = dev;
+    if (bound && dev)                        /* (no point bounded: nothing to keep up) */
+        for (int i = 0; i < npos && !d.bound; i++)
+            if (bound[i] < 1e300)
+                d.bound = bound;
     for (int i = 0; i < S_COUNT; i++)
         stats[i] = 0;
     d.q = calloc((size_t)npos * 10, sizeof(double));
     d.aqd = calloc((size_t)nw * d.aq, sizeof(double));
     d.warea = calloc(nw, sizeof(double));
+    d.qp = calloc((size_t)(npose + 1) * npos * 10, sizeof(double));
+    d.gmin = gmin;
+    d.gmax = gmax;
     d.wref = calloc(nw, sizeof(int));
     d.lock = calloc(npos, 1);
     d.dead = calloc(npos, 1);
@@ -747,8 +922,8 @@ int64_t ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int 
     d.plive = calloc(nparts, sizeof(long));
     d.pool_cap = (long)ntri * 6 + 1024;
     d.pool = malloc(d.pool_cap * sizeof(int));
-    if (!d.q || !d.aqd || !d.warea || !d.wref || !d.lock || !d.dead || !d.tdead || !d.fcount || !d.fnb || !d.ts ||
-        !d.tn || !d.tc || !d.mark || !d.version || !d.target || !d.plive || !d.pool)
+    if (!d.q || !d.aqd || !d.warea || !d.qp || !d.wref || !d.lock || !d.dead || !d.tdead || !d.fcount || !d.fnb ||
+        !d.ts || !d.tn || !d.tc || !d.mark || !d.version || !d.target || !d.plive || !d.pool)
         goto out;
     if (setup(&d, lock_in, stats))
         goto out;
@@ -783,8 +958,8 @@ int64_t ttt2_decimate(int npos, const double *pos, int nw, const int *wpos, int 
             tri[3 * t] = tri[3 * t + 1] = tri[3 * t + 2] = -1;
     result = d.live;
 out:
-    free(d.q); free(d.aqd); free(d.warea); free(d.wref); free(d.lock); free(d.dead); free(d.tdead); free(d.fcount);
-    free(d.fnb); free(d.ts); free(d.tn); free(d.tc); free(d.mark); free(d.version); free(d.target); free(d.pool);
-    free(d.hc); free(d.hv); free(d.hver); free(d.plive);
+    free(d.q); free(d.aqd); free(d.warea); free(d.qp); free(d.wref); free(d.lock); free(d.dead); free(d.tdead);
+    free(d.fcount); free(d.fnb); free(d.ts); free(d.tn); free(d.tc); free(d.mark); free(d.version); free(d.target);
+    free(d.pool); free(d.hc); free(d.hv); free(d.hver); free(d.plive);
     return result;
 }

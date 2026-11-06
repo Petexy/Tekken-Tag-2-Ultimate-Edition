@@ -347,6 +347,9 @@ class Pieces(unittest.TestCase):
                                                                                cloth8.STRAND_FLOWING))
         self.assertNotIn('link', coat)                                     # (Tekken 7's chains)
         self.assertTrue(coat['body_parent'] and strand['body_parent'])
+        self.assertTrue(coat['leg_parent'] and coat['leg_moves'])          # (a wide piece hangs from a thigh if skinned to it)
+        self.assertFalse(strand['leg_parent'])
+        self.assertTrue(strand['leg_moves'])
         cords = set(range(jacket, jacket + cord))
         self.assertLessEqual(len(set(strand['vertices'].tolist()) - cords), 1)      # (and the corner it hangs from)
         self.assertGreater(len(set(strand['vertices'].tolist()) & cords), cord - 3)
@@ -359,6 +362,37 @@ class Pieces(unittest.TestCase):
         self.assertGreaterEqual(len(made), 3)                              # (the coat's chains and the cord's)
         self.assertEqual(sum(1 for c in made if len(c['neighbours']) == 0 and c['part'] == 'bdf'), 1)
 
+    def test_drawn_vertices_go_by_where_tekken_8_models_them(self):
+        """Re-posed onto the jacket (as Miary Zo's two ankle boards' inner plates met at the middle in the donor's
+        bind), the cord's drawn vertices still follow the cord: they are matched to the particles where Tekken 8
+        models them."""
+        k, jacket, cord = self.k, self.jacket, self.cord
+        pos = k['prims'][0]['pos']
+        pos[jacket:jacket + cord] = pos[:cord] + (0, 0, 1.0)
+        found = cloth8.find(k, [('bdf', '/Game/x')], log=lambda s: None)
+        strand = min(found, key=lambda c: len(c['vertices']))
+        cords = set(range(jacket, jacket + cord))
+        self.assertGreater(len(set(strand['vertices'].tolist()) & cords), cord - 3)
+        coat = max(found, key=lambda c: len(c['vertices']))
+        self.assertLessEqual(len(set(coat['vertices'].tolist()) & cords), 1)
+
+    def test_a_coat_skinned_to_a_thigh_hangs_from_it(self):
+        """The drawn coat is skinned below its top row to the left thigh (the model's extra bone): its chains hang from
+        that thigh, on that side; its cord, a strand, hangs where it is sewn on."""
+        k, jacket = self.k, self.jacket
+        names = list(k['bones']['names']) + ['L_UpLeg']
+        k['bones'] = dict(names=names, parents=list(k['bones']['parents']) + [0],
+                          world=np.concatenate([k['bones']['world'], np.eye(4)[None]]))
+        prim = k['prims'][0]
+        prim['joints'][:jacket, 0] = len(names) - 1
+        found = cloth8.find(k, [('bdf', '/Game/x')], log=lambda s: None)
+        n = len(prim['pos']) // 2                                          # (a body: three of the copy's vertices)
+        prim['tris'] = np.concatenate([prim['tris'], [[n, n + 1, n + 5]]])
+        made = cloth.add(k, found, 100, log=lambda s: None)
+        coat, cords = [c for c in made if c['neighbours']], [c for c in made if not c['neighbours']]
+        self.assertTrue(coat and all(c['parent'] == len(names) - 1 and c['leg'] == 'L' for c in coat))
+        self.assertTrue(cords and all(c['parent'] == 0 and 'leg' not in c for c in cords))
+
     def test_cloth_moving_little_stays(self):
         k = self.k
         saved = cloth.FREE_MIN, cloth8.SWING
@@ -367,6 +401,68 @@ class Pieces(unittest.TestCase):
             self.assertEqual(cloth8.find(k, [('bdf', '/Game/x')], log=lambda s: None), [])
         finally:
             cloth.FREE_MIN, cloth8.SWING = saved
+
+
+class Hair(unittest.TestCase):
+    """What of the hair swings is hair (pieces() 'hair', HAIR_SPRING entries): Miary Zo's braids and back hair."""
+
+    def setUp(self):
+        self.saved = cloth8.catwalk
+
+    def tearDown(self):
+        cloth8.catwalk = self.saved
+
+    def found(self, tag):
+        k, data, _, _ = costume(particles=True)
+        cloth8.catwalk = lambda mesh: data
+        k['parts'][tag] = k['parts'].pop('bdf')
+        k['prims'][0]['part'] = tag
+        return k, cloth8.find(k, [(tag, '/Game/x')], log=lambda s: None)
+
+    def test_the_hairs_pieces_are_hair(self):
+        k, found = self.found('har')
+        self.assertEqual(len(found), 2)
+        self.assertTrue(all(c.get('hair') and c['spring'] is cloth8.HAIR_SPRING for c in found))
+        prim = k['prims'][0]
+        n = len(prim['pos']) // 2                                          # (a body: three of the copy's vertices)
+        prim['tris'] = np.concatenate([prim['tris'], [[n, n + 1, n + 5]]])
+        made = cloth.add(k, found, 100, log=lambda s: None)
+        self.assertTrue(made and all(c.get('hair') and c['spring'] is cloth8.HAIR_SPRING for c in made))
+        _, found = self.found('bdf')                                       # (the body's: cloth as before)
+        self.assertEqual(len(found), 2)
+        self.assertFalse(any('hair' in c or 'spring' in c for c in found))
+
+    def test_hair_lies_on_the_body_not_on_its_other_layers(self):
+        """LYING: a strand of the hair near the hair's other layers swings, near the body it is left (Miary Zo's long
+        back strands, 9..13 mm from the hair kept under them)."""
+        saved = cloth8.LYING
+
+        def cords(k):
+            return [c for c in cloth8.find(k, [('har', '/Game/x')], log=lambda s: None)
+                    if c.get('link') == cloth8.STRAND_LINK]
+        try:
+            cloth8.LYING = 1e6                                             # (whatever is drawn is near enough)
+            for particles in (False, True):
+                k, data, _, _ = costume(particles)
+                cloth8.catwalk = lambda mesh: data
+                k['parts']['har'] = k['parts'].pop('bdf')
+                k['prims'][0]['part'] = 'har'
+                self.assertEqual(len(cords(k)), 1)                         # (on the jacket, hair: it swings)
+                prim = k['prims'][0]
+                n = len(prim['pos']) // 2                                  # (a body drawn on the copy's vertices)
+                k['prims'].append(dict(prim, part='bdf', material='MI_skin', tris=prim['tris'] + n))
+                self.assertEqual(cords(k), [])
+        finally:
+            cloth8.LYING = saved
+
+    def test_a_piece_joined_only_through_others_makes_no_chain(self):
+        points = np.array([(0, -40.0 * i, 0) for i in range(5)] + [(30, -20.0, 0)])
+        held = np.array([True] + [False] * 5)
+        on = ~held
+        ladder = np.array([(0, 1, 5), (1, 2, 5), (2, 3, 5), (3, 4, 5)])
+        self.assertAlmostEqual(cloth8._own_reach(points, held, on, ladder), 160.0)
+        self.assertAlmostEqual(cloth8._own_reach(points, held, on, ladder[:1]), 40.0)   # (the rest not reached)
+        self.assertEqual(cloth8._own_reach(points, held, on, ladder[2:]), 0.0)          # (none of it)
 
 
 class Rig(unittest.TestCase):

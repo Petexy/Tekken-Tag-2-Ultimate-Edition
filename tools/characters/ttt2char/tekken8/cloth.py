@@ -51,7 +51,16 @@ from body joints, not from the busts (rig 'body_parent'). The simulation meshes 
 the strands() rules of before: islands the solver moves wholly (FULL), hanging from vertices it does not move (PINNED)
 or sewn onto another island (WELD), narrow (NARROW), at least STRAND_REACH long, with drawn vertices within
 DRAWN_REACH, not lying on the body. convert/cloth.py skins the drawn vertices to the chains and gives TTT2's spring
-file their entries and the legs' capsules. Its standing pose (settle) is Tekken 7's only (from the .tkmvst).
+file their entries and the legs' capsules. Tekken 8's solver moves the cloth from where its skin weights put it, so a
+wide piece skinned mostly to a thigh (Miary Zo's sarong below her hip, its flap, her right hip's scarf with its tassels)
+hangs from that thigh (rig 'leg_parent'): on the hips her stance turned the thigh off the cloth's rest, the thigh went
+through it and the sarong fell between and behind her legs, the tassels' strings sank into the thigh with only their
+beads showing. Cloth hung from a leg grows no capsule (rig 'leg_moves'). Its standing pose (settle) is Tekken 7's only
+(from the .tkmvst). What of
+the hair swings (HAIR_PARTS; Reina's and Azucena's hair moves 3 cm at most and stays skinned; Miary Zo's front braids,
+with their gold ornaments, and her back hair swing) has HAIR_SPRING entries and touches no capsule (convert/cloth.py
+'hair'): Lars's coat's entries hardly let it swing sideways, Lili's hair entry (Tekken 7's hanging hair, chains.py)
+holds it rigid on the head.
 
 Written for this project from the files themselves (no third-party code).
 """
@@ -73,7 +82,9 @@ STRAND_LINK = 80.0              # mm between a strand chain's bones (a 20 cm cor
 DRAWN_REACH = 50.0              # mm: drawn vertices this near a strand's simulated vertices follow it (a cord drawn
                                 # 3-4 cm off its simulated line: Reina's hem cords)
 LYING = 20.0                    # mm: a strand whose vertices are this near the body (median) lies on it: left (a
-                                # boot's lace ends)
+                                # boot's lace ends). The hair's strands lie on the body, not on the hair's other
+                                # layers (with its cards kept as strands, decimate.py's Hair strands, Miary Zo's two
+                                # long back strands came within 9..13 mm of the hair under them and stopped swinging)
 STRAND_FLOWING = np.radians(50.0)   # a strand tilted more than this from straight down was modelled flowing: it
                                 # hangs (rig's FLOWING for Tekken 7's cloth: 30; a hood's strings lean 44 degrees on
                                 # the chest as modelled, the hem's cords stand out 58-60)
@@ -91,6 +102,18 @@ ARM_SPRING = dict(flags=0x60, parameters=(20.0, 70.0, 20.0), limits=(1.57, -1.57
                                 # from straight down, standing / walking / Libertador; held rigid 56 / 42 / 60): this
                                 # 23 / 15 / 15; with 20 70 40, Y 1.05: 37 / 23 / 30; Lars's coat's entry (30 10 70,
                                 # 0.05 / 0.2 rad) 47 / 34 / 57, the spikes the user saw; 10 50 100 rigid with any limits
+HAIR_PARTS = ('har',)           # the costume's hair: what of it swings is hair (rig 'hair': no capsules) ..
+HAIR_SPRING = dict(flags=0x60, parameters=(50.0, 70.0, 50.0), limits=(0.3, -0.3, cloth_chains.OUTWARD, -0.05),
+                   last=0.2)    # .. with these entries: hanging (ARM_SPRING's gravity, 70), half-way back to rest (50),
+                                # damped (50: TTT2's own entries have 20..40 for cloth, 100 on a fixed bone, 0 and less
+                                # on bones meant to whip); sideways (about local Y) 0.3 rad per link, out from the body
+                                # cloth.OUTWARD, in toward it 0.05 (the hair rests on the back and chest). In game (Miary
+                                # Zo, a side step, the hair tips sideways off where the head would hold them, peak of
+                                # any chain, mm, braids / 45 cm strands / back pieces / back base): Lars's coat's
+                                # entries 28 / 91 / 54 / 77, these 68 / 240 / 132 / 235, settled 0.5 s later to Lars's
+                                # rest band; damped 20: the strands kept swinging 100-150 mm (no decay in 2.5 s); 20 and
+                                # pull back 20 with 0.6 rad: idle swings of 230 mm. Lili's hair entry (flag 0, 10 50 100,
+                                # no limits: Tekken 7's hanging hair) held them rigid on the head, 0.0 mm off
 ARMS = (('L_Arm', 'L_ForeArm'), ('L_ForeArm', 'L_Hand'), ('R_Arm', 'R_ForeArm'), ('R_ForeArm', 'R_Hand'))
 KIND_SIMULATED, KIND_DRIVEN = 0, 1
 MAX_LISTS = 1 << 16
@@ -370,13 +393,18 @@ def _bind_world(m):
 def _posed(k, info, geo, vertices):
     """A part's mesh vertices (its geometry() numbering) in TTT2 space (mm), turned as skeleton.repose turned the
     model: each by its bones' changes (the model's bind matrices now over the mesh's own), blended by its weights."""
-    cm = convert_model
-    p = cm._ue_to_ttt2_points(geo['positions'][vertices]).astype(np.float64) * cm.M_TO_MM
+    p = _bind_points(geo, vertices)
     change = np.asarray(k['bones']['world'])[info['remap']] @ np.linalg.inv(_bind_world(info['mesh']))
     w = geo['weights'][vertices].astype(np.float64)
     w = w / np.maximum(w.sum(1, keepdims=True), 1e-12)
     blended = np.einsum('vk,vkij->vij', w, change[geo['joints'][vertices]])
     return np.einsum('vij,vj->vi', blended[:, :3, :3], p) + blended[:, :3, 3]
+
+
+def _bind_points(geo, vertices):
+    """A part's mesh vertices (its geometry() numbering) where Tekken 8 models them, in TTT2's axes (mm)."""
+    cm = convert_model
+    return cm._ue_to_ttt2_points(geo['positions'][vertices]).astype(np.float64) * cm.M_TO_MM
 
 
 def _original(k):
@@ -517,6 +545,14 @@ def _sewn(geo, data, d, sim, base):
     return out
 
 
+def _own_reach(points, held, on, triangles):
+    """How far (mm, along its own triangles: the asset rig() gets) a piece's particles (on) reach from the held ones
+    it hangs from; a piece joined to them only through other particles' triangles (Miary Zo's two short back-hair
+    strands, sewn on with the cloth's welded particles) reaches no further than its own triangles go."""
+    g = cloth_chains._hang(points, held, cloth_chains._edges(triangles, len(points))[1])[0][on]
+    return float(g[np.isfinite(g)].max()) if np.isfinite(g).any() else 0.0
+
+
 def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
     """The pieces of a part's simulated cloth that swing (find() with particles()' solver data): per simulation
     mesh, per island of its particles, the hold level (_hold), then each free piece (_components) that
@@ -527,11 +563,13 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
       sewn onto it (_sewn) are pieces of their own, hanging from where they are sewn on, moving their max distance;
     -> [cloth for convert/cloth.add]: its asset the piece and the held particles it hangs from (their max distance 0,
     the piece's its max distance above the hold level), its drawn vertices those the game moves with this simulation
-    mesh whose nearest particle of the part's is one of these, 'body_parent'. A narrow piece has strand chains (link
+    mesh whose nearest particle of the part's (in Tekken 8's own bind: _bind_points) is one of these, 'body_parent'. A narrow piece has strand chains (link
     STRAND_LINK, reach STRAND_REACH): on an arm with ARM_SPRING entries, its modelled shape kept if Tekken 8 models it
     hanging (in its own pose: tilted at most ARM_HANGING from straight down: Azucena's fringes), laid along the arm if
     not (_hanging: Reina's strap ends); elsewhere hung if modelled tilted more than STRAND_FLOWING. A wide one has
-    Tekken 7's."""
+    Tekken 7's, and hangs from the thigh its vertices are skinned to ('leg_parent'). A piece that reaches its shortest
+    chain only through other pieces' triangles makes none: left. The hair's (HAIR_PARTS) are 'hair' with HAIR_SPRING
+    entries."""
     if not solver:
         return []
     pos = k['prims'][0]['pos']
@@ -542,17 +580,29 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
     every = np.concatenate([posed[sim] for sim in sims])
     owner_sim = np.concatenate([np.full(len(posed[sim]), sim) for sim in sims])
     owner = np.concatenate([np.arange(len(posed[sim])) for sim in sims])
+    # the drawn vertices go to their nearest particles where Tekken 8 models them (its own bind: geo's positions),
+    # not where the re-posing put them: turned into a donor's bind with the feet closer together, two wide pieces
+    # worn on the ankles (Miary Zo's boards) meet at the middle, so some of the right one's vertices took the left
+    # leg's strand (and the left's the right's): a stick from ankle to ankle once the legs parted
+    own_bind = np.concatenate([_bind_points(geo, sections[solver[sim]['section']].base_vertex + solver[sim]['vertex'])
+                               for sim in sims]) if local is not None else None
     out, still = [], []
     for sim in sims:
         d = solver[sim]
         points, distance = posed[sim], d['max_distance']
         base = sections[d['section']].base_vertex
         mesh = data['meshes'].get(sim, '?').rsplit('|', 1)[-1]
-        candidates = drawn[_driven(data, sections, sim, local)] if local is not None else drawn
-        nearest = cloth_chains._nearest(pos[candidates], every)[0] if len(candidates) else np.zeros(0, np.int64)
+        if local is not None:
+            driven = _driven(data, sections, sim, local)
+            candidates = drawn[driven]
+            nearest = cloth_chains._nearest(_bind_points(geo, local[driven]), own_bind)[0] if len(candidates) \
+                else np.zeros(0, np.int64)
+        else:
+            candidates = drawn
+            nearest = cloth_chains._nearest(pos[candidates], every)[0] if len(candidates) else np.zeros(0, np.int64)
         mine = owner_sim[nearest] == sim
         candidates, nearest = candidates[mine], owner[nearest[mine]]
-        body = pos[np.setdiff1d(used, candidates)]
+        body = pos[np.setdiff1d(used, drawn if tag in HAIR_PARTS else candidates)]   # (LYING)
         _, adjacency = cloth_chains._edges(d['triangles'], len(points))
         island = _islands(d['triangles'], len(points))
         swing, left, lines, holds = [], [], [], []
@@ -604,6 +654,10 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
                     left.append('%s: no drawn vertices follow it' % what)
                     continue
                 p = points[keep]
+                own = _own_reach(p, ring[keep], on[keep], tris)
+                if own < (STRAND_REACH if narrow else cloth_chains.REACH):     # (no chain: rig drops it)
+                    left.append('%s, %.0f mm of it joined to where it hangs' % (what, own))
+                    continue
                 vertices = np.stack([p[:, 0], p[:, 2], p[:, 1]], 1) / 10.0
                 free = np.maximum(distance[keep] - level, 2 * cloth_chains.PINNED)
                 c = dict(part=tag, asset=Strand(vertices, np.where(on[keep], free, 0.0), tris), vertices=follow,
@@ -621,6 +675,12 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
                             c['down'], c['flowing'] = _hanging(k, info, geo, base + d['vertex'][ring],
                                                                points[ring].mean(0))
                             how = ' (from an arm: laid along it)'
+                if tag in HAIR_PARTS:                                # (hair: its own entries, no capsules)
+                    c.update(hair=True, spring=HAIR_SPRING)
+                    how += ' (hair)'
+                else:                                                # (hung from a leg it moves with it; a wide
+                    c['leg_moves'] = True                            # piece Tekken 8 skins to a thigh hangs from it)
+                    c['leg_parent'] = not narrow
                 swing.append(c)
                 lines.append('    %s: %s, moving %.0f cm, %d drawn vertices%s' % (c['name'], what, moves,
                                                                                  len(follow), how))
@@ -697,8 +757,8 @@ def find(k, parts, log=print):
                 if not len(follow):
                     left.append('%s: no drawn vertices follow it' % name)
                     continue
-                body = np.setdiff1d(used, follow)
-                lying = float(np.median(cloth_chains._nearest(points[~hangs], pos[body])[1]))
+                body = np.setdiff1d(used, drawn if tag in HAIR_PARTS else follow)          # (LYING)
+                lying = float(np.median(cloth_chains._nearest(points[~hangs], pos[body])[1])) if len(body) else np.inf
                 if lying < LYING:
                     left.append('%s lies on the body (%.0f mm)' % (name, lying))
                     continue
@@ -707,6 +767,10 @@ def find(k, parts, log=print):
                 out.append(dict(part=tag, asset=Strand(vertices, np.where(hangs, 0.0, g / 10.0), tris),
                                 vertices=follow, name=name, link=STRAND_LINK, reach=STRAND_REACH, down=down,
                                 flowing=flowing))
+                if tag in HAIR_PARTS:
+                    out[-1].update(hair=True, spring=HAIR_SPRING)
+                else:
+                    out[-1]['leg_moves'] = True
                 log('  %s: a strand %.0f mm long%s, %d drawn vertices' % (
                     name, reach, ' (from an arm: laid along it)' if down is not None else '', len(follow)))
         if left:

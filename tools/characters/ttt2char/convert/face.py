@@ -16,6 +16,17 @@ ABSOLUTE local translations and rotations, made for the donor's face. An added f
   Tekken 7's largest turns beyond the donor's are squeezed eyes (Chloe's 89 degrees showed her eyeball through the lid,
   where the donor's turn closes it).
 
+* Tekken 8's eyelids (lid_turns_on_meshes). Tekken 8 blinks with a control joint posed at run time, so its face
+  animations hold no turn to measure. And the donor's turns are made for its own lids: TTT2 weights a lid's margin
+  about half to its eyelid joint (Jun's at most 0.53 upper, 0.71 lower), where Tekken 8 weights it fully, so with
+  the skin's linear blend Jun's margin turns about half as far as her joint: her closed eyes are 51.6 degrees, her
+  squeezed ones 63, but a Tekken 8 face closes at about 30 (Miary Zo 32, Reina 36, Azucena 29). Turned the donor's
+  way, the lid went 20 degrees past the lower one, sank into the eyeball, and its narrow eyeshadow band stretched
+  over the whole eye: a dark smear where a closed eye should be. So both faces are measured as the game skins them
+  (lid_motion: each eye's opening, and how far each lid's margin closes per degree its joint turns), and each lid is
+  scaled so that it closes the same share of the fighter's opening as the donor's lid of the donor's: Jun's closed
+  eyes close hers, her squeezed ones just meet.
+
 A compressed (0x64) animation's translations are its frame-0 values plus deltas: moving them changes the frame-0
 values (3 floats in place); a raw (0xC8) one has every frame's. Turned lids re-encode the animation with its own
 quantisation (animation.compression_params: the other channels decode as before, bit for bit) and rebuild its MOTA.
@@ -28,7 +39,7 @@ import struct
 import numpy as np
 
 from . import skeleton
-from ..ttt2 import animation, bone, motbin, motion
+from ..ttt2 import animation, bone, motbin, motion, nud
 
 CHANNELS = 70                   # a face animation's channels
 MOTBIN_SLOT = 4                 # the moveset's embedded face MOTA
@@ -42,6 +53,13 @@ TEKKEN7_LIDS = {'R_UwaMabuta_Joint': 17, 'L_UwaMabuta_Joint': 23, 'R_SitaMabuta_
 LID_SCALES = (0.25, 1.0)        # a lid's scale stays within these (a face whose animations never blink keeps it moving)
 SAME_SCALE = 0.02               # a scale this near 1 leaves the lid as the donor turns it
 SAMPLE = 400                    # rotations sampled to find a lid's usual pose
+# a face's eyes measured on its mesh (lid_motion): a lid's margin = its points weighted at least MARGIN of its joint's
+# largest weight; of these, the ones in the middle of the eye (along the lid's axis within MIDDLE of the lids' span
+# around its middle) and over the eyeball (at least FRONT of the farthest one's distance from the axis: not the
+# socket's inside)
+MARGIN = 0.9
+MIDDLE = 0.3
+FRONT = 0.8
 
 
 def _names(s):
@@ -167,6 +185,125 @@ def lid_scales(lids, donor_turns):
     return out
 
 
+def lid_axes(anims):
+    """(axes, turns) of TTT2 face animations [(byte order, bytes)]: axes {eyelid joint: the unit axis, in its parent's
+    frame, a positive turn about which closes the eye}, turns {eyelid joint: its largest turn about it (degrees)};
+    ({}, {}) without face animations."""
+    best = {}
+    for endian, a in anims:
+        h = animation.header(a, endian)
+        if h['type'] != animation.COMPRESSED or not _is_face(h):
+            continue
+        v = animation.decode(a, endian)['values'].astype(np.float64)
+        for name, c in _lid_channels().items():
+            k = int(np.argmax(np.abs(v[:, c, 2])))
+            if abs(v[k, c, 2]) > best.get(name, (0.0, None))[0]:
+                # (the game turns a joint by -z about rotation_axis: animation.local_rotation)
+                best[name] = (abs(v[k, c, 2]), animation.rotation_axis(v[k, c]) * -np.sign(v[k, c, 2]))
+    if len(best) < len(LIDS):
+        return {}, {}
+    return ({name: x / np.linalg.norm(x) for name, (_, x) in best.items()},
+            {name: float(np.degrees(t)) for name, (t, _) in best.items()})
+
+
+def _on_joint(model, joint):
+    """(bind positions (n, 3), weights (n,)) of the model's (nud.read) vertices weighted to bone `joint`."""
+    pos, weight = [np.zeros((0, 3))], [np.zeros(0)]
+    for mesh in model['meshes']:
+        for p in mesh['polys']:
+            v = p['verts']
+            if 'bones' not in (v.dtype.names or ()):
+                continue
+            w = np.asarray(v['w'], np.float64)
+            w = (w * (np.asarray(v['bones']) == joint)).sum(1) / np.maximum(w.sum(1), 1e-9)   # (u8: 255ths)
+            pos.append(np.asarray(v['pos'], np.float64)[w > 0])
+            weight.append(w[w > 0])
+    return np.concatenate(pos), np.concatenate(weight)
+
+
+def _turned(axis, degrees):
+    """The rotation matrix of `degrees` about the unit `axis` (column vectors)."""
+    a = np.radians(degrees)
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    return np.eye(3) + np.sin(a) * k + (1 - np.cos(a)) * k @ k
+
+
+def lid_motion(model, skel, axes, turns):
+    """(opening, rates) of a face's eyes as the game skins them (each vertex the linear blend of its bones): opening =
+    the degrees, about the upper lid's axis, from the upper lid's lowest margin point to the lower lid's highest in the
+    middle of the eye; rates {eyelid joint: the degrees its margin points there close (median) per degree the joint
+    turns, at turns[joint]}; both the mean over the eyes. (None, {}) when no eye's lids are found. model: nud.read's,
+    skel: bone.read's (lid joints with no bind turn, as TTT2's), axes / turns: lid_axes'."""
+    names, world = _names(skel), bone.world_matrices(skel)
+    openings, rates = [], {}
+    for upper, lower in zip(LIDS[:2], LIDS[2:]):
+        if upper not in names or lower not in names:
+            continue
+        lids = {}                               # joint: (pivot, closing axis (world), margin points, their weights)
+        for name in (upper, lower):
+            j = names.index(name)
+            axis = world[skel['parent'][j]][:3, :3] @ axes[name]
+            x, w = _on_joint(model, j)
+            keep = w >= MARGIN * w.max() if len(w) else w > 0
+            lids[name] = (world[j][:3, 3], axis / np.linalg.norm(axis), x[keep], w[keep])
+        if not len(lids[upper][2]) or not len(lids[lower][2]):
+            continue
+        pivot, axis = lids[upper][:2]
+        # angles about the upper lid's axis, from the lids' mean direction, the upper lid's side positive
+        f = np.concatenate([lids[upper][2], lids[lower][2]]).mean(0) - pivot
+        f -= axis * (f @ axis)
+        f /= np.linalg.norm(f)
+        g = np.cross(axis, f)
+
+        def polar(x):
+            q = x - pivot
+            return q @ axis, np.degrees(np.arctan2(q @ g, q @ f)), np.hypot(q @ g, q @ f)
+        (lu, au, ru), (ll, al, rl) = polar(lids[upper][2]), polar(lids[lower][2])
+        side = 1.0 if np.median(au) > np.median(al) else -1.0
+        au, al = side * au, side * al
+        span = np.concatenate([lu, ll])
+        mid, half = (span.min() + span.max()) / 2, MIDDLE * (span.max() - span.min()) / 2
+        su, sl = np.abs(lu - mid) <= half, np.abs(ll - mid) <= half
+        if not su.any() or not sl.any():
+            continue
+        su &= ru >= FRONT * ru[su].max()
+        sl &= rl >= FRONT * rl[sl].max()
+        openings.append(au[su].min() - al[sl].max())
+        for name, sel, sense in ((upper, su, -side), (lower, sl, side)):
+            pv, ax, x, w = lids[name]
+            x, w = x[sel], w[sel]
+            moved = (1 - w)[:, None] * x + w[:, None] * ((x - pv) @ _turned(ax, turns[name]).T + pv)
+            closed = sense * (polar(moved)[1] - polar(x)[1])
+            rates.setdefault(name[2:], []).append(float(np.median(closed)) / turns[name])
+    if not openings:
+        return None, {}
+    return float(np.mean(openings)), {name: float(np.mean(r)) for name, r in rates.items()}
+
+
+def lid_turns_on_meshes(model, skel, donor_model, donor, anims):
+    """{eyelid joint: scale} of the donor's lid turns for the face of `model` / `skel` (NUD bytes or nud.read's /
+    bone.read's), so that each lid closes the same share of the eye's opening as the donor's does (lid_motion, at the
+    donor's largest turns): the donor's rate over the fighter's, times the fighter's opening over the donor's; one
+    scale for both eyes' upper lids and one for their lower lids, within LID_SCALES; scales within SAME_SCALE of 1
+    left out, {} when either face's lids are not found."""
+    model, donor_model = (nud.read(m) if isinstance(m, (bytes, bytearray)) else m for m in (model, donor_model))
+    axes, turns = lid_axes(anims)
+    if not axes:
+        return {}
+    (mine, my_rates), (theirs, their_rates) = (lid_motion(model, skel, axes, turns),
+                                               lid_motion(donor_model, donor, axes, turns))
+    out = {}
+    for pair in (LIDS[:2], LIDS[2:]):
+        key = pair[0][2:]                       # (the rates go by lid, both eyes': 'UwaMabuta_Joint', ...)
+        # (a rate below 0: the donor's largest turn of that lid opens the eye; the same axis for both faces)
+        if not mine or not theirs or my_rates.get(key, 0) * their_rates.get(key, 0) <= 0:
+            continue
+        s = float(np.clip(their_rates[key] / my_rates[key] * mine / theirs, *LID_SCALES))
+        if abs(s - 1) > SAME_SCALE:
+            out.update(dict.fromkeys(pair, s))
+    return out
+
+
 def _with_mota(moveset, slot, mota):
     """The moveset with its MOTA slot `slot` replaced (the MOTAs after it moved along)."""
     slots = list(struct.unpack_from('>13I', moveset, 0x1D8))
@@ -180,10 +317,11 @@ def _with_mota(moveset, slot, mota):
     return bytes(out)
 
 
-def retarget(moveset, pack, skel, donor, lids=None):
+def retarget(moveset, pack, skel, donor, lids=None, meshes=None):
     """The fighter's moveset (motbin bytes) and motion pack with their face animations moved for its face joints and
     their eyelids turned as its own game turns them (skel: its skeleton, donor: the donor's, bone.read; lids: its
-    tekken7_lids, None or {}: the donor's turns kept) -> (moveset, pack, face animations changed, {eyelid joint: scale})."""
+    tekken7_lids; without them, meshes: (its model, the donor's: NUD bytes or nud.read's) for lid_turns_on_meshes
+    (Tekken 8); neither: the donor's turns kept) -> (moveset, pack, face animations changed, {eyelid joint: scale})."""
     moves = offsets(skel, donor)
     slot, = struct.unpack_from('>I', moveset, 0x1D8 + 4 * MOTBIN_SLOT)
     at, size = motion.pack_items(pack)[PACK_ITEM]
@@ -193,7 +331,13 @@ def retarget(moveset, pack, skel, donor, lids=None):
         end = motbin.BASE + (min(used) if used else len(moveset) - motbin.BASE)
         motas['moveset'] = (motbin.BASE + slot,) + _animations(moveset, motbin.BASE + slot, end)
     motas['pack'] = (at,) + _animations(pack, at, at + size)
-    scales = lid_scales(lids, _donor_lids([(e, a) for _, e, _, anims in motas.values() for a in anims])) if lids else {}
+    face_anims = [(e, a) for _, e, _, anims in motas.values() for a in anims]
+    if lids:
+        scales = lid_scales(lids, _donor_lids(face_anims))
+    elif meshes is not None:
+        scales = lid_turns_on_meshes(meshes[0], skel, meshes[1], donor, face_anims)
+    else:
+        scales = {}
     turns = {_lid_channels()[name]: s for name, s in scales.items()}
     if not moves and not turns:
         return moveset, pack, 0, scales

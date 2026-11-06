@@ -34,6 +34,30 @@ clips of 90.2), -34, -36, -13 (-29) on their own rigs or the proportion pose; TT
 The older shared clips (rotations only) hold their root in TTT2's units: they are measured against TTT2's leg
 (LEGACY_LEG), which gives back the TTT2 originals' channels 0 and 1 on a base skeleton.
 
+Weapons (convert/weapons.py, convert/summons8.py; Miary Zo's staffs, tail and the hit points): a fighter whose
+skeleton has weapon bones posed by animation pairs (OPT 800 + k) gets, in each clip that moves one of their joints
+(or that a move's root points need), extra (translation, rotation) pairs after the 23 body channels, pair k the local
+transform of weapon bone k in its TTT2 parent's frame as the runtime writes it into the bone's record (roster.cpp,
+weapons), every pair below the highest one present (pairs are positional: pair k = channels 23 + 2k, 24 + 2k; a pair
+whose weapon the clip does not move holds the bone's bind). A weapon bone's frame is its Tekken 8 joint's (the PSKS
+frame: weapons.append_tekken8), so with S, P the joints' world rotations / positions of the clip (forward kinematics
+as for the drivers) and O_b the calibration offset of the TTT2 parent b (its world G_b = S_driver O_b):
+    a weapon under a body bone b:           R = O_b^T S_driver^T S_joint,   t = O_b^T S_driver^T (P_joint - P_anchor)
+                                            (P_anchor: the driver's, or the joint at b's origin: ANCHORS)
+    a link under the weapon before it:      R = S_up^T S_joint,             t = S_up^T (P_joint - P_up)
+    a hit-only 'lead' under b:              R = I, t as a weapon's for the most forward (+z) of its joints, or the
+                                            point tip_cm past the last one along that joint's x (its chain's axis)
+    a 'root' point under HARA_ROT1:         R = I, t = H^T (s k o - s ch1): o the move's hit box offset (mm; the
+                                            fighter's frame before the turn, x left, y up, z forward), k the clip's
+                                            root scale, s the skeleton's size scale, ch1 / H HARA_ROT1's channel 1
+                                            and rotation (channel 3)
+    a 'snakes' head under b:                R = I, t = the most forward (+z) of the heads of the summoned model's
+                                            clip the move starts, given in b's frame (convert/snakes8.py: heads),
+                                            from its start frame on (before it: the clip's first frame)
+The re-pose of the model (convert/skeleton.py) cancels out: the mesh skinned to a weapon bone follows its Tekken 8
+joint exactly wherever the TTT2 parent is driven. The joints' own scale channels are left out (the record takes a
+rotation), and the clip's stored translations of the weapons' joints are used.
+
 Written for this project from the files themselves (no third-party code).
 """
 import collections
@@ -43,7 +67,7 @@ import numpy as np
 
 from .. import InputError
 from ..convert import retarget
-from ..ttt2 import animation, motion
+from ..ttt2 import animation, bone, motion
 from . import anmbin, panm, uprops
 
 SKELETON_PATH = 'Polaris/Content/Character/Item/shared/skeleton/%s/SKB_CH_%s_base_msl'
@@ -131,22 +155,27 @@ class Converter:
     bone.read() of the TTT2 skeleton they will play on (the added fighter's, skeleton.build); kind: 0x64
     (animation.COMPRESSED) or 0xC8 (animation.RAW)."""
 
-    def __init__(self, sk, target, kind=animation.COMPRESSED):
+    def __init__(self, sk, target, kind=animation.COMPRESSED, weapons=()):
         self.sk, self.kind = sk, kind
-        self.cal = retarget.Calibration(sk, LANDMARKS, DRIVERS, retarget.ttt2_skeleton(target))
+        dst = retarget.ttt2_skeleton(target)
+        self.cal = retarget.Calibration(sk, LANDMARKS, DRIVERS, dst)
         self.leg, self.own_leg = retarget.leg_length(target), bind_leg(sk)
+        self.scale = dst.scale
+        # weapons posed by pairs (pair_specs; none: the 23 body channels only)
+        self.pairs = pair_specs(sk, target, weapons, self.cal) if weapons else []
         # the joints the channels need, and their ancestors: a small skeleton of its own
-        want = [sk.index[j] for j in set(DRIVERS.values()) | {TOP, TRANS, ROT}]
+        body = sk.chain([sk.index[j] for j in set(DRIVERS.values()) | {TOP, TRANS, ROT}])
+        want = body + [sk.index[j] for j in pair_joints(self.pairs)]
         chain = sk.chain(want)
         at = {j: k for k, j in enumerate(chain)}
         self.sub = retarget.Skeleton([sk.names[j] for j in chain],
                                      [at[sk.parents[j]] if sk.parents[j] >= 0 else -1 for j in chain],
                                      sk.t[chain], sk.R[chain], sk.s[chain])
+        self.moved = {sk.names[j] for j in chain if j not in set(body)}     # the weapons' joints (pairs)
 
-    def pose(self, anim):
-        """The clip's source pose: (world rotations {joint: (F, 3, 3)}, root (F, 3) mm, displacement (F, 3) mm,
-        yaw (F,), the leg (mm) its root is measured against, joints {name: panm.Joint}). The joints keep the
-        fighter's own lengths (the clip's other translations are its authoring rig's); only the root moves."""
+    def fk(self, anim):
+        """(joints {name: panm.Joint}, world rotations (F, n, 3, 3), positions (F, n, 3) mm) of the clip on the small
+        skeleton: the root's and the weapons' joints' stored translations, the others' the bind's."""
         J = anim.joints()
         sub, F = self.sub, anim.frames
         LR = np.repeat(sub.R[None], F, 0)
@@ -157,9 +186,17 @@ class Converter:
                 continue
             if j.stored_rotation:
                 LR[:, i] = animation.quaternion_to_matrix(_quaternions(j.rotation))
-            if j.stored_translation and name in ROOT:
+            if j.stored_translation and (name in ROOT or name in self.moved):
                 Lt[:, i] = j.translation * CM
         WR, Wp = sub.fk(LR, Lt)
+        return J, WR, Wp
+
+    def pose(self, anim):
+        """The clip's source pose: (world rotations {joint: (F, 3, 3)}, root (F, 3) mm, displacement (F, 3) mm,
+        yaw (F,), the leg (mm) its root is measured against, joints {name: panm.Joint}). The joints keep the
+        fighter's own lengths (the clip's other translations are its authoring rig's); only the root moves."""
+        J, WR, Wp = self.fk(anim)
+        sub, F = self.sub, anim.frames
         world = {n: WR[:, sub.index[n]] for n in set(DRIVERS.values())}
         D = Wp[:, sub.index[TOP]]
         root = Wp[:, sub.index[ROT]] - D
@@ -170,17 +207,151 @@ class Converter:
             yaw = np.zeros(F)
         return world, root, D, yaw, LEGACY_LEG if anim.legacy else self.own_leg, J
 
-    def channels(self, anim):
-        """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale'}) of a panm.Animation."""
-        world, root, D, yaw, leg, _ = self.pose(anim)
+    def channels(self, anim, roots=None, snakes=None):
+        """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale', 'pairs'}) of a panm.Animation;
+        with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
+        offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
+        convert/snakes8.py) are given (pair_values)."""
+        world, root, D, yaw, leg, J = self.pose(anim)
         k = self.leg / leg
         values = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)
-        return values, dict(frames=anim.frames, leg=leg, root_scale=k)
+        count = 0
+        if self.pairs:
+            moving = any(n in self.moved and (j.stored_rotation or j.stored_translation) for n, j in J.items())
+            count = max([p + 1 for p, s in enumerate(self.pairs) if s is not None and
+                         (s['kind'] == 'root' and roots is not None or s['kind'] in ('joint', 'lead') and moving or
+                          s['kind'] == 'snakes' and snakes is not None)]
+                        or [0])
+        if count:
+            _, WR, Wp = self.fk(anim)
+            values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes)], 1)
+        return values, dict(frames=anim.frames, leg=leg, root_scale=k, pairs=count)
 
-    def animation(self, blob, endian='>'):
-        """A TTT2 body animation (bytes) of a body clip's blob."""
-        values, _ = self.channels(panm.Animation(blob))
+    def animation(self, blob, endian='>', roots=None, snakes=None):
+        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes: channels())."""
+        values, info = self.channels(panm.Animation(blob), roots, snakes)
+        self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
+
+
+# ------------------------------------------------------------------------------------------------ weapon pairs
+WEAPON_FIRST = 800                          # weapons.OPT_FIRST: bone OPT 800 + k takes pair k
+NAME_LENGTH = 31                            # weapons.NAME_LENGTH (with 'cha:')
+ROOT_PARENT = 'HARA_ROT1'
+# the Tekken 8 joint at a TTT2 bone's origin where that is not its driver's (skeleton.ANCHOR through tekken8/names.py):
+# KOSHI sits at HARA_ROT1 (Rot, 112.7 cm up in her bind), its driver C_Leg 16 cm below (a weapon's translation is
+# measured from it: her tail hung 16 cm too high from C_Leg)
+ANCHORS = {'KOSHI_jnt': ROT}
+
+
+def _short(name):
+    return name[4:] if name.startswith('cha:') else name
+
+
+def pair_specs(sk, target, weapons, cal):
+    """[spec or None by pair k] of the weapons posed by pairs (definition entries: 'bone', 'pair', and 'joint' (the
+    Tekken 8 joint, default the bone), 'lead' [joints] + 'tip_cm', 'root' (0 / 1: the move's first / second root
+    offset), or 'still' (a hit-only weapon at its bind: a pair only for its place in the weapons' order, which the
+    runtime's point slots go by: Miary Zo's snakes' point before her tail's)), each {'kind': 'joint' / 'lead' / 'root' /
+    'still', 'bind': (t, R) of the TTT2 bone's bind local, ...}; their bones are found in the TTT2 skeleton `target`
+    (bone.read) as weapons.append_tekken8 named them."""
+    names = [_short(n) for n in target['names']]
+    of_name = {}
+    for w in weapons:
+        if w.get('pair') is not None:
+            of_name[('cha:OPT%d_%s' % (WEAPON_FIRST + w['pair'], w['bone']))[:NAME_LENGTH][4:]] = w
+    out = {}
+    for name, w in of_name.items():
+        if name not in names:
+            raise ValueError('the skeleton has no bone %s for weapon %s' % (name, w['bone']))
+        b = names.index(name)
+        up = names[target['parent'][b]]
+        spec = dict(bind=(np.asarray(target['t'][b], np.float64),
+                          bone.matrix_from_euler_xyz(np.asarray(target['r'][b], np.float64))))
+        if w.get('still'):
+            spec.update(kind='still')
+        elif w.get('root') is not None:
+            if up != ROOT_PARENT:
+                raise ValueError('a root point\'s weapon hangs under %s, not %s' % (up, ROOT_PARENT))
+            spec.update(kind='root', root=int(w['root']))
+        elif up in of_name:                                      # a link under the weapon before it
+            spec.update(kind='joint', joint=w.get('joint', w['bone']), up=of_name[up].get('joint', of_name[up]['bone']))
+        else:
+            if up not in cal.drivers:
+                raise ValueError('weapon %s hangs under %s, which no Tekken 8 joint drives' % (w['bone'], up))
+            spec.update(driver=cal.drivers[up], offset=cal.offsets[up], anchor=ANCHORS.get(up, cal.drivers[up]))
+            if w.get('lead'):
+                spec.update(kind='lead', joints=list(w['lead']), tip=float(w.get('tip_cm', 0.0)) * CM)
+            elif w.get('snakes'):                                # (the snakes' heads: convert/snakes8.py)
+                spec.update(kind='snakes')
+            else:
+                spec.update(kind='joint', joint=w.get('joint', w['bone']))
+        for j in pair_joints([spec]):
+            if j not in sk.index:
+                raise ValueError('the fighter\'s skeleton has no joint %s (weapon %s)' % (j, w['bone']))
+        out[w['pair']] = spec
+    return [out.get(k) for k in range(max(out) + 1)] if out else []
+
+
+def pair_joints(specs):
+    """The Tekken 8 joints the specs' pairs are made of."""
+    out = []
+    for s in specs:
+        if s is None or s['kind'] in ('root', 'still'):
+            continue
+        out += s['joints'] if s['kind'] == 'lead' else [] if s['kind'] == 'snakes' else [s['joint']]
+        out += [x for x in (s.get('driver'), s.get('up'), s.get('anchor')) if x]
+    return sorted(set(out))
+
+
+def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None):
+    """The extra channels (F, 2 count, 3) of pairs 0 .. count - 1 (conv.pairs; see the module's notes) of a clip:
+    WR, Wp its forward kinematics (Converter.fk), values its body channels, k its root scale, roots its root point
+    offsets (or None: those pairs hold their bind), snakes (heads (G, m, 3) mm in the parent's frame, the frame
+    index the summoned clip starts at) or None."""
+    F = len(values)
+    idx = conv.sub.index
+    T = np.zeros((F, count, 3))
+    R = np.repeat(np.eye(3)[None, None], F, 0).repeat(count, 1)
+
+    def frame(s):                                       # (F, 3, 3) the TTT2 parent's frame from its driver: (S O)^T
+        return np.swapaxes(WR[:, idx[s['driver']]] @ s['offset'], -1, -2)
+    for p in range(count):
+        s = conv.pairs[p]
+        if s is None:
+            continue
+        if s['kind'] == 'joint':
+            w = idx[s['joint']]
+            if 'up' in s:
+                q = idx[s['up']]
+                A, origin = np.swapaxes(WR[:, q], -1, -2), Wp[:, q]
+            else:
+                A, origin = frame(s), Wp[:, idx[s['anchor']]]
+            R[:, p] = A @ WR[:, w]
+            T[:, p] = np.einsum('fij,fj->fi', A, Wp[:, w] - origin)
+        elif s['kind'] == 'lead':
+            last = idx[s['joints'][-1]]
+            cands = [Wp[:, idx[j]] for j in s['joints']] + [Wp[:, last] + s['tip'] * WR[:, last][:, :, 0]]
+            P = np.stack(cands, 1)                                              # (F, m, 3)
+            lead = P[np.arange(F), np.argmax(P[:, :, 2], 1)]
+            T[:, p] = np.einsum('fij,fj->fi', frame(s), lead - Wp[:, idx[s['anchor']]])
+        elif s['kind'] == 'snakes' and snakes is not None:                      # the snakes' most forward head
+            H, start = snakes
+            H = np.asarray(H, np.float64)
+            g = np.clip(np.arange(F) - int(start), 0, len(H) - 1)
+            at = H[g]                                                           # (F, m, 3) in the parent's frame
+            ahead = np.einsum('fij,fmj->fmi', WR[:, idx[s['driver']]] @ s['offset'], at)[:, :, 2]
+            T[:, p] = at[np.arange(F), np.argmax(ahead, 1)]
+        elif s['kind'] == 'root' and roots is not None:                         # a root point
+            o = np.asarray(roots[min(s['root'], len(roots) - 1)], np.float64)
+            H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)
+            T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (k * o[None] - values[:, 1]))
+        else:
+            T[:, p], R[:, p] = s['bind']
+    out = np.zeros((F, 2 * count, 3))
+    out[:, 0::2] = T
+    out[:, 1::2] = animation.axis_angles(R) if conv.kind == animation.COMPRESSED else retarget._euler(R)
+    return out
 
 
 def convert_body(blob, sk, target, kind=animation.COMPRESSED):
@@ -258,11 +429,16 @@ class Animations:
     """The converter's animation provider for a Tekken 8 fighter: called with a move's anim_ref (key, bank), as one
     tuple (moveset.Converter) or two arguments -> the TTT2 animation (bytes, big-endian) of its body clip, TTT2's own
     (an id or bytes: originals, when given), or None (no such clip). banks: anmbin.Banks; converter: a Converter. Each
-    clip is converted once; .stats counts them, .seconds the time taken."""
+    clip is converted once; .stats counts them, .seconds the time taken. roots: {clip key: root point offsets} of the
+    clips whose moves hit from root points (convert/summons8.py): converted with those pairs (TTT2's own original
+    left aside); snakes: {clip key: (heads, start)} of the clips whose moves start a summoned model's clip
+    (convert/snakes8.py), likewise."""
 
-    def __init__(self, banks, converter, originals=None):
+    def __init__(self, banks, converter, originals=None, roots=None, snakes=None):
         self.banks, self.converter = banks, converter
         self.originals = dict(originals or {})
+        self.roots = dict(roots or {})
+        self.snakes = dict(snakes or {})
         self.cache = {}
         self.stats = collections.Counter()
         self.seconds = 0.0
@@ -272,7 +448,7 @@ class Animations:
             key, bank = key
         if key in self.cache:
             return self.cache[key]
-        if key in self.originals:
+        if key in self.originals and key not in self.roots and key not in self.snakes:
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
             self.cache[key] = self.originals[key]
             return self.cache[key]
@@ -283,8 +459,15 @@ class Animations:
         else:
             t = time.time()
             try:
-                out = self.converter.animation(blob)
+                extra = dict(roots=self.roots[key]) if key in self.roots else {}
+                if key in self.snakes:          # (the snakes' heads: convert/snakes8.py)
+                    extra['snakes'] = self.snakes[key]
+                out = self.converter.animation(blob, **extra)
                 self.stats['body animations converted (%s)' % self.banks.where(anmbin.BODY, key)] += 1
+                if getattr(self.converter, 'pairs', None) and getattr(self.converter, 'last_pairs', 0):
+                    self.stats['body animations with weapon pairs (%s)' % (
+                        'root points too' if key in self.roots else 'snakes\' heads too' if key in self.snakes else
+                        'weapons')] += 1
             except ValueError as e:
                 self.stats['body animations not converted (%s)' % e] += 1
             self.seconds += time.time() - t

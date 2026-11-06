@@ -58,6 +58,43 @@ def model(asset):
     return k, np.arange(len(sim))
 
 
+def springs_of(k, chains_):
+    """cloth.springs of chains (rig()'s, of k's bones) in a made-up skeleton -> (its result, the chains'
+    bone indices in it, its bone names)."""
+    names = ['cha:HARA_ROT1', 'cha:KOSHI_jnt', 'cha:HIZA_R_jnt', 'cha:HIZA_L_jnt']
+    world = [np.eye(4) for _ in names]
+    world[1][1, 3], world[2][1, 3], world[3][1, 3] = 1100, 500, 500
+    made, number = [], cloth.OPT_FIRST
+    for c, chain in enumerate(chains_):
+        idx = []
+        for j, b in enumerate(chain['bones']):
+            idx.append(len(names))
+            names.append('cha:OPT%d_cloth0_%d_%d' % (number, c, j))
+            world.append(k['bones']['world'][b])
+            number += 1
+        made.append(idx)
+    for name, y in (('MOMO_R_jnt', 1000), ('MOMO_L_jnt', 1000), ('ASHI_R_jnt', 100), ('ASHI_L_jnt', 100),
+                    ('MUNE1_jnt', 1150), ('MUNE2_jnt', 1300), ('KUBI_jnt', 1500), ('ATAMA_jnt', 1600)):
+        names.append('cha:' + name)
+        world.append(np.eye(4))
+        world[-1][:3, 3] = (100 if '_L_' in name else -100 if '_R_' in name else 0, y, 0)
+    for name in [a for pair in cloth.OTHER for a in pair]:
+        if 'cha:' + name not in names:
+            names.append('cha:' + name)
+            world.append(np.eye(4))
+            world[-1][:3, 3] = (500, 1400, 0)
+    world[2][:3, 3], world[3][:3, 3] = (-100, 500, 0), (100, 500, 0)
+    skel = dict(names=names, parent=[-1] * len(names))
+    body = np.array([(x, y, z) for x in (-100, 100) for y in range(150, 1000, 25) for z in (-60, 60)]
+                    + [(x, y, z) for x in (-60, 60) for y in range(1000, 1500, 25) for z in (-90, 90)], float)
+    cloth_bone = types.SimpleNamespace(world_matrices=lambda s: np.array(world))
+    saved, cloth.bone = cloth.bone, cloth_bone
+    try:
+        return cloth.springs(skel, made, chains_, body), made, names
+    finally:
+        cloth.bone = saved
+
+
 class Rig(unittest.TestCase):
     def setUp(self):
         self.asset = skirt()
@@ -106,39 +143,101 @@ class Rig(unittest.TestCase):
         self.assertNotIn('spring', made[0])
         self.assertNotIn('spring', self.made[0])                          # (none of its own: Tekken 7's cloth)
 
+    def test_never_onto_a_chain_of_the_other_leg(self):
+        """A skirt hung from the left thigh (its pinned ring skinned to it): its vertices skinned to the right thigh
+        alone stay skinned to it (they would join the legs, as Miary Zo's ankle boards did), those skinned to both
+        thighs or to the hips go on the chains."""
+        k, drawn = model(self.asset)
+        world = np.tile(np.eye(4), (4, 1, 1))
+        world[1:, :3, 3] = (0, 1100, 0)
+        k['bones'] = dict(names=['BASE', 'Hip', 'L_UpLeg', 'R_UpLeg'], parents=[-1, 0, 1, 1], world=world)
+        s = k['prims'][0]
+        sim, x = self.asset.max_distance, cloth._points(self.asset.vertices)[:, 0]
+        s['joints'][drawn[sim == 0], 0] = 2                                 # (the ring: the chains hang from L_UpLeg)
+        right = drawn[(sim >= 30) & (x < -5)]
+        both = drawn[(sim >= 30) & (np.abs(x) <= 5)]
+        s['joints'][right, 0] = 3
+        s['joints'][both, 0], s['joints'][both, 1] = 3, 2
+        s['weights'][both, 0], s['weights'][both, 1] = 0.5, 0.5
+        lines = []
+        made = cloth.rig(k, [dict(part='bdu', asset=self.asset, vertices=drawn, name='skirt')], log=lines.append)
+        self.assertEqual({c['parent'] for c in made}, {2})
+        first = min(b for c in made for b in c['bones'])
+        on_chains = np.where(s['joints'] >= first, s['weights'], 0).sum(1)
+        self.assertTrue(len(right) and (on_chains[right] == 0).all())
+        self.assertTrue((s['joints'][right, 0] == 3).all())
+        self.assertTrue(len(both) and (on_chains[both] > 0.99).all())
+        self.assertTrue((on_chains[drawn[(sim >= 30) & (x > 5)]] > 0.99).all())
+        self.assertTrue(any('%d vertices left skinned to their own arm or leg' % len(right) in l for l in lines))
+
+    def _legged(self, **options):
+        """The skirt with its pinned ring on the hips, its left half (x > 0) skinned below it to the left thigh, its
+        right half to the right one; -> rig()'s chains, k, the drawn vertices."""
+        k, drawn = model(self.asset)
+        world = np.tile(np.eye(4), (4, 1, 1))
+        world[1:, :3, 3] = (0, 1100, 0)
+        k['bones'] = dict(names=['BASE', 'Hip', 'L_UpLeg', 'R_UpLeg'], parents=[-1, 0, 1, 1], world=world)
+        s = k['prims'][0]
+        free, x = self.asset.max_distance > 0, cloth._points(self.asset.vertices)[:, 0]
+        s['joints'][drawn[free & (x > 0)], 0] = 2
+        s['joints'][drawn[free & (x < 0)], 0] = 3
+        made = cloth.rig(k, [dict(part='bdu', asset=self.asset, vertices=drawn, name='skirt', **options)],
+                         log=lambda s: None)
+        return made, k, drawn
+
+    def test_a_cloth_skinned_to_a_thigh_hangs_from_it(self):
+        """Tekken 8 skins Miary Zo's sarong below her hip to her left thigh alone: hung from the hips, her stance
+        turned the thigh into the cloth's rest."""
+        made, _, _ = self._legged(leg_parent=True, leg_moves=True)
+        parents = {c['parent'] for c in made}
+        self.assertEqual(parents, {2, 3})                                  # (each half from its own thigh)
+        for c in made:
+            self.assertEqual(c['leg'], 'L' if c['parent'] == 2 else 'R')
+        made, _, _ = self._legged()
+        self.assertEqual({c['parent'] for c in made}, {1})                 # (without it: the hips, as Tekken 7's)
+        self.assertNotIn('leg', made[0])
+
+    def test_held_by_no_leg_it_stays_on_the_hips(self):
+        """Skinned to the hips (Reina's jacket), or half and half to both thighs: no leg holds it."""
+        k, drawn = model(self.asset)
+        world = np.tile(np.eye(4), (4, 1, 1))
+        world[1:, :3, 3] = (0, 1100, 0)
+        k['bones'] = dict(names=['BASE', 'Hip', 'L_UpLeg', 'R_UpLeg'], parents=[-1, 0, 1, 1], world=world)
+        s = k['prims'][0]
+        free = drawn[self.asset.max_distance > 0]
+        s['joints'][free, 0], s['joints'][free, 1], s['joints'][free, 2] = 1, 2, 3
+        s['weights'][free, 0], s['weights'][free, 1], s['weights'][free, 2] = 0.2, 0.4, 0.4
+        made = cloth.rig(k, [dict(part='bdu', asset=self.asset, vertices=drawn, name='skirt', leg_parent=True)],
+                         log=lambda s: None)
+        self.assertEqual({c['parent'] for c in made}, {1})
+
+    def test_hung_from_a_thigh_it_keeps_its_own_weights_longer(self):
+        """The chain's root rides the thigh: a vertex a link below the waist is still on the chain, one 80 mm below it
+        (past BLEND, within LEG_BLEND) keeps its own weights in part."""
+        def on_chains(k, drawn, made):
+            s = k['prims'][0]
+            first = min(b for c in made for b in c['bones'])
+            return np.where(s['joints'] >= first, s['weights'], 0).sum(1)[drawn]
+        made, k, drawn = self._legged(leg_parent=True)
+        hung = on_chains(k, drawn, made)
+        made, k, drawn = self._legged()
+        plain = on_chains(k, drawn, made)
+        row = self.asset.max_distance.astype(int) // 10                    # (10 cm a row, 80 mm apart)
+        self.assertTrue((plain[row == 1] > 0.99).all())
+        self.assertAlmostEqual(float(np.median(hung[row == 1])), 81.0 / cloth.LEG_BLEND, delta=0.05)
+        x = cloth._points(self.asset.vertices)[:, 0]
+        self.assertTrue((hung[(row >= 3) & (np.abs(x) > 100)] > 0.99).all())
+        self.assertTrue((hung[row == 0] == 0).all() and (plain[row == 0] == 0).all())
+
+    def test_limbs(self):
+        names = ['BASE', 'Hip', 'L_UpLeg', 'L_Leg', 'sim_ankle_board', 'R_UpLeg', 'Spine1', 'R_Arm', 'R_Hand']
+        k = {'bones': dict(names=names, parents=[-1, 0, 1, 2, 3, 1, 1, 6, 7])}
+        got = [cloth._limb(k, i) for i in range(len(names))]
+        self.assertEqual(got, [None, None, ('leg', 'L'), ('leg', 'L'), ('leg', 'L'), ('leg', 'R'), None,
+                               ('arm', 'R'), ('arm', 'R')])
+
     def test_spring_entries_pairs_and_links(self):
-        names = ['cha:HARA_ROT1', 'cha:KOSHI_jnt', 'cha:HIZA_R_jnt', 'cha:HIZA_L_jnt']
-        world = [np.eye(4) for _ in names]
-        world[1][1, 3], world[2][1, 3], world[3][1, 3] = 1100, 500, 500
-        made, number = [], cloth.OPT_FIRST
-        for c, chain in enumerate(self.made):
-            idx = []
-            for j, b in enumerate(chain['bones']):
-                idx.append(len(names))
-                names.append('cha:OPT%d_cloth0_%d_%d' % (number, c, j))
-                world.append(self.k['bones']['world'][b])
-                number += 1
-            made.append(idx)
-        for name, y in (('MOMO_R_jnt', 1000), ('MOMO_L_jnt', 1000), ('ASHI_R_jnt', 100), ('ASHI_L_jnt', 100),
-                        ('MUNE1_jnt', 1150), ('MUNE2_jnt', 1300), ('KUBI_jnt', 1500), ('ATAMA_jnt', 1600)):
-            names.append('cha:' + name)
-            world.append(np.eye(4))
-            world[-1][:3, 3] = (100 if '_L_' in name else -100 if '_R_' in name else 0, y, 0)
-        for name in [a for pair in cloth.OTHER for a in pair]:
-            if 'cha:' + name not in names:
-                names.append('cha:' + name)
-                world.append(np.eye(4))
-                world[-1][:3, 3] = (500, 1400, 0)
-        world[2][:3, 3], world[3][:3, 3] = (-100, 500, 0), (100, 500, 0)
-        skel = dict(names=names, parent=[-1] * len(names))
-        body = np.array([(x, y, z) for x in (-100, 100) for y in range(150, 1000, 25) for z in (-60, 60)]
-                        + [(x, y, z) for x in (-60, 60) for y in range(1000, 1500, 25) for z in (-90, 90)], float)
-        cloth_bone = types.SimpleNamespace(world_matrices=lambda s: np.array(world))
-        saved, cloth.bone = cloth.bone, cloth_bone
-        try:
-            sp = cloth.springs(skel, made, self.made, body)
-        finally:
-            cloth.bone = saved
+        sp, made, names = springs_of(self.k, self.made)
         self.assertEqual(len(sp['entries']), sum(map(len, made)))
         tops = {cloth.OPT_FIRST + sum(map(len, made[:c])) for c in range(len(made))}
         self.assertFalse(any(n in tops for n, _ in sp['pairs']))               # top bones touch no capsule
@@ -148,6 +247,54 @@ class Rig(unittest.TestCase):
         caps = {names[b]: size for b, _, size in sp['capsules']}
         self.assertGreater(caps['cha:MOMO_R_jnt'][1], cloth.LEG_MARGIN)          # round the thigh: its radius and more
         self.assertEqual({j for _, _, j in sp['links']}, set(range(min(map(len, made)))))
+
+
+class Hair(unittest.TestCase):
+    """What of Tekken 8's hair swings (rig 'hair'): its own spring entries, no capsules."""
+
+    def setUp(self):
+        self.asset = skirt()
+        self.k, self.drawn = model(self.asset)
+
+    def test_rig_marks_the_hairs_chains_and_leaves_out_what_makes_none(self):
+        lines = []
+        made = cloth.rig(self.k, [dict(part='har', asset=self.asset, vertices=self.drawn, name='hair', hair=True),
+                                  dict(part='har', asset=skirt(rows=2), vertices=np.zeros(0, np.int64), name='short',
+                                       hair=True)], log=lines.append)
+        self.assertGreaterEqual(len(made), 6)
+        self.assertTrue(all(c.get('hair') for c in made))
+        self.assertEqual([x.split(':')[0].strip() for x in lines], ['hair'])     # (no line for a cloth making none)
+        k, drawn = model(self.asset)
+        self.assertNotIn('hair', cloth.rig(k, [dict(part='bdu', asset=self.asset, vertices=drawn, name='skirt')],
+                                           log=lambda s: None)[0])
+
+    def test_hair_has_its_own_entries_and_touches_no_capsule(self):
+        made = cloth.rig(self.k, [dict(part='bdu', asset=self.asset, vertices=self.drawn, name='skirt')],
+                         log=lambda s: None)
+        own = dict(flags=0x60, parameters=(20.0, 70.0, 20.0), limits=(0.6, -0.6, 1.2, -0.05), last=0.2)
+        mixed = [dict(c, hair=True, spring=own) if i % 2 else c for i, c in enumerate(made)]
+        sp, bones, names = springs_of(self.k, mixed)
+        number = {i: int(names[i].split('_')[0][7:]) for chain in bones for i in chain}
+        hair = {number[i] for c, chain in zip(mixed, bones) if c.get('hair') for i in chain}
+        rest = {number[i] for c, chain in zip(mixed, bones) if not c.get('hair') for i in chain}
+        self.assertEqual({e[0] for e in sp['entries']}, hair | rest)               # (every bone has its entry ..
+        self.assertTrue(all(e[3] is own for e in sp['entries'] if e[0] in hair))   # .. the hair's its own)
+        self.assertFalse({n for n, _ in sp['pairs']} & hair)                       # (no pairs for the hair)
+        self.assertTrue({n for n, _ in sp['pairs']} & rest)
+        world = np.tile(np.eye(4), (3, 1, 1))                     # a chain 130 mm behind the chest ..
+        world[:, :3, 3] = [(0, 1200.0 - 60 * j, -130.0) for j in range(3)]
+        n = len(self.k['bones']['world'])
+        k = dict(self.k, bones=dict(self.k['bones'], world=np.concatenate([self.k['bones']['world'], world])))
+        back = dict(part='har', bones=[n, n + 1, n + 2], neighbours=set(), parent=0)
+        sizes = lambda sp: [tuple(np.round(c[2], 3)) for c in sp['capsules']]
+        plain, _, _ = springs_of(k, made)
+        cloth_, _, _ = springs_of(k, made + [back])
+        hair_, _, _ = springs_of(k, made + [dict(back, hair=True, spring=own)])
+        self.assertNotEqual(sizes(cloth_), sizes(plain))                 # .. as cloth it fits the chest's capsule,
+        self.assertEqual(sizes(hair_), sizes(plain))                     # as hair not
+        self.assertEqual(len(hair_['pairs']), len(plain['pairs']))
+        self.assertGreater(len(cloth_['pairs']), len(plain['pairs']))
+        self.assertEqual(len(hair_['entries']), len(plain['entries']) + 3)
 
 
 def entry(number, pairs=0, links=0):
@@ -321,6 +468,44 @@ class Settle(unittest.TestCase):
             np.testing.assert_allclose(world[c['bones'][-1]], before[c['bones'][-1]])
         self.assertTrue(np.any(np.abs(k['prims'][0]['pos'] - pos) > 20))     # its vertices followed
         np.testing.assert_allclose(k['prims'][0]['pos'][len(drawn):], pos[len(drawn):])   # the body did not
+
+
+class Capsules(unittest.TestCase):
+    def hung(self, x, leg=None):
+        """cloth.springs of a chain beside the left shin, `x` mm from the skeleton's middle -> {capsule's bone: sizes}."""
+        skel = skeleton()
+        n = len(skel['names'])
+        places = np.array([(x, -300, 0), (0, -150, 0), (0, -250, 0)], float)    # (hung from KOSHI: y 800, 650, 400)
+        skel = dict(names=skel['names'] + ['cha:OPT%d_cloth0_0_%d' % (400 + j, j) for j in range(3)],
+                    parent=skel['parent'] + [3, n, n + 1], t=np.concatenate([skel['t'], places]),
+                    r=np.concatenate([skel['r'], np.zeros((3, 3))]))
+        chain = dict(part='bdf', bones=[0, 1, 2], neighbours=set(), parent=3)
+        if leg:
+            chain['leg'] = leg
+        out = cloth.springs(skel, [[n, n + 1, n + 2]], [chain], legs_and_trunk())
+        return {skel['names'][b][4:]: size for b, _, size in out['capsules']}, skel
+
+    def test_cloth_hung_from_a_leg_grows_no_capsule(self):
+        """A chain beside the left shin. Not hung from a leg, the capsules scale to reach it: both shins' (and thighs')
+        thicker than the body's, up to GROW (her sarong's tip and the other foot's strands made them eggs 23 cm thick,
+        reaching across the other leg). Hung from the left leg, nothing grows."""
+        plain, skel = self.hung(250)
+        hung, _ = self.hung(250, 'L')
+        fitted = {skel['names'][b][4:]: size for b, _, size in cloth.capsules(skel, legs_and_trunk())}
+        for name in ('HIZA_R_jnt', 'HIZA_L_jnt'):
+            self.assertGreater(plain[name][1], 1.5 * fitted[name][1])
+            np.testing.assert_allclose(hung[name], fitted[name])
+        np.testing.assert_allclose(hung['KOSHI_jnt'], fitted['KOSHI_jnt'])
+
+    def test_a_legs_own_capsule_may_shrink_to_it(self):
+        """A chain resting just inside the left shin's capsule: only that capsule shrinks to touch it (a bone wholly
+        inside is never pushed), no further than SHRINK; the other leg's stays."""
+        _, skel = self.hung(100)
+        fitted = {skel['names'][b][4:]: size for b, _, size in cloth.capsules(skel, legs_and_trunk())}
+        hung, _ = self.hung(100 + 0.9 * fitted['HIZA_L_jnt'][1], 'L')
+        self.assertLess(hung['HIZA_L_jnt'][1], fitted['HIZA_L_jnt'][1])
+        self.assertGreaterEqual(hung['HIZA_L_jnt'][1], cloth.SHRINK * fitted['HIZA_L_jnt'][1] - 1e-6)
+        np.testing.assert_allclose(hung['HIZA_R_jnt'], fitted['HIZA_R_jnt'])
 
 
 class Graph(unittest.TestCase):

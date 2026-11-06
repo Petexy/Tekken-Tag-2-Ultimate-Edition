@@ -917,5 +917,6 @@ PPC_FUNC(sub_0414FA10) {
 PPC_FUNC(sub_039C2DB0_orig);
 PPC_FUNC(sub_039C2DB0) {
     cafe::title::gauge::situation(ctx.r[3]);
+    cafe::title::summons_situation(ctx.r[3]);
     sub_039C2DB0_orig(ctx, base);
 }

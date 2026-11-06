@@ -56,7 +56,9 @@ def costume(store, code, which='1p', materials=None):
     cls, props = _props(store, cs)
     if cls != 'CustomizeSet':
         raise InputError('%s is a %s, not a Tekken 8 costume set' % (cs, cls))
-    prefabs = [p for p in (props.get('ItemPrefabSet') or []) + (props.get('ItemPrefabAccSet') or []) if p]
+    # (a set may name a prefab the game does not ship, which it then leaves out: Miary Zo's 2P earrings)
+    prefabs = [p for p in (props.get('ItemPrefabSet') or []) + (props.get('ItemPrefabAccSet') or [])
+               if p and store.exists(material.package_of(p))]
     items, forced, static = [], {}, []
     for ip in prefabs:
         _, prefab = _props(store, ip)

@@ -94,10 +94,11 @@ def of_skeleton(skel, definitions=()):
     for points and held weapons, which such an item has not: parent_index), the same in every preset outfit, whose
     cloth bones before the weapons' may differ."""
     index = _numbers(skel)
-    weapon_bones = {index[n] for n in index if OPT_FIRST <= n < POINT_FIRST}
+    own = {w['number'] for w in definitions if w.get('number') is not None}     # (numbered below 800: number_of)
+    weapon_bones = {index[n] for n in index if OPT_FIRST <= n < POINT_FIRST or n in own}
     out = []
     for n in sorted(index):
-        if OPT_FIRST <= n < POINT_FIRST:
+        if OPT_FIRST <= n < POINT_FIRST or n in own:
             b = index[n]
             up = skel['parent'][b]
             while up in weapon_bones:
@@ -112,7 +113,14 @@ def of_skeleton(skel, definitions=()):
 
 
 def number_of(skel, weapon):
-    """The extra bone number a weapon gets: OPT 800 + its pair, or the next free from 820 (a still one)."""
+    """The extra bone number a weapon gets: OPT 800 + its pair, or the next free from 820 (a still one), or the
+    definition's 'number' (a still weapon below 800 whose bones under it must come after it in the game's record
+    order, which is by number: Miary Zo's snakes' parent, convert/snakes8.py; character.ini k = number - 800 < 0,
+    which the runtime's 800 + k (uint32) turns back into the number)."""
+    if weapon.get('number') is not None:
+        if weapon.get('pair') is not None or weapon['number'] in _numbers(skel):
+            raise ValueError('weapon %s: number %d taken or with a pair' % (weapon['bone'], weapon['number']))
+        return int(weapon['number'])
     if weapon.get('pair') is not None:
         return OPT_FIRST + weapon['pair']
     used = _numbers(skel)
@@ -127,8 +135,8 @@ def parent_index(skel, name):
     if name in names:
         return names.index(name)
     for n, i in sorted(_numbers(skel).items()):
-        if OPT_FIRST <= n < POINT_FIRST and skel['names'][i] == ('cha:OPT%d_%s' % (n, name))[:NAME_LENGTH]:
-            return i
+        if n < POINT_FIRST and skel['names'][i] == ('cha:OPT%d_%s' % (n, name))[:NAME_LENGTH]:   # (or numbered
+            return i                                                                               # below: number_of)
     raise ValueError('a weapon\'s parent %s is neither a bone of the fighter nor a weapon before it' % name)
 
 
@@ -201,6 +209,58 @@ def append_bones(skel, t7bones, weapon):
             x = world_t7[i][:3, 3] + a[:, 0] * where * 10.0 * scale
         local = np.eye(4)
         local[:3, 3] = world[:3, :3].T @ (x - world[:3, 3])
+        add(point_name(n, code, slot), n, index, local)
+        used.append(n)
+    s['t'], s['r'], s['s'] = np.array(ts, np.float32), np.array(rs, np.float32), np.array(ss, np.float32)
+    return s, index, number, used
+
+
+def joint_frame(bones, name):
+    """The world matrix (4x4, TTT2 space, mm) a weapon bone gets at joint `name` of a model's bones ({'names',
+    'world'}: model.load_tekken7_model's or tekken8.model.load_model's): append_bones' axes. For a Tekken 8 joint
+    they are its PSKS frame (the frame its animations pose: tekken8/anim.py pair_values)."""
+    w = np.array(bones['world'], np.float64)[list(bones['names']).index(name)]
+    a = (w @ _SWAP)[:3, :3]
+    out = np.eye(4)
+    out[:3, :3] = (a / np.linalg.norm(a, axis=0)) @ M
+    out[:3, 3] = w[:3, 3]
+    return out
+
+
+def append_tekken8(skel, weapon, world, points=()):
+    """A Tekken 8 fighter's weapon (convert/summons8.py): the skeleton with the weapon's bone at `world` (4x4, TTT2
+    space, mm: joint_frame's, or any frame of a hit-only weapon) under weapon['parent'] (parent_index), numbered as
+    append_bones numbers it, and its points [(code, slot, position (3,) mm)] after it (the slot given: several
+    weapons' points share one). -> (skeleton, the weapon bone's index, its number, the point numbers used)."""
+    parent = parent_index(skel, weapon['parent'])
+    if skel['names'][parent].startswith('cha:OPT') and points:
+        raise ValueError('an item carried in another (%s) has no points of its own' % weapon['bone'])
+    hw = bone.world_matrices(skel)
+    number = number_of(skel, weapon)
+    s = dict(skel)
+    for key in ('names', 'parent', 'opt'):
+        s[key] = list(skel[key])
+    s['names_raw'] = None
+    ts, rs, ss = list(skel['t']), list(skel['r']), list(skel['s'])
+
+    def add(name, opt, up, local):
+        s['names'].append(name[:NAME_LENGTH])
+        s['parent'].append(up)
+        s['opt'].append(opt)
+        ts.append(local[:3, 3])
+        rs.append(bone.euler_xyz_from_matrix(local[:3, :3]))
+        ss.append(np.ones(3))
+        return len(s['names']) - 1
+
+    world = np.asarray(world, np.float64)
+    index = add('cha:OPT%d_%s' % (number, weapon['bone']), number, parent, np.linalg.inv(hw[parent]) @ world)
+    used = []
+    for code, slot, x in points:
+        n = POINT_FIRST + len([o for o in s['opt'] if o >= POINT_FIRST])
+        if not 0 <= slot < POINTS or n >= POINT_FIRST + POINT_NUMBERS:
+            raise ValueError('weapon point slot %d (the slots are 0..%d)' % (slot, POINTS - 1))
+        local = np.eye(4)
+        local[:3, 3] = world[:3, :3].T @ (np.asarray(x, np.float64) - world[:3, 3])
         add(point_name(n, code, slot), n, index, local)
         used.append(n)
     s['t'], s['r'], s['s'] = np.array(ts, np.float32), np.array(rs, np.float32), np.array(ss, np.float32)
