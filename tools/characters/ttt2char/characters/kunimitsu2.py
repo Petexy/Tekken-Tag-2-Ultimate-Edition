@@ -81,8 +81,9 @@ VOICE_PREFIX = 'kt'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 # Keep both BT 1 stance-side variants: their generic names hide Kunimitsu's
 # own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups; likewise her own
-# BT 4 and crouching 2, d/f+3 and d/f+4 (4).
-REVISION = 4
+# BT 4 and crouching 2, d/f+3 and d/f+4 (4); her f+1+4 throw at her own
+# frames (5).
+REVISION = 5
 
 MOVESET = {
     'own_moves': r'^Co_(?:R_(?:rp00L|lp00R|rk00R)|syarp00|syalkF|syarkF)$',

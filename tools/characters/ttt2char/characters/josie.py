@@ -9,6 +9,7 @@ SHORT_NAME = 'JOSIE'
 TEKKEN7_ID = 24
 TEKKEN7_CODE = 'mut'
 CODE = 'mut'
+REVISION = 1                  # her f,F+3+4 throw at her own frames (1)
 SEX = 'female'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
