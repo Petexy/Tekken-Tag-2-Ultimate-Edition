@@ -670,6 +670,15 @@ def rev32(v):
     return int('{:032b}'.format(v)[::-1], 2)
 
 
+def hit_location(game, x, hit_locations, hitbox):
+    """A hit location code of `game` (a byte of a move's hitbox) -> TTT2's: a weapon's point (its bone's number) or
+    the definition's HIT_LOCATIONS (hit_locations), else a Tekken 8 limb point's (HIT_POINT8), else the id maps'
+    (hitbox), else HIT_LOCATION's."""
+    if x not in hit_locations and game == 't8' and x in HIT_POINT8:
+        return HIT_POINT8[x]
+    return hit_locations.get(x, hitbox.get(x, HIT_LOCATION[game].get(x, x)))
+
+
 def classify(k, h7, donor):
     """Per move of the Tekken 7 fighter: 'G' generic (the donor has it), 'T' Tekken 7 generic (Tekken 7 Heihachi
     has it), 'K' the fighter's own."""
@@ -1734,12 +1743,8 @@ class Converter:
         return start
 
     def hit_location(self, x):
-        """A Tekken 7 hit location code (a byte of a move's hitbox) -> TTT2's: a weapon's point (its bone's number)
-        or the definition's HIT_LOCATIONS, else a Tekken 8 limb point's (HIT_POINT8), else the id maps', else
-        HIT_LOCATION's."""
-        if x not in self.hit_locations and self.game == 't8' and x in HIT_POINT8:
-            return HIT_POINT8[x]
-        return self.hit_locations.get(x, self.hitbox.get(x, HIT_LOCATION[self.game].get(x, x)))
+        """A Tekken 7 hit location code (a byte of a move's hitbox) -> TTT2's (hit_location)."""
+        return hit_location(self.game, x, self.hit_locations, self.hitbox)
 
     def conv_xps(self, i, move=None, extra=(), only=None):
         """Move `move`'s extra property list i (with rows `extra` after it) -> the new list's index, or None.

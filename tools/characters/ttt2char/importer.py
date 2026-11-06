@@ -498,8 +498,14 @@ def _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon):
     c.tag_states = tag_states
     if getattr(d, 'HANDS', None) is not None:              # the TTT2 row whose hands its moveset takes
         c.hands_reference = (motbin.read(archives.entry('data006', d.HANDS)), archives.entry('data005', d.HANDS))
-    c.hit_locations = dict(getattr(d, 'HIT_LOCATIONS', {}))     # Tekken 7 hit locations TTT2 numbers otherwise
-    c.hit_locations.update(weapons.points_of(bone.read(bon)['names']))         # ... and its weapons' points
+    c.hit_locations = _hit_locations(d, bon)
+
+
+def _hit_locations(d, bon):
+    """The definition's hit locations TTT2 numbers otherwise, and its weapons' points (skeleton bon's)."""
+    out = dict(getattr(d, 'HIT_LOCATIONS', {}))
+    out.update(weapons.points_of(bone.read(bon)['names']))
+    return out
 
 
 def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, effect_files, wins, vlist, voice_extra,
@@ -544,7 +550,9 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         k.attach_banks(motbin8.read_bank(files['anmbin']), motbin8.read_bank(files['common']))
         banks = anmbin.Banks(own_bank, common_bank, k.character_id)
         common = archives.entry('data004', 0)
-        roots = summons8.prepare(k, d, log=sub)     # (its summons and root points: convert/summons8.py)
+        hit_locations = _hit_locations(d, bon)       # (its summons, hit box summaries, root points: summons8.py)
+        roots = summons8.prepare(k, d, log=sub, place=lambda x: moveset.hit_location('t8', x, hit_locations,
+                                                                                      hitboxes))
         plan = snakes8.prepare(k, d, log=sub)       # (a summoned model's clips: convert/snakes8.py)
         converter = anim.Converter(anim.load_skeleton(source.store, d.TEKKEN8_CODE), bone.read(bon),
                                    weapons=summons8.weapons(d, k))

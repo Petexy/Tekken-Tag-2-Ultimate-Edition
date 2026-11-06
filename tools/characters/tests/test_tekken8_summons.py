@@ -131,6 +131,102 @@ class SummonsTest(unittest.TestCase):
         self.assertEqual(summons8.prepare(object(), definition(STAFF), log=lambda s: None), {})
 
 
+ZERO = (0, 0, 0)
+LEAD, TOE, FOOT, KNEE, HIPS = 121, 47, 16, 140, 33     # made-up codes: a weapon's point, a toe on its foot, ...
+PLACE = {LEAD: 70, TOE: 16, KNEE: 15, HIPS: 3}.get
+
+
+def place(x):
+    return PLACE(x, x)
+
+
+def boxes(*b):
+    """Hit boxes (loc, loc2[, a, b]), padded to eight with empty ones."""
+    out = [Box(x[0], x[2] if len(x) > 2 else ZERO, x[1], x[3] if len(x) > 3 else ZERO) for x in b]
+    return out + [Box(0, ZERO, 0, ZERO) for _ in range(8 - len(out))]
+
+
+class SummaryTest(unittest.TestCase):
+    """The two hit boxes a move's TTT2 summary takes (summons8.summary, prepare's place)."""
+
+    def test_box_1_on_another_line_stays(self):
+        hb = boxes((13, 0), (39, 0), (13, 12))                  # a jab: both fists' paths
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[1]))
+
+    def test_the_same_points_with_offsets(self):
+        """Box 1 on box 0's points (its offsets lost in TTT2) gives way to the first later box on another line: the
+        tail's lead twice, then lead -> 1.3 m up in front of her (the ground origin), then lead -> hips."""
+        up = (0.0, 1300.0, 300.0)
+        hb = boxes((LEAD, 0), (LEAD, 0, (0, -200, 0), up), (LEAD, 125, (0, -200, 0), up), (LEAD, HIPS))
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[2]))
+        self.assertEqual(summons8.line(hb[2], place), (70, ('origin', up)))
+        self.assertEqual(summons8.summary(hb, place, roots=False), (hb[0], hb[3]))     # (no root points)
+
+    def test_two_points_on_one_place(self):
+        """A toe TTT2 places on its foot's bone: the foot's path twice -> the next box, foot -> knee."""
+        hb = boxes((FOOT, 0), (TOE, 0), (FOOT, KNEE), (TOE, KNEE))
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[2]))
+
+    def test_an_empty_box_1(self):
+        hb = boxes((9, 0), (0, 0), (125, 125, (0, 200, 1500), (0, 2100, 500)))
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[2]))
+        self.assertEqual(summons8.summary(hb, place, roots=False), (hb[0], hb[1]))
+
+    def test_what_adds_nothing(self):
+        """A line both ways round and one point of box 0's line are box 0's; with nothing else, box 1 stays."""
+        hb = boxes((9, 8), (8, 9), (9, 9, (720, 0, 650), (-100, 0, 900)), (9, 13))
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[3]))
+        hb = boxes((18, 21), (18, 21, (80, -50, 0)))
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[1]))
+        hb = boxes((9, 0), (13, 0))
+        self.assertIs(summons8.summary(hb, place)[1], hb[1])
+        hb = boxes()
+        self.assertEqual(summons8.summary(hb, place), (hb[0], hb[1]))
+
+    def test_prepare(self):
+        """prepare(place): the summary's boxes and codes, those at the ground origin its root points (the clip's
+        offsets from the box chosen); a move whose box 1 stays keeps its bytes; no place: boxes 0 and 1."""
+        up = (0.0, 1300.0, 300.0)
+        tail = [(LEAD, ZERO, 0, ZERO), (LEAD, (0, -200, 0), 0, up), (LEAD, (0, -200, 0), 125, up),
+                (LEAD, ZERO, HIPS, ZERO)]
+        jab = [(13, ZERO, 0, ZERO), (39, ZERO, 0, ZERO)]
+        k = Moveset([move(tail, 4), move(jab, 5), move([(125, GENERIC[0], 125, GENERIC[1])], 6)])
+        log = []
+        got = summons8.prepare(k, definition(), log=log.append, place=place)
+        mv = k.tables['moves']
+        self.assertEqual(mv[0]['hitbox'], bytes([LEAD, 0, LEAD, 0xFA]))
+        self.assertIs(mv[0]['summary'][1], mv[0]['hitboxes'][2])
+        self.assertEqual(got[4], [up])
+        self.assertEqual(mv[1]['hitbox'], bytes([13, 0, 39, 0]))
+        self.assertNotIn('summary', mv[1])
+        self.assertEqual(mv[2]['hitbox'], bytes([0xFA, 0xFB, 0, 0]))
+        self.assertTrue(any('later hit box' in line and line.endswith(': 1') for line in log))
+        k = Moveset([move(tail[:2], 4)])
+        k.tables['moves'][0]['hitboxes'] = [Box(*x) for x in tail]
+        self.assertEqual(summons8.prepare(k, definition(), log=lambda s: None), {})
+        self.assertEqual(k.tables['moves'][0]['hitbox'], bytes([LEAD, 0, LEAD, 0]))
+
+    def test_clip_points_stay(self):
+        """A clip's root points stay those of boxes 0 and 1 of its moves: a move whose summary took a later box at
+        other offsets counts after them (a conflict, its codes the nearest)."""
+        area = (0.0, 600.0, 1500.0)
+        k = Moveset([move([(9, ZERO, 0, ZERO), (0, ZERO, 0, ZERO)], 3), move([(125, area, 0, ZERO)], 3)])
+        k.tables['moves'][0]['hitboxes'] = [Box(*x) for x in [(9, ZERO, 0, ZERO), (0, ZERO, 0, ZERO),
+                                                              (125, (0, 200, 1500), 125, (0, 2100, 500))]]
+        got = summons8.prepare(k, definition(), log=lambda s: None, place=place)
+        self.assertEqual(got, {3: [area]})
+        self.assertEqual([m['hitbox'] for m in k.tables['moves']], [bytes([9, 0, 0xFA, 0xFA]), bytes([0xFA, 0, 0, 0])])
+
+    def test_hit_location(self):
+        """The converter's hit_location is the module's, which prepare's place uses: a weapon's point, a Tekken 8
+        limb point (HIT_POINT8), the id maps', HIT_LOCATION's."""
+        self.assertEqual(moveset.hit_location('t8', LEAD, {LEAD: 70}, {}), 70)
+        self.assertEqual(moveset.hit_location('t8', TOE, {}, {TOE: 38}), 16)
+        self.assertEqual(moveset.hit_location('t8', 21, {}, {21: 19}), 19)
+        self.assertEqual(moveset.hit_location('t8', 133, {}, {}), 0)
+        self.assertEqual(moveset.hit_location('t7', TOE, {}, {TOE: 38}), 38)
+
+
 # ------------------------------------------------------------------------------------------------ channels
 class DescriptorsTest(unittest.TestCase):
     def test_descriptors(self):
