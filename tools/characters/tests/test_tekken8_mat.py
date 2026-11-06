@@ -494,6 +494,11 @@ class Bakes(unittest.TestCase):
         self.assertLess(look[0, 1, 2] / look[0, 1, 0], 9)                           # paler than its base colour
         self.assertEqual(bake.classify(eff['name'], eff, alpha), ('hair', False, True))
         self.assertEqual(bake.classify('MI_CH_zbr_eyelash', eff, alpha), ('overlay', False, True))
+        # Tekken 8's other spelling of eyebrows (Miary Zo's MI_CH_wkz_eyeblow): an overlay with its own colours
+        blow = dict(eff, name='MI_CH_x_eyeblow')
+        self.assertEqual(bake.classify(blow['name'], blow, alpha), ('overlay', False, True))
+        np.testing.assert_allclose(bake.bake_albedo(blow, tex)[0], rgb, atol=1e-6)
+        self.assertEqual(bake.classify('MI_CH_x_har_1p_braid', eff, alpha), ('hair', False, True))
 
     def test_hair_strands(self):
         """The strands' variation (ADI blue: an ID each; value and hue) and shading (ADI green: depth)."""

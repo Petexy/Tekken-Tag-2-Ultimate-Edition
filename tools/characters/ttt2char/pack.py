@@ -275,11 +275,12 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
     """voice_extra: the se_Chr tones of the shouts past the donor's (the port appends them to the voice list);
     sound_extra: the se_Chr tones of its sound effects (the port appends them to its item sounds: convert/sounds.py);
     gauge_sound: the item sound its gauge plays as it fills up (convert/gauge.py);
-    weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them):
-    k:parent:points[:summon], a point `n` hitting as slot n, else `n>slot`."""
-    def item(k, parent, points, summon):
+    weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them), or with
+    a ramp (convert/summonfade.ramps: how a fading summon is scaled):
+    k:parent:points[:summon[:ramp]], a point `n` hitting as slot n, else `n>slot`."""
+    def item(k, parent, points, summon, ramp=0):
         return '%d:%d:%s' % (k, parent, ','.join('%d' % n if n == slot else '%d>%d' % (n, slot) for n, slot in points)) \
-            + (':%d' % summon if summon is not None else '')
+            + (':%d' % summon if summon is not None else (':' if ramp else '')) + (':%d' % ramp if ramp else '')
     return ('# %s, from %s (made on this machine from the player\'s own copy)\n'
             'format = %d\ncode = %s\ndonor = %s\nsex = %s\nslot = %d\nchr_tones = %d\nrevision = %d\n'
             % (d.NAME.split(' (')[0], GAMES[game_of(d)], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones,

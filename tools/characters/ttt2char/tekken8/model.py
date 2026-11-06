@@ -26,9 +26,10 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from .. import InputError
 from ..convert import model as convert_model
 from ..tekken7 import mesh as t7mesh
-from . import mesh as t8mesh, names
+from . import bake, material as t8material, mesh as t8mesh, names
 
 
 def _weighted(geo):
@@ -74,6 +75,25 @@ def rebind(skel, geo, ref):
     return dict(skel, pose=pose), out
 
 
+def section_uvs(materials, m, geo):
+    """A mesh's texture coordinates (n, 2): UV0, but a section whose material lays its colour out along another set
+    ('Use UV1 for BaseColor': Miary Zo's tail, a strip along its length in UV1, its UV0 the dissolve's layout) takes
+    that set (bake.uv_set). materials: tekken8.material.Materials."""
+    uv = geo['uvs'][:, 0].copy()
+    for si, s in enumerate(m.lods[0].sections):
+        ref = m.materials[s.material_index]['material'] if 0 <= s.material_index < len(m.materials) else None
+        if not ref or geo['uvs'].shape[1] < 2:
+            continue
+        try:
+            k = bake.uv_set(materials.effective(ref), 'BaseColor')
+        except (KeyError, ValueError, InputError):       # (a material it cannot read: UV0, as before)
+            continue
+        if 0 < k < geo['uvs'].shape[1]:
+            used = np.unique(geo['triangles'][si])
+            uv[used] = geo['uvs'][used, k]
+    return uv
+
+
 def load_model(store, parts, merge_order, log=print):
     """The costume's meshes as one skinned mesh in TTT2 space (model.load_tekken7_model's dict).
     store: tekken8.store.Store; parts: [(tag, skeletal mesh path)] in mesh order; merge_order: the tags in
@@ -83,6 +103,7 @@ def load_model(store, parts, merge_order, log=print):
     (part bone -> merged bone), 'mesh' (its SkeletalMesh), 'first' (its first vertex in the streams), 'source_names'
     (Tekken 8's joint names)}}}."""
     cm = convert_model
+    materials = t8material.Materials(store)
     loaded = []
     for tag, path in parts:
         m = t8mesh.SkeletalMesh(store, path)
@@ -116,7 +137,7 @@ def load_model(store, parts, merge_order, log=print):
         pos.append(geo['positions'])
         nrm.append(geo['normals'])
         tan.append(geo['tangents'])
-        uvs.append(geo['uvs'][:, 0])
+        uvs.append(section_uvs(materials, m, geo))
         j, w = remaps[tag][geo['joints']], geo['weights']
         if w.shape[1] < 8:
             pad = 8 - w.shape[1]

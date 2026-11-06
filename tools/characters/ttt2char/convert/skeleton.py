@@ -381,3 +381,75 @@ def repose(model, donor, log=print):
     log('  re-posed to the donor\'s bind pose (largest turn, degrees): %s' % ', '.join(
         '%s %.0f' % (g, a) for g, a in groups.items()))
     return out
+
+
+# ------------------------------------------------------------------------------------------------- bent poses
+# The joints a fight bends (Tekken 7 joint, its child: the segment it turns, degrees), for decimate.py's test poses:
+# where skin weights pass from one of these segments to the next (an elbow, a knee, a shoulder, a hip, the waist)
+# the skin folds when they turn, and the decimator must keep the vertices of that fold. Fingers are left out (their
+# folds are a few millimetres; keeping their knuckles' rings would take the vertices that keep their shapes).
+BENDS = [('Spine1', 'Spine2', 30), ('Spine2', 'Neck', 30), ('Neck', 'Head', 30)]
+for s in 'RL':
+    BENDS += [('%s_Shoulder' % s, '%s_Arm' % s, 20), ('%s_Arm' % s, '%s_ForeArm' % s, 60),
+              ('%s_ForeArm' % s, '%s_Hand' % s, 90), ('%s_Hand' % s, '%s_Middle1' % s, 60),
+              ('%s_UpLeg' % s, '%s_Leg' % s, 60), ('%s_Leg' % s, '%s_Foot' % s, 90),
+              ('%s_Foot' % s, '%s_Toe' % s, 45)]
+
+
+def bend_poses(bones):
+    """Two test poses of a model's skeleton (bones: {'names', 'parents', 'world' (n, 4, 4) bind matrices, optional
+    'follow'}) for decimate.decimate's `poses`: every BENDS joint the skeleton has turned by its angle about an axis
+    across its segment (the first pose about one, the second about the one at right angles to it and the segment),
+    carried down to its children, and to the joints that follow it by their share (as repose() moves them) -> [(n,
+    4, 4) changes: posed world x inverse bind] (the skin of a vertex goes as its weights blend them). [] when the
+    skeleton has none of them."""
+    nm, parents = bones['names'], bones['parents']
+    W = np.asarray(bones['world'], np.float64)
+    P = W[:, :3, 3]
+    n = len(nm)
+    idx = {x: i for i, x in enumerate(nm)}
+    bends = {idx[a]: (idx[b], np.radians(deg)) for a, b, deg in BENDS if a in idx and b in idx}
+    if not bends:
+        return []
+    follow = bones.get('follow') or [None] * n
+    carries = np.zeros(n, bool)                   # (a joint carrying bent ones keeps its parent's change)
+    for i in bends:
+        j = parents[i]
+        while j >= 0 and not carries[j]:
+            carries[j] = True
+            j = parents[j]
+    poses = []
+    for which in (0, 1):
+        D = np.zeros((n, 4, 4))
+        own = {}
+        for i in range(n):
+            p = parents[i]
+            dp = D[p] if p >= 0 else np.eye(4)
+            if i not in bends:
+                D[i] = dp
+                continue
+            b, angle = bends[i]
+            seg = P[b] - P[i]
+            seg = seg / max(float(np.linalg.norm(seg)), 1e-9)
+            ref = np.array([0.0, 0, 1]) if abs(seg[2]) < 0.7 else np.array([0.0, 1, 0])
+            axis = np.cross(seg, ref)
+            if which:
+                axis = np.cross(seg, axis)
+            r = _rotation(dp[:3, :3] @ (axis / np.linalg.norm(axis)), angle)
+            pivot = dp[:3, :3] @ P[i] + dp[:3, 3]
+            own[i] = (r, pivot)
+            D[i] = _about(r, pivot) @ dp
+        for i in range(n):
+            f = follow[i] if i < len(follow) else None
+            if i in bends or carries[i]:
+                continue
+            if f is not None:
+                j, share = f
+                pj = parents[j]
+                dpj = D[pj] if pj >= 0 else np.eye(4)
+                r, pivot = own.get(j, (np.eye(3), dpj[:3, :3] @ P[j] + dpj[:3, 3]))
+                D[i] = _about(_share(r, share), pivot) @ dpj
+            elif parents[i] >= 0:
+                D[i] = D[parents[i]]
+        poses.append(D)
+    return poses

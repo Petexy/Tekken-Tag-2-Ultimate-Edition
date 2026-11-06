@@ -84,7 +84,8 @@ SKIN_BASES = ('M_CH_skin', 'M_Ch_skin')         # M_CH_skin_V3 (face; arm/body/h
 # not drawn in TTT2: the invisible calculation mesh, the cloth simulation proxy, the eye shadow and tear line films
 LEFT_OUT_BASES = ('M_CalculationMesh', 'M_Eye_Blur_AO', 'M_Add_Tear', 'M_CH_sim_mesh_material')
 LEFT_OUT_NAMES = ('tear', 'tealine', 'cal_mesh', 'sim_mesh', 'eye_ao')
-OVERLAY_NAMES = ('eyebrow', 'eyelash', 'lash', 'brow')     # hair materials drawn as overlays on the face
+OVERLAY_NAMES = ('lash', 'brow', 'eyeblow')     # hair materials drawn as overlays on the face: eyelashes, eyebrows
+                                                # (also spelt eyeblow: Miary Zo's MI_CH_wkz_eyeblow)
 AB_OVERLAY = 12                     # AB_BlendMode default: Unreal's overlay
 IDS_PER_CHANNEL = 4                 # IDs an ID map channel holds at most (16 per material)
 NO_ID_COLOUR = {'r': 0.5, 'g': 0.5, 'b': 0.5}     # IDnn_Color's default in the base materials
@@ -413,15 +414,18 @@ def bake_albedo(eff, textures, grey=False):
     return None, None
 
 
-def classify(name, base, alpha):
+def classify(name, base, alpha, share=None):
     """What a Tekken 8 material becomes when the definition's MATERIALS does not say: (template kind, normal map?,
     alpha-tested?) or None (left out), from its base material `base` (a name, or the effective() dict) and its name;
-    alpha: its baked alpha (None: opaque; bake_albedo gives one to masked materials only)."""
+    alpha: its baked alpha (None: opaque; bake_albedo gives one to masked materials only); share: its emission share
+    (emission_share; None: not known), at GLOW_SHARE or more on a glowing part's base the 'glow' template's."""
     if isinstance(base, dict):
         base = base['base']
     base, n = base or '', name.lower()
     if base.startswith(LEFT_OUT_BASES) or any(x in n for x in LEFT_OUT_NAMES):
         return None                                   # calculation and cloth proxies, eye shadow, tear line
+    if base.startswith(GLOW_BASES) and share is not None and share >= GLOW_SHARE:
+        return ('glow', False, False)                 # a glowing summon (bake_emissive)
     if base == 'M_CH_Eyes' or n.endswith(('_eye_l', '_eye_r', '_eyes', '_eye')):
         return ('eye', False, False)
     if 'teeth' in n:
@@ -434,3 +438,110 @@ def classify(name, base, alpha):
         return ('overlay', False, True) if any(x in n for x in OVERLAY_NAMES) else ('hair', False, True)
     holes = alpha is not None and float((alpha < 0.5).mean()) > HOLES
     return ('cloth', True, holes)
+
+
+# ------------------------------------------------------------------------------------------------ glowing parts
+# Summoned parts (M_CH_Extra_Parts instances: Miary Zo's staffs, tail, horn and snakes) are lit, masked materials whose
+# look is an HDR emissive over a dark base, bloomed (their Tekken 8 "translucency"). The steady emissive (Transition
+# 1, the shown part: its compiled base-pass pixel shader, the part's own parameters):
+#     E = R(EmissiveMask) ** EmissiveMask_Power x EmissiveColor_A x EmissiveIntensity_A
+#       + G(EmissiveMask) ** EmissiveMask_Power x EmissiveColor_B x EmissiveIntensity_B
+#       + (1 - N.V) ** FresnelPower x Fresnel Color x Fresnel Intensity           ('Use Fresnel')
+#       + FlowEmissiveMap(scrolling) x FlowEmissiveColor x FlowEmissiveIntensity   (the flowing wave)
+#       + OverrideEmissiveColor x OverrideEmissiveIntensity
+# The part is drawn with the definition's 'glow' template (Miary Zo's: the unlit textured core of TTT2's own light
+# spears, cmn_opu_LightSpear), its colour texture the colour on screen: bake_emissive bakes E + the base colour x
+# BaseTintColor x
+# GLOW_AMBIENT (the scene's light on the base) with the view-dependent terms at their means (the Fresnel term's over a
+# cylinder seen side-on, the wave's over its texture), then Tekken 8's tone curve on it: exposure GLOW_EXPOSURE,
+# GLOW_DESATURATION of the way to its luma (Unreal's filmic curve greys bright blue), the ACES fit, gamma 2.2. Fitted
+# on a Tekken 8 screenshot of her right staff (40462 staff pixels: sRGB p10 51 106 169, median 70 149 209, p90 99 199
+# 240): the bake's p10 43 110 169, median 87 179 239 (13 levels off on average; without the desaturation 21). A part
+# whose emission is GLOW_SHARE or more of its look (emission_share: staffs 0.97, tail centre and fur 0.84, horn 0.86)
+# is drawn so (classify: 'glow'); the others keep a lit template.
+GLOW_BASES = ('M_CH_Extra_Parts',)
+GLOW_SHARE = 0.75
+GLOW_AMBIENT = 0.5
+GLOW_EXPOSURE = 0.5
+GLOW_DESATURATION = 0.15
+GLOW_LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)      # (Rec. 709)
+
+
+def uv_set(eff, slot):
+    """The UV set (0 or 1) material eff samples its texture `slot` ('BaseColor', 'EmissiveMask', ...) through: its
+    'Use UV1 for <slot>' switch (M_CH_Extra_Parts: Miary Zo's tail is laid out along its UV1)."""
+    return 1 if (eff.get('switches') or {}).get('Use UV1 for %s' % slot) else 0
+
+
+def fresnel_mean(power, samples=4096):
+    """The screen mean of (1 - N.V) ** power over a cylinder seen side-on (x = sin of the normal's angle to the view,
+    uniform across its width)."""
+    x = (np.arange(samples) + 0.5) / samples
+    return float(((1.0 - np.sqrt(1.0 - x * x)) ** power).mean())
+
+
+def aces(x):
+    """Narkowicz's fit of the ACES filmic curve (as convert/particles.py's lit texels)."""
+    x = np.maximum(x, 0)
+    return np.clip(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0, 1)
+
+
+def _emissive_terms(eff, textures):
+    """(base term (H, W, 3), emissive E (H, W, 3)) of a glowing part, linear, at its BaseColor's size (the module
+    notes); (None, None) without a colour texture."""
+    t, s, sw = eff['textures'], eff['scalars'], eff.get('switches') or {}
+    if not textures.exists(t.get('BaseColor')):
+        return None, None
+    base, _ = textures.linear(t['BaseColor'])
+    shape = base.shape[:2]
+    lit = base * _col(eff['vectors'].get('BaseTintColor', {'r': 1, 'g': 1, 'b': 1})) * GLOW_AMBIENT
+    E = np.zeros(shape + (3,), np.float32)
+    if sw.get('Use EmissiveMask', True) and textures.exists(t.get('EmissiveMask')):
+        mask, _ = textures.linear(t['EmissiveMask'])
+        power = float(s.get('EmissiveMask_Power', 1.0))
+        if uv_set(eff, 'EmissiveMask') == uv_set(eff, 'BaseColor'):
+            mask = _resize(mask, shape)
+        else:                                    # (laid out otherwise: its mean)
+            mask = np.broadcast_to(mask.reshape(-1, 3).mean(0), shape + (3,))
+        for ch, ab in ((0, 'A'), (1, 'B')):
+            colour = _col(eff['vectors'].get('EmissiveColor_' + ab, {'r': 0, 'g': 0, 'b': 0}))
+            E = E + np.power(np.clip(mask[..., ch:ch + 1], 0, 1), power) * colour * float(
+                s.get('EmissiveIntensity_' + ab, 0.0))
+    if sw.get('Use Fresnel'):
+        E = E + fresnel_mean(float(s.get('FresnelPower', 1.0))) * _col(
+            eff['vectors'].get('Fresnel Color', {'r': 0, 'g': 0, 'b': 0})) * float(s.get('Fresnel Intensity', 0.0))
+    flow = t.get('FlowEmissiveMap')
+    if flow and textures.exists(flow) and not any(x in flow for x in ('White', 'Black')):
+        wave, _ = textures.linear(flow)
+        E = E + float(wave[..., 0].mean()) * _col(eff['vectors'].get('FlowEmissiveColor', {'r': 0, 'g': 0, 'b': 0})) \
+            * float(s.get('FlowEmissiveIntensity', 0.0))
+    E = E + _col(eff['vectors'].get('OverrideEmissiveColor', {'r': 0, 'g': 0, 'b': 0})) * float(
+        s.get('OverrideEmissiveIntensity', 0.0))
+    return lit.astype(np.float32), E.astype(np.float32)
+
+
+def emission_share(eff, textures):
+    """The share of a glowing part's steady look its emission gives (linear luminance, the base term as
+    bake_emissive takes it), or None: not a glowing part's base, or nothing to bake."""
+    if not (eff.get('base') or '').startswith(GLOW_BASES):
+        return None
+    lit, E = _emissive_terms(eff, textures)
+    if lit is None:
+        return None
+    e, b = float((E * GLOW_LUMA).sum(-1).mean()), float((lit * GLOW_LUMA).sum(-1).mean())
+    return e / (e + b) if e + b > 0 else 0.0
+
+
+def glow_encode(x):
+    """Linear HDR colour -> the display value (0..1) Tekken 8's tone curve gives it (the module notes)."""
+    luma = (x * GLOW_LUMA).sum(-1, keepdims=True)
+    return aces((x * (1 - GLOW_DESATURATION) + luma * GLOW_DESATURATION) * GLOW_EXPOSURE) ** (1 / 2.2)
+
+
+def bake_emissive(eff, textures):
+    """A glowing part's steady look, its colour texture -> (linear rgb whose sRGB encoding is the colour on screen,
+    None) (the module notes), or (None, None) without a colour texture."""
+    lit, E = _emissive_terms(eff, textures)
+    if lit is None:
+        return None, None
+    return srgb_to_linear(glow_encode(lit + E)).astype(np.float32), None

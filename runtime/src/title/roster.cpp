@@ -3,6 +3,7 @@
 #include "title/eliza_assist.h"
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
+#include "title/summon_fade.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
 #include "outfit_menu.h"
@@ -235,7 +236,9 @@ std::optional<uint32_t> tone_index(const std::vector<uint8_t>& bank, const std::
 // OPT 800 + k (k < 20: posed by the animations' extra pair k; from 20 still),
 // that bone's parent (a bone index), its hit points (OPT 850 + n, each
 // hitting as the held item's point slot s) and, for a weapon the fighter
-// summons (Noctis's), the number of its summon (shown only while summoned).
+// summons (Noctis's), the number of its summon (shown only while summoned)
+// and how it is scaled while that summon fades in or out (Tekken 8's: the
+// importer's summonfade.py; see the fades below).
 struct WeaponPoint {
     uint32_t number = 0, slot = 0;
 };
@@ -243,6 +246,7 @@ struct Weapon {
     uint32_t pair = 0, parent = 0;
     std::vector<WeaponPoint> points;
     int32_t summon = -1; // -1: always shown
+    uint32_t ramp = 0;   // the local's rows (bits 0..2) a fade scales; bit 3: under a ramped weapon (S L S^-1)
 };
 
 // The added fighters, by number k (their slots).
@@ -462,7 +466,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         } else if (key == "sound_extra") {
             std::istringstream tones(value);
             for (uint32_t tone; tones >> tone;) pack.sound_extra.push_back(tone);
-        } else if (key == "weapons") { // k:parent:points[:summon], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
+        } else if (key == "weapons") { // k:parent:points[:summon[:ramp]], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
             std::istringstream items(value);
             for (std::string item; items >> item;) {
                 std::vector<std::string> fields;
@@ -483,6 +487,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                     weapon.points.push_back(point);
                 }
                 if (fields.size() > 3 && !fields[3].empty()) weapon.summon = std::atoi(fields[3].c_str());
+                if (fields.size() > 4) weapon.ramp = static_cast<uint32_t>(std::strtoul(fields[4].c_str(), nullptr, 10)) & 15;
                 pack.weapons.push_back(weapon);
             }
         }
@@ -3328,15 +3333,23 @@ constexpr uint32_t kFirstWeaponBone = 800, kStillWeapons = 20, kFirstWeaponPoint
 constexpr uint32_t kModelExtraSampled = 13216, kModelExtraCount = 13220, kModelExtra = 13984, kModelExtraMax = 64;
 constexpr uint32_t kPlayerItemPoints = 3416, kSkeletonRecords = 32, kRecordSize = 144, kRecordWorld = 64;
 constexpr uint32_t kSummonProp = 0x822E, kDismissProp = 0x822F, kDismissAll = 16, kHoldProp = 0x822B;
+constexpr uint32_t kPlayerMoveset = 136, kPlayerMovesetInUse = 272; // its own moveset; the one its move is from
+constexpr uint32_t kRoundEndAfterKo = 26; // the situation kind before a KO's replay (title/gauge.cpp)
 constexpr float kThrown = 400.0f; // mm from the parent bone: a weapon thrown, not held
 constexpr int kHoldFrames = 120;   // a held weapon let go after these frames whatever comes
 constexpr float kHeldReach = 1500.0f; // mm: a weapon always in hand (no summon) ignores a pair farther out (the
                                       // channels of another animation's use: Tekken 7's spin reactions, 20 m paths)
 struct WeaponBone {
     std::array<uint32_t, 16> bind{}, last{};
+    std::array<uint32_t, 16> posed{}; // the local its pair gave it last while shown (a fade-out holds it)
+    bool has_posed = false;
 };
 std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last
 std::map<uint32_t, uint64_t> g_summoned; // player -> its summoned weapons (bit n: summon n)
+// Fades of Tekken 8 summons (title/summon_fade.h): only the drawing fades; g_summoned (the points, the slots)
+// changes at once, as before.
+std::map<uint32_t, summon_fade::Fades> g_fades; // player -> by summon number
+
 struct PosedWeapons {
     uint32_t player = 0;
     const std::vector<Weapon>* weapons = nullptr;
@@ -3392,19 +3405,30 @@ float value(uint32_t v) {
     return f;
 }
 
+// Every summoned weapon of the player put away at once, thrown ones let go (the dismissal of all).
+void put_away_summons(uint32_t player) {
+    g_summoned[player] = 0;
+    g_fades.erase(player);
+    g_weapon_holds[player].held.clear();
+}
+
 void summon_property(uint32_t player, uint32_t id, uint32_t n) {
     if (id == kHoldProp) {
         g_weapon_holds[player].requested = true;
         return;
     }
     uint64_t& summoned = g_summoned[player];
+    const summon_fade::Value v = summon_fade::split(n); // (0 frames in Tekken 7 fighters' values)
+    n = v.n;
+    const bool was = n < 64 && (summoned >> n & 1) != 0;
     if (id == kSummonProp && n < 64) {
         summoned |= uint64_t{1} << n;
+        summon_fade::start(g_fades[player], n, v.frames, true, was);
     } else if (id == kDismissProp && n == kDismissAll) {
-        summoned = 0;
-        g_weapon_holds[player].held.clear();
+        put_away_summons(player);
     } else if (id == kDismissProp && n < 64) {
         summoned &= ~(uint64_t{1} << n);
+        summon_fade::start(g_fades[player], n, v.frames, false, was);
     }
 }
 
@@ -3461,6 +3485,13 @@ bool hold_weapon(uint32_t player, size_t w, bool summoned, uint32_t parent, std:
 
 void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t player, const std::vector<Weapon>& weapons) {
     if (weapons.empty()) return;
+    // Hit or thrown: a standing hit plays the attacker's reaction, a throw its victim moves, from the attacker's
+    // moveset (+272, the one in use; +136 its own), so none of its own moves' dismissals runs: its summons go away
+    // as Tekken 7 and Tekken 8 put them away when the fighter is hit.
+    if (const auto it = g_summoned.find(player); it != g_summoned.end() && it->second != 0 &&
+                                                 load(player + kPlayerMovesetInUse) != load(player + kPlayerMoveset)) {
+        put_away_summons(player);
+    }
     std::vector<uint32_t> extra; // the current frame's extra channels, 4 words each
     if (load(model + kModelExtraSampled) != 0) {
         const uint32_t channels = std::min(load(model + kModelExtraCount), kModelExtraMax);
@@ -3470,6 +3501,8 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
     std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (this frame's, not collapsed)
     std::vector<bool> shown(weapons.size(), false);
+    if (const auto it = g_fades.find(player); it != g_fades.end()) summon_fade::step(it->second);
+    const auto fades = g_fades.find(player);
     for (size_t w = 0; w < weapons.size(); ++w) {
         const Weapon& weapon = weapons[w];
         ctx.r[3] = load(model + kModelBones);
@@ -3505,10 +3538,27 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
             shown[w] = hold_weapon(player, w, shown[w], records + kRecordSize * weapon.parent + kRecordWorld, local);
         }
         locals[w] = local;
-        if (!shown[w]) {
+        // a fading summon (the fades above): drawn scaled; dismissed, drawn until its fade ends where its pair had it
+        bool drawn = shown[w];
+        float scale = 1.0f;
+        if (fades != g_fades.end() && weapon.summon >= 0 && weapon.summon < 64 && fades->second[weapon.summon].running()) {
+            const summon_fade::Fade& fade = fades->second[weapon.summon];
+            scale = fade.scale();
+            if (!fade.in && !drawn && (weapon.ramp & summon_fade::kRampRows)) { // (one with no ramp goes at once, as before)
+                drawn = true;
+                if (t == nullptr && bone.has_posed) local = bone.posed; // (the next move's clip has not its pair)
+            }
+        }
+        if (shown[w] && t != nullptr) {
+            bone.posed = local;
+            bone.has_posed = true;
+        }
+        if (!drawn) {
             for (int row = 0; row < 3; ++row) {
                 for (int col = 0; col < 3; ++col) local[4 * row + col] = bits(0.0f);
             }
+        } else if (scale < 1.0f && (weapon.ramp & summon_fade::kRampRows)) {
+            summon_fade::ramp_local(local, weapon.ramp, std::max(scale, 1e-3f));
         }
         if (local != now) {
             for (uint32_t i = 0; i < 16; ++i) store(record + 4 * i, local[i]);
@@ -3608,6 +3658,16 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
 }
 
 } // namespace
+
+// A round's (a match's, Practice's) set-up: the summoned weapons a fighter had out when the round before ended (a
+// KO in the middle of a move that showed one) would stand drawn into the next until a move of its own dismissed
+// them, since neither its stance nor the donor's moves do; the KO's replay (after 26) still shows them.
+void cafe::title::summons_situation(uint32_t kind) {
+    if (kind == kRoundEndAfterKo) return;
+    for (auto& [player, summoned] : g_summoned) {
+        if (summoned != 0) put_away_summons(player);
+    }
+}
 
 
 // A fighter's model, every frame (the per-fighter posing of extra bones among

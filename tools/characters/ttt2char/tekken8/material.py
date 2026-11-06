@@ -57,8 +57,9 @@ FACE = '*face'                      # colours entry: the face part's material na
 PATTERN = 'Pattern'                 # the costume shader's pattern texture, and the costume's adjustments of it
 PATTERN_ADJUSTMENTS = (bake.PATTERN_HUE, bake.PATTERN_SATURATION, bake.PATTERN_BRIGHTNESS)
 SHADING_SUBSURFACE = 2              # EMaterialShadingModel MSM_Subsurface
-# normal map parameter by base material family (the key Tekken 7's vocabulary calls Normal)
-NORMALS = ('BaseNormal_A', 'tx04_Normal', 'Normal', 'NormalMap', 'tx02_Normal')
+# normal map parameter by base material family (the key Tekken 7's vocabulary calls Normal; Normal_Map: M_CH_Extra_Parts,
+# Miary Zo's summoned staffs, tail and horn)
+NORMALS = ('BaseNormal_A', 'tx04_Normal', 'Normal', 'NormalMap', 'tx02_Normal', 'Normal_Map')
 
 
 def short(path):

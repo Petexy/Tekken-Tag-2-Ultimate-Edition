@@ -32,7 +32,7 @@ from test_tekken8_anim import bank, clip, sample  # noqa: E402
 from test_tekken8_convert import Source8  # noqa: E402
 from ttt2char import importer  # noqa: E402
 from ttt2char.characters import definition  # noqa: E402
-from ttt2char.convert import idmaps as M, moveset, voice  # noqa: E402
+from ttt2char.convert import idmaps as M, moveset, voice, weapons  # noqa: E402
 from ttt2char.tekken8 import anim, anmbin, autodump as dump8, movenames, panm, voice as voice8  # noqa: E402
 from ttt2char.ttt2 import animation, motion, nus3bank  # noqa: E402
 
@@ -327,6 +327,8 @@ class ConvertStep(unittest.TestCase):
         c.write.return_value = (b'moves', b'motions')
         c.summary.return_value = ['tables: ...']
         lines = []
+        bon, hb = mock.MagicMock(), {21: 19}         # (her skeleton read; the id maps' hit locations)
+        bon.__getitem__.side_effect = lambda key: {'names': ['cha:OPT800_tail', weapons.point_name(850, 121)]}[key]
         with mock.patch('ttt2char.tekken8.movenames.ttt2_movesets', return_value=ttt2), \
                 mock.patch('ttt2char.tekken8.movenames.name_moves') as name_moves, \
                 mock.patch('ttt2char.tekken8.movenames.harvest', return_value=({b'Co_a'}, set())), \
@@ -339,15 +341,17 @@ class ConvertStep(unittest.TestCase):
                 mock.patch('ttt2char.tekken8.anim.originals', return_value={1: 0x8001}), \
                 mock.patch('ttt2char.tekken8.movelist.convert', side_effect=ValueError('bad list')), \
                 mock.patch.object(importer, '_read', side_effect=lambda p: p.encode()), \
-                mock.patch.object(importer.idmaps, 'tekken8_maps', return_value=('req', 'prop', 'rr', 'hb', 'ev')) \
+                mock.patch.object(importer.idmaps, 'tekken8_maps', return_value=('req', 'prop', 'rr', hb, 'ev')) \
                 as maps, \
                 mock.patch.object(importer.idmaps, 'ttt2_usage', return_value='usage'), \
                 mock.patch.object(importer.tagsystem, 'TagStates', return_value='states'), \
                 mock.patch.object(importer.moveset, 'Converter', return_value=c) as Converter, \
                 mock.patch.object(importer, '_options') as options, \
-                mock.patch.object(importer.bone, 'read', return_value='bon read'), \
-                mock.patch.object(importer.itemdb, 'body_only', side_effect=lambda xml, effects=None: xml + b' body'), \
-                mock.patch.object(importer.itemdb, 'effect_files_named', return_value=[]), \
+                mock.patch.object(importer.bone, 'read', return_value=bon) as read_bone, \
+                mock.patch.object(importer.summons8, 'prepare', return_value={}) as prepare, \
+                mock.patch.multiple(importer.itemdb, body_only=mock.Mock(side_effect=lambda xml, effects=None: xml +
+                                                                         b' body'),
+                                    effect_files_named=mock.Mock(return_value=[])), \
                 mock.patch.object(importer.fx, 'still_named', side_effect=lambda files, names: files):
             out = importer._converted_tekken8_moveset(
                 mock.Mock(store='store'), archives, d, {'row': 70}, (k, files, [('aml', 'aml.motbin', 'aml.f')]),
@@ -362,10 +366,15 @@ class ConvertStep(unittest.TestCase):
         self.assertEqual(maps.call_args, mock.call([k], ttt2, references=[other]))
         args = Converter.call_args[0]
         self.assertEqual(args[:5], (k, None, 'row 42', ('data005', 42), 'row 13'))
-        self.assertEqual(args[6:9], (('req', 'prop', 'rr', 'hb'), 'usage', 70))
+        self.assertEqual(args[6:9], (('req', 'prop', 'rr', hb), 'usage', 70))
         self.assertIs(args[9], d)
         k.attach_banks.assert_called_once_with('index of own.anmbin', 'index of com.anmbin')
-        self.assertEqual(AnimConverter.call_args[0], ('her skeleton', 'bon read'))
+        self.assertEqual(AnimConverter.call_args[0], ('her skeleton', bon))
+        # (the hit box summaries: her weapons' points, the id maps' hit locations, HIT_POINT8's, the others as they are)
+        self.assertIn(mock.call(b'bon'), read_bone.call_args_list)
+        self.assertIs(prepare.call_args[0][0], k)
+        place = prepare.call_args[1]['place']
+        self.assertEqual((place(121), place(21), place(47), place(5)), (70, 19, 16, 5))
         self.assertIsInstance(c.animations, anim.Animations)
         self.assertEqual(c.animations.originals, {1: 0x8001})
         self.assertEqual(options.call_args[0][3], {'zbr_w01': 2, 'other': 3})    # the win quotes by her moves

@@ -216,6 +216,13 @@ REQ_OVERRIDE['t8'][43] = 46
 REQ_OVERRIDE['t7'].update({43: 46, 51: 46})
 for _g in REQ_OR:
     REQ_OR[_g][43] = (46, 49)
+# Tekken 8 alike: its 51 is player +0x6fc bit 0x40 (case 0x1418763db), which the hit's registration sets
+# (0x14188a72c) and a blocked one does not: the move hit, 46 (Miary Zo's u+4, 4,4 and four more strings into Baobab
+# Mihira on hit, #1522 / #1572); its 49, the byte +0x67c (case 0x1418763c5) set to 1 where a hit or a block registers
+# (0x1418703c9, 0x141884f45, 0x141885204), is a contact either way: 46 or 49 in a cancel list, 46 elsewhere (her
+# f,f+2,2, 8LK, 6LK_8WP, 6LK_WP, 666LK on contact). Neither had an id map row
+REQ_OVERRIDE['t8'].update({51: 46, 49: 46})
+REQ_OR['t8'][49] = (46, 49)
 REQ_FALSE['t7'][45] = 'a contact neither hit nor block'
 # Throw breaks: Tekken 8's 131..134 call one test (0x1418756a0) with break kinds 1..4 (135: the kind in `param`),
 # TTT2's 129..131 test kinds 1..3 (sub_0404FF30 stores 1 / 2 / 3 at +598): 1, 2 and 1+2 (Jun's Ju_Cnage01_y
@@ -285,6 +292,7 @@ EFFECT_AT = {'t7': {0x802e, 0x803f}, 't8': set()}
 # Tekken 7 spawns effects with 0x8036 (the id maps find 0x801f) and, in a few moves, 0x8038 (the same value). Tekken 8
 # spawns them with 0x8039 (its 0x8036, the id maps find 0x801f too) but numbers its own effects, which nothing converts
 # (the pack has no effects of a Tekken 8 fighter): left out (PROP_DROP)
+EFFECT8_SPAWN, EFFECT8_STOP = 0x8039, 0x8035   # ... except the ids a definition attaches (convert/effects8.py)
 PROP_OVERRIDE = {'t7': {0x8255: 0x8193, 0x8256: 0x8194, 0x8038: EFFECT_PROP}, 't8': {0x82c5: 0x8193, 0x82c6: 0x8194}}
 # Moveset variables: numbers of a player's that its moves set and test (TTT2's at player +1532 + 4k, counted down each
 # frame by the game). TTT2 tests variable k with 232 + k (>= param) and 261 + k (<= param) and sets it with VAR_SET[k]
@@ -300,6 +308,65 @@ REQ_OVERRIDE['t7'].update({288 + k: VAR_LE + k for k in range(5)})
 REQ_OVERRIDE['t7'].update(VAR_PROPS)                 # (properties inside requirement lists)
 PROP_OVERRIDE['t7'].update(VAR_PROPS)
 PROP_OVERRIDE['t8'].update(LATCH_PROPS['t8'])        # the latches' properties (LATCHES), as extra properties too
+# (Only variables 1..3 are counted down each frame: sub_04336854 near 0x04339A20 subtracts 1 from +1536..+1544 while
+# above 0 and adds 1 to +1532; 4 and on keep their values. sub_0404FF30's tests are unsigned compares, and a property
+# reaches its handler as value & 0xFFFF.) Variables 4..7 at +1548 + 4(k - 4) and 8..10 at +1564 + 4(k - 8): tests
+# >= 232 + k / 243..245, <= 261 + k / 272..274, == 290 + k / 301..303; set, add, subtract 0x806C + 3(k - 4) / 0x8081
+# + 3(k - 8) and the next two.
+def var_ids(k):
+    """TTT2's ids of moveset variable k (4..10): (>= test, <= test, == test, set, add, subtract)."""
+    if 4 <= k <= 7:
+        return VAR_GE + k, VAR_LE + k, 290 + k, 0x806C + 3 * (k - 4), 0x806D + 3 * (k - 4), 0x806E + 3 * (k - 4)
+    if 8 <= k <= 10:
+        return 235 + k, 264 + k, 293 + k, 0x8081 + 3 * (k - 8), 0x8082 + 3 * (k - 8), 0x8083 + 3 * (k - 8)
+    raise ValueError('moveset variable %d has no set / subtract of its own' % k)
+
+
+# Tekken 8's flag slots (FLAG8): ten per player (+0xde4, 8 bytes {lifetime, value}). 507 (param the slot, param2 a
+# value) tests slot.value == param2 (case 0x14187b150); 0x815a (value the slot, value2 the lifetime, value3 the value)
+# sets both (handler 0x1418980c0), as an action of a cancel row's requirement list, an extra property or a begin / end
+# property. The lifetime counts moves, the setting one included: as a move starts it goes down by one, and at 0 the
+# slot is clear (Miary Zo's: b+2's 3 sets slot 0 for 1 move, and b+2 tests it at frame 13 for b+2,3; f+1+2's 1+2
+# sets it for 2 moves, f+1+2 and its automatic second hit, which tests it for the third; the 10-hit combo's 5th hit
+# sets slot 1 for 2 moves, the 6th tests it for the 7th; 26 of 31 Tekken 8 fighters' movesets have them). The id maps
+# paired 507 with TTT2's 0 (true; FIT kept (507, 0, x) as it, left the other slots false) and had no row for 0x815a:
+# b+2 always went on to b+2,3, f+1+2 played all five hits unpressed, and the 7th hit and f+1+2,1+2,3+4's ender never
+# came out. TTT2 has no such slots: a slot the fighter both sets (value 0 or 1 only) and tests is a moveset variable no
+# TTT2 moveset of the donor's uses (FLAG8_VARS in turn: 7, which no TTT2 moveset uses, 6 and 5, which only Tekken 7
+# definitions' state_flags take, then 10 and 4) holding the lifetime left: a set is (set, lifetime if value else 0),
+# a test of value 1 (>= 1), of value 0 (<= 0), of another value false; every cancel list converted from the fighter's
+# starts with one action row per variable (window 1-1, no input: tagcombo.ACTION_ONLY) that takes one off a variable
+# above 0 as the move starts. A slot without a variable is never set: its sets are left out, its value-0 tests true.
+# Tekken 8 also tests slots in extra properties' requirement lists (state values 0x81fa -> TTT2's 0x80f8 as the move
+# starts: Reina's d/f+1,2 on hit, Miary Zo's string enders, her Heat Tromba's weapon); TTT2's extra properties have no
+# conditions, so such a property (and a set as an extra or begin property) is an action row of the move's list at its
+# frame (1 for the start), after the countdown rows
+FLAG8_REQ = {'t7': None, 't8': 507}
+FLAG8_PROP = {'t7': None, 't8': 0x815a}
+FLAG8_VARS = (7, 6, 5, 10, 4)
+# Wall tests: Tekken 8's 194..201 (cases 0x141879ebd..0x14187a0ff) call 0x1419672b0(player, out, param as the
+# distance, 360.1 degrees, the facing +0x17e * 2pi / 65536 plus 0 / 0 / pi / pi / pi/2 / pi/2 / -pi/2 / -pi/2, 1, 0):
+# a wall within `param` in front, behind, to the side +pi/2, to the side -pi/2; the even ids true when there is one,
+# the odd ids when there is none. TTT2's 174..181 (sub_0404D868(player, axis, frame, param >> 8, param & 0xFF)) are
+# the same test on the same rotation (rows (cos, 0, -sin) and (sin, 0, cos) in both; sinf / cosf told by their value
+# at 0), front, back, local +x (forward turned by +pi/2), -x, even = a wall (along the facing or the screen),
+# odd = none along the facing, the low byte the largest angle between the wall and the way (|cos|, 90: any wall; its
+# tag system's runs out use them: Co_runchng 640080 = 2500 << 8 | 80). No id map has them: Miary Zo's Mikisaka Malaky
+# (b+3+4, u+3+4, d+3+4: 196 / 198 / 200 (950 / 1250)) never went on to Tromba at a wall
+WALL8 = {'t7': {}, 't8': {194 + n: 174 + n for n in range(8)}}
+WALL_ANGLE = 90
+# "The move hit" kept to the move's end: TTT2's 46 holds on the hit's frame only. Each frame sub_039C8D64 clears the
+# four players' hit bits (+1152 & 0x00300000: sub_03ADB680 -> sub_03ADB5E4) before the hit pass (sub_03ADCBA8 ->
+# sub_03ADBD10 sets 0x00200000, 46's, on the attacker as a hit registers), and TTT2's own rows test 46 / 47 / 49 / 51
+# inside the active frames only (none of 2239 starts after the last). Tekken 8's 51 (+0x6fc & 0x40, set by the hit)
+# and 49 (+0x67c, hit or block) keep their value: Miary Zo's u+4 (active 16-17) goes on to Baobab Mihira at frame 17
+# when it hit, and so do u/b+4 and the strings' enders (frames 19 .. 30), f,f+2's 2 and four more follow-ups on contact.
+# In game, with 51 as 46, u+4 hit on frame 16 and never went on. A cancel list testing them (HIT_HELD, the hit
+# alternative of REQ_OR) gets a latch none of its rows and moves use (the last first; latches are cleared as a move
+# starts): its first row, an action on the hit's frame, sets it to 1 [(46), (set latch, 1)], and the tests are the
+# latch's (== 1). In a group list (shared by moves) and in other lists they stay 46
+HIT_HELD = {'t7': (), 't8': (51, 49)}
+HIT_NOW = 46                                         # TTT2: the move's attack hit on this frame
 # Electrics (the Mishimas' Electric Wind God Fist and its like). TTT2's own (Kazuya's Kz_shoryu_S; Heihachi's, Jin's
 # and Devil Jin's alike) carry: 0x8192 = 1 from the start (ELECTRIC_PROP: player +928 bit 0x2000, the electric spark
 # of sub_03AE2254), the common spark sound at frame 2 (0x82f9 0x0100002b: se_Btl_Battle's RES_BANK_SPK_L01, the same
@@ -404,7 +471,7 @@ WIN_QUOTE_PROP, WIN_QUOTE_VALUE = 0x82F9, 0x0E003000
 # index there (0x82df does the same in win poses only, 0x82e0 under another condition: Devil Jin's wings); the added
 # fighter's tiger is such a set of bones (convert/tiger.py), so 0x828f becomes 0x82de where the converter knows the
 # tiger animation's index (opt_anims), else it is left out.
-TIGER_PROP = {'t7': 0x828f, 't8': None}
+TIGER_PROP = {'t7': 0x828f, 't8': 0x83aa}  # (Tekken 8's: Miary Zo's snakes' clip k, convert/snakes8.py)
 OPT_ANIM_PROP, OPT_ANIM_BASE = 0x82de, 0x4000
 # A fighter's own state Tekken 7's game keeps for it, which TTT2 has not (unmapped, its tests made their lists false):
 # Claudio's Starburst (351 == param; 0x81bf 1 / 0 gives it / uses it up) and Leroy's cane (641 not used yet, 642 used;
@@ -510,6 +577,13 @@ SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON,
                        0x8300: TT_SUMMON, 0x8301: TT_DISMISS},
                 't8': {0x8317: TT_SUMMON, 0x8318: TT_DISMISS}}
 SUMMON_EFFECT = {'t7': 0x82af, 't8': 0x831f}
+# --- Tekken 8 summons and hit points (convert/summons8.py) ---------------------------------------------------------
+# its show / hide rows become the summon ids above before the converter runs (summons8.prepare), so its end properties
+# (hide as the move ends) map too; its limb points TTT2 has no place for get TTT2's (summons8.HIT_POINTS)
+from .summons8 import HIT_POINTS as _HIT_POINTS8  # noqa: E402
+PROP_OVERRIDE['t8'].update(SUMMON_PROPS['t8'])
+HIT_POINT8.update(_HIT_POINTS8)
+# --------------------------------------------------------------------------------------------------------------------
 # A thrown weapon that hits stays where it hit (Noctis's Warp-Strike: Tekken 7 dismisses the sword as it hits, with
 # particles of its mesh lingering there, which convert/particles.py leaves out): the move a hit leads to (the
 # definition's WEAPON_HOLD, by Tekken 7 name) starts with this property (another id TTT2 ignores and no moveset uses),
@@ -613,8 +687,30 @@ def state_flags(moveset):
     return tests, props
 
 
+class ParamAsValue:
+    """A requirement row (an action) seen as the property row it was made of: its 'value' is the row's 'param'."""
+
+    def __init__(self, row):
+        self.row = row
+
+    def __getitem__(self, key):
+        return self.row['param' if key == 'value' else key]
+
+    def __setitem__(self, key, v):
+        self.row['param' if key == 'value' else key] = v
+
+
 def rev32(v):
     return int('{:032b}'.format(v)[::-1], 2)
+
+
+def hit_location(game, x, hit_locations, hitbox):
+    """A hit location code of `game` (a byte of a move's hitbox) -> TTT2's: a weapon's point (its bone's number) or
+    the definition's HIT_LOCATIONS (hit_locations), else a Tekken 8 limb point's (HIT_POINT8), else the id maps'
+    (hitbox), else HIT_LOCATION's."""
+    if x not in hit_locations and game == 't8' and x in HIT_POINT8:
+        return HIT_POINT8[x]
+    return hit_locations.get(x, hitbox.get(x, HIT_LOCATION[game].get(x, x)))
 
 
 def classify(k, h7, donor):
@@ -690,6 +786,7 @@ class Converter:
     linking = 0                         # > 0 while the links of the fighter's own (or converted) moves are made
     gauge = None                        # the definition's GAUGE (convert/gauge.py), set by __init__
     effects = None                      # its sound effects (convert/sounds.Effects; the importer's), or None
+    effects8 = {}                       # Tekken 8 effect id -> its body part, or {summon: part} (convert/effects8.py)
     true_reqs = frozenset()             # (requirement, parameter) pairs true by the definition, set by __init__
     # reactions of the fighter's that keep their own move where the reaction evidence puts another of the same kind in
     # their place (MOVESET['own_reactions']: source names, '#<index>' for unnamed Tekken 8 moves; target()), by __init__
@@ -697,6 +794,11 @@ class Converter:
     flag_reqs, flag_props = {}, {}      # the definition's state flags (FLAG_ON): test id -> (variable, kind), property
                                         # id -> variable, set by __init__
     counted = frozenset()               # the counted holds' variables of the cancel list being converted (COUNT_VAR)
+    flag8 = {}                          # Tekken 8 flag slot -> its TTT2 moveset variable (FLAG8), set by __init__
+    flag8_count = None                  # the flag variables' countdown requirement lists (flag8_block)
+    hit_latch = None                    # the latch keeping "the move hit" in the cancel list being converted (HIT_HELD)
+    _prop_latches = None                # {cancel list: latches its moves' properties use} (hit_latch_of)
+    _hit_sets = None                    # {latch: the requirement list [(46), (set latch, 1)]} (hit_row)
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
     hands_reference = None              # the definition's HANDS row: (its motbin, its motion pack), by the importer
     _hands = None                       # hand_map's map
@@ -747,6 +849,7 @@ class Converter:
         self.own_reactions = frozenset(d.MOVESET.get('own_reactions', ()))
         self.effect_ids = set()                                   # the Tekken 7 effect ids the moves spawn
         self.effect_rows = []              # (property row, Tekken 7 effect id, frames left of its move or None)
+        self.effects8_stopped = set()      # the Tekken 8 effect ids a move's list stops (effect8_rows)
         self.projectile_effects = {}                               # effect id -> its projectile (projectile_look)
         self.electric_moves = []           # the (Tekken 8) electrics given Kazuya's lightning (electric_rows)
         self.thrown = getattr(d, 'THROWN', {})                    # move name -> its projectile (thrown_rows)
@@ -817,6 +920,8 @@ class Converter:
         # Tekken 7's variable 9, which nothing he does sets)
         self.true_reqs = set(d.MOVESET.get('true_requirements', ()))
         self.flag_reqs, self.flag_props = state_flags(d.MOVESET)
+        self.flag8 = self.flag8_slots()
+        self.flag8_moves = collections.defaultdict(list)   # Tekken 8 move -> [(frame, gate list, TTT2 rows)] (FLAG8)
         self.drop_moves = drop_moves(d)
         self.ground_arcs = {}           # Tekken 7 move -> (frame, value) of its 0x8226 to bake (convert/arcs.py)
 
@@ -892,6 +997,8 @@ class Converter:
     def guarded(self, c):
         """The values of the fighter's id c pass the id maps as they are, so FIT tests them (a Tekken 8 fighter's)."""
         g = self.game
+        if c == TIGER_PROP[g] and self.opt_anims:       # (its own part-3 animations: conv_value)
+            return False
         return g == 't8' and not (c in VALUE_KIND[g] or c in SOUND_PROPS[g] or c in PROJ_PROPS[g] or
                                   c in PROP_OVERRIDE[g] or c in REQ_OVERRIDE[g] or c in REQ_OR[g] or
                                   c in (MOVE_PARAM[g], MOVE_PROP[g]) or c in CHAR_IS[g] or c in CHAR_IS_NOT[g] or
@@ -1080,6 +1187,192 @@ class Converter:
             return {'condition': LATCH_PROP['ttt2'] + 3 * k + c - base, 'param': row['param2']}
         return None
 
+    # --- Tekken 8's flag slots (FLAG8) ------------------------------------------------------------------
+    def flag8_slots(self):
+        """{Tekken 8 flag slot: TTT2 moveset variable} for the slots the fighter both sets (with value 0 or 1 only)
+        and tests, one variable each in FLAG8_VARS order while one is free: not a state_flags one of the definition's,
+        and none whose ids the donor's moveset has or the fighter's ids map to (the id maps, the overrides)."""
+        g = self.game
+        if FLAG8_REQ.get(g) is None:
+            return {}
+        k, d = self.k, self.d
+        tested, values, ids = set(), collections.defaultdict(set), set()
+        for r in k.tables['requirements']:
+            ids.add(r['condition'])
+            if r['condition'] == FLAG8_REQ[g]:
+                tested.add(r['param'])
+            elif r['condition'] == FLAG8_PROP[g]:
+                values[r['param']].add(r.get('param3', 0))
+        for t in ('extra_move_properties', 'move_begin_props', 'move_end_props'):
+            for x in k.tables[t]:
+                ids.add(x['id'])
+                if x['id'] == FLAG8_PROP[g]:
+                    values[x['value']].add(x.get('value3', 0))
+        why = {v: 'a state flag of the definition' for v in FLAG8_VARS
+               if v in set(self.flag_props.values()) | {v for v, _ in self.flag_reqs.values()}}
+        donor = {r['condition'] for r in d.tables['requirements']}
+        for t in ('extra_move_properties', 'move_begin_props', 'move_end_props'):
+            donor |= {x['id'] for x in d.tables[t]}
+        mapped = {}
+        for c in sorted(ids - {FLAG8_REQ[g], FLAG8_PROP[g]}):
+            b, how = (self.req_map if c < 0x8000 else self.prop_map).lookup(c)
+            for x in (REQ_OVERRIDE[g].get(c), PROP_OVERRIDE[g].get(c), b if how in M.MAPPED else None):
+                mapped.setdefault(x, c)
+        for v in FLAG8_VARS:
+            if v not in why and donor & set(var_ids(v)):
+                why[v] = 'the donor\'s moveset uses it'
+            elif v not in why and mapped.keys() & set(var_ids(v)):
+                why[v] = 'the fighter\'s %d maps to its id' % mapped[min(mapped.keys() & set(var_ids(v)))]
+        for v, reason in sorted(why.items()):
+            self.stats['Tekken 8 flag slots: moveset variable %d not taken (%s)' % (v, reason)] += 1
+        free = [v for v in FLAG8_VARS if v not in why]
+        out = {}
+        for s in sorted(tested & set(values)):
+            if not values[s] <= {0, 1}:
+                self.stats['Tekken 8 flag slots set to values TTT2 cannot keep (left never set)'] += 1
+            elif not free:
+                self.stats['Tekken 8 flag slots without a free moveset variable (left never set)'] += 1
+            else:
+                out[s] = free.pop(0)
+                self.stats['Tekken 8 flag slot %d -> moveset variable %d' % (s, out[s])] += 1
+        return out
+
+    def flag8_test(self, slot, value):
+        """A test of flag slot `slot`'s value: TTT2's row for it, None (true: left out) or False."""
+        k = self.flag8.get(slot)
+        if k is None:
+            self.stats['Tekken 8 flag slot tests of a slot never set (value 0 true, others false)'] += 1
+            return None if value == 0 else False
+        self.stats['Tekken 8 flag slot tests -> moveset variables'] += 1
+        ge, le = var_ids(k)[:2]
+        return {'condition': le, 'param': 0} if value == 0 else {'condition': ge, 'param': 1} if value == 1 else False
+
+    def flag8_set(self, slot, life, value):
+        """A set of flag slot `slot` (its lifetime in moves, its value): TTT2's row for it ({'condition', 'param'}, as
+        an action in a requirement list), or None (left out)."""
+        k = self.flag8.get(slot)
+        if k is None:
+            self.stats['Tekken 8 flag slot sets of a slot without a variable (left out)'] += 1
+            return None
+        self.stats['Tekken 8 flag slot sets -> moveset variables'] += 1
+        return {'condition': var_ids(k)[3], 'param': (life if value else 0) & 0xFFFF}
+
+    def flag8_gated(self, i):
+        """Tekken 8 requirement list i tests a flag slot kept in a variable."""
+        return bool(self.flag8) and any(c == FLAG8_REQ[self.game] and p in self.flag8 for c, p, _ in self.req_rows(i))
+
+    def flag8_block(self):
+        """The rows every cancel list converted from the fighter's starts with: per flag variable, an action row as the
+        move starts (window 1-1, no input) taking 1 off it while it is above 0 (the unsigned tests: below 0 it is
+        huge)."""
+        if not self.flag8:
+            return []
+        if self.flag8_count is None:
+            self.flag8_count = []
+            for k in sorted(set(self.flag8.values())):
+                ge, sub = var_ids(k)[0], var_ids(k)[5]
+                self.flag8_count.append(tagsystem.write(self.T, 'requirements', [
+                    {'condition': ge, 'param': 1}, {'condition': sub, 'param': 1}, {'condition': TT_END, 'param': 0}]))
+        return [self.action_row(r, 1) for r in self.flag8_count]
+
+    def action_row(self, req, frame):
+        """A cancel row that only runs requirement list req's actions, at the move's frame `frame`."""
+        if tagcombo.ACTION_ONLY not in self.extra_index:
+            self.extra_index[tagcombo.ACTION_ONLY] = self.add('cancel_extras', {'value': tagcombo.ACTION_ONLY})
+        return dict(direction=0, button=0, req=req, extradata=self.extra_index[tagcombo.ACTION_ONLY],
+                    win_start=frame, win_end=frame, start_frame=frame, move_id=0x8001, option=0)
+
+    def flag8_rows(self):
+        """The fighter's moves whose extra (or begin) properties set a flag slot or test one (flag8_moves) get them as
+        action rows of their cancel list (a copy), after its countdown rows: per property frame and list, the list's
+        tests, then the properties as its actions."""
+        made = {}
+        for t8, held in sorted(self.flag8_moves.items()):
+            if t8 not in self.newidx:
+                continue
+            move = self.T['moves'][self.newidx[t8]]
+            rows = []
+            for frame, gate, props in held:
+                if not props:
+                    continue
+                tests = [{'condition': c, 'param': p} for c, p in tagsystem.reqs(self.T, gate)] if gate is not None else []
+                acts = [{'condition': p['id'], 'param': p['value']} for p in props]
+                for p, a in zip(props, acts):           # (an effect's row: split_effects names its copy later)
+                    for n, (row, effect, left) in enumerate(self.effect_rows):
+                        if row is p:
+                            self.effect_rows[n] = (ParamAsValue(a), effect, left)
+                req = tagsystem.write(self.T, 'requirements', tests + acts + [{'condition': TT_END, 'param': 0}])
+                rows.append(self.action_row(req, 1 if frame >= 0x8000 or frame < 1 else min(frame, 32767)))
+                self.stats['Tekken 8 flag slots: property rows as action rows'] += len(props)
+            if not rows:
+                continue
+            cl = [dict(c) for c in tagsystem.cancels(self.T, move['cancel'])]
+            count = set(self.flag8_count or ())
+            at = max((n + 1 for n, c in enumerate(cl) if c['req'] in count and c['move_id'] == 0x8001), default=0)
+            key = (move['cancel'], tuple(tuple(sorted(r.items())) for r in rows))
+            if key not in made:
+                made[key] = tagsystem.write(self.T, 'cancels', cl[:at] + rows + cl[at:])
+            move['cancel'] = made[key]
+            self.stats['Tekken 8 flag slots: moves given action rows'] += 1
+
+    # --- "the move hit" kept to the move's end (HIT_HELD) ----------------------------------------------------
+    def latches_in(self, rows):
+        """The latches (0 .. LATCHES - 1) Tekken 8 requirement or property rows [(id, value, ...)] name."""
+        g, out = self.game, set()
+        for c, p, *_ in rows:
+            if LATCH_REQ[g] <= c < LATCH_REQ[g] + LATCHES:
+                out.add(c - LATCH_REQ[g])
+            elif LATCH_PROP[g] <= c < LATCH_PROP[g] + 3 * LATCHES:
+                out.add((c - LATCH_PROP[g]) // 3)
+            elif c == LATCH_ANY_REQ[g] or 0 <= c - LATCH_ANY_PROP[g] < 3:
+                out.add(p - 1)
+        return out
+
+    def hit_latch_of(self, i):
+        """The latch keeping "the move hit" in the Tekken 8 cancel list at i (HIT_HELD): None when none of its rows
+        tests a HIT_HELD id, or when its rows, its groups' and the properties of the moves with this list name all four
+        latches (the last free one otherwise)."""
+        g = self.game
+        if not HIT_HELD[g] or i is None:
+            return None
+        rows = M.cancels(self.k, i)
+        if not any(c in HIT_HELD[g] for x in rows for c, _, _ in self.req_rows(x['req'])):
+            return None
+        used = set()
+        for x in rows:
+            used |= self.latches_in(self.req_rows(x['req']))
+            if x['direction'] == M.GROUP:
+                for y in M.cancels(self.k, x['move_id'], 'group_cancels', M.GROUP_END):
+                    used |= self.latches_in(self.req_rows(y['req']))
+        if self._prop_latches is None:
+            self._prop_latches = collections.defaultdict(set)
+            for mv in self.k.tables['moves']:
+                props = [(idv, v) for _, idv, v, _ in self.xp_rows(mv.get('extraprops'))]
+                for key, t in (('begin_props', 'move_begin_props'), ('end_props', 'move_end_props')):
+                    if mv.get(key) is not None:
+                        for _, p in self.k.iter_list(t, mv[key], lambda p: p['id'] == self.end):
+                            if p['id'] == self.end:
+                                break
+                            props.append((p['id'], p['value']))
+                self._prop_latches[mv.get('cancel')] |= self.latches_in(props)
+        used |= self._prop_latches.get(i, set())
+        free = [k for k in reversed(range(LATCHES)) if k not in used]
+        if not free:
+            self.stats['Tekken 8 "the move hit": cancel lists with every latch taken (46 kept)'] += 1
+            return None
+        return free[0]
+
+    def hit_row(self, k):
+        """The action row first in a cancel list keeping "the move hit" in latch k (HIT_HELD): on the hit's frame (46)
+        it sets the latch to 1."""
+        if self._hit_sets is None:
+            self._hit_sets = {}
+        if k not in self._hit_sets:
+            self._hit_sets[k] = tagsystem.write(self.T, 'requirements', [
+                {'condition': HIT_NOW, 'param': 0}, {'condition': LATCH_PROP['ttt2'] + 3 * k, 'param': 1},
+                {'condition': TT_END, 'param': 0}])
+        return dict(self.action_row(self._hit_sets[k], 1), win_end=32767)
+
     def conv_reqs(self, i, overrides=None):
         """A Tekken 7 requirement list -> (the new list's index, ok); ok False: the list can never be true."""
         if i is None:
@@ -1089,6 +1382,9 @@ class Converter:
         counted = self.counted and self.counted & {p >> 16 for c, p, _ in self.req_rows(i) if c in COUNT_VAR[g]}
         if counted:                               # (the list names a counted hold's variable: converted for it)
             key += ('counted',) + tuple(sorted(counted))
+        held = self.hit_latch is not None and any(c in HIT_HELD[g] for c, _, _ in self.req_rows(i))
+        if held:                                  # (it tests "the move hit": the cancel list's latch, HIT_HELD)
+            key += ('hit', self.hit_latch)
         if key in self.cache:
             return self.cache[key]
         rows, res = [], None
@@ -1128,6 +1424,26 @@ class Converter:
                     self.stats['character requirement "is X" -> false'] += 1
                     res = (None, False)
                     break
+            if c == FLAG8_REQ[g]:                 # a test of a Tekken 8 flag slot (FLAG8)
+                test = self.flag8_test(p, row.get('param2', 0))
+                if test is False:
+                    res = (None, False)
+                    break
+                if test is not None:
+                    rows.append(test)
+                continue
+            if c == FLAG8_PROP[g]:                # a flag slot's set, as an action (FLAG8)
+                act = self.flag8_set(p, row.get('param2', 0), row.get('param3', 0))
+                if act is not None:
+                    rows.append(act)
+                continue
+            if c in WALL8[g]:                     # a wall test (WALL8): the distance in TTT2's high bits
+                if not 0 <= p < 1 << 24:
+                    res = (None, False)
+                    break
+                rows.append({'condition': WALL8[g][c], 'param': p << 8 | WALL_ANGLE})
+                self.stats['wall tests (Tekken 8 194..201 -> TTT2 174..181)'] += 1
+                continue
             if c in self.flag_reqs:               # a test of a state flag (state_flags): on or off
                 k, kind = self.flag_reqs[c]
                 on = p != 0 if kind == 'equals' else kind == 'set'
@@ -1148,6 +1464,10 @@ class Converter:
                 res = (None, False)
                 break
             c2 = overrides[c] if overrides and c in overrides else self.map_req(c)
+            if held and c in HIT_HELD[g] and c2 == HIT_NOW:     # "the move hit": the latch (HIT_HELD)
+                rows.append({'condition': LATCH_REQ['ttt2'] + self.hit_latch, 'param': 1})
+                self.stats['Tekken 8 "the move hit" tests -> the latch set on the hit\'s frame'] += 1
+                continue
             if c in AIR_SIDE_EFFECT[g] and p == 1 and c2 is not None:     # (1, n): the hit's side effect, no test
                 self.stats['Tekken 8 airborne tests: the hit\'s side effect (1, n) left out'] += 1
                 p = 0
@@ -1194,6 +1514,8 @@ class Converter:
         nseq = len(self.k.tables['input_sequences'])
         counting = self.counting_rows(i) if table == 'cancels' else {}
         outer, self.counted = self.counted, frozenset(counting.values())     # (a group is converted without them)
+        hit = self.hit_latch_of(i) if table == 'cancels' else None
+        outer_hit, self.hit_latch = self.hit_latch, hit                       # (a group's stay 46: HIT_HELD)
         for n, c in enumerate(M.cancels(self.k, i, table, end)):
             d = dict(direction=c['direction'], button=c['button'], req=None, extradata=None,
                      win_start=c['win_start'], win_end=c['win_end'], start_frame=c['start_frame'],
@@ -1235,7 +1557,13 @@ class Converter:
             for r in reqs:
                 out.append(dict(d, req=r))
                 self.stats['cancels converted'] += 1
-        self.counted = outer
+        self.counted, self.hit_latch = outer, outer_hit
+        if hit is not None and any((LATCH_REQ['ttt2'] + hit, 1) in tagsystem.reqs(self.T, r['req'])
+                                   for r in out if r['req'] is not None):
+            out = [self.hit_row(hit)] + out         # "the move hit" set on the hit's frame (HIT_HELD)
+            self.stats['Tekken 8 "the move hit": cancel lists keeping it in a latch'] += 1
+        if table == 'cancels' and self.flag8:      # the flag slots' countdown as the move starts (FLAG8)
+            out = self.flag8_block() + out
         return out
 
     def or_variants(self, i):
@@ -1314,7 +1642,7 @@ class Converter:
         g = self.game
         if t7id in self.flag_props:
             return FLAG_ON if v else 0
-        if t7id == TIGER_PROP[g]:
+        if t7id == TIGER_PROP[g] and self.opt_anims:
             return OPT_ANIM_BASE + self.opt_anims[v] if v in self.opt_anims else None
         if t7id == SCREW_COUNTER[g] and v == SCREW_SPEND:
             return None
@@ -1360,9 +1688,12 @@ class Converter:
         return voices[turn % len(voices)]
 
     def prop_value(self, row):
-        """A property row's value as Tekken 7 has it (Tekken 8's sounds: bank << 24 | n, SPLIT_SOUND)."""
+        """A property row's value as Tekken 7 has it (Tekken 8's sounds: bank << 24 | n, SPLIT_SOUND; a flag slot's set:
+        slot | lifetime << 8 | value << 24, FLAG8)."""
         if SPLIT_SOUND[self.game] and row['id'] in SOUND_PROPS[self.game]:
             return (row['value'] & 0xFF) << 24 | (row['value3'] & 0xFFFFFF)
+        if row['id'] == FLAG8_PROP[self.game]:
+            return row['value'] & 0xFF | (row.get('value2', 0) & 0xFFFF) << 8 | min(row.get('value3', 0), 0xFF) << 24
         return row['value']
 
     def req_value(self, row):
@@ -1514,19 +1845,18 @@ class Converter:
         return start
 
     def hit_location(self, x):
-        """A Tekken 7 hit location code (a byte of a move's hitbox) -> TTT2's: a weapon's point (its bone's number)
-        or the definition's HIT_LOCATIONS, else a Tekken 8 limb point's (HIT_POINT8), else the id maps', else
-        HIT_LOCATION's."""
-        if x not in self.hit_locations and self.game == 't8' and x in HIT_POINT8:
-            return HIT_POINT8[x]
-        return self.hit_locations.get(x, self.hitbox.get(x, HIT_LOCATION[self.game].get(x, x)))
+        """A Tekken 7 hit location code (a byte of a move's hitbox) -> TTT2's (hit_location)."""
+        return hit_location(self.game, x, self.hit_locations, self.hitbox)
 
-    def conv_xps(self, i, move=None, extra=()):
-        if i is None and not extra:
+    def conv_xps(self, i, move=None, extra=(), only=None):
+        """Move `move`'s extra property list i (with rows `extra` after it) -> the new list's index, or None.
+        `only`: rows [(frame, id, value, None)] converted in place of list i's, their TTT2 rows returned (FLAG8: the
+        properties whose requirement list tests a flag slot)."""
+        if i is None and not extra and only is None:
             return None
         g = self.game
         rows = []
-        t7 = self.xp_rows(i)
+        t7 = self.xp_rows(i) if only is None else only
         air = any(idv == ARCS[g][1] for _, idv, _, _ in t7)     # a 2D air move (convert/arcs.py)
         amounts = sorted((0 if f >= 0x8000 else f, v) for f, idv, v, _ in t7 if idv == DAMAGE_AMOUNT[g])
         dealt = collections.Counter()                       # points dealt so far (amount's frame, property)
@@ -1540,8 +1870,20 @@ class Converter:
                     self.stats['property dropped: requirement'] += 1
                     continue
                 if not self.always(r):                      # (TTT2's rows have none)
+                    if move is not None and self.flag8_gated(req):      # a flag slot's test: action rows (FLAG8)
+                        self.flag8_moves[move].append((f, r, self.conv_xps(None, move, only=[(f, idv, v, None)])))
+                        continue
                     self.stats['property dropped: a condition TTT2 cannot attach'] += 1
                     continue
+            if idv == FLAG8_PROP[g]:                        # a flag slot's set: an action row at its frame (FLAG8)
+                act = self.flag8_set(v & 0xFF, v >> 8 & 0xFFFF, v >> 24)
+                if act is not None and (only is not None or move is not None):
+                    prop = dict(frame=f, id=act['condition'], value=act['param'])
+                    if only is not None:
+                        rows.append(prop)
+                    else:
+                        self.flag8_moves[move].append((f, None, [prop]))
+                continue
             if idv in ARCS[g]:                              # 2D arcs (convert/arcs.py)
                 rows += [r for r in self.arc_rows(move, air, f, idv, v) if r not in rows]
                 continue
@@ -1567,6 +1909,9 @@ class Converter:
                 if points:
                     rows.append(dict(frame=f, id=DAMAGE_DEAL[g][idv], value=points))
                     self.stats['throw damage dealt'] += 1
+                continue
+            if g == 't8' and idv in (EFFECT8_SPAWN, EFFECT8_STOP) and v & 0xFF in self.effects8:   # (effects8.py)
+                self.effect8_rows(rows, t7, f, idv, v, move)
                 continue
             stop = G.stop_frames(t7, idv, v, g) if self.gauge else None
             if stop:                                        # a super's time stop (convert/gauge.py)
@@ -1594,6 +1939,8 @@ class Converter:
                 look = self.projectile_look(v, {i: x for h, i, x, _ in t7 if h == f})
                 if look is not None:
                     rows.append(dict(frame=f, id=EFFECT_PROP, value=look))
+        if only is not None:
+            return rows
         if ELECTRIC_MARK[g] is not None and any(r['id'] == ELECTRIC_PROP and r['value'] == 1 for r in rows):
             rows += self.electric_rows(move)                # a Tekken 8 electric: Kazuya's lightning
         if breaks or FLOOR_BREAK8[g] is not None and move is not None:
@@ -1605,6 +1952,35 @@ class Converter:
         start = len(self.T['extra_move_properties'])
         self.T['extra_move_properties'] += rows
         return start
+
+    # --- Tekken 8 effects (convert/effects8.py) ---------------------------------------------------------------------
+    def effect8_rows(self, rows, t7, f, idv, v, move):
+        """A Tekken 8 effect row (EFFECT8_SPAWN, EFFECT8_STOP; value part << 8 | id) of an effect id the definition
+        attaches to a body part (effects8 {id: part, or {summon: part}: at the part of the summon the list shows or
+        hides, the first listed when it does neither}): a spawn becomes TTT2's (EFFECT_PROP, at that part), noted
+        with the frames until the same list stops it (EFFECT8_STOP, the same id, or that summon's dismissal; else
+        the move's frames left), which split_effects makes the end of its copy; a stop has no TTT2 row (TTT2's
+        effects stop by themselves; effects8_stopped notes the id: it loops until stopped)."""
+        if idv == EFFECT8_STOP:
+            self.effects8_stopped.add(v & 0xFF)
+            self.stats['Tekken 8 effect stops (their copies end there)'] += 1
+            return
+        eid, part = v & 0xFF, self.effects8[v & 0xFF]
+        at = lambda g: 0 if g >= 0x8000 else g
+        start = at(f)
+        ends = [at(g) for g, i, x, _ in t7 if i == EFFECT8_STOP and x & 0xFF == eid]
+        if isinstance(part, dict):                          # a summon's effect: at its part, ending with it
+            moves = SUMMON_PROPS[self.game]
+            n = next((x for g, i, x, _ in t7 if moves.get(i) in (TT_SUMMON, TT_DISMISS) and x in part),
+                     next(iter(part)))
+            ends += [at(g) for g, i, x, _ in t7 if moves.get(i) == TT_DISMISS and x == n]
+            part = part[n]
+            self.stats['Tekken 8 effects at the part of the summon shown (%d)' % n] += 1
+        stop = min((g for g in ends if g > start), default=None)
+        rows.append(dict(frame=f, id=EFFECT_PROP, value=part << 8 | eid))
+        self.effect_ids.add(eid)
+        self.effect_rows.append((rows[-1], eid, stop - start if stop is not None else self.frames_left(move, f)))
+        self.stats['Tekken 8 effects (the definition\'s, at its body parts)'] += 1
 
     def summon_rows(self, t7, move=None):
         """The rows of Tekken 7 properties [(frame, id, value)] that summon weapons and their particles (SUMMON_PROPS,
@@ -1635,6 +2011,7 @@ class Converter:
             for f, idv, v, _ in self.xp_rows(mv.get('extraprops')):
                 if idv == 0 and f == 0:
                     break
+                v &= 0xFF                                     # (Tekken 8's fade frames above: summons8.fade_value)
                 if idv in ids and v in self.summons:
                     ops[v].append((0 if f >= 0x8000 else f, ids[idv] == TT_SUMMON))
             for n, rows in ops.items():
@@ -1976,6 +2353,13 @@ class Converter:
         for _, p in self.k.iter_list(table, i, lambda p: p['id'] == self.end):
             if p['id'] == self.end:
                 break
+            if p['id'] == FLAG8_PROP[self.game]:      # a flag slot's set (FLAG8; an end property clears one)
+                v = self.prop_value(p)
+                act = self.flag8_set(v & 0xFF, v >> 8 & 0xFFFF, v >> 24)
+                r, ok = self.conv_reqs(p['req'])
+                if act is not None and ok:
+                    rows.append(dict(req=r if r is not None else 0, id=act['condition'], value=act['param']))
+                continue
             pid = self.map_prop(p['id']) if p['id'] >= 0x8000 else self.map_req(p['id'])
             if pid is None:
                 continue
@@ -2396,6 +2780,7 @@ class Converter:
         self.evade_rows()
         if self.game == 't8':
             self.handoffs8()
+        self.flag8_rows()                   # Tekken 8's flag slots: the properties that set or test them (FLAG8)
         # every move belongs to the new motion row
         for n, row in enumerate(self.T['moves']):
             combined = (self.newid << 16) + n - (self.newid - 1)
@@ -2733,7 +3118,7 @@ class Converter:
         for n, lst in sorted(users.items()):
             clip = animation.decode(self.new_anims[n], '>')
             v, kind = clip['values'].astype(np.float64), clip['type']
-            if v.shape[1] != len(animation.BODY_DESCRIPTORS) or len(v) < 2:
+            if v.shape[1] < len(animation.BODY_DESCRIPTORS) or len(v) < 2:     # (weapon pairs after: summons8)
                 continue
             fixes = {}
             for _, b in lst:

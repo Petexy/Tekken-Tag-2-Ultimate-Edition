@@ -405,9 +405,11 @@ def rotation_shift(values):
     without wrapping: shift s steps by 2^s units of pi/32768 (0: 0.0055 degrees) over +-pi 2^s. Retargeted motion is
     smooth floats: at shift 0 the feet and hands stay within 0.13 mm (median of the clips' worst frames; 0.24 p99) of
     the unquantised pose, at the game's usual 4 within 2 mm, with 0.3 mm of frame-to-frame jitter on a planted foot,
-    for 0.74 of the size (Reina's clips). The game stores some of its own so too (Jun's stance)."""
+    for 0.74 of the size (Reina's clips). The game stores some of its own so too (Jun's stance). Values with extra
+    (translation, rotation) pairs after the body channels (descriptors()) count those rotations too."""
     v = np.asarray(values, np.float64)
-    rot = [c for c, d in enumerate(animation.BODY_DESCRIPTORS) if animation.is_rotation(d)]
+    rot = [c for c, d in enumerate(descriptors(v.shape[1] if v.ndim == 3 else len(animation.BODY_DESCRIPTORS)))
+           if animation.is_rotation(d)]
     top = float(np.abs(v[:, rot]).max()) if v.size else 0.0
     shift = 0
     while shift < MAX_SHIFT and np.round(top / (float(animation.ROTATION_UNIT) * (1 << shift))) > 32767:
@@ -420,12 +422,29 @@ def rotation_shift(values):
 RAW_DESCRIPTORS = tuple(animation.ROTATION if animation.is_rotation(d) else d for d in animation.BODY_DESCRIPTORS)
 
 
+# extra bones' channels after the body's: a (translation, rotation) pair per bone, as TTT2's own (Yoshimitsu's katanas)
+# and Tekken 7's weapon animations carry them (ttt2/animation.py)
+PAIR_DESCRIPTORS = (animation.TRANSLATION, animation.ROTATION)
+
+
+def descriptors(nch, kind=animation.COMPRESSED):
+    """The descriptors of a body animation of nch channels: the 23 body channels', then a PAIR_DESCRIPTORS pair per
+    extra bone (nch - 23 even)."""
+    body = animation.BODY_DESCRIPTORS if kind == animation.COMPRESSED else RAW_DESCRIPTORS
+    extra = nch - len(body)
+    if extra < 0 or extra % 2:
+        raise ValueError('a body animation has 23 channels and (translation, rotation) pairs after them, not %d' % nch)
+    return tuple(body) + PAIR_DESCRIPTORS * (extra // 2)
+
+
 def encode(values, kind=animation.COMPRESSED, endian='>'):
-    """A TTT2 body animation (bytes) of body_channels() values: 0x64 (compressed) or 0xC8 (raw)."""
+    """A TTT2 body animation (bytes) of body_channels() values, with extra pairs after them if they have any
+    (descriptors()): 0x64 (compressed) or 0xC8 (raw)."""
+    nch = np.asarray(values).shape[1]
     if kind == animation.COMPRESSED:
-        return animation.encode_compressed(list(animation.BODY_DESCRIPTORS), values, endian,
+        return animation.encode_compressed(list(descriptors(nch)), values, endian,
                                            rotation_shift=rotation_shift(values))
-    return animation.encode_raw(list(RAW_DESCRIPTORS), values, endian)
+    return animation.encode_raw(list(descriptors(nch, kind)), values, endian)
 
 
 # ------------------------------------------------------------------------------------------------ checking
