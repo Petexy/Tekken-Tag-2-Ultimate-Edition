@@ -547,7 +547,8 @@ def _maps8(ev):
 # own numbering where their meaning has one TTT2 has not, so an exception of a Tekken 8 map is kept only when at
 # least FIT_SHARE of the fighters' rows with that id pass a value TTT2's own movesets pass with its TTT2 id (in any
 # list): Reina's 0x8049 -> 0x801d (71 .. 5054 where TTT2 passes 0 .. 60; through Tekken 7 it is 0x8031, whose values
-# do not fit either), 0x83be -> 0x8001 (65536: TTT2 passes 0), 0x83ce -> 0x8138 (70, 80: TTT2 0, 1), 0x8376 ->
+# do not fit either), 0x83be -> 0x8001 (65536: TTT2 passes 0), 0x83ce -> 0x8138 (70, 80: TTT2 0, 1; the converter
+# makes its own rows of it: moveset.FLOOR_BREAK8), 0x8376 ->
 # 0x825d, 0x82a6 -> 0x82d5, 0x833b -> 0x8194, 0x8281 -> 0x82f9 (a sound property, value 1) and the requirements 442
 # (Heat variables 1 .. 3 as TTT2's 46, which tests 0) and 352 -> 49 lose theirs (`distrust`). And an exception of the
 # fighters' own evidence yields to the references' map where their evidence (which holds the fighters' too) pairs the
