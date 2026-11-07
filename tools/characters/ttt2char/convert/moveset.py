@@ -452,6 +452,7 @@ VERSUS8 = (505, 506)
 # the kinds Tekken 8's moves give it (3 and 4 damage, 11 surprise: bank 17), TTT2's damage voice 0, as TTT2's own
 # throws play the opponent's (Jun's 0x82fb 0x03000000 where Reina's 0x87f2 plays 17 / 3); its other voices left out
 OPPONENT_VOICE8 = (0x87f2, {3: 0x03000000, 4: 0x03000000, 11: 0x03000000})
+PLAYER_SOUND8 = 0x87f0
 # A voice of a kind (bank 17) Tekken 8 says by chance (value2, percent: her jabs' short shout 40 %, most of her
 # attacks' 60 to 100 %): said always from CHANCE8 on (TTT2's rows have no conditions), else left out (TTT2's own jabs
 # say nothing: a shout on every jab would be the most of her voice)
@@ -1479,6 +1480,8 @@ class Converter:
                 p = 0
             if c >= 0x8000 and c not in (self.end, MOVE_PARAM[g]) and c not in REQ_PROP_KEEP[g]:
                 v = self.req_value(row)           # (a Tekken 8 sound: its split value, req_value)
+                if v is not None and self.own_effect(c, v) != c:
+                    c2 = self.map_req(self.own_effect(c, v))
                 p2 = self.conv_value(c, v) if c2 is not None and v is not None else None
                 if p2 is None:                    # an action TTT2 cannot take: left out, the list kept
                     self.stats['property left out of a requirement list'] += 1
@@ -1682,6 +1685,15 @@ class Converter:
                 not self.own_voice(v):
             return None
         return v
+
+    def own_effect(self, c, v):
+        """Tekken 8's sound id c with value v (bank << 24 | n), as the id its row needs: an effect of the attacker's
+        played at the opponent's body (0x87f2) is the player's in TTT2, whose opponent sound would take the item sound
+        from the opponent's list (tekken8/sounds.py)."""
+        if self.game == 't8' and c == OPPONENT_VOICE8[0] and self.effects is not None and \
+                self.effects.move_value(v) is not None:
+            return PLAYER_SOUND8
+        return c
 
     def voice8(self, v):
         """A Tekken 8 voice (bank << 24 | n, VOICE8_BANKS) -> the TTT2 voice that plays its line (voices8; a kind's
@@ -1924,7 +1936,7 @@ class Converter:
                 rows.append(dict(frame=f, id=G.STOP, value=stop))
                 self.stats['time stops'] += 1
                 continue
-            p = self.map_prop(idv) if idv >= 0x8000 else self.map_req(idv)
+            p = self.map_prop(self.own_effect(idv, v)) if idv >= 0x8000 else self.map_req(idv)
             if p is None:
                 continue
             v2 = self.conv_value(idv, v)
@@ -2366,7 +2378,7 @@ class Converter:
                 if act is not None and ok:
                     rows.append(dict(req=r if r is not None else 0, id=act['condition'], value=act['param']))
                 continue
-            pid = self.map_prop(p['id']) if p['id'] >= 0x8000 else self.map_req(p['id'])
+            pid = self.map_prop(self.own_effect(p['id'], self.prop_value(p))) if p['id'] >= 0x8000 else self.map_req(p['id'])
             if pid is None:
                 continue
             r, ok = self.conv_reqs(p['req'])

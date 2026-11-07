@@ -20,6 +20,7 @@ from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
     moveset, outfits, particles, snakes8, sounds, summons8, tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
+from .tekken8 import sounds as sounds8
 from .tekken7.autodump import FILES, unread
 from .tekken7.pak import EncryptedError, Paks, pak_names
 from .ttt2 import bone, motbin, title_folder
@@ -346,6 +347,14 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                  extra=[s for s in (gauge.full_sound(d),) if s],
                                  actions=lambda m, mv: idmaps.cancel_reqs(m, mv['cancel']))
         effects.base = sounds.item_count(rpx, d.DONOR)
+    named8 = None
+    if saved8 is not None:                  # (the sounds taken are those of the moves it converts, by their names)
+        step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
+        named8 = _name_moves8(archives, d, saved8[0], lambda s: log('         ' + s))
+        dropped8 = moveset.drop_moves(d)
+        effects = sounds8.Effects(source.store, d.TEKKEN8_CODE, saved8[0], lambda i: not dropped8.search(
+            saved8[0].move_name(i) or moveset.UNNAMED + str(i)))
+        effects.base = sounds.item_count(rpx, d.DONOR)
     try:
         clips = source.clips(d)
         if saved8 is not None:              # (Tekken 8: the lines her own moves say, shouts after hers)
@@ -354,7 +363,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
         banks, lines, wins, voice_extra, sound_extra = voice.build(
             clips, {w: archives.raw(key_of('%s_%s.nus3bank' % (w, d.DONOR))) for w in ('se_Chr', 'se_Dwi', 'rm_Dst',
                                                                                      'rm_Dwi')}, d.CODE, vlist, slot,
-            effects.clips if effects else ())
+            effects.clips if effects else (), saved8 is not None)
     except KeyError as error:
         raise InputError('%s has no %s voice files (%s): is it the Wii U game\'s folder?' % (game, d.DONOR, error))
     merged, chr_tones = voice.merge(banks.pop('se_Chr_%s.nus3bank' % d.CODE), banks.pop('se_Dwi_%s.nus3bank' % d.CODE))
@@ -364,6 +373,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     if effects:
         lines.append('sound effects (its moves\' and projectiles\' item sounds %d on): %s'
                      % (effects.base, ', '.join(effects.names)))
+        for what, why in sorted({(str(w), y) for w, y in getattr(effects, 'left_out', ())}):
+            lines.append('sound effect left out: %s (%s)' % (what, why))
+        for what, why in getattr(effects, 'skipped', ()):
+            lines.append('WARNING: sound effect not read: %s (%s)' % (what, why))
     for line in lines:
         log('         ' + line)
 
@@ -382,7 +395,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                                                             donor_xml, effect_files, wins, vlist,
                                                                             voice_extra, bon, log, step,
                                                                             clips.move_voices(voice.voice_values(
-                                                                                clips, vlist)), slot=slot)
+                                                                                clips, vlist)), slot=slot,
+                                                                            named=named8, effects=effects)
     else:
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
@@ -508,25 +522,32 @@ def _hit_locations(d, bon):
     return out
 
 
+def _name_moves8(archives, d, k, log):
+    """Names the moves of Tekken 8 moveset k -> TTT2's movesets (the names' source)."""
+    from .tekken8 import movenames
+    ttt2_movesets = movenames.ttt2_movesets(archives)
+    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
+    movenames.name_moves(k, ttt2_movesets, log=log)
+    return ttt2_movesets
+
+
 def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, effect_files, wins, vlist, voice_extra,
-                               bon, log, step, voices8=None, slot=None):
+                               bon, log, step, voices8=None, slot=None, named=None, effects=None):
     """The fighter's own Tekken 8 moveset converted (saved: tekken8_moveset's), with its command list -> (moveset
     bytes, motion pack bytes, item database, effect files, command list or None). Its moves are named from TTT2's
     movesets, the id maps come from those and the other Tekken 8 fighters saved with it (their moves named alike),
     its body animations are retargeted onto the skeleton the model step built (bon), TTT2's own where an older
     shared clip was made from one. Tekken 8's effects are not converted: the donor's stay (as with a stand-in).
     voices8: the TTT2 voice of each of its moves' Tekken 8 voices (tekken8/voice.py's move_voices on the banks the
-    voice step built)."""
+    voice step built). named: TTT2's movesets, once its moves are named (_name_moves8). effects: its sound effects
+    (tekken8/sounds.py)."""
     from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, voice as voice8
     from .convert import effects8
     k, files, references = saved
 
     def sub(s):
         log('         ' + s)
-    step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
-    ttt2_movesets = movenames.ttt2_movesets(archives)
-    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
-    movenames.name_moves(k, ttt2_movesets, log=sub)
+    ttt2_movesets = named if named is not None else _name_moves8(archives, d, k, sub)
     dictionary = movenames.harvest(ttt2_movesets)[0]
     others = []
     for code, motbin_path, fields_path in references:
@@ -570,6 +591,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         _options(c, archives, d, {voice8.pose_move(n) or n: tone for n, tone in wins.items()}, vlist, voice_extra,
                  tag_states, bon)
         c.voices8 = voices8 or {}           # her moves' Tekken 8 voices -> the TTT2 voices of the same lines
+        c.effects = effects                 # her moves' sound effects (tekken8/sounds.py)
         if snakes:                          # (their clips in part 3 of the motion pack, started as a tiger's)
             c.part3, c.opt_anims = snakes.part3(plan, bone.read(bon))
         spec8 = effects8.parts(d) if slot is not None else {}       # (her effects: convert/effects8.py)
