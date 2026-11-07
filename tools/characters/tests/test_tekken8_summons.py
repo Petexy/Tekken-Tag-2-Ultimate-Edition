@@ -4,6 +4,7 @@ made-up data (no game files needed).
 
     python3 -m pytest -q tools/characters/tests/test_tekken8_summons.py
 """
+import collections
 import os
 import sys
 import types
@@ -52,6 +53,118 @@ def definition(*weapons_):
 
 STAFF = dict(bone='staff', parent='TE_R_jnt', pair=0, summon=1)
 TAIL = dict(bone='tail', parent='KOSHI_jnt', pair=3, summon=2)
+
+
+class MaskRowsTest(unittest.TestCase):
+    """Show and hide masks (SUMMON_MASKS): a row per bit, in a copy of the list; other lists and moves stay."""
+    class Masks(Moveset):
+        def iter_list(self, table, start, end):
+            i = start
+            while True:
+                row = self.tables[table][i]
+                yield i, row
+                if end(row):
+                    return
+                i += 1
+
+    def test_split(self):
+        end = dict(id=0, frame=0, value=0, value2=0)
+        extra = [dict(id=0x8001, frame=3, value=7, value2=0), end,
+                 dict(id=0x83a6, frame=5, value=0b101, value2=0), dict(id=0x83a7, frame=9, value=0b10, value2=0),
+                 dict(id=0x8001, frame=9, value=1, value2=0), end]
+        k = self.Masks([dict(extraprops=0), dict(extraprops=2), dict(extraprops=2), dict()], extra=extra)
+        d = types.SimpleNamespace(WEAPONS=[dict(summon=0), dict(summon=1)])
+        stats = collections.Counter()
+        summons8.split_masks(k, d, stats)
+        moves = k.tables['moves']
+        self.assertEqual([m.get('extraprops') for m in moves], [0, 6, 6, None])         # (one copy for both)
+        rows = [(r['id'], r['frame'], r['value']) for r in k.tables['extra_move_properties'][6:]]
+        self.assertEqual(rows, [(summons8.SUMMON, 5, 0), (summons8.DISMISS, 9, 1), (0x8001, 9, 1), (0, 0, 0)])
+        self.assertEqual(stats['0x83a6 rows\' bits no weapon takes'], 1)                # (bit 2: no object of his)
+
+
+class VarSlotsTest(unittest.TestCase):
+    def test_rows(self):
+        """A variable the definition names: its tests and sets become the flag slot's; other rows stay."""
+        k = types.SimpleNamespace(tables=dict(requirements=[
+            dict(condition=335, param=1), dict(condition=0x809b, param=1), dict(condition=336, param=1),
+            dict(condition=0x809e, param=1)]))
+        d = types.SimpleNamespace(TEKKEN8=dict(var_slots={3: (9, 2)}))
+        stats = collections.Counter()
+        summons8.vars_as_slots(k, d, stats)
+        rows = k.tables['requirements']
+        self.assertEqual((rows[0]['condition'], rows[0]['param'], rows[0]['param2']), (507, 9, 1))
+        self.assertEqual((rows[1]['condition'], rows[1]['param'], rows[1]['param2'], rows[1]['param3']),
+                         (0x815a, 9, 2, 1))
+        self.assertEqual(rows[2:], [dict(condition=336, param=1), dict(condition=0x809e, param=1)])
+
+    def test_no_slots(self):
+        k = types.SimpleNamespace(tables=dict(requirements=[dict(condition=335, param=1)]))
+        summons8.vars_as_slots(k, types.SimpleNamespace(), collections.Counter())
+        self.assertEqual(k.tables['requirements'], [dict(condition=335, param=1)])
+
+
+class Sphere(Box):
+    def __init__(self, loc, a, loc2, b, radius=0):
+        Box.__init__(self, loc, a, loc2, b)
+        self.radius = radius
+
+
+class JointSpotsTest(unittest.TestCase):
+    JOINTS = {121: ('R_Hand', 9), 131: ('ATH_R_katana', None)}
+    STANDARD = {131: (0.0, 730.0, 0.0)}
+
+    def spots(self, *boxes, every=()):
+        return summons8.joint_spots(boxes, self.JOINTS, self.STANDARD, every)
+
+    def test_plain_moves_have_none(self):
+        """Body codes and the weapon's own point: the move's codes do."""
+        self.assertIsNone(self.spots(Sphere(9, (0, 0, 0), 0, (0, 0, 0)),
+                                     Sphere(131, (0, 730, 0), 0, (0, 0, 0))))
+
+    def test_other_offset_follows_the_joint(self):
+        got = self.spots(Sphere(131, (0, 1200, 0), 9, (0, 0, 0)), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'ATH_R_katana', (0.0, 1200.0, 0.0), (0.0, 0.0, 0.0)))
+        self.assertEqual(got[1:], [9, 0, 0])
+
+    def test_hand_line_near_the_joint(self):
+        """Near its joint an end is the body code at the joint; the far end follows the joint (a gun's line)."""
+        got = self.spots(Sphere(121, (100, 0, 0), 121, (5000, 0, 0)), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[0], 9)
+        self.assertEqual(got[1], (summons8.JOINT_SPOT, 'R_Hand', (5000.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+
+    def test_short_thick_line_is_a_sphere_at_the_joint(self):
+        """A flashlight's box, its round ends longer than the line; a gun's long thick line stays a line."""
+        got = self.spots(Sphere(121, (0, -160, 160), 121, (0, 0, 0), 200), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (0.0, 0.0, 0.0), (0.0, 0.0, 200.0)))
+        self.assertEqual(got[1], 9)
+        got = self.spots(Sphere(121, (2000, 0, 0), 121, (0, 0, 0), 150), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (2000.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+
+    def test_sphere_is_a_line_of_its_radius(self):
+        """A grenade's sphere: its point lifted by the largest radius of that spot, to the body code."""
+        grown = Sphere(121, (0, 0, 0), 121, (0, 0, 0), 800)
+        got = self.spots(Sphere(121, (0, 0, 0), 121, (0, 0, 0), 400), Sphere(121, (0, 0, 0), 121, (0, 0, 0), 400),
+                         every=(grown,))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (0.0, 0.0, 0.0), (0.0, 0.0, 800.0)))
+        self.assertEqual(got[1], 9)
+        self.assertEqual(got[2], (summons8.JOINT_SPOT, 'R_Hand', (0.0, 0.0, 0.0), (0.0, 560.0, 560.0)))
+        self.assertEqual(got[3], 9)
+
+    def test_ground_origin_stays_an_offset(self):
+        got = self.spots(Sphere(121, (0, 0, 0), 125, (0, 900, 900)), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[1], (0.0, 900.0, 900.0))
+
+
+class WideRootBoxTest(unittest.TestCase):
+    def test_column_replaces_the_second_box(self):
+        """Boxes 0 and 1 points on his arm with no reach, box 2 a column round the ground origin (IAI.d+2)."""
+        fist = Sphere(5, (0, 0, 0), 5, (0, 0, 0))
+        column = Sphere(125, (0, 1100, 0), 125, (0, 1100, 1500), 300)
+        hb = (fist, Sphere(6, (0, 0, 0), 6, (0, 0, 0)), column, Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        place = lambda code: code
+        self.assertIs(summons8.summary(hb, place, True, True)[1], column)
+        self.assertIsNot(summons8.summary(hb, place, True, False)[1], column)
 
 
 class SummonsTest(unittest.TestCase):
@@ -341,6 +454,25 @@ class PairValuesTest(unittest.TestCase):
         R, t = self.local(out, 4)
         np.testing.assert_allclose(t, np.repeat(self.bind[0][None], self.F, 0), atol=1e-9)
         self.assertLess(RT.angle(R, self.bind[1][None]).max(), 1e-6)
+
+    def test_joint_point(self):
+        """A root point following a joint: the joint's point in the fighter's frame (the source's frame turned by the
+        calibration's C), each frame, plus its delta."""
+        C = TR.random_rotation(np.random.default_rng(8))
+        conv = types.SimpleNamespace(sub=types.SimpleNamespace(index=dict(self.idx, **{T8.TOP: self.idx['Anc']})),
+                                     pairs=self.pairs, scale=0.98, kind=animation.COMPRESSED,
+                                     cal=types.SimpleNamespace(C=C))
+        off, delta = np.array([10.0, 20.0, 30.0]), np.array([0.0, 0.0, 200.0])
+        spot = (summons8.JOINT_SPOT, 'Joint', tuple(off), tuple(delta))
+        k = 1.07
+        out = T8.pair_values(conv, self.WR, self.Wp, self.values, k, [spot, spot], 5)
+        R, t = self.local(out, 4)
+        H = animation.local_rotation(self.values[:, RT.HARA_CH], animation.COMPRESSED)
+        world = 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, t)
+        i = self.idx
+        at = self.Wp[:, i['Joint']] + np.einsum('fij,j->fi', self.WR[:, i['Joint']], off) - self.Wp[:, i['Anc']]
+        np.testing.assert_allclose(world, 0.98 * k * (at @ C.T + delta), atol=1e-6)
+        self.assertLess(RT.angle(R, np.eye(3)[None]).max(), 1e-9)
 
     def test_still(self):
         """A still pair (a hit-only weapon holding its place in the order): its bind in every frame, offsets or not."""

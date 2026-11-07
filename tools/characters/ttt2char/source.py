@@ -113,6 +113,7 @@ class Tekken8Source:
     NAME = GAMES['tekken8']
     FACE_WORDS = ('face_skin',)                  # MI_CH_zbr_face_skin
     NO_COLOURS = None
+    SKIN_NEAR_HUE = True                         # (skin.gain: reference faces nearest in brightness and hue)
 
     def __init__(self, store):
         self.store = store
@@ -126,9 +127,9 @@ class Tekken8Source:
         from .tekken8 import costume
         return costume.costume(self.store, d.TEKKEN8_CODE, which)
 
-    def load_model(self, parts, merge_order, log=print):
+    def load_model(self, parts, merge_order, log=print, worn=None):
         from .tekken8 import model
-        return model.load_model(self.store, parts, merge_order, log=log)
+        return model.load_model(self.store, parts, merge_order, log=log, worn=worn)
 
     @staticmethod
     def cloth(k, parts, log=print):
@@ -138,7 +139,9 @@ class Tekken8Source:
         return cloth.find(k, parts, log=log)
 
     def mesh(self, path):
-        from .tekken8 import mesh
+        from .tekken8 import mesh, model
+        if path.rsplit('/', 1)[-1].startswith('SM_'):
+            return model.WornItem(self.store, path)
         return mesh.SkeletalMesh(self.store, path)
 
     def materials(self):

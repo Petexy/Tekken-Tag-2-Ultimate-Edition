@@ -283,6 +283,12 @@ def _source(d, tekken7, tekken8, files):
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
 
 
+def _donor_effects(d, donor_xml):
+    """The donor's effect files the pack gets (its generic moves fire them): none when the definition says
+    DONOR_EFFECTS = False. The database goes on naming them, as the game's own name files that do not exist."""
+    return itemdb.effect_names(donor_xml) if getattr(d, 'DONOR_EFFECTS', True) else []
+
+
 def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, make_outfits):
     d = definition(name)
     folder, open_source = _source(d, tekken7, tekken8, files)
@@ -325,7 +331,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                                            log=lambda s: log('         ' + s.strip()),
                                                            standing=standing, weapons=weapons8)
     donor_xml = archives.read_name(d.DONOR + '.xml')
-    effect_files, _, _ = fx.copy_files(archives, d.DONOR, itemdb.effect_names(donor_xml), {},
+    effect_files, _, _ = fx.copy_files(archives, d.DONOR, _donor_effects(d, donor_xml), {},
                                        log=lambda s: log('         ' + s))
     part3, opt_anims = None, {}
     if getattr(d, 'TIGER', None):
@@ -542,7 +548,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
     voice step built). named: TTT2's movesets, once its moves are named (_name_moves8). effects: its sound effects
     (tekken8/sounds.py)."""
     from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, voice as voice8
-    from .convert import effects8
+    from .convert import effects8, trails8
     k, files, references = saved
 
     def sub(s):
@@ -598,10 +604,13 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
             c.part3, c.opt_anims = snakes.part3(plan, bone.read(bon))
         spec8 = effects8.parts(d) if slot is not None else {}       # (her effects: convert/effects8.py)
         c.effects8 = {i: part for i, (part, _) in spec8.items()}
+        if spec8 and getattr(d, 'TEKKEN8_TRAILS', False):          # (the weapons' trails: convert/trails8.py)
+            c.trail_sampler = trails8.Sampler(source.store, d, k, banks, converter, bone.read(bon))
         c.run()
         systems8 = effects8.systems_of(source.store, d.TEKKEN8_CODE, c.effect_ids, log=sub) if spec8 else {}
         copies8 = c.split_effects(effects8.emitting_frames(systems8, c.effects8_stopped),
                                   set(itemdb.effect_ids(donor_xml))) if spec8 else {}
+        trails = c.assign_trails(set(itemdb.effect_ids(donor_xml))) if getattr(d, 'TEKKEN8_TRAILS', False) else {}
         moves, motions = c.write()
     finally:
         own_bank.close()
@@ -616,7 +625,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
             % len(c.projectile_effects))
     electric = None
     if c.electric_moves:                # Tekken 8 electrics: Kazuya's lightning, a copy of his TTT2 effect file
-        effect_files, electric, _ = fx.copy_files(archives, d.DONOR, itemdb.effect_names(donor_xml),
+        effect_files, electric, _ = fx.copy_files(archives, d.DONOR, _donor_effects(d, donor_xml),
                                                   {moveset.ELECTRIC_EFFECT: [(moveset.ELECTRIC_LOOK, None)]})
         sub('electrics with Kazuya\'s lightning (%s, effect id %d): %s'
             % (moveset.ELECTRIC_LOOK, moveset.ELECTRIC_EFFECT, ', '.join(c.electric_moves)))
@@ -627,7 +636,8 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         step('effects: the Tekken 8 effects %s\'s moves spawn' % d.NAME)
         files8, own8 = effects8.convert_fighter(source.store, archives, systems8, spec8,
                                                 model.GIDX_BASE + model.SLOT_GIDX * slot + particles.FIRST_ID,
-                                                copies8, log=sub, stopped=c.effects8_stopped)
+                                                copies8, log=sub, stopped=c.effects8_stopped,
+                                                tune=getattr(d, 'TEKKEN8_EFFECT_TUNE', None), trails=trails)
     named = dict(electric or {})
     named.update({i: [(name, None) for name in names] for i, names in own8.items()})
     xml = itemdb.body_only(donor_xml, named or None)

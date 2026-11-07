@@ -16,6 +16,9 @@ FMT_BLOCK = {0: 8, 1: 16, 2: 16}       # bytes per 4x4 block
 FMT_BPP = {8: 2, 14: 4, 17: 4}         # bytes per pixel of the plain formats
 
 
+SOLID_GAIN = 4.0                # make_texture(solid): how steep a level's alpha gets about the test's reference
+
+
 def mip_size(fmt, w, h):
     if fmt in FMT_BLOCK:
         return max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * FMT_BLOCK[fmt]
@@ -90,15 +93,21 @@ def decode(t):
     return fn(t['mips'][0], t['w'], t['h'])
 
 
-def make_texture(rgba, gidx, fmt=0, mips=None, min_size=4):
+def make_texture(rgba, gidx, fmt=0, mips=None, min_size=4, solid=None):
     """A new texture from an (H, W, 4) uint8 image with power-of-two sides: a box-filtered mip chain (down to
-    min_size, or `mips` levels), each level BC1 (fmt 0) or BC3 (fmt 2)."""
+    min_size, or `mips` levels), each level BC1 (fmt 0) or BC3 (fmt 2). solid: an alpha test's reference: each level's
+    alpha steepened about it (SOLID_GAIN), as the materials that blend what passes the test would show a thin strand
+    half transparent; the test passes the same texels."""
     img = np.asarray(rgba, np.uint8)
     levels = []
     cur = img.astype(np.float32)
     while True:
         h, w = cur.shape[:2]
-        levels.append(bc.encode(np.clip(cur + 0.5, 0, 255).astype(np.uint8), fmt))
+        level = cur
+        if solid is not None:
+            level = cur.copy()
+            level[..., 3] = solid + (cur[..., 3] - solid) * SOLID_GAIN
+        levels.append(bc.encode(np.clip(level + 0.5, 0, 255).astype(np.uint8), fmt))
         if (mips and len(levels) >= mips) or (not mips and (w <= min_size or h <= min_size)):
             break
         cur = cur.reshape(h // 2, 2, w // 2, 2, 4).mean((1, 3))

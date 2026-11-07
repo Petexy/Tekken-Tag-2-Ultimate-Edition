@@ -266,6 +266,7 @@ struct Added {
     uint32_t code_string = 0;       // the code as a guest string
     fs::path pack;
     std::vector<Weapon> weapons;
+    uint64_t rest_summons = 0;      // the summons out when no move says otherwise (bit n: summon n)
     std::vector<Outfit> outfits;
 };
 std::vector<Added> g_added;
@@ -401,6 +402,7 @@ struct Pack {
     std::vector<uint32_t> voice_extra; // its bank's shouts past the donor's (appended to the voice list)
     std::vector<uint32_t> sound_extra; // its bank's sound effects (appended to the item sounds)
     std::vector<Weapon> weapons;       // character.ini weapons: k:parent:points[:summon] (see pose_weapons)
+    uint64_t rest_summons = 0;         // character.ini rest_summons: the summons out when no move says otherwise
     std::vector<std::string> outfits;  // optional complete body sets, in chooser order
     std::optional<gauge::Config> gauge; // a Tekken 7 2D fighter's gauge (title/gauge.h)
 };
@@ -466,6 +468,11 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         } else if (key == "sound_extra") {
             std::istringstream tones(value);
             for (uint32_t tone; tones >> tone;) pack.sound_extra.push_back(tone);
+        } else if (key == "rest_summons") { // summon numbers, e.g. 2 3 4 8 9
+            std::istringstream numbers(value);
+            for (uint32_t n; numbers >> n;) {
+                if (n < 64) pack.rest_summons |= uint64_t{1} << n;
+            }
         } else if (key == "weapons") { // k:parent:points[:summon[:ramp]], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
             std::istringstream items(value);
             for (std::string item; items >> item;) {
@@ -1423,6 +1430,7 @@ void prepare_roster() {
         added.code = pack.code;
         added.pack = pack.directory;
         added.weapons = pack.weapons;
+        added.rest_summons = pack.rest_summons;
         for (size_t i = 0; i < pack.outfits.size(); ++i) {
             const auto& code = pack.outfits[i];
             if (fighter_id(code) || std::any_of(g_added.begin(), g_added.end(), [&](const Added& a) {
@@ -3405,9 +3413,18 @@ float value(uint32_t v) {
     return f;
 }
 
-// Every summoned weapon of the player put away at once, thrown ones let go (the dismissal of all).
+// The summons the player's fighter has out with nothing else going on (Victor's scabbard at his hip, his knife and
+// karambit in his hands, his gun at his thigh: Tekken 8 keeps them through hits and throws, whose moves are the
+// attacker's and say nothing of them). 0: nothing out (every other fighter).
+uint64_t rest_summons(uint32_t player) {
+    const int slot = slot_of_id(load(player + kPlayerSelectId));
+    return slot >= 0 ? g_added[slot].rest_summons : 0;
+}
+
+// Every summoned weapon of the player put away at once, thrown ones let go (the dismissal of all); its rest state
+// stays out.
 void put_away_summons(uint32_t player) {
-    g_summoned[player] = 0;
+    g_summoned[player] = rest_summons(player);
     g_fades.erase(player);
     g_weapon_holds[player].held.clear();
 }
@@ -3488,8 +3505,10 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     // Hit or thrown: a standing hit plays the attacker's reaction, a throw its victim moves, from the attacker's
     // moveset (+272, the one in use; +136 its own), so none of its own moves' dismissals runs: its summons go away
     // as Tekken 7 and Tekken 8 put them away when the fighter is hit.
-    if (const auto it = g_summoned.find(player); it != g_summoned.end() && it->second != 0 &&
-                                                 load(player + kPlayerMovesetInUse) != load(player + kPlayerMoveset)) {
+    const uint64_t rest = rest_summons(player);
+    const bool foreign = load(player + kPlayerMovesetInUse) != load(player + kPlayerMoveset);
+    if (rest != 0) g_summoned.try_emplace(player, rest); // (before its first move's rows)
+    if (const auto it = g_summoned.find(player); it != g_summoned.end() && it->second != rest && foreign) {
         put_away_summons(player);
     }
     std::vector<uint32_t> extra; // the current frame's extra channels, 4 words each
@@ -3521,6 +3540,7 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         if (t != nullptr && weapon.summon < 0 && std::hypot(value(t[0]), value(t[1]), value(t[2])) > kHeldReach) {
             t = nullptr;
         }
+        if (rest != 0 && foreign) t = nullptr; // (out through a reaction: another's clip, its channels mean nothing here)
         if (t != nullptr) {
             const float x = value(t[4]), y = value(t[5]), z = value(t[6]), w = value(t[7]);
             const float m[3][3] = {{1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)},
@@ -3665,7 +3685,7 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
 void cafe::title::summons_situation(uint32_t kind) {
     if (kind == kRoundEndAfterKo) return;
     for (auto& [player, summoned] : g_summoned) {
-        if (summoned != 0) put_away_summons(player);
+        if (summoned != rest_summons(player)) put_away_summons(player);
     }
 }
 

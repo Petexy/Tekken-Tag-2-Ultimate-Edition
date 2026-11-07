@@ -290,9 +290,11 @@ EFFECT_PROP = 0x801f                 # spawn an effect: value = body part << 8 |
 # points and the definition's HIT_LOCATIONS)
 EFFECT_AT = {'t7': {0x802e, 0x803f}, 't8': set()}
 # Tekken 7 spawns effects with 0x8036 (the id maps find 0x801f) and, in a few moves, 0x8038 (the same value). Tekken 8
-# spawns them with 0x8039 (its 0x8036, the id maps find 0x801f too) but numbers its own effects, which nothing converts
-# (the pack has no effects of a Tekken 8 fighter): left out (PROP_DROP)
+# spawns them with 0x8039 (its 0x8036, the id maps find 0x801f too, stops them as 0x8035 does: the same family of moves
+# has either at the same frame) but numbers its own effects, which nothing converts (the pack has no effects of a
+# Tekken 8 fighter): left out (PROP_DROP)
 EFFECT8_SPAWN, EFFECT8_STOP = 0x8039, 0x8035   # ... except the ids a definition attaches (convert/effects8.py)
+EFFECT8_TRAIL, EFFECT8_TRAIL_END = 0x831c, 0x831d   # a weapon's trail: a definition's TEKKEN8_TRAILS (convert/trails8.py)
 PROP_OVERRIDE = {'t7': {0x8255: 0x8193, 0x8256: 0x8194, 0x8038: EFFECT_PROP}, 't8': {0x82c5: 0x8193, 0x82c6: 0x8194}}
 # Moveset variables: numbers of a player's that its moves set and test (TTT2's at player +1532 + 4k, counted down each
 # frame by the game). TTT2 tests variable k with 232 + k (>= param) and 261 + k (<= param) and sets it with VAR_SET[k]
@@ -602,6 +604,7 @@ HIT_POINT8.update(_HIT_POINTS8)
 WEAPON_HOLD_PROP = 0x822B
 EFFECT_STEP = 6                      # frames: effect ends closer than this share a copy (split_effects)
 EFFECT_SPARE = range(229, 160, -1)   # ids for the copies: above Tekken 7's (100..160), below the projectiles' (230)
+TRAIL_SPARE = range(100, 230)        # ids for a Tekken 8 fighter's trails (convert/trails8.py): above its own ids
 DAMAGE_AMOUNT = {'t7': 0x821b, 't8': 0x828b}
 DAMAGE_DEAL = {'t7': {0x821c: 0x8058, 0x821d: 0x8059}, 't8': {0x828c: 0x8058, 0x838a: 0x8058, 0x838f: 0x8058,
                                                               0x828d: 0x8059}}
@@ -870,6 +873,8 @@ class Converter:
         self.effect_ids = set()                                   # the Tekken 7 effect ids the moves spawn
         self.effect_rows = []              # (property row, Tekken 7 effect id, frames left of its move or None)
         self.effects8_stopped = set()      # the Tekken 8 effect ids a move's list stops (effect8_rows)
+        self.trail_sampler = None          # a definition's TEKKEN8_TRAILS: convert/trails8.Sampler
+        self.trail_rows = []               # (property row, what shares its effect, trail) (trail8_rows)
         self.projectile_effects = {}                               # effect id -> its projectile (projectile_look)
         self.electric_moves = []           # the (Tekken 8) electrics given Kazuya's lightning (electric_rows)
         self.thrown = getattr(d, 'THROWN', {})                    # move name -> its projectile (thrown_rows)
@@ -1947,8 +1952,11 @@ class Converter:
                     rows.append(dict(frame=f, id=DAMAGE_DEAL[g][idv], value=points))
                     self.stats['throw damage dealt'] += 1
                 continue
-            if g == 't8' and idv in (EFFECT8_SPAWN, EFFECT8_STOP) and v & 0xFF in self.effects8:   # (effects8.py)
+            if g == 't8' and v & 0xFF in self.effects8 and idv in (EFFECT8_SPAWN, EFFECT8_STOP):    # (effects8.py)
                 self.effect8_rows(rows, t7, f, idv, v, move)
+                continue
+            if g == 't8' and idv == EFFECT8_TRAIL and self.trail_sampler is not None:              # (trails8.py)
+                self.trail8_rows(rows, t7, f, v, move)
                 continue
             stop = G.stop_frames(t7, idv, v, g) if self.gauge else None
             if stop:                                        # a super's time stop (convert/gauge.py)
@@ -2018,6 +2026,34 @@ class Converter:
         self.effect_ids.add(eid)
         self.effect_rows.append((rows[-1], eid, stop - start if stop is not None else self.frames_left(move, f)))
         self.stats['Tekken 8 effects (the definition\'s, at its body parts)'] += 1
+
+    def trail8_rows(self, rows, t7, f, v, move):
+        """A Tekken 8 weapon trail (EFFECT8_TRAIL; value parts << 24 | frames << 16 | tail << 8 | kind): an effect at the
+        hips (part 0) that draws the blade's way baked from move's clip (convert/trails8.py), to the first
+        EFFECT8_TRAIL_END of the list after it or its frames. Its id comes with assign_trails."""
+        at = lambda g: 0 if g >= 0x8000 else g
+        start = at(f)
+        frames = min([at(g) - start for g, i, _, _ in t7 if i == EFFECT8_TRAIL_END and at(g) > start] + [v >> 16 & 0xFF])
+        trail = self.trail_sampler(move, start, frames, v)
+        if trail is None:
+            self.stats['Tekken 8 trails left out (no clip or weapon)'] += 1
+            return
+        rows.append(dict(frame=f, id=EFFECT_PROP, value=0))
+        self.trail_rows.append((rows[-1], (self.k.anim_ref(move)[0], start, frames, v), trail))
+        self.stats['Tekken 8 trails'] += 1
+
+    def assign_trails(self, used):
+        """The ids of the trails trail8_rows met: one for each clip, start, length and value, none of `used` or
+        effect_ids; the rows name them -> {id: trail}."""
+        spare = iter([i for i in TRAIL_SPARE if i not in used and i not in self.effect_ids])
+        ids, out = {}, {}
+        for row, key, trail in self.trail_rows:
+            if key not in ids:
+                ids[key] = next(spare)
+                out[ids[key]] = trail
+            row['value'] = ids[key]
+        self.effect_ids |= set(out)
+        return out
 
     def summon_rows(self, t7, move=None):
         """The rows of Tekken 7 properties [(frame, id, value)] that summon weapons and their particles (SUMMON_PROPS,
@@ -2808,7 +2844,7 @@ class Converter:
         k, d = self.k, self.d
         self.alloc_ok = 0
         self.queue = []
-        self.shown = self.default_summons()
+        self.shown = sorted(getattr(self.defn, 'REST_SUMMONS', ())) or self.default_summons()
         # per reaction slot, the donor's most common move (fallback); the donor's bound reactions (requirement 467)
         self.slot_default = {f: collections.Counter(r[f] for r in d.tables['reactions']).most_common(1)[0][0]
                              for f in REACTION_MOVE_FIELDS}

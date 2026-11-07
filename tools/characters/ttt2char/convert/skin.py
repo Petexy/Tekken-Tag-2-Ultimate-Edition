@@ -6,7 +6,9 @@ an added fighter looks tanned beside TTT2's fighters on any stage. So the skin m
 per channel by the gain that turns Tekken 7's baked faces into TTT2's face textures, measured on the fighters both
 games have under the same code, of the fighter's sex (the games' female faces differ more than their male ones):
 the median of their ratios (linear colour means) over the NEAREST of them in brightness (TTT2 evens skin out: a
-dark Tekken 7 face gains more than a fair one, Marduk x3.3 and Lars x1.4 in red).
+dark Tekken 7 face gains more than a fair one, Marduk x3.3 and Lars x1.4 in red). A source with SKIN_NEAR_HUE (Tekken
+8) takes them nearest in brightness and hue: the blue gains of its men run from 1.8 to 3.2 at one brightness, and a
+fair man among the low ones comes out far more orange than TTT2 draws any (Victor Chevalier, who bakes as Lars does).
 
 Written for this project from the files themselves (no third-party code).
 """
@@ -63,7 +65,7 @@ def gain(source, archives, sex, materials, bake, own=None, log=None):
     fighters both games have; Tekken 7's paks as such too); materials: its game's Materials; bake: its bake_albedo
     with its textures, (effective material) -> (linear rgb, alpha). -> (gain, their face colour: the hue hue() keeps
     skin near)."""
-    ratios, lumas, faces = [], [], []
+    ratios, lumas, faces, baked = [], [], [], []
     if hasattr(source, 'skin_faces'):
         found, none = source.skin_faces(sex), source.NO_COLOURS
     else:
@@ -81,19 +83,25 @@ def gain(source, archives, sex, materials, bake, own=None, log=None):
             ratios.append(theirs / ours)
             lumas.append(float(ours @ LUMA))
             faces.append(theirs)
+            baked.append(ours)
     if len(ratios) < FEWEST:
         if log:
             log('  skin: too few fighters in both games to measure (%d); colours as Tekken 7 has them' % len(ratios))
         return np.ones(3), None
     ratios, faces = np.array(ratios), np.array(faces)
     if own is not None and float(own @ LUMA) > 0:
-        near = np.argsort(np.abs(np.log(np.array(lumas)) - np.log(float(own @ LUMA))))[:NEAREST]
+        far = np.abs(np.log(np.array(lumas)) - np.log(float(own @ LUMA)))
+        if getattr(source, 'SKIN_NEAR_HUE', False) and (own > 1e-3).all():
+            baked = np.array(baked)
+            far = far + np.abs(np.log(baked[:, 1:] / baked[:, :1]) - np.log(own[1:] / own[:1])).sum(1)
+        near = np.argsort(far)[:NEAREST]
         ratios, faces = ratios[near], faces[near]
     g = np.median(ratios, 0)
     target = np.median(faces, 0)
     if log:
         log('  skin: colour gain %.2f %.2f %.2f (from the %d fighters both games have %s)' % (
-            g[0], g[1], g[2], len(ratios), 'nearest in brightness' if own is not None else 'of that sex'))
+            g[0], g[1], g[2], len(ratios), 'nearest in brightness' + (' and hue' if getattr(source, 'SKIN_NEAR_HUE', False) else '')
+            if own is not None else 'of that sex'))
     return g, target
 
 

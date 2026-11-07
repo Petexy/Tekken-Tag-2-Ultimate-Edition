@@ -53,6 +53,8 @@ SCALP = '*scalp'                    # colours entry: the hair's scalp painting, 
 HAIR_SCALP_MASK = 'HairScalpMask'   # (the BaseItem property's name) the hair's mask, painted ScalpColor_Hair01
 SCALP_COLOUR = 'ScalpColor_Hair01'  # the face skin's colour for its scalp mask's alpha (the hair's root colour)
 SHEER = '*sheer'                    # colours entry for sheer cloth (ShadingModel Subsurface): the skin colour under it
+SCALP_BRIGHT_TIP = 0.5              # a hair's tip colour (linear luma) from which its scalp takes SCALP_OF_TIP of it
+SCALP_OF_TIP = 0.15                 # (the root colour otherwise), about the hair's look through the skin gain
 FACE = '*face'                      # colours entry: the face part's material names (the ones SCALP paints)
 PATTERN = 'Pattern'                 # the costume shader's pattern texture, and the costume's adjustments of it
 PATTERN_ADJUSTMENTS = (bake.PATTERN_HUE, bake.PATTERN_SATURATION, bake.PATTERN_BRIGHTNESS)
@@ -289,6 +291,10 @@ class Materials:
         for name, params in colours.items():
             if HAIR_IDS[1] in params:
                 out[SCALP_COLOUR] = dict(params[HAIR_IDS[1]])
+                tip = params.get(HAIR_IDS[2])
+                # (white hair on a near-black scalp, the root colour: every gap TTT2's alpha test leaves shows black)
+                if tip and 0.2126 * tip['r'] + 0.7152 * tip['g'] + 0.0722 * tip['b'] >= SCALP_BRIGHT_TIP:
+                    out[SCALP_COLOUR] = {k: v * SCALP_OF_TIP if k != 'a' else v for k, v in tip.items()}
                 break
         return out
 

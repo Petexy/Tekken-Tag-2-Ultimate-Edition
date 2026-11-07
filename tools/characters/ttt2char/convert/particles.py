@@ -263,6 +263,9 @@ def material_source(textures, mat, sheet=False):
             img = _shape(_smaller(textures.linear_image(main), 2 * side))
         except (KeyError, ValueError):
             return None
+        tile_base = getattr(textures, 'hot', False)     # (Tekken 8's tiling is its base's: the mask stays whole)
+        if tile_base:
+            img = _tiled(img, tu, tv)
         for mask in masks:
             try:
                 m = _shape(textures.linear_image(mask))[..., 3]
@@ -273,7 +276,8 @@ def material_source(textures, mat, sheet=False):
                 pass
         if power != 1.0:
             img[..., 3] = s_curve(img[..., 3], min(power, 16.0))
-        img = _tiled(img, tu, tv)
+        if not tile_base:
+            img = _tiled(img, tu, tv)
         textures.sources[key] = img
     return Source(key, textures.sources[key], side, _power(mat), _scroll(mat), _subtractive(mat))
 
@@ -392,6 +396,8 @@ def _power(mat):
 class Converter:
     """Converts a fighter's Tekken 7 particle systems (one Converter per fighter; textures and meshes are shared by
     its effects)."""
+
+    flat_models = False                # flat quads stay models of their own proportions (a thin card, not a square)
 
     def __init__(self, paks, archives, first_texture_id, log=None):
         self.paks, self.archives, self.log = paks, archives, log or (lambda s: None)
@@ -659,8 +665,8 @@ class Converter:
             if sm is not None and not td.get('bOverrideMaterial') and sm.materials:
                 mat_ref = sm.materials[0]
             plane = _plane(sm)
-            if not _drawn_as_model(em, sm):  # a flat quad: drawn as a sprite of its size (models are few in TTT2)
-                mesh = None
+            if not _drawn_as_model(em, sm) and not self.flat_models:   # a flat quad: drawn as a sprite of its size
+                mesh = None                                            # (models are few in TTT2)
             else:
                 plane = None
         mat = self.materials.describe(mat_ref) if mat_ref else None

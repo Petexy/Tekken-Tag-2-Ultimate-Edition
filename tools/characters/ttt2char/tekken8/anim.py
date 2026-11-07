@@ -50,7 +50,9 @@ as for the drivers) and O_b the calibration offset of the TTT2 parent b (its wor
     a 'root' point under HARA_ROT1:         R = I, t = H^T (s k o - s ch1): o the move's hit box offset (mm; the
                                             fighter's frame before the turn, x left, y up, z forward), k the clip's
                                             root scale, s the skeleton's size scale, ch1 / H HARA_ROT1's channel 1
-                                            and rotation (channel 3)
+                                            and rotation (channel 3); a joint's point (summons8.JOINT_SPOT):
+                                            o = C (P_joint + S_joint offset - P_Top) + delta, each frame (C: the
+                                            source's frame to this one, retarget.Calibration)
     a 'snakes' head under b:                R = I, t = the most forward (+z) of the heads of the summoned model's
                                             clip the move starts, given in b's frame (convert/snakes8.py: heads),
                                             from its start frame on (before it: the clip's first frame)
@@ -482,9 +484,15 @@ def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None):
             ahead = np.einsum('fij,fmj->fmi', WR[:, idx[s['driver']]] @ s['offset'], at)[:, :, 2]
             T[:, p] = at[np.arange(F), np.argmax(ahead, 1)]
         elif s['kind'] == 'root' and roots is not None:                         # a root point
-            o = np.asarray(roots[min(s['root'], len(roots) - 1)], np.float64)
+            o = roots[min(s['root'], len(roots) - 1)]
+            if isinstance(o[0], str):                                           # a joint's point, frame by frame
+                j = idx[o[1]]
+                o = (Wp[:, j] + np.einsum('fij,j->fi', WR[:, j], np.asarray(o[2], np.float64)) - Wp[:, idx[TOP]]) @ \
+                    conv.cal.C.T + np.asarray(o[3], np.float64)
+            else:
+                o = np.asarray(o, np.float64)[None]
             H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)
-            T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (k * o[None] - values[:, 1]))
+            T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))
         else:
             T[:, p], R[:, p] = s['bind']
     out = np.zeros((F, 2 * count, 3))
