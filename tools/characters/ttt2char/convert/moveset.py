@@ -574,6 +574,15 @@ TT_DISMISS_ALL = 16
 # left out (PROP_DROP).
 HAND_PROPS = {'t7': {0x842e: 0x82db, 0x842f: 0x82dc}, 't8': {}}
 HAND_OWN = 0x4000
+# ... and a Tekken 8 fighter (Converter.hands8, tekken8/anim.py) has
+# its own: 0x8610 left and 0x8611 right name a hand clip, until a move gives that hand another, also on the generic
+# moves it shares with the donor (hands8_generic); the hand shapes a hand goes back to take its stance's first frame,
+# so the donor's open hand never shows and a move's return to the stance meets the stance's clip (TTT2's own moves,
+# which Tekken 8 does not have, keep theirs).
+HANDS8 = {0x8610: 0x82db, 0x8611: 0x82dc}
+HAND_ROWS = frozenset((0x82d6, 0x82d7, 0x82d9, 0x82db, 0x82dc))     # (TTT2's, all of them)
+HAND_SHAPE_LEFT, HAND_SHAPE_RIGHT = 1, 2                            # the frames of the hand shapes a hand goes back to
+HAND_SHAPES_OPEN = (3, 24)          # (both hands', when hit and down, and running: the donor's open hands)
 SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON, 0x82c5: TT_DISMISS,
                        0x8300: TT_SUMMON, 0x8301: TT_DISMISS},
                 't8': {0x8317: TT_SUMMON, 0x8318: TT_DISMISS}}
@@ -808,6 +817,7 @@ class Converter:
     _hit_sets = None                    # {latch: the requirement list [(46), (set latch, 1)]} (hit_row)
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
     hands_reference = None              # the definition's HANDS row: (its motbin, its motion pack), by the importer
+    hands8 = None                       # tekken8.anim.HandClips of a Tekken 8 fighter, by the importer
     _hands = None                       # hand_map's map
     _throw_victims = None               # throw_victims' set
 
@@ -832,6 +842,9 @@ class Converter:
         self.summons = {w['summon']: w for w in getattr(d, 'WEAPONS', []) if w.get('summon') is not None}
         self.shown = []                 # the summons out by default (default_summons, by run)
         self.hand_anims = []            # animations added to the pack's hands container (hand_map)
+        self._hand8_numbers = self._hand8_longest = None            # (hand8)
+        self.posed_hands = {}           # donor pose part -> (Tekken 8 move, holding its last frame) (pose_sequence)
+        self.hand8_shapes = {}          # hand shapes frame -> its values (hands8_generic)
         self.posed = set()              # the donor's intro and win pose moves playing the fighter's animations
         self.usage = usage
         self.stats = collections.Counter()
@@ -1913,6 +1926,12 @@ class Converter:
             if idv in SUMMON_PROPS[g] or idv == SUMMON_EFFECT[g]:  # summoned weapons
                 rows += self.summon_rows([(f, idv, v)], move)
                 continue
+            if g == 't8' and self.hands8 is not None and idv in HANDS8:    # the fighter's own hand clip
+                n = self.hand8(v)
+                if n is not None:
+                    rows.append(dict(frame=f, id=HANDS8[idv], value=n))
+                    self.stats['hand animations (Tekken 8\'s)'] += 1
+                continue
             if (idv, v) in self.hand_map():                 # a hand animation the HANDS row has
                 rows.append(dict(frame=f, id=HAND_PROPS[g][idv], value=self.hand_map()[idv, v]))
                 self.stats['hand animations (the HANDS row\'s)'] += 1
@@ -2082,6 +2101,75 @@ class Converter:
             self._hands[key] = HAND_OWN | number[a]
         return self._hands
 
+    def hand8_number(self, a):
+        """The pack's value (HAND_OWN | n) of hand animation `a`, added to hand_anims when new."""
+        if self._hand8_numbers is None:
+            o, n = motion.pack_items(self.donor_pack)[1]
+            self._hand8_numbers = {}
+            self._hand8_donor = len(motion.hand_animations(self.donor_pack[o:o + n]))
+        if a not in self._hand8_numbers:
+            self._hand8_numbers[a] = HAND_OWN | (self._hand8_donor + len(self.hand_anims))
+            self.hand_anims.append(a)
+        return self._hand8_numbers[a]
+
+    def hand8(self, value):
+        """The pack's value of Tekken 8's hand clip `value`, as long as the longest move it starts (None: no clip)."""
+        if self._hand8_longest is None:
+            self._hand8_longest = collections.Counter()
+            for i, mv in enumerate(self.k.tables['moves']):
+                values = [v for _, idv, v, _ in self.xp_rows(mv.get('extraprops')) if idv in HANDS8]
+                frames = self.hands8.body_frames(self.k.anim_ref(i)[0]) if values else 0
+                for v in values:
+                    self._hand8_longest[v] = max(self._hand8_longest[v], frames)
+        a = self.hands8.animation(value, self._hand8_longest[value])
+        return None if a is None else self.hand8_number(a)
+
+    def hands8_rows(self, t8):
+        """The TTT2 rows of Tekken 8 move t8's hand properties."""
+        return [dict(frame=f, id=HANDS8[idv], value=n) for f, idv, n in
+                ((f, idv, self.hand8(v)) for f, idv, v, _ in self.xp_rows(self.k.tables['moves'][t8]['extraprops'])
+                 if idv in HANDS8) if n is not None]
+
+    def hands8_hold_rows(self, t8):
+        """Rows that hold the last frame of the hand clips Tekken 8 move t8 starts."""
+        out = []
+        for f, idv, v, _ in self.xp_rows(self.k.tables['moves'][t8]['extraprops']):
+            a = self.hands8.hold(v) if idv in HANDS8 else None
+            if a is not None:
+                out.append(dict(frame=0x8001, id=HANDS8[idv], value=self.hand8_number(a)))
+        return out
+
+    def hands8_generic(self):
+        """The donor's moves the fighter has by name, and its intros and win poses (pose_sequence), play Tekken 8's
+        hand properties in place of the donor's; those Tekken 8 does not have keep theirs. The hand shapes a hand goes
+        back to (write) are its stance's first frames."""
+        if self.hands8 is None:
+            return
+        made = {}
+        for i in range(len(self.d.tables['moves'])):
+            row = self.T['moves'][i]
+            if i in self.posed_hands:
+                t8, holding = self.posed_hands[i]
+                rows = self.hands8_hold_rows(t8) if holding else self.hands8_rows(t8)
+            else:
+                t8 = self.kn.get(self.d.move_name(i))
+                if t8 is None:
+                    continue
+                rows = self.hands8_rows(t8)
+            key = (row['extraprops'], tuple(sorted(tuple(sorted(r.items())) for r in rows)))
+            if key not in made:
+                made[key] = self.with_props(row['extraprops'], rows, drop=HAND_ROWS)
+            row['extraprops'] = made[key]
+            self.stats['hands: donor moves with Tekken 8\'s hand properties'] += 1
+        stance = self.kn.get('%s_sKAM00_' % self.prefix)
+        for f, idv, v, _ in self.xp_rows(self.k.tables['moves'][stance]['extraprops']) if stance is not None else ():
+            values = self.hands8.values(v) if idv in HANDS8 else None
+            if values is not None:
+                self.hand8_shapes[HAND_SHAPE_LEFT if idv == 0x8610 else HAND_SHAPE_RIGHT] = values[0].tolist()
+        if HAND_SHAPE_RIGHT in self.hand8_shapes:        # (Tekken 8 has no row there: its hands stay as they were)
+            for frame in HAND_SHAPES_OPEN:
+                self.hand8_shapes[frame] = self.hand8_shapes[HAND_SHAPE_RIGHT]
+
     def dismiss_when_hit(self):
         """Tekken 7 puts a summoned weapon away when the fighter is hit (its game, not the moveset, does) and in its
         stance; the added fighter is hit into, falls and gets up through the donor's generic moves, and gets up into the
@@ -2210,12 +2298,14 @@ class Converter:
             self.stats['moves given automatic evades (Tekken 8: cancel rows)'] += 1
             self.stats['automatic evade rows'] += len(rows)
 
-    def with_props(self, start, extra):
-        """A new property list: the one at `start` (None: none) with rows `extra` after it -> its index."""
+    def with_props(self, start, extra, drop=()):
+        """A new property list: the one at `start` (None: none) without its rows of the ids `drop`, with rows `extra`
+        after it -> its index."""
         rows = []
         table = self.T['extra_move_properties']
         while start is not None and start < len(table) and not (table[start]['id'] == 0 and table[start]['frame'] == 0):
-            rows.append(dict(table[start]))
+            if table[start]['id'] not in drop:
+                rows.append(dict(table[start]))
             start += 1
         out = len(table)
         table += rows + list(extra) + [dict(frame=0, id=0, value=0)]
@@ -2762,6 +2852,7 @@ class Converter:
             self.T, self.move_name, d.tables, d.move_name)
         move_overrides.apply(self)
         specialcancels.apply(self)
+        self.hands8_generic()
         self.dismiss_when_hit()
         self.dismiss_at_start()
         self.hold_thrown()
@@ -3122,11 +3213,13 @@ class Converter:
                     summons = self.summon_reset() + summons
                 if summons:                              # the weapons its pose holds (Noctis's sword)
                     row['extraprops'] = self.with_props(row['extraprops'], summons)
+                self.posed_hands[m] = (t7, False)
             elif not name.startswith('co_') or re.search(r'_%s\(' % re.escape(prefix), name):
                 frames = self.donor_anim_frames(d.tables['moves'][m]['anim'])
                 if frames:
                     row['anim'] = self.hold(t7, frames)
                     self.stats['donor pose parts holding her pose'] += 1
+                    self.posed_hands[m] = (t7, True)
 
     def handoffs8(self):
         """Tekken 8: a converted clip keeps HARA_ROT1 upright, TTT2's lying (and other) moves hold the body's
@@ -3218,6 +3311,9 @@ class Converter:
         if self.hands_reference is not None:             # the HANDS row's hand shapes
             blob, slots = motbin.with_slot(blob, slots, motbin.HAND_SHAPES,
                                            motbin.slot_bytes(self.hands_reference[0], motbin.HAND_SHAPES))
+        if getattr(self, 'hand8_shapes', None):          # (hands8_generic)
+            blob, slots = motbin.with_slot(blob, slots, motbin.HAND_SHAPES, motion.with_hand_frames(
+                motbin.slot_bytes(self.d, motbin.HAND_SHAPES), self.hand8_shapes))
         hdr = bytearray(hdr)
         nid = self.newid
         struct.pack_into('>4H', hdr, 0xF8 + 32 * 2, nid - 1, (-(nid - 1)) & 0xFFFF, nid, (-nid) & 0xFFFF)
@@ -3241,7 +3337,7 @@ class Converter:
         if self.hands_reference is not None:
             lines.append('hand shapes: the HANDS row\'s')
         if self.hand_anims:
-            lines.append('hand animations added from the HANDS row: %d (%d bytes)' % (
+            lines.append('hand animations added: %d (%d bytes)' % (
                 len(self.hand_anims), sum(len(a) for a in self.hand_anims)))
         if self.shown:
             lines.append('summons out by default (default_summons): %s' % ', '.join(map(str, self.shown)))

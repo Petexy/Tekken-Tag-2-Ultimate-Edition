@@ -66,9 +66,9 @@ import time
 import numpy as np
 
 from .. import InputError
-from ..convert import retarget
+from ..convert import retarget, skeleton as model_skeleton
 from ..ttt2 import animation, bone, motion
-from . import anmbin, panm, uprops
+from . import anmbin, names, panm, uprops
 
 SKELETON_PATH = 'Polaris/Content/Character/Item/shared/skeleton/%s/SKB_CH_%s_base_msl'
 CM = 10.0                                   # Tekken 8's centimetres -> TTT2's millimetres
@@ -153,12 +153,15 @@ def bind_leg(sk):
 class Converter:
     """Clips of a fighter -> TTT2 body animations. sk: the fighter's skeleton (load_skeleton / skeleton()); target:
     bone.read() of the TTT2 skeleton they will play on (the added fighter's, skeleton.build); kind: 0x64
-    (animation.COMPRESSED) or 0xC8 (animation.RAW)."""
+    (animation.COMPRESSED) or 0xC8 (animation.RAW); hands: the hands' calibration exact (HandFrames)."""
 
-    def __init__(self, sk, target, kind=animation.COMPRESSED, weapons=()):
+    def __init__(self, sk, target, kind=animation.COMPRESSED, weapons=(), hands=False):
         self.sk, self.kind = sk, kind
         dst = retarget.ttt2_skeleton(target)
         self.cal = retarget.Calibration(sk, LANDMARKS, DRIVERS, dst)
+        self.hands = HandFrames(sk, target) if hands else None
+        if self.hands:                                  # the hand exactly where Tekken 8's is (HandFrames)
+            self.cal.offsets.update(self.hands.wrists())
         self.leg, self.own_leg = retarget.leg_length(target), bind_leg(sk)
         self.scale = dst.scale
         # weapons posed by pairs (pair_specs; none: the 23 body channels only)
@@ -232,6 +235,142 @@ class Converter:
         values, info = self.channels(panm.Animation(blob), roots, snakes)
         self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
+
+
+# ------------------------------------------------------------------------------------------------ hand clips
+# A Tekken 8 fighter keeps Tekken 8's hands: its moves' hand properties
+# name category-1 clips (one hand's L_ / R_ finger joints; values: list 1 of the bank's keys), as long as the move's
+# body clip in almost all moves, and TTT2 plays the same kind of thing (ttt2/motion.py, hand animations). A finger's
+# TTT2 bone follows its joint exactly: with S_j, D_j the joint's bind world rotation and the re-pose's turn of it
+# (convert/skeleton.py) and B_b the bone's bind world rotation, the mesh on b is on j when G_b = A_j O_j, O_j = S_j^T
+# D_j^T B_b, A_j the joint's world rotation. So the wrist's offset is exact too (the calibration's anatomical frame is 5
+# degrees off the hand, and the weapon, posed by its joint, did not sit in it), and a finger's channel is
+# L_b = O_p^T A_p^T A_j O_j, p the parent's joint or bone. The metacarpals (Index0 ..) have no bone: the first bone of
+# a finger takes their turn too. The game applies a right hand's values as they are and a left hand's as (-x, y, -z)
+# (measured: the bones' local matrices in game against the clip, 0 degrees off on all 30), so one set of numbers makes
+# a fist on either hand.
+HAND_JOINTS = (('OYA3', 'Thumb0'), ('OYA2', 'Thumb1'), ('OYA1', 'Thumb2'),
+               ('HITO3', 'Index1'), ('HITO2', 'Index2'), ('HITO1', 'Index3'),
+               ('NAKA3', 'Middle1'), ('NAKA2', 'Middle2'), ('NAKA1', 'Middle3'),
+               ('KUSU3', 'Ring1'), ('KUSU2', 'Ring2'), ('KUSU1', 'Ring3'),
+               ('KO3', 'Pinky1'), ('KO2', 'Pinky2'), ('KO1', 'Pinky3'))                 # the channels' order
+WRISTS = {'R': 'TE_R_jnt', 'L': 'TE_L_jnt'}
+HAND_UNIT = 32768.0 / np.pi
+
+
+class HandFrames:
+    """The frames that put a TTT2 hand on a Tekken 8 hand. sk: the fighter's skeleton; target: bone.read() of the TTT2
+    skeleton (the fighter's own, with the model re-posed on it)."""
+
+    def __init__(self, sk, target):
+        self.sk = sk
+        SR, SP = sk.bind_world()
+        n = len(sk.names)
+        W = np.zeros((n, 4, 4))
+        W[:, :3, :3], W[:, :3, 3], W[:, 3, 3] = SR, SP, 1.0
+        follow = [None] * n
+        for i, x in enumerate(sk.names):
+            f = names.follow(x)
+            if f is not None and f[0] in sk.index:
+                follow[i] = (sk.index[f[0]], float(f[1]))
+        done = model_skeleton.repose(dict(bones=dict(names=[names.canonical(x) for x in sk.names], parents=sk.parents,
+                                                     world=W, follow=follow), prims=[]), target,
+                                     log=lambda *_: None)
+        D = done['bones']['world'][:, :3, :3] @ np.swapaxes(SR, -1, -2)
+        self.dst = retarget.ttt2_skeleton(target)
+        B, _ = self.dst.bind_world()
+
+        def offset(joint, b):
+            i = sk.index[joint]
+            return SR[i].T @ D[i].T @ B[self.dst.index[b]]
+        self.wrist = {s: offset('%s_Hand' % s, w) for s, w in WRISTS.items()}
+        self.fingers = {s: [offset('%s_%s' % (s, j), '%s_%s' % (b, s)) for b, j in HAND_JOINTS] for s in WRISTS}
+        # (the little finger hangs from a base bone that holds its bind)
+        self.base = {s: self.dst.R[self.dst.index['KO_%s_BASE' % s]] for s in WRISTS}
+
+    def wrists(self):
+        """{TTT2 hand bone: its calibration offset}"""
+        return {WRISTS[s]: self.wrist[s] for s in WRISTS}
+
+    def values(self, anim):
+        """(F, 45) i16 of a hand clip (panm.Animation): TTT2's hand animation of the same pose."""
+        J = anim.joints()
+        sides = {name[0] for name in J if name[:2] in ('L_', 'R_')}
+        if len(sides) != 1:
+            raise ValueError('a hand clip holds one hand\'s joints')
+        s = sides.pop()
+        sk, F = self.sk, anim.frames
+        hand = sk.index['%s_Hand' % s]
+        local = {}
+
+        def rel(i):                                     # the joint's rotation in the hand's frame, per frame
+            if i == hand:
+                return np.broadcast_to(np.eye(3), (F, 3, 3))
+            if i not in local:
+                j = J.get(sk.names[i])
+                r = animation.quaternion_to_matrix(_quaternions(j.rotation)) \
+                    if j is not None and j.stored_rotation else np.broadcast_to(sk.R[i], (F, 3, 3))
+                local[i] = rel(sk.parents[i]) @ r
+            return local[i]
+        L = np.zeros((F, len(HAND_JOINTS), 3, 3))
+        O = self.fingers[s]
+        for c, (b, joint) in enumerate(HAND_JOINTS):
+            A = rel(sk.index['%s_%s' % (s, joint)])
+            if b[-1] == '3':                            # under the hand
+                up = self.wrist[s] @ self.base[s] if b == 'KO3' else self.wrist[s]
+                L[:, c] = up.T @ A @ O[c]
+            else:
+                up = rel(sk.index['%s_%s' % (s, HAND_JOINTS[c - 1][1])])
+                L[:, c] = O[c - 1].T @ np.swapaxes(up, -1, -2) @ A @ O[c]
+        # (from no turn: the triple TTT2's own hands have, a curl about +z, its axis not at the wrap of the i16s)
+        v = np.rint(animation.axis_angles(L, np.zeros((len(HAND_JOINTS), 3))) * HAND_UNIT).astype(np.int64).reshape(F, -1)
+        if s == 'L':                                    # (the game reads a left hand's values as -x, y, -z)
+            v[:, 0::3] *= -1
+            v[:, 2::3] *= -1
+        return ((v + 32768) & 0xFFFF) - 32768
+
+
+class HandClips:
+    """A fighter's hand clips by the value its moves' hand properties give: banks (anmbin.Banks), frames: HandFrames."""
+
+    def __init__(self, banks, frames):
+        self.banks, self.frames = banks, frames
+        self.keys = banks.own.key_lists[anmbin.HANDS]
+        self.cache = {}
+        self.stats = collections.Counter()
+
+    def values(self, value):
+        """(F, 45) i16 of clip `value`, None if neither bank has it."""
+        if value not in self.cache:
+            out = None
+            blob = self.banks.blob(anmbin.HANDS, self.keys[value]) if 0 <= value < len(self.keys) else None
+            if blob is None:
+                self.stats['hand clips missing from both banks'] += 1
+            else:
+                out = self.frames.values(panm.Animation(blob))
+                self.stats['hand clips converted (%s)' % self.banks.where(anmbin.HANDS, self.keys[value])] += 1
+            self.cache[value] = out
+        return self.cache[value]
+
+    def body_frames(self, key):
+        """The frames of a move's body clip (0: not in the banks)."""
+        blob = self.banks.blob(anmbin.BODY, key)
+        return panm.Animation(blob).frames if blob is not None else 0
+
+    def animation(self, value, frames=0):
+        """A TTT2 hand animation of clip `value` (None: no clip), at least `frames` long (its last frame held: a hand
+        animation starts over at its end, which Tekken 8's hand never shows)."""
+        v = self.values(value)
+        if v is None:
+            return None
+        if len(v) < frames:
+            v = np.concatenate([v, np.repeat(v[-1:], frames - len(v), 0)])
+        return motion.encode_hand_animation(v.tolist())
+
+    def hold(self, value):
+        """A TTT2 hand animation holding clip `value`'s last frame (None: no clip)."""
+        v = self.values(value)
+        return None if v is None else motion.encode_hand_animation(np.repeat(v[-1:], 2, 0).tolist())
 
 
 # ------------------------------------------------------------------------------------------------ weapon pairs
