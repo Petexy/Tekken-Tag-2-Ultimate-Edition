@@ -26,7 +26,8 @@ STAND_IN = ('hei', 13)        # Heihachi Mishima
 # what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: her bounds; 2: Tekken 8's
 # limb hit points, on-hit follow-ups (1,1 into Libertador), air reactions (d+2,3), slams after the bound, wall
 # pushbacks, the run's contact stop, her u/f+1+2's catch; 3: with Miary Zo's work: her model's elbow and knee rings,
-# her eyelids' turn, hit points from her ground origin, hit box summaries
+# her eyelids' turn, hit points from her ground origin, hit box summaries;
+# Tekken 8's hand clips
 REVISION = 3
 
 # ------------------------------------------------------------------------------------------------ model
