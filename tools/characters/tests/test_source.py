@@ -323,6 +323,10 @@ class RunOwnVoice(unittest.TestCase):
                    mock.patch.object(importer, '_archives', return_value=archives),
                    mock.patch.object(importer, '_rpx', return_value='rpx'),
                    mock.patch.object(importer, 'tekken8_moveset', return_value=((k, {}, []), None)),
+                   mock.patch.object(importer, '_name_moves8', return_value=None),
+                   mock.patch.object(importer.sounds8, 'Effects', return_value=mock.Mock(
+                       names=[], clips=[], left_out=[], skipped=[])),
+                   mock.patch.object(importer.sounds, 'item_count', return_value=0),
                    mock.patch.object(importer.model, 'convert', return_value=(b'nud', b'nut', b'bon', None, None)),
                    mock.patch.object(importer.fx, 'copy_files', return_value=({}, None, None)),
                    mock.patch.object(importer.itemdb, 'effect_names', return_value=[]),

@@ -23,6 +23,7 @@ The model, its materials and the fighter's voice:
     skin.py       the fighters both games have, with faces of their own, for convert/skin.py's skin colour gain
     wwise.py      Wwise sound data (bank version 145): one small bank per event, its audio as loose files
     voice.py      a fighter's voice clips by kind, for convert/voice.py
+    sounds.py     the sound effects a fighter's moves play (weapons, special moves, hits) -> tones of its bank
 Her effects:
     niagara.py    Niagara systems (NS_*): emitters, renderers, spawn bursts and rates, curves, colours, the bone
                   followed; the fighter's effect table (DA_CharacterEffect_<CODE>)

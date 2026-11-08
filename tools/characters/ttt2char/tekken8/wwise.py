@@ -31,6 +31,10 @@ PLAY_ACTIONS = (0x0400, 0x0500)             # Play, Play and continue (action ty
 PCM_PLUGIN = 0x00010001
 PCM_TAGS = (1, 0xFFFE)                      # WAVE_FORMAT_PCM, WAVE_FORMAT_EXTENSIBLE (Wwise's)
 MAX_DEPTH = 6                               # containers inside containers followed this deep
+RANDOM, SWITCH, LAYER = 5, 6, 9             # (a random or switch container plays one child, a layer all of them)
+SOURCE_SIZE = 14                            # a sound's body before its parameters: u32 plugin, u8 stream, u32 media
+                                            # id, u32 media size, u8 bits
+VOLUME, PITCH, MAKEUP, DELAY = 0x00, 0x02, 0x06, 0x3B   # node properties: dB, cents, dB, seconds
 
 
 def fnv(name):
@@ -118,6 +122,60 @@ class Bank:
                 out += [s for s in self._sounds(v, depth + 1) if s not in out]
         return out
 
+    def parameters(self, oid):
+        """A sound's or container's own node properties {id: value}: its body (a sound's after its source) holds
+        u8 override FX, u8 FX count, [u8 bypass, 7 bytes per FX], u8 override metadata, u8 metadata count, [6 bytes per
+        entry], u8 override attachment, u32 output bus, u32 direct parent, u8 bits, u8 count, ids, f32 values (volume in
+        dB, pitch in cents, ...). {} when the parent read is no object of this bank (a layout not understood)."""
+        kind, body = self.objects.get(oid, (None, b''))
+        p = SOURCE_SIZE if kind == SOUND else 0
+        try:
+            fx = body[p + 1]
+            p += 2 + (1 + 7 * fx if fx else 0)
+            meta = body[p + 1]
+            p += 2 + 6 * meta + 1
+            _, parent, _, n = struct.unpack_from('<IIBB', body, p)
+            p += 10
+            if parent and parent not in self.objects:
+                return {}
+            return dict(zip(body[p:p + n], struct.unpack_from('<%df' % n, body, p + n)))
+        except (IndexError, struct.error):
+            return {}
+
+    def event_tree(self, name):
+        """What an event's Play actions play: ('all', [nodes]) played together, of nodes ('one', [nodes]) (a random or
+        switch container: one of them) and ('sound', object id, volume dB, pitch cents, delay s), a sound's values with
+        those of the containers it is in added."""
+        nodes = []
+        for aid in self.actions(name):
+            akind, abody = self.objects.get(aid, (None, b''))
+            if akind != ACTION or len(abody) < 6:
+                continue
+            atype, target = struct.unpack_from('<HI', abody, 0)
+            if atype & 0xFF00 in PLAY_ACTIONS:
+                node = self._node(target, (0.0, 0.0, 0.0), 0, {target})
+                if node is not None:
+                    nodes.append(node)
+        return 'all', nodes
+
+    def _node(self, oid, up, depth, seen):
+        kind, body = self.objects.get(oid, (None, b''))
+        if kind != SOUND and (kind not in CONTAINERS or depth > MAX_DEPTH):
+            return None
+        q = self.parameters(oid)
+        up = (up[0] + q.get(VOLUME, 0.0) + q.get(MAKEUP, 0.0), up[1] + q.get(PITCH, 0.0), up[2] + q.get(DELAY, 0.0))
+        if kind == SOUND:
+            return ('sound', oid) + up
+        nodes = []
+        for off in range(len(body) - 3):          # (its children: as _sounds)
+            v, = struct.unpack_from('<I', body, off)
+            if v not in seen and self.objects.get(v, (None,))[0] in (SOUND,) + CONTAINERS:
+                seen.add(v)
+                node = self._node(v, up, depth + 1, seen)
+                if node is not None:
+                    nodes.append(node)
+        return ('all' if kind == LAYER else 'one', nodes) if nodes else None
+
     def sound(self, oid):
         """A sound object -> (codec plugin id, stream type, media id, media size)."""
         kind, body = self.objects[oid]
@@ -182,6 +240,13 @@ class Events:
         if p is None:
             raise KeyError(name)
         return Bank(self.store.read(p)).event_media(name)
+
+    def bank(self, name):
+        """The bank of event `name`; KeyError when it has none."""
+        p = self.path(name)
+        if p is None:
+            raise KeyError(name)
+        return Bank(self.store.read(p))
 
     def wem(self, media):
         """A medium's bytes; KeyError when the installation has none."""
