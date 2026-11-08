@@ -1062,8 +1062,12 @@ class Converter:
         return (name not in self.dn and not DROP_T_RE.search(name) and not re.search(DROP_MOVES, name)
                 and not name.startswith(('Co_I', 'Wi_I', 'Mt_I')))
 
-    def target(self, mid, input_target=False):
-        """A Tekken 7 move id (or alias slot) -> the new moveset's move id, or None."""
+    def target(self, mid, input_target=False, reaction=False):
+        """A Tekken 7 move id (or alias slot) -> the new moveset's move id, or None. reaction: mid is a reaction slot's
+        move (conv_reaction): a Tekken 8 one the remap would turn into TTT2's empty move 0 (motOrigin: the move TTT2's
+        reaction slots that cannot happen hold: the victim stood free at once) or into a guard or stagger that frees
+        the opponent on another frame (other_stun: a 28-frame guard, sGrd_SmTR28, became sGrd_mM00's 19 frames and
+        left the attacker 9 frames more minus on block) is converted itself instead, as a refused remap is."""
         if mid is None:
             return None
         if mid >= 0x8000:
@@ -1081,6 +1085,10 @@ class Converter:
         r = self.react_remap.get(n) if n not in PRESERVE_T7_REACTIONS and n not in self.own_reactions else None
         if r and r in self.dn and self.other_fall(mid, self.dn[r]):
             self.stats['reaction remap refused (the TTT2 move does another thing: stagger, crumple, launch)'] += 1
+        elif r and r in self.dn and reaction and self.game == 't8' and self.convertible8(mid, n) and (
+                self.dn[r] == 0 or self.other_stun(mid, self.dn[r])):
+            why = 'TTT2 has no move there, motOrigin' if self.dn[r] == 0 else 'a guard or stagger of another length'
+            self.stats['reaction remap refused (%s: Tekken 8\'s own kept)' % why] += 1
         elif r and r in self.dn:
             self.stats['target remapped (Tekken 7-only move -> the TTT2 move in its place)'] += 1
             return self.dn[r]
@@ -1167,6 +1175,31 @@ class Converter:
         floor, -> the pop-up sDw_KAO00_)."""
         a, b = self.rest(self.k, mid, self.name), self.rest(self.d, j, self.d.move_name)
         return a is not None and b is not None and self.fall(a) != self.fall(b)
+
+    @staticmethod
+    def end_frame(m, i):
+        """The frame move i of moveset m frees its player from (its cancel list's end row: Wavu's recovery, a
+        reaction's stun), or None."""
+        ends = [c['start_frame'] for c in M.cancels(m, m.tables['moves'][i]['cancel']) if c['direction'] == M.LIST_END]
+        return ends[0] if ends else None
+
+    def other_stun(self, mid, j):
+        """The source's reaction mid and the donor's move j both leave the opponent on its feet (fall(): a guard, a
+        stagger; unknown counts as not) and free it on other frames (end_frame): the attacker's advantage would change
+        by the difference (Tekken 8's guards run 20 to 42 frames, TTT2's generic sGrd_mM00 and sGrd_hM00 19). A copy of
+        TTT2's move given Tekken 8's end frame would not do: its animations last 30 frames, fewer than Tekken 8's
+        longest guards and staggers (32 to 42).
+        Launches and crumples are left to other_fall: their end rows are air or floor time, not a stun."""
+        a, b = self.rest(self.k, mid, self.name), self.rest(self.d, j, self.d.move_name)
+        if a is None or b is None or self.fall(a) != 'feet' or self.fall(b) != 'feet':
+            return False
+        fa, fb = self.end_frame(self.k, mid), self.end_frame(self.d, j)
+        return fa is not None and fb is not None and fa != fb
+
+    def convertible8(self, mid, n):
+        """Tekken 8 move mid (name n) is one target() converts as a reaction ('T' not dropped, 'N'): a remap refused
+        for it then gives Tekken 8's own move, not none."""
+        return (self.cls[mid] == 'T' and not DROP_T_RE.search(n)) or self.cls[mid] == 'N'
 
     def is_state(self, i):
         """Tekken 7 move i is a movement state TTT2 lets a fighter tag out of (by TTT2's own movesets' move names,
@@ -2524,7 +2557,7 @@ class Converter:
             if link == 'pushbacks':
                 row[nm] = self.conv_pushback(r[nm])
             elif link == 'move':
-                t = self.target(r[nm])
+                t = self.target(r[nm], reaction=True)
                 if t is None:
                     self.stats['reaction slot -> fallback'] += 1
                     n = self.name(r[nm]) if r[nm] < len(self.k.tables['moves']) else r[nm]
