@@ -27,7 +27,7 @@ STAND_IN = ('hei', 13)        # Heihachi Mishima
 # jab's), on-hit follow-ups (WS1 into Sentai), the sweeps' Sentai rows, Heaven's Wrath 3,4, air reactions, slams after
 # the bound, wall pushbacks, the run's contact stop; 7: floor breaks (her throws' and SSH.CH.3's), and with Miary
 # Zo's work: her model's elbow and knee rings, her eyelids' turn, hit points from her ground origin, hit box summaries;
-# her moves' sound effects from Tekken 8
+# her moves' sound effects from Tekken 8, Tekken 8's hand clips
 REVISION = 7
 
 # ------------------------------------------------------------------------------------------------ model
