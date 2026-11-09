@@ -215,13 +215,20 @@ class Converter:
             yaw = np.zeros(F)
         return world, root, D, yaw, LEGACY_LEG if anim.legacy else self.own_leg, J
 
-    def channels(self, anim, roots=None, snakes=None, ground=False):
+    def channels(self, anim, roots=None, snakes=None, ground=False, shift=None):
         """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale', 'pairs'}) of a panm.Animation;
         with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
         offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
-        convert/snakes8.py) are given (pair_values)."""
+        convert/snakes8.py) are given (pair_values). shift: (F, 3) mm added to his Top's path (a scene cut taken back:
+        convert/prefabs8.py SCENE CUTS); his scene's pairs keep the clip's own path."""
         world, root, D, yaw, leg, J = self.pose(anim)
         k = self.leg / leg
+        travel = None
+        if shift is not None:
+            if len(shift) != len(D):
+                raise ValueError('a shift of %d frames for a clip of %d' % (len(shift), len(D)))
+            travel = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)[:, 0]
+            D = D + shift
         values = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)
         count = 0
         if self.pairs:
@@ -232,12 +239,13 @@ class Converter:
                         or [0])
         if count:
             _, WR, Wp = self.fk(anim)
-            values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes, ground)], 1)
+            values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes, ground,
+                                                         travel)], 1)
         return values, dict(frames=anim.frames, leg=leg, root_scale=k, pairs=count)
 
-    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False):
-        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground: channels())."""
-        values, info = self.channels(panm.Animation(blob), roots, snakes, ground)
+    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False, shift=None):
+        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground, shift: channels())."""
+        values, info = self.channels(panm.Animation(blob), roots, snakes, ground, shift)
         self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
 
@@ -453,9 +461,10 @@ def pair_joints(specs):
     return sorted(set(out))
 
 
-def root_point(conv, WR, Wp, values, k, o, follows=None):
+def root_point(conv, WR, Wp, values, k, o, follows=None, travel=None):
     """(F, 3) a root point of a clip through its frames: an offset from the ground origin, a joint's point, or a hold
-    clip's path (prefabs8.py), in HARA's frame. follows: whether the scene is where he is (default conv.follows)."""
+    clip's path (prefabs8.py), in HARA's frame. follows: whether the scene is where he is (default conv.follows);
+    travel: the root channel the scene keeps to (default his: values[:, 0])."""
     F = len(values)
     idx = conv.sub.index
     H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)
@@ -466,7 +475,7 @@ def root_point(conv, WR, Wp, values, k, o, follows=None):
         turn = animation.local_rotation(values[:, retarget.TURN], conv.kind)
         if follows is None:
             follows = getattr(conv, 'follows', False)
-        back = 0 if follows else conv.scale * values[:, 0]                  # (a scene where he is: Top's)
+        back = 0 if follows else conv.scale * (values[:, 0] if travel is None else travel)  # (where he is: Top's)
         return np.einsum('fji,fj->fi', H, np.einsum('fij,fj->fi', turn, X - back) - conv.scale * values[:, 1])
     if isinstance(o[0], str):                                                   # a joint's point, frame by frame
         j = idx[o[1]]
@@ -477,12 +486,13 @@ def root_point(conv, WR, Wp, values, k, o, follows=None):
     return np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))
 
 
-def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None, ground=False):
+def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None, ground=False, travel=None):
     """The extra channels (F, 2 count, 3) of pairs 0 .. count - 1 (conv.pairs; see the module's notes) of a clip:
     WR, Wp its forward kinematics (Converter.fk), values its body channels, k its root scale, roots its root point
     offsets (or None: those pairs hold their bind), snakes (heads (G, m, 3) mm in the parent's frame, the frame
     index the summoned clip starts at) or None; ground: True to pose the ground (where his Top is with a following
-    ground), HELD to pose it where the move began all the same (its scene's root points with it)."""
+    ground), HELD to pose it where the move began all the same (its scene's root points with it); travel: the root
+    channel the scene keeps to when his own was shifted (channels' shift: the clip's own), else None."""
     F = len(values)
     idx = conv.sub.index
     follows = getattr(conv, 'follows', False) and ground != HELD
@@ -521,13 +531,14 @@ def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None, ground=False
             o = roots[min(s['root'], len(roots) - 1)]
             if o[0] == 'windows':                                               # other points from frame to frame
                 for start, stop, spot in o[1]:                                  # (prefabs8.root_windows)
-                    T[start:stop, p] = root_point(conv, WR, Wp, values, k, spot, follows)[start:stop]
+                    T[start:stop, p] = root_point(conv, WR, Wp, values, k, spot, follows, travel)[start:stop]
             else:
-                T[:, p] = root_point(conv, WR, Wp, values, k, o, follows)
+                T[:, p] = root_point(conv, WR, Wp, values, k, o, follows, travel)
         elif s['kind'] == 'ground' and ground:                                  # the scene's origin: where Top is at
             H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)   # the clip's frame 0, not turned
             turn = animation.local_rotation(values[:, retarget.TURN], conv.kind)
-            back = 0 if s.get('follow') and ground != HELD else np.einsum('fij,fj->fi', turn, -values[:, 0])
+            x = values[:, 0] if travel is None else travel
+            back = 0 if s.get('follow') and ground != HELD else np.einsum('fij,fj->fi', turn, -x)
             T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (back - values[:, 1]))   # (follow: where Top is now,
             R[:, p] = np.swapaxes(H, -1, -2) @ turn                                     # his body's creatures)
         else:
@@ -616,12 +627,14 @@ class Animations:
     clip is converted once; .stats counts them, .seconds the time taken. roots: {clip key: root point offsets} of the
     clips whose moves hit from root points (convert/summons8.py): converted with those pairs (TTT2's own original
     left aside); snakes: {clip key: (heads, start)} of the clips whose moves start a summoned model's clip
-    (convert/snakes8.py), likewise."""
+    (convert/snakes8.py), likewise; shifts: {clip key: (frames, 3) mm added to its Top's path} (prefabs8.scene_cuts)."""
 
-    def __init__(self, banks, converter, originals=None, roots=None, snakes=None, ground=None, held=None):
+    def __init__(self, banks, converter, originals=None, roots=None, snakes=None, ground=None, held=None,
+                 shifts=None):
         self.banks, self.converter = banks, converter
         self.ground = set(ground or ())    # (the clips of moves showing a prefab: convert/prefabs8.py)
         self.held = set(held or ())        # (... of those, the ones whose scene stays where the move began)
+        self.shifts = dict(shifts or {})   # (clip key -> its Top's shift: prefabs8.scene_cuts)
         self.originals = dict(originals or {})
         self.roots = dict(roots or {})
         self.snakes = dict(snakes or {})
@@ -634,7 +647,8 @@ class Animations:
             key, bank = key
         if key in self.cache:
             return self.cache[key]
-        if key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground:
+        if key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground \
+                and key not in self.shifts:
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
             self.cache[key] = self.originals[key]
             return self.cache[key]
@@ -650,6 +664,8 @@ class Animations:
                     extra['snakes'] = self.snakes[key]
                 if key in self.ground:
                     extra['ground'] = HELD if key in self.held else True
+                if key in self.shifts:
+                    extra['shift'] = self.shifts[key]
                 out = self.converter.animation(blob, **extra)
                 self.stats['body animations converted (%s)' % self.banks.where(anmbin.BODY, key)] += 1
                 if getattr(self.converter, 'pairs', None) and getattr(self.converter, 'last_pairs', 0):

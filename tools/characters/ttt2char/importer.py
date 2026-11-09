@@ -553,7 +553,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
     voices8: the TTT2 voice of each of its moves' Tekken 8 voices (tekken8/voice.py's move_voices on the banks the
     voice step built). named: TTT2's movesets, once its moves are named (_name_moves8). effects: its sound effects
     (tekken8/sounds.py)."""
-    from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, voice as voice8
+    from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, panm, voice as voice8
     from .convert import disks8, effects8, trails8
     k, files, references = saved
 
@@ -599,7 +599,9 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
                                                     lambda row: archives.entry('data005', row), d.DONOR_ROW),
                                      roots=roots, snakes=snakes.pairs(plan) if snakes else None,
                                      ground=prefab_plan.keys if prefab_plan else None,
-                                     held=prefab_plan.held if prefab_plan else None)
+                                     held=prefab_plan.held if prefab_plan else None,
+                                     shifts=prefabs8.scene_cuts(k, d, lambda key: converter.pose(panm.Animation(
+                                         banks.blob(anmbin.BODY, key)))[2], log=sub) if prefab_plan else None)
         c = moveset.Converter(k, None, ttt2_movesets[d.DONOR_ROW], archives.entry('data005', d.DONOR_ROW),
                               ttt2_movesets[13], common, (req, prop, reactions, hitboxes), usage, place['row'], d)
         c.animations = animations

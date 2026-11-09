@@ -225,6 +225,10 @@ PREFABS = {
     # while Torgal bites the victim 1.6 m ahead of the scene's origin; followed, the dog played 4.4 m short. #1923 is
     # its version from the opponent's left side (1+3 or 2+4)
     'held_moves': ('Okm_FLnage_n', '#1923'),
+    # .. and their scene cut (prefabs8 SCENE CUTS): 2.26 m of that is one frame, 66, where Tekken 8 cuts to Torgal (he
+    # teleported); taken back, and the victim thrown that much further from frame 40, where his push starts, so the
+    # bite and the slash meet as in Tekken 8. #1924 is #1923's victim
+    'scene_cuts': {'Okm_FLnage_n': (66, 'Okm_FLnage_y', 40), '#1923': (66, '#1924', 40)},
 }
 WEAPONS = [
     {'mesh': _EX0, 'bone': 'ATH_swordR_1st', 'parent': 'TE_R_jnt', 'pair': 0, 'summon': 0,

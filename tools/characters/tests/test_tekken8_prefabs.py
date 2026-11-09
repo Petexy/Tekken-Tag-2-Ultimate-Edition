@@ -5,6 +5,8 @@ import sys
 import types
 import unittest
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 
@@ -334,6 +336,55 @@ class Tekken8PrefabsTest(unittest.TestCase):
         mv = {'hitboxes': [box(1000.0), types.SimpleNamespace(loc=13, loc2=12, radius=0.0, a=(0, 0, 0), b=(0, 0, 0))]}
         prefabs8.thick_roots(types.SimpleNamespace(tables={'moves': [mv]}), stats)
         assert mv['spots'] == [near, (0.0, 900.0, 1260.0), 13, 12]                 # (one: as before)
+
+
+class SceneCutsTest(unittest.TestCase):
+    """prefabs8.scene_cuts: a throw's one-frame jump of the attacker (a camera cut) taken back, the victim thrown that
+    much further, on made-up paths."""
+    F, CUT, PUSH = 12, 8, 3
+
+    def setUp(self):
+        z = np.zeros((self.F, 3))
+        self.attacker = z.copy()
+        self.attacker[:, 2] = -50.0 * np.arange(self.F)               # (backing off ..)
+        self.attacker[self.CUT:, 2] -= 2000.0                          # (.. and 2 m back in one frame)
+        self.attacker[:, 1] = 900.0
+        self.victim = z.copy()
+        self.victim[:, 2] = [0, -10, -20, -30, -10, 50, 150, 250, 300, 300, 290, 280]   # (pushed from frame 3)
+        self.paths = {'A': self.attacker, 'V': self.victim, 'S': z}
+        names = ['Okm_throw', 'Okm_thrown', '']
+        self.k = types.SimpleNamespace(tables={'moves': [{}, {}, {}]}, move_name=lambda i: names[i],
+                                       anim_ref=lambda i: ('AVS'[i], 0))
+
+    def cuts(self, spec):
+        return prefabs8.scene_cuts(self.k, types.SimpleNamespace(PREFABS={'scene_cuts': spec}),
+                                   lambda key: self.paths[key], log=lambda *a: None)
+
+    def test_the_attacker_has_no_jump_and_the_victim_ends_as_far_from_him_as_before(self):
+        out = self.cuts({'Okm_throw': (self.CUT, 'Okm_thrown', self.PUSH)})
+        A, V = self.attacker + out['A'], self.victim + out['V']
+        steps = np.linalg.norm(np.diff(A, axis=0), axis=1)
+        np.testing.assert_allclose(steps, 50.0)                       # (backing off all through)
+        np.testing.assert_allclose(out['A'][:self.CUT], 0.0)
+        np.testing.assert_allclose(V[self.CUT:] - A[self.CUT:], self.victim[self.CUT:] - self.attacker[self.CUT:])
+        np.testing.assert_allclose(out['V'][:self.PUSH + 1], 0.0)    # (as he was until his push)
+        assert (np.diff(out['V'][:, 2]) >= 0).all() and out['V'][self.CUT, 2] == 2000.0
+        assert (out['V'][:, :2] == 0).all()                            # (along the jump only, never up)
+
+    def test_a_named_move_without_a_jump_or_a_push_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.cuts({'Okm_throw': (self.CUT - 2, 'Okm_thrown', self.PUSH)})
+        with self.assertRaises(ValueError):
+            self.cuts({'Okm_throw': (self.CUT, 'Okm_thrown', 9)})          # (a push after the cut)
+        self.paths['V'] = -self.victim
+        with self.assertRaises(ValueError):
+            self.cuts({'Okm_throw': (self.CUT, 'Okm_thrown', self.PUSH)})  # (pushed towards him)
+        with self.assertRaises(ValueError):
+            self.cuts({'Okm_throw': (self.CUT, 'Okm_nobody', self.PUSH)})
+
+    def test_a_fighter_without_cuts_has_none(self):
+        assert prefabs8.scene_cuts(self.k, types.SimpleNamespace(PREFABS={}), None) == {}
+        assert prefabs8.scene_cuts(self.k, types.SimpleNamespace(), None) == {}
 
 
 if __name__ == '__main__':
