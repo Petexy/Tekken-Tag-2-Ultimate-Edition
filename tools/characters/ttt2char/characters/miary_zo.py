@@ -177,6 +177,18 @@ MOVESET = {
     'direct': [(r'^Ju_sKAM00_$', 'move', ['Wkz_sKAM00_']),                      # Jun's stance -> hers
                (r'^(ju|mk)_s', 'anim', ['wkz_s%02d' % k for k in range(3)]),    # intros
                (r'^ju_w', 'anim', ['wkz_w%02d' % k for k in range(3)])],        # win poses
-    # TTT2 bounds: the user lists them (Tekken 8 has none; her tornados do not become any)
-    'bounds': {},
+    # TTT2 bounds (Tekken 8 has none, and her tornados do not become any): an air hit slams the opponent into the
+    # floor once per juggle (convert/move_overrides.py). d+2 Famakin'naina, d/f+1,1,2's last hit (Famakin'ny Ala),
+    # b+1+2 Ampinga Afo, Morengy Miroso 1+2 (Tafika Maitso) and ws3 Daka Manorana; d+2 and d/f+1,1,2 go on from frame
+    # 24 in a copy of themselves under Tekken 8's requirement 126, which bounds alike. (Moves no name is known for are
+    # '#<index>': indices of the game build the names were read from.)
+    'bounds': {
+        'Wkz_2RP': True,       # d+2
+        '#1663': True,         # d+2, its copy
+        'Wkz_3LPLPRP': True,   # d/f+1,1,2, last hit
+        '#1672': True,         # d/f+1,1,2, its copy
+        'Wkz_4WP': True,       # b+1+2
+        'Wkz_6LK_WP': True,    # MOR 1+2
+        '#1705': True,         # ws3
+    },
 }
