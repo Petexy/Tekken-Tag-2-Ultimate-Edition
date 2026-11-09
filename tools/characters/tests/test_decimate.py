@@ -482,9 +482,12 @@ class Folds(unittest.TestCase):
         self.assertLess(sizes[1][1], sizes[0][1])
 
     def test_folds_give_way_when_nothing_else_fits(self):
+        # 16: kept, the folds leave 24 to 28 vertices, so they must give way. (12 was too near what a 732-vertex tube
+        # can come down to at all: points one ulp off, as another platform's sin and cos make them, ended at 13 or 14
+        # one time in ten, with decimate's warning; Windows CI got 13)
         said = []
-        out = decimate.decimate(self.model(), 12, log=said.append, poses=[self.bent])
-        self.assertLessEqual(decimate.count(out), 12)
+        out = decimate.decimate(self.model(), 16, log=said.append, poses=[self.bent])
+        self.assertLessEqual(decimate.count(out), 16)
         self.assertTrue(any('folds' in s for s in said))
 
 
