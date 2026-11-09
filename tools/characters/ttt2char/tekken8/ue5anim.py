@@ -17,9 +17,10 @@ The stream: i32 offsets into the data (translation, rotation of each track), i32
 the data; an offset -1: no data (a translation of 0, the identity rotation, or the reference pose's scale).
 A track's data: u32 header (keys = low 24 bits; bits 24..27 flags: 0..2 which of x, y, z are stored (the others
 0), 3 a frame table follows; top 4 bits the format: 1 Float96NoW = f32 a stored component, 2 Fixed48NoW = u16 a
-stored component, 3 IntervalFixed32NoW = f32 (min, range) a stored component, then a u32 a key), its keys, padding
-(0x55) to 4 bytes, then a timed track's frame table (a u8 a key when the clip has fewer than 256 frames, else u16)
-and padding to 4 again. Fixed48: a rotation component (q - 32767) / 32767 (w >= 0 made from x, y, z), a vector's
+stored component, 3 IntervalFixed32NoW = f32 (min, range) a stored component, then a u32 a key: x its top 11 bits, y
+the next 11, z the low 10, a field of n bits q reading (q - c) / c, c = 2^(n-1) - 1, and the value min + range times
+that), its keys, padding (0x55) to 4 bytes, then a timed track's frame table (a u8 a key when the clip has fewer
+than 256 frames, else u16) and padding to 4 again. Fixed48: a rotation component (q - 32767) / 32767 (w >= 0 made from x, y, z), a vector's
 q - 255 (scale 256 = 1; checked against the same bones' Float96 tracks in other clips). Keys between frames are
 interpolated linearly (rotations normalised).
 Checked on the 16 clips: every one of their 2228 tracks ends exactly where the next one starts; frame tables start
@@ -37,8 +38,11 @@ FLOAT96, FIXED48, INTERVAL32 = 1, 2, 3
 CODEC = 'AnimCompress_PerTrackCompression'   # (its objects' names: _1, _2)
 FIXED48_ROTATION = 32767.0
 FIXED48_VECTOR = 255.0
-INTERVAL_BITS = (10, 11, 11)        # a vector's x, y, z widths in an IntervalFixed32 key (x the top bits: unverified;
-                                    # the one such track, a hidden dambe's scale, reads 0.0001..0.001 either way)
+# a vector's x, y, z widths in an IntervalFixed32 key (x the top bits), each field centred (_interval). Read from Clive's
+# clips: Torgal's root scale in his throws, keys whose fields stand at their middle and one below full, comes out 0.001
+# (parked) and 0.95 (shown) on all three axes, and his phoenix's feather scales start and end at exactly 1; split as
+# 10, 11, 11 of the full range, Torgal came out (0.95, 0.475, 0.475), squashed into shards
+INTERVAL_BITS = (11, 11, 10)
 
 
 class Clip:
@@ -90,12 +94,14 @@ def layout(b, end):
 
 
 def _interval(raw):
-    """u32 keys -> (n, 3) fractions 0..1 (INTERVAL_BITS)."""
+    """u32 keys -> (n, 3) fractions (INTERVAL_BITS): a field of n bits q reads (q - c) / c, c = 2^(n-1) - 1 (0 at its
+    middle, 1 one below full)."""
     bx, by, bz = INTERVAL_BITS
-    z = raw & ((1 << bz) - 1)
-    y = (raw >> bz) & ((1 << by) - 1)
-    x = (raw >> (bz + by)) & ((1 << bx) - 1)
-    return np.stack([x / ((1 << bx) - 1), y / ((1 << by) - 1), z / ((1 << bz) - 1)], 1)
+    out = []
+    for q, n in ((raw >> (by + bz), bx), (raw >> bz, by), (raw, bz)):
+        c = (1 << (n - 1)) - 1
+        out.append(((q & ((1 << n) - 1)) - c) / c)
+    return np.stack(out, 1)
 
 
 def read_track(d, off, frames, rotation):

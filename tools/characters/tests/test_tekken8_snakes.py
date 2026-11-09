@@ -99,13 +99,24 @@ class Ue5AnimTest(unittest.TestCase):
         np.testing.assert_allclose(out, [[1.0, 5.0, 0.0]] * 2)
 
     def test_interval32(self):
-        bx, by, bz = ue5anim.INTERVAL_BITS
-        x, y, z = 100, 2000, 7
-        raw = x << (by + bz) | y << bz | z
-        out, _ = ue5anim.read_track(track(ue5anim.INTERVAL32, (0, 1, 2), ((1.0, 2.0, -1.0, 4.0, 0.0, 1.0), [raw])),
-                                    0, 2, False)
-        want = [1.0 + 2.0 * x / ((1 << bx) - 1), -1.0 + 4.0 * y / ((1 << by) - 1), z / ((1 << bz) - 1)]
-        np.testing.assert_allclose(out, [want] * 2, atol=1e-6)
+        """x 11 top bits, y 11, z 10, each centred: a field at its middle reads min, one below full min + range."""
+        self.assertEqual(ue5anim.INTERVAL_BITS, (11, 11, 10))
+        mid, full = 1023 << 21 | 1023 << 10 | 511, 2046 << 21 | 2046 << 10 | 1022
+        x, y, z = 1023 + 512, 1023 - 341, 511 + 100
+        mixed = x << 21 | y << 10 | z
+        out, _ = ue5anim.read_track(track(ue5anim.INTERVAL32, (0, 1, 2), ((1.0, 2.0, -1.0, 4.0, 0.0, 1.0),
+                                                                         [mid, full, mixed])), 0, 3, False)
+        want = [[1.0, -1.0, 0.0], [3.0, 3.0, 1.0],
+                [1.0 + 2.0 * 512 / 1023, -1.0 - 4.0 * 341 / 1023, 100 / 511]]
+        np.testing.assert_allclose(out, want, atol=1e-6)
+
+    def test_interval32_uniform_scale(self):
+        """A made-up scale track from 0.001 to 0.95 whose fields stand at their middle, then one below full: the same on
+        all three axes (split 10, 11, 11 of the full range it read (0.475, 0.713, 0.713) and (0.95, 0.475, 0.475))."""
+        mid, full = 1023 << 21 | 1023 << 10 | 511, 2046 << 21 | 2046 << 10 | 1022
+        out, _ = ue5anim.read_track(track(ue5anim.INTERVAL32, (0, 1, 2), ((0.001, 0.949) * 3, [mid, full])), 0, 2,
+                                    False)
+        np.testing.assert_allclose(out, [[0.001] * 3, [0.95] * 3], atol=1e-6)
 
     def test_timed_track_interpolates(self):
         """A frame table: keys at those frames, linear between; the data padded before the table and after."""
