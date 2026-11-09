@@ -27,6 +27,7 @@ The model, its materials and the fighter's voice:
 Her effects:
     niagara.py    Niagara systems (NS_*): emitters, renderers, spawn bursts and rates, curves, colours, the bone
                   followed; the fighter's effect table (DA_CharacterEffect_<CODE>)
+    niagarasim.py  a CPU emitter's scripts run: what it draws, measured (convert/effects8.py, a definition's tune)
     staticmesh.py cooked static meshes (the effects' mesh particles) with tekken7.staticmesh's interface
 The moveset (the files autodump.py saves):
     windows.py    native Windows Steam discovery and importer-owned Tekken 8 sessions

@@ -10,7 +10,10 @@ and which TTT2 bone each Tekken 7 bone's skin weights go to.
   glances and the jaw turn about the fighter's own eyelids, eyes and jaw. The face animations set absolute local
   positions made for the donor's face: convert/face.py moves the fighter's by the same offsets (without that, every
   face animation pulled the joints back to the donor's places: the lips pushed into the face). A source without a
-  face joint by that name (Tekken 8's face rig: '<role>@<its name>') keeps the donor's offset to the head.
+  face joint by that name (Tekken 8's face rig: '<role>@<its name>') keeps the donor's offset to the head, moved along
+  with the face's eyes when that offset misses them by more than EYE_MISS: Tekken 8's women on Jun miss theirs by 3 to
+  4 mm, Victor on Lars by 21 (his face sits higher over his head joint), and lid joints that far under the eye turned
+  his lids forward, off the eye, and swung his eyeballs out of their sockets.
 * Scale = the Tekken 7 BASE joint's height / 1150 (TTT2 puts HARA_ROT1 at 1150 x scale); body bone scales follow it,
   hand and face scales stay the donor's.
 * Since build keeps the donor's rest rotations, the model must be bound in the donor's pose (TTT2 skeletons and
@@ -39,6 +42,7 @@ FACE = ['L_Mayu1_Joint', 'L_Mayu2_Joint', 'L_Mayu3_Joint', 'R_Mayu1_Joint', 'R_M
         'R_LipD_Joint', 'M_LipU_Joint', 'M_LipD_Joint', 'Jaw_Joint', 'Bero1_Joint', 'Bero2_Joint', 'L_Hana_Joint',
         'L_Hoho_Joint', 'L_Chobo_Joint', 'L_Kobana_Joint', 'R_Hana_Joint', 'R_Hoho_Joint', 'R_Chobo_Joint',
         'R_Kobana_Joint']
+EYE_MISS = 8.0                  # mm from a Tekken 8 fighter's eye the donor's offset to the head may leave its eye joint
 # joints that keep the donor's offset to another (already placed) bone instead of an anchor; the face joints the
 # source has no joint of keep theirs to the head
 KEEP_OFFSET_TO = {'KUBI_jnt': 'KUBI_jnt_assist', 'ATAMA_jnt': 'ATAMA_jnt_assist'}
@@ -172,6 +176,14 @@ def build(t7bones, donor):
         i, r = idx[nm], idx[ref]
         if i not in newP:
             newP[i] = newP[r] + (P[i] - P[r])
+    # ... and with them all, the donor's face layout, at the eyes of a face far from it
+    eyes = {s: t7pos.get('%s_Eye_Joint@%s_Eye' % (s, s)) for s in 'LR'}
+    if eyes['L'] is not None and eyes['R'] is not None:
+        miss = {s: eyes[s] - newP[idx['%s_Eye_Joint' % s]] for s in 'LR'}
+        if max(float(np.linalg.norm(m)) for m in miss.values()) > EYE_MISS:
+            middle = (miss['L'] + miss['R']) / 2
+            for nm in FACE:
+                newP[idx[nm]] = newP[idx[nm]] + miss.get(nm[0], middle)
     # 3. limb helpers along their segment, 4. the rest with their parent (in index order: parents first)
     seg = [(idx[a], idx[b]) for a, b in SEGMENTS]
     for i in range(n):

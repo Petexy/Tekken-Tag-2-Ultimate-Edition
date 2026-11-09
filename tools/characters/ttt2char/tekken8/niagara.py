@@ -226,6 +226,8 @@ class Emitter:
         self.renderers, self.curves, self.colours = [], {}, {}
         self.bursts, self.rate, self.per_unit, self.loop = [], 0.0, False, None
         self.modules, self.literals = [], {}
+        self.arrays = {}                    # module.input: [(values of one entry)] (array data interfaces)
+        self.scripts = None                 # (the particle spawn script's properties, the update's): a CPU emitter's
 
     def __repr__(self):
         return '<Emitter %s %s %s bursts %s rate %g>' % (self.name, 'GPU' if self.gpu else 'CPU',
@@ -305,6 +307,10 @@ class System:
                 e.renderers.append(Renderer(rex.class_name, self._props(rex)))
             except (ValueError, KeyError, NotImplementedError):
                 continue
+        if not e.gpu:
+            refs = [self._export((v.get(key) or {}).get('Script')) for key in ('SpawnScriptProps', 'UpdateScriptProps')]
+            if all(refs):
+                e.scripts = tuple(self._props(x) for x in refs)
         for key in ('SpawnScriptProps', 'UpdateScriptProps'):
             s = self._script((v.get(key) or {}).get('Script'))
             if s is None:
@@ -339,6 +345,13 @@ class System:
         elif 'ColorData' in p:
             e.colours[key] = [(c.get('R', 0.0), c.get('G', 0.0), c.get('B', 0.0), c.get('A', 1.0))
                               for c in p.get('ColorData') or []]
+            e.arrays[key] = e.colours[key]
+        elif 'FloatData' in p:
+            e.arrays[key] = [(float(x),) for x in p.get('FloatData') or []]
+        elif 'IntData' in p:
+            e.arrays[key] = [(int(x),) for x in p.get('IntData') or []]
+        elif 'InternalFloatData' in p:
+            e.arrays[key] = [tuple(float(c[a]) for a in 'XYZW' if a in c) for c in p.get('InternalFloatData') or []]
 
 
 def _bounds(b):
@@ -381,10 +394,14 @@ def read(store, path):
 def effect_table(store, code):
     """A fighter's Tekken 8 effect table DA_CharacterEffect_<CODE> -> {effect id: {'system': NS object path, 'attached':
     isAttachedCharacter, ...the entry's other flags}} (empty when the fighter has none)."""
-    path = '/Game/Effect/Polaris%swork/Character/%s/DA_CharacterEffect_%s' % (code.upper(), code, code.upper())
-    try:
-        pkg = store.package(path)
-    except (KeyError, OSError, ValueError):
+    pkg = None
+    for folder in ('Polaris%swork' % code.upper(), 'Polariswork'):       # (Victor's: the second)
+        try:
+            pkg = store.package('/Game/Effect/%s/Character/%s/DA_CharacterEffect_%s' % (folder, code, code.upper()))
+            break
+        except (KeyError, OSError, ValueError):
+            continue
+    if pkg is None:
         return {}
     props = uprops.read(pkg, pkg.main_export())[0]
     out = {}

@@ -75,6 +75,20 @@ class Textures(unittest.TestCase):
             self.assertLess(np.abs(rgb - img[..., :3].astype(int)).mean(), 4, 'format %d' % fmt)
 
 
+    def test_solid_alpha(self):
+        """solid: a blended strand's alpha steepened about the test's reference: the same texels pass it."""
+        img = np.zeros((8, 8, 4), np.uint8)
+        img[..., :3] = 200
+        img[:, ::2, 3] = (100, 70, 100, 70)[0]
+        img[:, 1::2, 3] = 70
+        t = nut.make_texture(img, 1, 2, mips=2, solid=85)
+        a = np.asarray(nut.decode(t))[..., 3].astype(int)
+        self.assertGreater(a[0, 0], 130)                                 # 85 + (100 - 85) x 4
+        self.assertLess(a[0, 1], 85)                                     # still fails the test
+        plain = np.asarray(nut.decode(nut.make_texture(img, 1, 2, mips=2)))[..., 3].astype(int)
+        self.assertLess(plain[0, 0], 110)
+
+
 class Skeleton(unittest.TestCase):
     def test_round_trip(self):
         n = 3
@@ -311,6 +325,28 @@ class Colours(unittest.TestCase):
         self.assertTrue((f['alpha'][:9] == 1).all())
         self.assertLess(worst_1p(f).max(), 1 / 255)
 
+    def test_fit_satin(self):
+        """The groups are the satin texels and the others, whatever their colours; the palette holds the lifted colours,
+        the shades stay those of the colours as they are."""
+        c1, c2 = np.zeros((8, 8, 3)), np.zeros((8, 8, 3))
+        c1[:4], c2[:4] = (0.4, 0.4, 0.4), (0.2, 0.2, 0.3)
+        c1[4:], c2[4:] = (0.42, 0.4, 0.4), (0.2, 0.22, 0.3)        # (k-means would not split these)
+        satin = np.zeros((8, 8), bool)
+        satin[:4] = True
+        seen = []
+
+        def lift(group, rgb, texels):
+            seen.append((group, int(texels.sum())))
+            return rgb * (2 if group == 0 else 0.5)
+
+        grid = np.zeros((32, 64, 3, 3), '>f4').tobytes()
+        plain = colours.fit(c1, c2, colours.Palette(grid, []), satin=satin)
+        f = colours.fit(c1, c2, colours.Palette(grid, []), satin=satin, lift=lift)
+        self.assertTrue((f['b'][:4] == 0).all() and (f['b'][4:] == 1).all())
+        self.assertEqual(seen, [(0, 32), (0, 32), (1, 32), (1, 32)])
+        np.testing.assert_allclose(f['groups'][0][1], np.array(plain['groups'][0][1]) * 2)
+        np.testing.assert_allclose(f['groups'][1][3], np.array(plain['groups'][1][3]) * 0.5)
+        np.testing.assert_array_equal(f['shade'], plain['shade'])
 
     def test_drawn_triangles(self):
         """Two triangles side by side over a mask drawn in a band of the left one: the right one draws nothing; with a

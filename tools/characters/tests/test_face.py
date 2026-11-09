@@ -241,6 +241,54 @@ class MeshLids(unittest.TestCase):
         self.assertNotEqual(kept, scales)                  # (a Tekken 7 fighter's own turns win)
 
 
+class FaceAtTheEyes(unittest.TestCase):
+    """A Tekken 8 fighter's face joints: the donor's offsets to the head, moved along to its eyes when far from them."""
+    @staticmethod
+    def donor():
+        names = sorted(set(skeleton.ANCHOR) | set(skeleton.FACE) | set(skeleton.KEEP_OFFSET_TO)
+                       | {n for pair in skeleton.SEGMENTS for n in pair})
+        t = np.zeros((len(names), 3), np.float32)
+        t[:, 0] = np.arange(len(names))                 # (no limb segment of no length)
+        t[names.index('ATAMA_Joint')] = (0, 1700, 0)
+        for s, x in (('L', 30), ('R', -30)):
+            t[names.index(s + '_Eye_Joint')] = (x, 1730, 90)
+            t[names.index(s + '_SitaMabuta_Joint')] = (x, 1729, 90)
+        t[names.index('Jaw_Joint')] = (0, 1670, 40)
+        return dict(names=names, parent=np.full(len(names), -1, np.int32), t=t,
+                    r=np.zeros((len(names), 3), np.float32), s=np.ones((len(names), 3), np.float32), scale=1.0)
+
+    @staticmethod
+    def source(left, right):
+        names = ['BASE', 'Neck', 'Head', 'L_Eye_Joint@L_Eye', 'R_Eye_Joint@R_Eye']
+        world = np.tile(np.eye(4), (5, 1, 1))
+        world[:, :3, 3] = ((0, 1000, 0), (0, 1600, 0), (0, 1680, 0), left, right)
+        return dict(names=names, parents=[-1, 0, 1, 2, 2], world=world)
+
+    def placed(self, left, right):
+        out = skeleton.build(self.source(left, right), self.donor())
+        at = {n: np.asarray(out['t'][out['names'].index(n)], np.float64) for n in skeleton.FACE}
+        return at
+
+    def test_near_its_eyes_stays(self):
+        at = self.placed((33, 1712, 88), (-33, 1712, 88))        # (the donor's offset: 1680 + 30, 90)
+        np.testing.assert_allclose(at['L_Eye_Joint'], (30, 1710, 90))
+        np.testing.assert_allclose(at['Jaw_Joint'], (0, 1650, 40))
+
+    def test_far_from_its_eyes_moves_along(self):
+        at = self.placed((32, 1730, 84), (-32, 1730, 84))
+        np.testing.assert_allclose(at['L_Eye_Joint'], (32, 1730, 84))
+        np.testing.assert_allclose(at['R_Eye_Joint'], (-32, 1730, 84))
+        np.testing.assert_allclose(at['L_SitaMabuta_Joint'], (32, 1729, 84))      # (its offset to the eye kept)
+        np.testing.assert_allclose(at['Jaw_Joint'], (0, 1670, 34))                # (the middle: no sideways move)
+
+    def test_tekken7_source_has_its_own(self):
+        names = ['BASE', 'Neck', 'Head', 'L_Eye_Joint', 'R_Eye_Joint']
+        world = np.tile(np.eye(4), (5, 1, 1))
+        world[:, :3, 3] = ((0, 1000, 0), (0, 1600, 0), (0, 1680, 0), (32, 1730, 84), (-32, 1730, 84))
+        out = skeleton.build(dict(names=names, parents=[-1, 0, 1, 2, 2], world=world), self.donor())
+        np.testing.assert_allclose(out['t'][out['names'].index('Jaw_Joint')], (0, 1650, 40))
+
+
 class SameJoints(unittest.TestCase):
     def test_face_joints_copied(self):
         mine, ref = made_skeleton((0, 0, 0)), made_skeleton((3, 3, 3))

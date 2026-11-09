@@ -29,7 +29,43 @@ import numpy as np
 from .. import InputError
 from ..convert import model as convert_model
 from ..tekken7 import mesh as t7mesh
-from . import bake, material as t8material, mesh as t8mesh, names
+from . import bake, material as t8material, mesh as t8mesh, names, staticmesh, zen
+
+
+class WornItem:
+    """A costume's static mesh worn rigidly on the head (Victor's glasses) with a skeletal mesh's interface, so that it
+    is merged, decimated and drawn as one part of the costume. Tekken 8 models it in the body's axes about the joint
+    (its offset slot's rotation only undoes the joint's own; Victor's lenses come 3 cm in front of his eyes, his temples
+    reach his ears), so the joint's bind position and the slot's scale place it."""
+    JOINT = 'Head'
+
+    def __init__(self, store, path, scale=1.0, ref=None):
+        self.mesh = staticmesh.StaticMesh(store, path)
+        self.name = self.mesh.name
+        self.scale = scale
+        self.materials = [{'material': ref_, 'slot': None} for ref_ in self.mesh.materials]
+        self.props = {}
+        self.skeleton = dict(ref) if ref is not None else None
+        n = len(self.mesh.positions)
+        self.lods = [SimpleNamespace(num_vertices=n, sections=[
+            SimpleNamespace(material_index=slot, cloth_mapping=0, cloth_asset=None, base_vertex=0, num_vertices=n)
+            for slot, _ in self.mesh.triangles()])]
+
+    def material_name(self, index):
+        ref = self.materials[index]['material'] if 0 <= index < len(self.materials) else None
+        return zen.short_name(ref) if ref else 'None'
+
+    def geometry(self, lod_index=0):
+        g = t7mesh.global_matrices(self.skeleton['pose'], self.skeleton['parents'])
+        at = self.skeleton['names'].index(self.JOINT)
+        sm = self.mesh
+        n = len(sm.positions)
+        joints = np.zeros((n, 1), np.int32)
+        joints[:] = at
+        return {'positions': (sm.positions * self.scale + g[at][:3, 3]).astype(np.float32),
+                'normals': sm.normals.astype(np.float32), 'tangents': sm.tangents.astype(np.float32), 'uvs': sm.uvs,
+                'joints': joints, 'weights': np.ones((n, 1), np.float32),
+                'triangles': [t for _, t in sm.triangles()]}
 
 
 def _weighted(geo):
@@ -94,10 +130,11 @@ def section_uvs(materials, m, geo):
     return uv
 
 
-def load_model(store, parts, merge_order, log=print):
+def load_model(store, parts, merge_order, log=print, worn=None):
     """The costume's meshes as one skinned mesh in TTT2 space (model.load_tekken7_model's dict).
     store: tekken8.store.Store; parts: [(tag, skeletal mesh path)] in mesh order; merge_order: the tags in
-    skeleton-merge order (the face's first: its joints own the face). Returns {'bones': {'names', 'parents', 'world'
+    skeleton-merge order (the face's first: its joints own the face); worn: {tag: size} of the parts that are static
+    meshes worn on the head (WornItem), after the others in parts. Returns {'bones': {'names', 'parents', 'world'
     (n, 4, 4) bind matrices, mm, 'follow'}, 'prims': [{'part', 'material', 'pos' (mm), 'nrm', 'tan', 'uv', 'joints'
     (n, 8), 'weights' (n, 8), 'tris'}] (prims share the vertex arrays), 'parts': {tag: {'names', 'parents', 'remap'
     (part bone -> merged bone), 'mesh' (its SkeletalMesh), 'first' (its first vertex in the streams), 'source_names'
@@ -105,7 +142,12 @@ def load_model(store, parts, merge_order, log=print):
     cm = convert_model
     materials = t8material.Materials(store)
     loaded = []
+    worn = worn or {}
     for tag, path in parts:
+        if tag in worn:                          # (on the first part's rig, which is the costume's)
+            m = WornItem(store, path, worn[tag], next(x[1] for x in loaded if x[0] == merge_order[0]).skeleton)
+            loaded.append((tag, m, m.geometry(0), list(m.skeleton['names'])))
+            continue
         m = t8mesh.SkeletalMesh(store, path)
         source = list(m.skeleton['names'])
         m.skeleton['names'] = [names.canonical(n) for n in source]

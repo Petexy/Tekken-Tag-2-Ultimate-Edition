@@ -16,7 +16,8 @@ colours are the group's, and each texel's shade the brightness that best gives b
 change (a texel can only be its group's colour, at most twice as bright): with a max_error, the texels whose 1P colour
 the layer would miss by more are left out of it (player 1 sees them as they are; player 2 as player 1 does there) and
 the groups are fitted again without them (Tekken 8 fighters: Reina's white stripes, purple in a group of purple ->
-lime texels, came out purple in her 1P colours).
+lime texels, came out purple in her 1P colours). A Tekken 8 satin costume (tekken8/bake.py, its notes on satin cloth)
+gives the groups itself and the colours they take in the game (fit: satin, lift).
 """
 import re
 
@@ -68,16 +69,21 @@ def _kmeans2(x, iters=20):
     return lab
 
 
-def fit(c1, c2, palette, max_error=None):
+def fit(c1, c2, palette, max_error=None, satin=None, lift=None):
     """1P and 2P colours (H, W, 3) in 0..1 (the texture's own encoding) -> None when nothing changes, else
     dict(alpha (H, W) 0/1, shade (H, W), b (H, W) 0/1, groups [((x, y, s) 1P, rgb 1P, (x, y, s) 2P, rgb 2P)] x 2).
-    max_error: leave out the texels whose 1P colour the layer misses by more than this in a channel (PASSES fits)."""
+    max_error: leave out the texels whose 1P colour the layer misses by more than this in a channel (PASSES fits).
+    satin (H, W) bool: the groups are these texels and the others, no k-means; lift(group, colour, texels (H, W) bool):
+    a group's colour -> what the palette holds for it (the shades stay fitted to the colours themselves)."""
     changed = np.abs(c1 - c2).max(-1) > CHANGED
     if changed.mean() < 0.002:
         return None
     for _ in range(PASSES if max_error is not None else 1):
         x = np.concatenate([c1[changed], c2[changed]], 1)
-        lab = _kmeans2(x) if len(x) > 16 else np.zeros(len(x), np.int64)
+        if satin is not None:
+            lab = (~satin[changed]).astype(np.int64)
+        else:
+            lab = _kmeans2(x) if len(x) > 16 else np.zeros(len(x), np.int64)
         means, shade = [], np.zeros(changed.sum())
         for k in range(2):
             m = lab == k
@@ -102,6 +108,11 @@ def fit(c1, c2, palette, max_error=None):
         changed, lab, shade = kept, lab[~missed], shade[~missed]
         if changed.mean() < 0.002:
             return None
+    if lift is not None:
+        where = [np.zeros(changed.shape, bool) for _ in means]
+        for k, texels in enumerate(where):
+            texels[changed] = lab == k
+        means = [None if q is None else (lift(k, q[0], where[k]), lift(k, q[1], where[k])) for k, q in enumerate(means)]
     groups = [(palette.place(q[0]), q[0], palette.place(q[1]), q[1]) for q in means if q is not None]
     groups += groups[:1] * (2 - len(groups))        # (one group: both its; no texel takes the empty one)
     out_shade = np.zeros(changed.shape)

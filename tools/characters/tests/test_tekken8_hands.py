@@ -1,5 +1,5 @@
 """A Tekken 8 fighter's own hands: TTT2's hand animation format (ttt2/motion.py), the clips' conversion
-(tekken8/anim.py HandFrames), the moves' rows (convert/moveset.py).
+(tekken8/anim.py HandFrames), the moves' rows (convert/moveset.py), the dark metal of a weapon (tekken8/bake.py).
 Made-up numbers only."""
 import struct
 import types
@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from ttt2char.convert import moveset, retarget
-from ttt2char.tekken8 import anim
+from ttt2char.tekken8 import anim, bake
 from ttt2char.ttt2 import animation, motion
 
 
@@ -181,6 +181,45 @@ class Textures:
 
     def image(self, path, max_size=None):
         return self.rma, False
+
+
+class DarkMetalTest(unittest.TestCase):
+    def setUp(self):
+        rma = np.zeros((1, 2, 3), np.uint8)
+        rma[0, :, 0] = (51, 51)                                     # roughness
+        rma[0, :, 1] = (255, 0)                                     # metal, not metal
+        rma[0, :, 2] = (255, 255)
+        self.tex = Textures(rma)
+        self.eff = dict(textures={'RMA_A': 'RMA'}, vectors={}, scalars={})
+
+    def test_only_the_metal_darkens(self):
+        rgb = np.full((1, 2, 3), 0.8, np.float32)
+        out = bake.dark_metal(rgb, self.eff, self.tex, (0.1, 0.5, 0.25, 1.0))
+        np.testing.assert_allclose(out[0, 0], 0.08, atol=1e-5)
+        np.testing.assert_allclose(out[0, 1], 0.8, atol=1e-5)
+
+    def test_other_greys_take_their_own_factor(self):
+        rgb = np.full((1, 2, 3), 0.8, np.float32)
+        out = bake.dark_metal(rgb, self.eff, self.tex, (0.1, 0.5, 0.25, 0.5))
+        np.testing.assert_allclose(out[0, 0], 0.08, atol=1e-5)
+        np.testing.assert_allclose(out[0, 1], 0.4, atol=1e-5)
+
+    def test_coloured_texels_stay(self):
+        rgb = np.array([[[0.8, 0.0, 0.5], [0.8, 0.0, 0.5]]], np.float32)
+        out = bake.dark_metal(rgb, self.eff, self.tex, (0.1, 0.5, 0.25, 0.5))
+        np.testing.assert_allclose(out, rgb, atol=1e-5)
+
+    def test_no_map_no_change(self):
+        rgb = np.full((1, 2, 3), 0.8, np.float32)
+        self.assertIs(bake.dark_metal(rgb, dict(textures={}), self.tex, (0.1, 0.5, 0.25, 1.0)), rgb)
+
+    def test_shine(self):
+        plain = bake.specular(self.eff, self.tex).astype(float)
+        dark = bake.specular(self.eff, self.tex, dark=(0.1, 0.5, 0.25, 1.0)).astype(float)
+        self.assertAlmostEqual(dark[0, 0, 0], plain[0, 0, 0] * 0.5, delta=1)
+        self.assertAlmostEqual(dark[0, 0, 1], plain[0, 0, 1] * 0.25, delta=1)
+        self.assertEqual(dark[0, 1, 0], plain[0, 1, 0])
+        self.assertEqual(dark[0, 0, 3], plain[0, 0, 3])
 
 
 class HandRowsTest(unittest.TestCase):

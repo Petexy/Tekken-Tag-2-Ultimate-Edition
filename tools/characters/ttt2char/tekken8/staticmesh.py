@@ -9,6 +9,7 @@ The render data follows the properties; its first LOD's buffers are found by the
         (half2 or float2 per set)
     colours: FStripDataFlags, u32 stride (0 or 4), u32 count, [bulk array of FColor (B, G, R, A)]
     indices: u32 32-bit, bulk array of bytes (u16 or u32 indices)
+Before the position buffer: its sections (_sections), the materials' parts of the triangles.
 Units are centimetres, Z up.
 
 Written for this project from the files themselves (no third-party code).
@@ -20,6 +21,8 @@ import numpy as np
 from . import uprops
 
 MAX_VERTICES = 1 << 20
+MAX_SECTIONS = 64
+SECTION_SIZE = 40
 
 
 class StaticMesh:
@@ -72,12 +75,35 @@ class StaticMesh:
         self.indices = np.frombuffer(b, '<u4' if wide else '<u2', size * k // (4 if wide else 2), q).astype(np.uint32)
         if not len(self.indices) or len(self.indices) % 3 or self.indices.max() >= n:
             raise ValueError('%s: %d indices for %d vertices' % (self.name, len(self.indices), n))
+        self.sections = _sections(b, end, at, len(self.indices))
+        self.tangents = np.concatenate([tangents[:, 0, :3], np.where(tangents[:, 1, 3:] < 0, -1.0, 1.0)], 1)
         nz = tangents[:, 1, :3]
         self.normals = nz / np.maximum(np.linalg.norm(nz, axis=1, keepdims=True), 1e-8)
 
     def triangles(self):
-        """[(material slot, (k, 3) vertex indices)]: one section (the effect meshes have one)."""
-        return [(0, self.indices.reshape(-1, 3))]
+        """[(material slot, (k, 3) vertex indices)], one per section (the effect meshes have one)."""
+        t = self.indices.reshape(-1, 3)
+        return [(slot, t[first // 3:first // 3 + count]) for slot, first, count in self.sections]
+
+
+def _sections(b, start, end, indices):
+    """The first LOD's sections, in the bytes before its position buffer: u32 count, then per section u32 material
+    slot, first index, triangles, lowest and highest vertex, 5 x u32 flags: [(slot, first index, triangles)]; the whole
+    mesh as slot 0 when no such table lies there."""
+    for o in range(start, end - 4):
+        n = struct.unpack_from('<I', b, o)[0]
+        if not 0 < n <= MAX_SECTIONS or o + 4 + SECTION_SIZE * n > end:
+            continue
+        rows = [struct.unpack_from('<3I', b, o + 4 + SECTION_SIZE * i) for i in range(n)]
+        at = 0
+        for _, first, count in rows:
+            if first != at or not count:
+                break
+            at += 3 * count
+        else:
+            if at == indices:
+                return rows
+    return [(0, 0, indices // 3)]
 
 
 def _position_header(b, o):
