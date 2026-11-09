@@ -719,6 +719,47 @@ def settle(k, chains, skel, parents, still, body):
     return turned, hanging.follow(k, before, changed) if changed else 0
 
 
+def long_cloth(chains, spec):
+    """A definition's spring for its long cloth (TEKKEN8 'long_cloth': {'links': n, 'spring': a chain's own, springs()}):
+    chains of at least n links without a spring of their own take it. The limits are per link: ten links at OUTWARD can
+    curl 12 rad (Clive's mantle: a black ball round him in his turns)."""
+    for c in chains:
+        if len(c['bones']) >= spec['links'] and not c.get('spring'):
+            c['spring'] = spec['spring']
+
+
+def long_cloth_parents(chains, parents, names, spec):
+    """parents (one per chain) with a definition's long cloth hung from the bone its 'parent' names, if it names one: a
+    chain hung from a collarbone turns with the arm, its tip a metre away from the others' when he raises it (Clive's
+    mantle), and touches no capsule (LIMBS)."""
+    if not spec.get('parent'):
+        return parents
+    at = list(names).index('cha:' + spec['parent'])
+    return [at if len(c['bones']) >= spec['links'] and not c.get('spring') else p for c, p in zip(chains, parents)]
+
+
+def _swing_limits(spring, frame, length=None):
+    """A chain's spring with its limits for one link (frame: its bind matrix, world), from the spring's 'swing': {'back':
+    a direction in the model, 'towards', 'against', 'across': per link, rad}: each chain may swing that far toward back,
+    away from it, and to the sides of it, whichever way its own axes lie. Limits about each chain's own axes spread a sheet:
+    local Y faces away from the body, so "outward" takes the chains at the sheet's edge away from each other. About Y a
+    positive angle takes the link toward -Z, about Z toward +Y. With the swing's 'per' (mm) the three are per that much
+    chain, the link's `length` taking its share: the cloth curls as far whatever its links' count (the bone room left
+    for cloth sets their length: add())."""
+    s = spring['swing']
+    if s.get('per') and length:
+        k = float(length) / float(s['per'])
+        s = dict(s, towards=s['towards'] * k, against=s['against'] * k, across=s['across'] * k)
+    rot = frame[:3, :3] / np.linalg.norm(frame[:3, :3], axis=0)
+    y, z = (rot.T @ np.asarray(s['back'], np.float64))[1:]
+    length = max(float(np.hypot(y, z)), 1e-9)
+    y, z = y / length, z / length
+
+    def limit(along):
+        return s['across'] + max(along, 0.0) * (s['towards'] - s['across']) + max(-along, 0.0) * (s['against'] - s['across'])
+    return dict(spring, limits=(limit(-z), -limit(z), limit(y), -limit(-y)))
+
+
 def springs(skel, made, chains, body):
     """The spring file's cloth part: skel the fighter's skeleton with the chains' bones (made: their indices, in
     chain order; chains: rig()'s result), body: the body's vertices without the cloth ((n, 3) bind positions, mm).
@@ -800,7 +841,9 @@ def springs(skel, made, chains, body):
         for j, b in enumerate(bones):
             p = world[b][:3, 3]
             nxt = world[bones[j + 1]][:3, 3] if j + 1 < len(bones) else world[bones[j - 1]][:3, 3]
-            entries.append((number[b], j, float(np.linalg.norm(nxt - p)), limits))
+            length = float(np.linalg.norm(nxt - p))
+            own = _swing_limits(limits, world[b], length) if isinstance(limits, dict) and 'swing' in limits else limits
+            entries.append((number[b], j, length, own))
             pairs += [(number[b], cc) for cc in range(len(caps)) if (b, cc) in touching]
         for nb in sorted(chain['neighbours']):
             if nb <= c:

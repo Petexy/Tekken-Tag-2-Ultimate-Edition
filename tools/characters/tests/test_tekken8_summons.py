@@ -151,6 +151,16 @@ class JointSpotsTest(unittest.TestCase):
         self.assertEqual(got[2], (summons8.JOINT_SPOT, 'R_Hand', (0.0, 0.0, 0.0), (0.0, 560.0, 560.0)))
         self.assertEqual(got[3], 9)
 
+    def test_joint_that_leaves_the_hand(self):
+        """AT_JOINT: an end near the joint, a sphere's far end too, follows the joint, not the hand's body code."""
+        joints = {121: ('R_Have', summons8.AT_JOINT)}
+        got = summons8.joint_spots((Sphere(121, (0, -100, 0), 121, (0, 0, 0)), Sphere(0, (0, 0, 0), 0, (0, 0, 0))), joints, {})
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Have', (0.0, -100.0, 0.0), (0.0, 0.0, 0.0)))
+        self.assertEqual(got[1], (summons8.JOINT_SPOT, 'R_Have', (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+        got = summons8.joint_spots((Sphere(121, (0, 0, 0), 121, (0, 0, 0), 300), Sphere(0, (0, 0, 0), 0, (0, 0, 0))), joints, {})
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Have', (0.0, 0.0, 0.0), (0.0, 0.0, 300.0)))
+        self.assertEqual(got[1], (summons8.JOINT_SPOT, 'R_Have', (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+
     def test_ground_origin_stays_an_offset(self):
         got = self.spots(Sphere(121, (0, 0, 0), 125, (0, 900, 900)), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
         self.assertEqual(got[1], (0.0, 900.0, 900.0))
@@ -474,6 +484,35 @@ class PairValuesTest(unittest.TestCase):
         np.testing.assert_allclose(world, 0.98 * k * (at @ C.T + delta), atol=1e-6)
         self.assertLess(RT.angle(R, np.eye(3)[None]).max(), 1e-9)
 
+    def test_ground(self):
+        """A ground pair: the scene's origin (where Top is at the clip's frame 0); not held, where Top is each frame."""
+        H = animation.local_rotation(self.values[:, RT.HARA_CH], animation.COMPRESSED)
+        turn = animation.local_rotation(self.values[:, RT.TURN], animation.COMPRESSED)
+        for follow in (False, True):
+            conv = types.SimpleNamespace(sub=self.conv.sub, scale=0.98, kind=animation.COMPRESSED,
+                                         pairs=self.pairs[:6] + [dict(kind='ground', follow=follow, bind=self.bind)])
+            R, t = self.local(T8.pair_values(conv, self.WR, self.Wp, self.values, 1.0, None, 7, ground=True), 6)
+            world = 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, t)       # HARA_ROT1 x the pair, from Top
+            moved = 0.98 * np.einsum('fij,fj->fi', turn, self.values[:, 0])         # Top, from where it was at 0
+            np.testing.assert_allclose(world, 0 * moved if follow else -moved, atol=1e-6)
+            self.assertLess(RT.angle(H @ R, turn).max(), 1e-6)
+
+    def test_scene_point(self):
+        """A hold clip's path point: from the scene's origin (where Top was at frame 0); the scene where he is (every
+        ground following him), from Top each frame."""
+        F = self.F
+        path = np.random.default_rng(3).uniform(-900, 900, (F, 3))
+        H = animation.local_rotation(self.values[:, RT.HARA_CH], animation.COMPRESSED)
+        turn = animation.local_rotation(self.values[:, RT.TURN], animation.COMPRESSED)
+        moved = 0.98 * np.einsum('fij,fj->fi', turn, self.values[:, 0])
+        for follows in (False, True):
+            conv = types.SimpleNamespace(sub=self.conv.sub, scale=0.98, kind=animation.COMPRESSED, follows=follows,
+                                         scene=lambda clip, joint: (path, np.repeat(np.eye(3)[None], F, 0)))
+            t = T8.root_point(conv, self.WR, self.Wp, self.values, 1.0, ('scene', 'J', (0, 0, 0), (0, 0, 0), 0, 1))
+            world = 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, t)
+            want = np.einsum('fij,fj->fi', turn, path)
+            np.testing.assert_allclose(world, want if follows else want - moved, atol=1e-6)
+
     def test_still(self):
         """A still pair (a hit-only weapon holding its place in the order): its bind in every frame, offsets or not."""
         for roots in (None, [(0.0, 1300.0, 280.0)]):
@@ -573,6 +612,44 @@ class RootConverterTest(unittest.TestCase):
 
 
 # ------------------------------------------------------------------------------------------------ skeleton
+class GroundPairTest(unittest.TestCase):
+    """The scene's ground pair (prefabs8.py): following him, where his Top is each frame; in a held clip (a definition's
+    held_moves: a throw's scene), where the move began, his travel taken back, as a ground that is not followed."""
+
+    def setUp(self):
+        self.F = 5
+        self.values = TR.smooth_values(self.F)
+        self.values[:, 0] = np.linspace(0.0, -4400.0, self.F)[:, None] * np.array([0.1, 0.0, 1.0])  # Top: 4.4 m back
+
+    def world(self, follow, ground):
+        conv = types.SimpleNamespace(sub=types.SimpleNamespace(index={}), pairs=[dict(kind='ground', follow=follow)],
+                                     scale=0.98, kind=animation.COMPRESSED, follows=follow)
+        out = T8.pair_values(conv, None, None, self.values, 1.0, None, 1, None, ground)
+        H = animation.local_rotation(self.values[:, RT.HARA_CH], animation.COMPRESSED)
+        return 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, out[:, 0])     # HARA_ROT1 x the pair
+
+    def test_following_ground_is_at_his_top(self):
+        np.testing.assert_allclose(self.world(True, True), 0, atol=1e-6)
+
+    def test_held_clip_takes_his_travel_back(self):
+        turn = animation.local_rotation(self.values[:, RT.TURN], animation.COMPRESSED)
+        want = -0.98 * np.einsum('fij,fj->fi', turn, self.values[:, 0])
+        np.testing.assert_allclose(self.world(True, T8.HELD), want, atol=1e-6)
+        np.testing.assert_allclose(self.world(False, True), want, atol=1e-6)
+        self.assertGreater(np.linalg.norm(want[-1]), 4000)
+
+    def test_animations_pass_held_for_its_clips(self):
+        seen = {}
+
+        def animation_(blob, **extra):
+            seen[blob] = extra.get('ground')
+            return b''
+        banks = types.SimpleNamespace(blob=lambda kind, key: key, where=lambda kind, key: 'own')
+        cache = T8.Animations(banks, types.SimpleNamespace(animation=animation_), ground={1, 2}, held={2})
+        cache(1), cache(2), cache(3)
+        self.assertEqual(seen, {1: True, 2: T8.HELD, 3: None})
+
+
 class AppendTest(unittest.TestCase):
     def test_append_tekken8(self):
         bon = TR.ttt2_bon()

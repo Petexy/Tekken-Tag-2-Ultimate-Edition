@@ -168,6 +168,8 @@ class Converter:
         self.scale = dst.scale
         # weapons posed by pairs (pair_specs; none: the 23 body channels only)
         self.pairs = pair_specs(sk, target, weapons, self.cal) if weapons else []
+        grounds = [s for s in self.pairs if s is not None and s['kind'] == 'ground']
+        self.follows = bool(grounds) and all(s['follow'] for s in grounds)     # the scene is where he is (root_point)
         # the joints the channels need, and their ancestors: a small skeleton of its own
         body = sk.chain([sk.index[j] for j in set(DRIVERS.values()) | {TOP, TRANS, ROT}])
         want = body + [sk.index[j] for j in pair_joints(self.pairs)]
@@ -177,6 +179,7 @@ class Converter:
                                      [at[sk.parents[j]] if sk.parents[j] >= 0 else -1 for j in chain],
                                      sk.t[chain], sk.R[chain], sk.s[chain])
         self.moved = {sk.names[j] for j in chain if j not in set(body)}     # the weapons' joints (pairs)
+        self.scene = None                               # the hold clips (convert/prefabs8.py HoldClips)
 
     def fk(self, anim):
         """(joints {name: panm.Joint}, world rotations (F, n, 3, 3), positions (F, n, 3) mm) of the clip on the small
@@ -212,7 +215,7 @@ class Converter:
             yaw = np.zeros(F)
         return world, root, D, yaw, LEGACY_LEG if anim.legacy else self.own_leg, J
 
-    def channels(self, anim, roots=None, snakes=None):
+    def channels(self, anim, roots=None, snakes=None, ground=False):
         """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale', 'pairs'}) of a panm.Animation;
         with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
         offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
@@ -225,16 +228,16 @@ class Converter:
             moving = any(n in self.moved and (j.stored_rotation or j.stored_translation) for n, j in J.items())
             count = max([p + 1 for p, s in enumerate(self.pairs) if s is not None and
                          (s['kind'] == 'root' and roots is not None or s['kind'] in ('joint', 'lead') and moving or
-                          s['kind'] == 'snakes' and snakes is not None)]
+                          s['kind'] == 'snakes' and snakes is not None or s['kind'] == 'ground' and ground)]
                         or [0])
         if count:
             _, WR, Wp = self.fk(anim)
-            values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes)], 1)
+            values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes, ground)], 1)
         return values, dict(frames=anim.frames, leg=leg, root_scale=k, pairs=count)
 
-    def animation(self, blob, endian='>', roots=None, snakes=None):
-        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes: channels())."""
-        values, info = self.channels(panm.Animation(blob), roots, snakes)
+    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False):
+        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground: channels())."""
+        values, info = self.channels(panm.Animation(blob), roots, snakes, ground)
         self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
 
@@ -379,6 +382,7 @@ class HandClips:
 WEAPON_FIRST = 800                          # weapons.OPT_FIRST: bone OPT 800 + k takes pair k
 NAME_LENGTH = 31                            # weapons.NAME_LENGTH (with 'cha:')
 ROOT_PARENT = 'HARA_ROT1'
+HELD = 'held'                               # a clip's ground: its scene stays where the move began (prefabs8 HELD SCENES)
 # the Tekken 8 joint at a TTT2 bone's origin where that is not its driver's (skeleton.ANCHOR through tekken8/names.py):
 # KOSHI sits at HARA_ROT1 (Rot, 112.7 cm up in her bind), its driver C_Leg 16 cm below (a weapon's translation is
 # measured from it: her tail hung 16 cm too high from C_Leg)
@@ -401,6 +405,8 @@ def pair_specs(sk, target, weapons, cal):
     for w in weapons:
         if w.get('pair') is not None:
             of_name[('cha:OPT%d_%s' % (WEAPON_FIRST + w['pair'], w['bone']))[:NAME_LENGTH][4:]] = w
+        elif w.get('channels') is not None:                      # (a bone numbered below 800, posed by that pair)
+            of_name[('cha:OPT%d_%s' % (w['number'], w['bone']))[:NAME_LENGTH][4:]] = w
     out = {}
     for name, w in of_name.items():
         if name not in names:
@@ -411,6 +417,8 @@ def pair_specs(sk, target, weapons, cal):
                           bone.matrix_from_euler_xyz(np.asarray(target['r'][b], np.float64))))
         if w.get('still'):
             spec.update(kind='still')
+        elif w.get('ground'):                                    # (convert/prefabs8.py)
+            spec.update(kind='ground', follow=not w.get('held', True))
         elif w.get('root') is not None:
             if up != ROOT_PARENT:
                 raise ValueError('a root point\'s weapon hangs under %s, not %s' % (up, ROOT_PARENT))
@@ -430,7 +438,7 @@ def pair_specs(sk, target, weapons, cal):
         for j in pair_joints([spec]):
             if j not in sk.index:
                 raise ValueError('the fighter\'s skeleton has no joint %s (weapon %s)' % (j, w['bone']))
-        out[w['pair']] = spec
+        out[w['pair'] if w.get('pair') is not None else w['channels']] = spec
     return [out.get(k) for k in range(max(out) + 1)] if out else []
 
 
@@ -438,20 +446,46 @@ def pair_joints(specs):
     """The Tekken 8 joints the specs' pairs are made of."""
     out = []
     for s in specs:
-        if s is None or s['kind'] in ('root', 'still'):
+        if s is None or s['kind'] in ('root', 'still', 'ground'):
             continue
         out += s['joints'] if s['kind'] == 'lead' else [] if s['kind'] == 'snakes' else [s['joint']]
         out += [x for x in (s.get('driver'), s.get('up'), s.get('anchor')) if x]
     return sorted(set(out))
 
 
-def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None):
+def root_point(conv, WR, Wp, values, k, o, follows=None):
+    """(F, 3) a root point of a clip through its frames: an offset from the ground origin, a joint's point, or a hold
+    clip's path (prefabs8.py), in HARA's frame. follows: whether the scene is where he is (default conv.follows)."""
+    F = len(values)
+    idx = conv.sub.index
+    H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)
+    if o[0] == 'scene':
+        at, turn_of = conv.scene(o[4], o[1])
+        g = np.clip(np.arange(F) - (int(o[5]) - 1), 0, len(at) - 1)
+        X = at[g] + np.einsum('fij,j->fi', turn_of[g], np.asarray(o[2], np.float64)) + np.asarray(o[3], np.float64)
+        turn = animation.local_rotation(values[:, retarget.TURN], conv.kind)
+        if follows is None:
+            follows = getattr(conv, 'follows', False)
+        back = 0 if follows else conv.scale * values[:, 0]                  # (a scene where he is: Top's)
+        return np.einsum('fji,fj->fi', H, np.einsum('fij,fj->fi', turn, X - back) - conv.scale * values[:, 1])
+    if isinstance(o[0], str):                                                   # a joint's point, frame by frame
+        j = idx[o[1]]
+        o = (Wp[:, j] + np.einsum('fij,j->fi', WR[:, j], np.asarray(o[2], np.float64)) - Wp[:, idx[TOP]]) @ \
+            conv.cal.C.T + np.asarray(o[3], np.float64)
+    else:
+        o = np.asarray(o, np.float64)[None]
+    return np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))
+
+
+def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None, ground=False):
     """The extra channels (F, 2 count, 3) of pairs 0 .. count - 1 (conv.pairs; see the module's notes) of a clip:
     WR, Wp its forward kinematics (Converter.fk), values its body channels, k its root scale, roots its root point
     offsets (or None: those pairs hold their bind), snakes (heads (G, m, 3) mm in the parent's frame, the frame
-    index the summoned clip starts at) or None."""
+    index the summoned clip starts at) or None; ground: True to pose the ground (where his Top is with a following
+    ground), HELD to pose it where the move began all the same (its scene's root points with it)."""
     F = len(values)
     idx = conv.sub.index
+    follows = getattr(conv, 'follows', False) and ground != HELD
     T = np.zeros((F, count, 3))
     R = np.repeat(np.eye(3)[None, None], F, 0).repeat(count, 1)
 
@@ -485,14 +519,17 @@ def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None):
             T[:, p] = at[np.arange(F), np.argmax(ahead, 1)]
         elif s['kind'] == 'root' and roots is not None:                         # a root point
             o = roots[min(s['root'], len(roots) - 1)]
-            if isinstance(o[0], str):                                           # a joint's point, frame by frame
-                j = idx[o[1]]
-                o = (Wp[:, j] + np.einsum('fij,j->fi', WR[:, j], np.asarray(o[2], np.float64)) - Wp[:, idx[TOP]]) @ \
-                    conv.cal.C.T + np.asarray(o[3], np.float64)
+            if o[0] == 'windows':                                               # other points from frame to frame
+                for start, stop, spot in o[1]:                                  # (prefabs8.root_windows)
+                    T[start:stop, p] = root_point(conv, WR, Wp, values, k, spot, follows)[start:stop]
             else:
-                o = np.asarray(o, np.float64)[None]
-            H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)
-            T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))
+                T[:, p] = root_point(conv, WR, Wp, values, k, o, follows)
+        elif s['kind'] == 'ground' and ground:                                  # the scene's origin: where Top is at
+            H = animation.local_rotation(values[:, retarget.HARA_CH], conv.kind)   # the clip's frame 0, not turned
+            turn = animation.local_rotation(values[:, retarget.TURN], conv.kind)
+            back = 0 if s.get('follow') and ground != HELD else np.einsum('fij,fj->fi', turn, -values[:, 0])
+            T[:, p] = np.einsum('fji,fj->fi', H, conv.scale * (back - values[:, 1]))   # (follow: where Top is now,
+            R[:, p] = np.swapaxes(H, -1, -2) @ turn                                     # his body's creatures)
         else:
             T[:, p], R[:, p] = s['bind']
     out = np.zeros((F, 2 * count, 3))
@@ -581,8 +618,10 @@ class Animations:
     left aside); snakes: {clip key: (heads, start)} of the clips whose moves start a summoned model's clip
     (convert/snakes8.py), likewise."""
 
-    def __init__(self, banks, converter, originals=None, roots=None, snakes=None):
+    def __init__(self, banks, converter, originals=None, roots=None, snakes=None, ground=None, held=None):
         self.banks, self.converter = banks, converter
+        self.ground = set(ground or ())    # (the clips of moves showing a prefab: convert/prefabs8.py)
+        self.held = set(held or ())        # (... of those, the ones whose scene stays where the move began)
         self.originals = dict(originals or {})
         self.roots = dict(roots or {})
         self.snakes = dict(snakes or {})
@@ -595,7 +634,7 @@ class Animations:
             key, bank = key
         if key in self.cache:
             return self.cache[key]
-        if key in self.originals and key not in self.roots and key not in self.snakes:
+        if key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground:
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
             self.cache[key] = self.originals[key]
             return self.cache[key]
@@ -609,6 +648,8 @@ class Animations:
                 extra = dict(roots=self.roots[key]) if key in self.roots else {}
                 if key in self.snakes:          # (the snakes' heads: convert/snakes8.py)
                     extra['snakes'] = self.snakes[key]
+                if key in self.ground:
+                    extra['ground'] = HELD if key in self.held else True
                 out = self.converter.animation(blob, **extra)
                 self.stats['body animations converted (%s)' % self.banks.where(anmbin.BODY, key)] += 1
                 if getattr(self.converter, 'pairs', None) and getattr(self.converter, 'last_pairs', 0):

@@ -138,6 +138,7 @@ class Sampler:
         self.parts, self.kinds = assets(store, d.TEKKEN8_CODE)
         self.weapons = {w['bone']: w for w in getattr(d, 'WEAPONS', ())}
         self.looks = getattr(d, 'TEKKEN8_TRAIL_LOOKS', {})
+        self.sockets = getattr(d, 'TEKKEN8_TRAIL_SOCKETS', {})      # (a joint no weapon has -> (a weapon's bone, offset))
         self.k, self.banks, self.conv = k, banks, conv
         self.skeleton = retarget.ttt2_skeleton(target)
         self._clips = {}
@@ -153,15 +154,18 @@ class Sampler:
         parts, _, tail, kind = decode(value)
         values = self.clip(move)
         part = self.parts.get(parts)
-        if values is None or part is None or kind not in self.kinds or part['first'][0] not in self.weapons \
-                or part['second'][0] not in self.weapons:
+        if values is None or part is None or kind not in self.kinds:
+            return None
+        sockets = [self.sockets.get(part[n][0], (part[n][0], (0.0, 0.0, 0.0))) for n in ('first', 'second')]
+        sockets = [(j, np.add(o, part[n][1])) for (j, o), n in zip(sockets, ('first', 'second'))]
+        if any(j not in self.weapons for j, _ in sockets):
             return None
         first = max(0, start - 1 + SPAWN_LAG)   # (a move's frame f shows its clip's frame f - 1)
         last = min(len(values) - 1, first + frames)
         if last <= first:
             return None
         ends = []
-        for joint, offset in (part['first'], part['second']):
+        for joint, offset in sockets:
             R, t = weapon_frames(self.conv, self.skeleton, values[first:last + 1], self.weapons[joint])
             ends.append(t + np.einsum('fij,j->fi', R, socket(offset)))
         R0, p0 = level_frame(values, self.skeleton, max(0, start - 1 + ANCHOR_LAG))
@@ -172,7 +176,7 @@ class Sampler:
         seen = np.einsum('fj,fji->fi', ends[0] - Wp[:, 0], turns)
         return dict(far=to_effect(ends[0]), near=to_effect(ends[1]), seen=seen, tail=max(1, tail),
                     kind=dict(self.kinds[kind], **self.looks.get(kind, {})), kind_id=kind, scale=part['scale'], width=part['width'],
-                    blade=float(np.linalg.norm(socket(part['first'][1]) - socket(part['second'][1])) * part['width']))
+                    blade=float(np.linalg.norm(socket(sockets[0][1]) - socket(sockets[1][1])) * part['width']))
 
 
 def catmull(p, t):
@@ -313,6 +317,43 @@ def fire(plain, alpha, age):
     return np.stack([np.interp(t, FIRE_RAMP[0], c) for c in FIRE_RAMP[1:]], -1).astype(np.float32) / 255.0
 
 
+GLASS, GLASS_RIM, GLASS_GLINT = (0.14, 0.2, 0.27), (0.86, 0.93, 0.97), (0.95, 0.98, 1.0)      # by Tekken 8's frames
+
+
+def glass(store, materials, kind, scale, tails, along, across):
+    """A kind (the definition's TEKKEN8_TRAIL_LOOKS 'glass') Tekken 8 draws by bending the picture: its first layer's shape
+    as a slate shadow towards the far end, its second's as white glints, a thin pale line outside. Its Mask's U 1 is the
+    far end, V 1 the head."""
+    age = np.minimum((np.arange(along, dtype=np.float32) + 0.5) / along * tails, 1.0)
+    q = (np.arange(across, dtype=np.float32) + 0.5) / across
+    a, q = np.meshgrid(age, q, indexing='ij')
+    x = q * (1.0 + RIM) - RIM
+    inside = x / np.maximum(keys_at(scale, a), 1e-3)
+    u, v = np.clip(1.0 - inside, 0.0, 1.0), 1.0 - a
+    first, second = [materials.effective(path)['textures'] for path in kind['materials'][:2]]
+    cache = {}
+    plain = lambda t: _image(store, t, cache)[..., 0:1]
+    shade = _sample(plain(first['MaskTexture']), u, v, wrap=False)[..., 0] * \
+        _sample(plain(first['BaseTexture']), u, v, wrap=False)[..., 0]
+    glint = _sample(plain(second['BaseTexture']), u, v * 2.0)[..., 0] * \
+        _sample(plain(second['MaskTexture']), u, v, wrap=False)[..., 0]
+    alpha = np.clip(shade ** 0.8 * kind.get('shade', 0.6), 0.0, 1.0) * (inside >= 0.0) * (inside <= 1.0)
+    rgb = np.broadcast_to(np.array(GLASS, np.float32), a.shape + (3,)).copy()
+    opacity = np.clip((glint - 0.1) * 2.5, 0.0, 0.7) * (inside >= 0.0) * (inside <= 1.0)
+    rgb = (rgb * (alpha * (1.0 - opacity))[..., None] + np.array(GLASS_GLINT, np.float32) * opacity[..., None]) / \
+        np.maximum(opacity + alpha * (1.0 - opacity), 1e-4)[..., None]
+    alpha = opacity + alpha * (1.0 - opacity)
+    rim = _step(-0.03, -0.015, inside) * (1.0 - _step(0.0, 0.01, inside)) * (1.0 - _step(0.35, 0.8, a)) * _step(0.0, 0.05, a) * 0.8
+    rgb = (rgb * (alpha * (1.0 - rim))[..., None] + np.array(GLASS_RIM, np.float32) * rim[..., None]) / \
+        np.maximum(rim + alpha * (1.0 - rim), 1e-4)[..., None]
+    alpha = rim + alpha * (1.0 - rim)
+    out = np.dstack([rgb, alpha])
+    out[0, :, 3] = out[-1, :, 3] = 0.0
+    out[a >= 1.0, 3] = 0.0
+    out[:, 0, 3] = out[:, -1, 3] = 0.0
+    return np.round(np.clip(out, 0.0, 1.0) * 255.0)
+
+
 def bake(store, materials, kind, scale, tails=1.0, along=ALONG, across=ACROSS, exposure=EXPOSURE):
     """The look of a kind (assets) as RGBA (along, across, 4) 0 .. 255: y the slice's age, `tails` tails from the top to
     the bottom (0 the head), x across the blade (the mesh's u). materials: material8.Materials; scale: the parts'
@@ -322,6 +363,8 @@ def bake(store, materials, kind, scale, tails=1.0, along=ALONG, across=ACROSS, e
     TEKKEN8_TRAIL_LOOKS: body scales the opacity of all but the rim. A fire is coloured by `fire`."""
     age = np.minimum((np.arange(along, dtype=np.float32) + 0.5) / along * tails, 1.0)
     q = (np.arange(across, dtype=np.float32) + 0.5) / across
+    if kind.get('glass'):
+        return glass(store, materials, kind, scale, tails, along, across)
     a, q = np.meshgrid(age, q, indexing='ij')
     x = q * (1.0 + RIM) - RIM                   # share of the blade from the far end: 0 .. 1 the band
     w = np.maximum(keys_at(scale, a), 1e-3)
@@ -506,8 +549,8 @@ def burning(conv, kind):
 
 def left_behind(conv, doc, trail, looks):
     """What a trail leaves along the far end's way, every WISP_FRAMES frames it flies: a fire (burning) clouds and sparks,
-    a kind with 'flecks' (the definition's TEKKEN8_TRAIL_LOOKS) flecks of its shine."""
-    fire_, flecks = burning(conv, trail['kind']), trail['kind'].get('flecks')
+    a kind with 'flecks' (the definition's TEKKEN8_TRAIL_LOOKS) flecks of its shine; one with 'clean' (the same) nothing."""
+    fire_, flecks = burning(conv, trail['kind']) and not trail['kind'].get('clean'), trail['kind'].get('flecks')
     if not fire_ and not flecks:
         return
     key = ('wisp' if fire_ else 'fleck', trail['kind_id'])

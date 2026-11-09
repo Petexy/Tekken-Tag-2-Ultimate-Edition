@@ -4,7 +4,8 @@
 // Eliza's): what its EX moves, supers and cancels cost, filled as it deals
 // and takes damage, shown at the bottom of the screen with Tekken 7's own
 // pictures, the fighter lit up yellow as it spends it (Geese light blue in
-// his MAX mode). See gauge.cpp.
+// his MAX mode). Clive's Zantetsuken gauge from Tekken 8 too: only his moves
+// fill it, an arc under his life bar. See gauge.cpp.
 
 #include "cafe/ppc_context.h"
 

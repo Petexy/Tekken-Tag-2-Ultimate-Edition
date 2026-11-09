@@ -115,6 +115,9 @@ def apply(c):
 
     for name, locations in c.defn.MOVESET.get('hitboxes', {}).items():
         c.T['moves'][c.newidx[c.kn[name]]]['hitbox'] = bytes(c.hit_location(x) for x in locations)
+    for name, (first, last) in c.defn.MOVESET.get('active_frames', {}).items():
+        move = c.T['moves'][c.dn[name] if name in c.dn else c.newidx[c.kn[name]]]     # (a generic move: the donor's row)
+        move['first_active'], move['last_active'] = first, last
     for name, reaction in c.defn.MOVESET.get('downed_reactions', {}).items():
         downed_reaction(c, name, reaction)
     for name, template in c.defn.MOVESET.get('air_reactions', {}).items():

@@ -62,6 +62,8 @@ ROOT_CODE = 125                     # Tekken 8's hit location of the fighter's g
 JOINT_SPOT = 'joint'                # a root point's offset that is a joint's point: (JOINT_SPOT, joint, (x, y, z), delta)
 SPHERE_RADIUS = 100                 # mm: a box on one point counts as a sphere from this radius
 HAND_LINE = 200                     # mm: an end this near its joint's origin hits from the body code at the joint
+AT_JOINT = 'joint'                  # HIT_JOINTS' body code for a joint that leaves the hand (Clive's R_Have, up to 3 m off
+                                    # it in 18 moves: a shot's place): such an end hits from a root point following it
 ROOT_CODES = (0xFA, 0xFB)           # the codes its two offsets get in the summary (no Tekken 8 hit box uses > 191)
 ROOT_SLOTS = (2, 3)                 # their points' slots (TTT2 locations 72, 73)
 ROOT_SUMMON = 63                    # never summoned (runtime: summon numbers < 64)
@@ -178,7 +180,7 @@ def weapons(d, k=None):
     out = [dict(w) for w in getattr(d, 'WEAPONS', [])]
     if k is None or not uses_roots(k):
         return out
-    first = max([w['pair'] for w in out if w.get('pair') is not None] + [-1]) + 1
+    first = max([w[key] for w in out for key in ('pair', 'channels') if w.get(key) is not None] + [-1]) + 1
     if first + len(ROOT_CODES) > MAX_PAIRS:
         raise ValueError('no animation pairs left for the root points (%d used of %d)' % (first, MAX_PAIRS))
     for r, (code, slot) in enumerate(zip(ROOT_CODES, ROOT_SLOTS)):
@@ -278,9 +280,15 @@ def joint_spots(boxes, joints, standard, every=()):
                 out.append(loc)
                 continue
             joint, body = joints[loc]
-            if sphere and e == 0:
+            if body == AT_JOINT and e == 1 and sphere:
+                out.append((JOINT_SPOT, joint, ball, (0.0, 0.0, 0.0)))
+                odd = True
+            elif sphere and e == 0:
                 r = sphere * (1.0 if b == 0 else 0.7)
                 out.append((JOINT_SPOT, joint, ball, (0.0, 0.0 if b == 0 else r, r)))
+                odd = True
+            elif body == AT_JOINT and float(np.linalg.norm(off)) <= HAND_LINE:
+                out.append((JOINT_SPOT, joint, off, (0.0, 0.0, 0.0)))
                 odd = True
             elif sphere or (body is not None and float(np.linalg.norm(off)) <= HAND_LINE):
                 out.append(body if body is not None else loc)
@@ -336,6 +344,9 @@ def prepare(k, d, log=print, place=None):
                 mv['summary'] = pick
                 mv['hitbox'] = bytes((pick[0].loc, pick[0].loc2, pick[1].loc, pick[1].loc2))
                 stats['moves whose summary takes a later hit box (box 1 empty or on box 0\'s line)'] += 1
+        if getattr(d, 'PREFABS', None):       # (the definition's own picks: convert/prefabs8.py)
+            from . import prefabs8
+            prefabs8.summaries(k, d, stats)
         joints = getattr(d, 'HIT_JOINTS', None)
         if joints:
             standard = standard_offsets(d)
@@ -345,6 +356,9 @@ def prepare(k, d, log=print, place=None):
                     if spots:
                         mv['spots'] = spots
                         stats['moves hitting from joint points (root points following a joint, spheres as lines)'] += 1
+        if getattr(d, 'PREFABS', None):       # (the definition's own ends win over the joints')
+            from . import prefabs8
+            prefabs8.named_spots(k, d, stats)
     if any(w.get('summon') is not None for w in getattr(d, 'WEAPONS', [])):
         for table in PROP_TABLES:
             for row in _table(k, table):
@@ -360,7 +374,17 @@ def prepare(k, d, log=print, place=None):
                 if row['value'] != n:
                     stats['%s rows fading (%s over %d frames)' % (hex(SHOW_PROP), 'in' if row.get('value2') else 'out',
                                                                   row['value'] >> FADE_SHIFT)] += 1
+    if place is not None and getattr(d, 'PREFABS', None):     # (hit points on the hold clips' paths: convert/prefabs8.py)
+        from . import prefabs8
+        prefabs8.scene_spots(k, d, stats)
+        prefabs8.thick_roots(k, stats)
     found = roots(k)
+    if place is not None and getattr(d, 'PREFABS', None):     # (a shared clip's root points frame by frame: there too)
+        from . import prefabs8
+        prefabs8.root_windows(k, found, stats)
+    for mv in _table(k, 'moves'):           # (joint points all on body codes: no root points for the rows below to fill)
+        if 'spots' in mv and all(isinstance(x, int) for x in mv['spots']):
+            mv['hitbox'] = bytes(mv['spots'])
     if len(weapons(d, k)) > len(getattr(d, 'WEAPONS', [])):
         for i, key in found.moves.items():
             mv = k.tables['moves'][i]
@@ -374,12 +398,13 @@ def prepare(k, d, log=print, place=None):
                 mv['hitbox'] = bytes(codes)
                 stats['moves hitting from root points'] += 1
                 continue
-            off = [np.asarray(o) for o in found[key]]
+            # (its clip's root points as offsets; a clip another move fills with joint points has others, or none)
+            off = {n: np.asarray(o) for n, o in enumerate(found[key]) if o[0] != JOINT_SPOT}
             hb = _boxes(mv)
             spots = [(hb[0].loc, hb[0].a), (hb[0].loc2, hb[0].b), (hb[1].loc, hb[1].a), (hb[1].loc2, hb[1].b)]
             for c, (loc, at) in enumerate(spots):
                 if loc == ROOT_CODE and codes[c] == ROOT_CODE:
-                    near = int(np.argmin([np.linalg.norm(np.asarray(at, np.float64) - o) for o in off]))
+                    near = min(off, key=lambda n: np.linalg.norm(np.asarray(at, np.float64) - off[n]), default=-1)
                     codes[c] = ROOT_CODES[near]
             mv['hitbox'] = bytes(codes)
             stats['moves hitting from root points'] += 1

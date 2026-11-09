@@ -69,6 +69,13 @@ class Format(unittest.TestCase):
             [p] = pack.installed(d)
             self.assertEqual((p['format'], p['current'], p['slot']), (pack.PACK_FORMAT, True, 3))
 
+    def test_unblurred_meshes_listed_only_for_a_definition_that_names_them(self):
+        made_up = dict(NAME='X', CODE='abc', DONOR='lar', SEX='male')
+        listed = pack.character_ini(type('D', (), dict(made_up, UNBLURRED=('abc_dog', 'abc_wpn1'))), 3)
+        self.assertIn('unblurred = abc_dog abc_wpn1\n', listed)
+        self.assertNotIn('unblurred', pack.character_ini(type('D', (), made_up), 3))
+        self.assertNotIn('unblurred', pack.character_ini(KAZUMI, 3, chr_tones=26))
+
     def test_older_and_newer_packs_are_not_current(self):
         with tempfile.TemporaryDirectory() as d:
             old_kazumi(d)                                           # (no format, its own keys/: format 0)

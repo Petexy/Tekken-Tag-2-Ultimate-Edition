@@ -38,6 +38,7 @@ FLOAT96, FIXED48, INTERVAL32 = 1, 2, 3
 CODEC = 'AnimCompress_PerTrackCompression'   # (its objects' names: _1, _2)
 FIXED48_ROTATION = 32767.0
 FIXED48_VECTOR = 255.0
+CURVE_NAME = 8                      # bytes of a curve's name in an AnimSequence's list (an FName)
 # a vector's x, y, z widths in an IntervalFixed32 key (x the top bits), each field centred (_interval). Read from Clive's
 # clips: Torgal's root scale in his throws, keys whose fields stand at their middle and one below full, comes out 0.001
 # (parked) and 0.95 (shown) on all three axes, and his phoenix's feather scales start and end at exactly 1; split as
@@ -74,8 +75,9 @@ def layout(b, end):
     track_map = list(struct.unpack_from('<%di' % n, b, p))
     p += 4 * n
     curves, = struct.unpack_from('<i', b, p)
-    if curves:
-        raise ValueError('an animation with %d curves (not read)' % curves)
+    # (a clip with float curves, Clive's prefabs' material curves, names them here: an FName each; the curve data after
+    # the codec's names is skipped)
+    p += CURVE_NAME * curves
     stream_bytes, _ = struct.unpack_from('<iI', b, p + 4)
     stream = p + 12
     p = stream + stream_bytes

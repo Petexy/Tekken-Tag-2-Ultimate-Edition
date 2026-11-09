@@ -384,13 +384,22 @@ class Rows(unittest.TestCase):
 
     def test_stop_row_and_no_summon(self):
         c = converter({42: STAFF})
-        t8 = [(5, moveset.EFFECT8_SPAWN, 42, None), (20, moveset.EFFECT8_STOP, 42, None)]
+        t8 = [(5, moveset.EFFECT8_SPAWN, 42, None), (20, moveset.EFFECT8_STOPS[0], 42, None)]
         rows = []
         c.effect8_rows(rows, t8, 5, moveset.EFFECT8_SPAWN, 42, 0)
-        c.effect8_rows(rows, t8, 20, moveset.EFFECT8_STOP, 42, 0)               # a stop: no row of its own
+        c.effect8_rows(rows, t8, 20, moveset.EFFECT8_STOPS[0], 42, 0)               # a stop: no row of its own
         self.assertEqual([r['value'] for r in rows], [9 << 8 | 42])             # no summon in the list: the first
         self.assertEqual(c.effect_rows[0][2], 15)
         self.assertEqual(c.effects8_stopped, {42})                              # it loops until stopped
+
+    def test_the_other_stop_is_no_spawn(self):
+        c = converter({42: STAFF})
+        t8 = [(5, moveset.EFFECT8_SPAWN, 42, None), (30, 0x8036, 42, None)]
+        rows = []
+        c.effect8_rows(rows, t8, 5, moveset.EFFECT8_SPAWN, 42, 0)
+        c.effect8_rows(rows, t8, 30, 0x8036, 42, 0)
+        self.assertEqual([r['value'] for r in rows], [9 << 8 | 42])
+        self.assertEqual(c.effect_rows[0][2], 25)
 
 
 # ------------------------------------------------------------------------------------------------ static meshes

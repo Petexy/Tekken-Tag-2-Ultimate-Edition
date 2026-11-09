@@ -67,6 +67,9 @@ def _tones(store, path, skipped):
     return out
 
 
+STOP_EVENT = 'Stop_'                # an event that plays nothing
+
+
 def table(store, code, skipped=None):
     """Bank 15's sounds as the fighter hears them: {n: event name}; the fighter's own first."""
     skipped = [] if skipped is None else skipped
@@ -177,6 +180,8 @@ class Effects:
                 self.left_out.append((name, 'a Rage Art\'s'))
             elif TITLE_HAS.match(name):
                 self.left_out.append((name, 'the title has its own'))
+            elif name.startswith(STOP_EVENT):      # (no sound: it ends a loop; TTT2's clips end by themselves)
+                self.left_out.append((name, 'it only stops a sound'))
             elif name not in self.names:
                 try:
                     self.clips.append(clip(events, events.name(name) or name))

@@ -9,12 +9,37 @@
 // its parent's scale (S L S^-1): each link thins about its own axis. frames 0 or 1: at once (every pack before;
 // Noctis's). A row for a summon fading the same way is left alone (Tekken 8's queue); one the other way turns it
 // round from the scale it has.
+//
+// A ramp's bit 4 (kRampDissolve, the importer's convert/lace8.py: Clive's wings) has the weapon's summon dissolve
+// instead: its material's texels carry in their alpha the order they form in, from 1 (first) down to kDissolveRef / 255
+// (last), and the material's alpha test is at kDissolveRef (all of them drawn); while the fade runs, the reference the
+// title sets for that material is raised so that the fade's share of them is drawn (dissolve_ref), and the weapon is
+// not scaled. The drawing knows no player, so this holds while one fighter alone has such a summon drawn; with two
+// (a mirror match, both out) both scale as before and the reference stays. A pack's rows keep their scale bits: a
+// runtime without the bit (ramps read & 15) scales it.
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
 namespace cafe::title::summon_fade {
-constexpr uint32_t kFadeShift = 8, kSummonBits = 0xFF, kRampRows = 7, kRampUnder = 8;
+constexpr uint32_t kFadeShift = 8, kSummonBits = 0xFF, kRampRows = 7, kRampUnder = 8, kRampDissolve = 16;
+constexpr float kDissolveRef = 107.0f; // (/ 255: no TTT2 model's alpha test uses it)
+// The reference for the frames just after a dissolving summon goes: above every alpha, nothing drawn (the drawing can
+// still have its last pose for a frame, where a scaled one was at its smallest)
+constexpr float kDissolveGone = 2.0f;
+constexpr int kDissolveGoneFrames = 2;
+
+// The alpha test reference that draws a dissolving material's share (0..1) of its texels.
+inline float dissolve_ref(float share) {
+    const float lo = kDissolveRef / 255.0f;
+    return lo + (1.0f - lo) * (1.0f - std::clamp(share, 0.0f, 1.0f));
+}
+// Whether a reference is a dissolving material's (its 107 as the title makes it a float: / 255, or / 256).
+inline bool is_dissolve_ref(float ref) {
+    return std::fabs(ref * 255.0f - kDissolveRef) < 0.05f || std::fabs(ref * 256.0f - kDissolveRef) < 0.05f;
+}
 
 struct Fade {
     uint32_t frames = 0, t = 0; // runs while frames > 1 and t < frames

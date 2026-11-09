@@ -253,6 +253,14 @@ class System:
             s = self._script(props.get(key))
             if s is not None:
                 self.scripts[key] = s
+        self.user = {}                          # its exposed parameters' defaults ('User.Scale': [floats])
+        exposed = props.get('ExposedParameters') or {}
+        data = bytes(exposed.get('ParameterData') or b'')
+        for q in exposed.get('SortedParameterOffsets') or []:
+            n = {'Vector3f': 3, 'Vector': 3, 'NiagaraFloat': 1, 'Vector2f': 2, 'LinearColor': 4, 'Vector4f': 4}.get(
+                str((q.get('Type') or {}).get('ClassStructOrEnum')).rsplit('.', 1)[-1])
+            if n is not None and q.get('Offset') is not None and q['Offset'] + 4 * n <= len(data):
+                self.user[q.get('Name')] = list(struct.unpack_from('<%df' % n, data, q['Offset']))
         self.bones = []
         for s in self.scripts.values():
             for _, ref in s.data_interfaces:

@@ -213,6 +213,16 @@ def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False
     return out, report, wins, extra, effect_tones
 
 
+def _effect_suffix(j):
+    """The two characters that end effect j's tone name, the name staying the length of the tone it copies: A0 .. FF,
+    then G0 .. ZZ (Clive's moves play more than 96 sounds)."""
+    if j < 0x60:
+        return '%02X' % (0xA0 + j)
+    digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    high, low = divmod(j - 0x60, len(digits))
+    return 'GHIJKLMNOPQRSTUVWXYZ'[high] + digits[low]
+
+
 def append_effects(bank, clips, plain=False):
     """Appends the fighter's sound effects (convert/sounds.py: its moves play them as item sounds) to its se_Chr
     bank, each a copy of the donor's item sound tone (itm_lar_03; else of a tone with audio) -> their tones.
@@ -230,7 +240,7 @@ def append_effects(bank, clips, plain=False):
     _, channels, _ = bank.format(t)
     tones = []
     for j, clip in enumerate(clips):
-        i = bank.append(bank.renamed(t, old[:-2] + '%02X' % (0xA0 + j)), audio=audio)
+        i = bank.append(bank.renamed(t, old[:-2] + _effect_suffix(j)), audio=audio)
         a, rate, ch, n = _audio(audio, clip, channels, EFFECT_RATE)
         bank.replace(i, a, rate, ch, n)
         if plain:

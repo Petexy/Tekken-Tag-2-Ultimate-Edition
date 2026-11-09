@@ -123,6 +123,52 @@ class Rig(unittest.TestCase):
         self.assertTrue(np.all(cloth_w[sim >= 30] > 0.99))                     # the skirt below hangs on chains
         self.assertTrue(np.all((s['weights'] > 0).sum(1) <= 8))
 
+    def test_long_cloth_parents_only_when_named(self):
+        chains_ = [{'bones': [1, 2, 3]}, {'bones': [4, 5, 6, 7]}, {'bones': [8, 9, 10, 11], 'spring': {'flags': 1}}]
+        names = ['cha:A', 'cha:B', 'cha:CHEST']
+        self.assertEqual(cloth.long_cloth_parents(chains_, [0, 1, 1], names, {'links': 4}), [0, 1, 1])
+        self.assertEqual(cloth.long_cloth_parents(chains_, [0, 1, 1], names, {'links': 4, 'parent': 'CHEST'}), [0, 2, 1])
+
+    def test_swing_limits_follow_each_links_own_axes(self):
+        spring = {'flags': 0x60, 'swing': {'back': (0.0, 0.0, -1.0), 'towards': 0.1, 'against': 0.04, 'across': 0.02}}
+        # a link along -Y with its own Y facing back: back is its +Y, reached by a positive angle about Z
+        frame = np.eye(4)
+        frame[:3, :3] = np.stack([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]], 1)
+        y_up, y_down, z_up, z_down = cloth._swing_limits(spring, frame)['limits']
+        self.assertAlmostEqual(z_up, 0.1)
+        self.assertAlmostEqual(z_down, -0.04)
+        self.assertAlmostEqual(y_up, 0.02)
+        self.assertAlmostEqual(y_down, -0.02)
+        # its Y facing sideways, its Z forward: back is its -Z, reached by a positive angle about Y
+        frame[:3, :3] = np.stack([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], 1)
+        y_up, y_down, z_up, z_down = cloth._swing_limits(spring, frame)['limits']
+        self.assertAlmostEqual(y_up, 0.1)
+        self.assertAlmostEqual(y_down, -0.04)
+        self.assertAlmostEqual(z_up, 0.02)
+        self.assertAlmostEqual(z_down, -0.02)
+
+    def test_swing_limits_per_length(self):
+        spring = {'flags': 0x60, 'swing': {'back': (0.0, 0.0, -1.0), 'towards': 0.1, 'against': 0.04, 'across': 0.02,
+                                           'per': 100.0}}
+        frame = np.eye(4)
+        frame[:3, :3] = np.stack([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]], 1)
+        y_up, y_down, z_up, z_down = cloth._swing_limits(spring, frame, 250.0)['limits']
+        self.assertAlmostEqual(z_up, 0.25)                      # a link 2.5 x 'per' long swings 2.5 x as far
+        self.assertAlmostEqual(z_down, -0.1)
+        self.assertAlmostEqual(y_up, 0.05)
+        self.assertAlmostEqual(cloth._swing_limits(spring, frame)['limits'][2], 0.1)    # (no length: as given)
+        del spring['swing']['per']
+        self.assertAlmostEqual(cloth._swing_limits(spring, frame, 250.0)['limits'][2], 0.1)   # (no 'per': per link)
+
+    def test_long_cloth_takes_the_definitions_spring(self):
+        spec = {'links': 4, 'spring': {'flags': 0x60}}
+        own = {'flags': 1}
+        chains = [{'bones': [1, 2, 3, 4]}, {'bones': [5, 6]}, {'bones': [7, 8, 9, 10, 11], 'spring': own}]
+        cloth.long_cloth(chains, spec)
+        self.assertIs(chains[0]['spring'], spec['spring'])
+        self.assertNotIn('spring', chains[1])
+        self.assertIs(chains[2]['spring'], own)
+
     def test_a_cloths_own_spring_and_body_parent(self):
         k, drawn = model(self.asset)
         k['bones'] = dict(names=['BASE', 'Hip', 'OPT1_bustL'], parents=[-1, 0, 1],
