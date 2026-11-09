@@ -345,6 +345,10 @@ NATIVE = {   # structs with a serialiser of their own (TStructOpsTypeTraits With
     'PerQualityLevelInt': _per_quality(_int), 'PerQualityLevelFloat': _per_quality(_float),
     'RichCurveKey': _rich_curve_key, 'SimpleCurveKey': _fields('<2f', ('Time', 'Value')),
     'SkeletalMeshSamplingLODBuiltData': lambda r: {'AreaWeightedTriangleSampler': _weighted_sampler(r)},
+    'SkeletalMeshSamplingRegionBuiltData': lambda r: {'TriangleIndices': r.array(_INT, r.count()),
+                                                       'BoneIndices': r.array(_INT, r.count()),
+                                                       'AreaWeightedSampler': _weighted_sampler(r),
+                                                       'Vertices': r.array(_INT, r.count())},
     'MaterialOverrideNanite': _nanite_override,
 }
 AS_PROPERTIES = {   # structs whose serialiser only notes a version and leaves the rest to the properties

@@ -69,6 +69,23 @@ class Tune(unittest.TestCase):
         self.assertEqual(emitter['spawner']['tracks'][P.alo.COLOUR_TRACK]['keys'],
                          [[0, 0.5, 0.25, 0.0], [10, 0.25, 0.25, 0.25]])
 
+    def test_palette_colours_a_gpu_emitter(self):
+        conv = E8.Converter.__new__(E8.Converter)
+        conv.materials = types.SimpleNamespace(describe=lambda mat: dict(alpha=1.0, blend='BLEND_Additive', base=''))
+        conv.flat_box = lambda desc, sm, sprite: False
+        conv.tune, conv.emitter = {}, lambda em, cap: []
+        seen = []
+        old, old_power = E8.cascade, P._power
+        E8.cascade = lambda e, r, colour, *a, **k: seen.append(colour)
+        P._power = lambda desc: (1.0,)
+        try:
+            e = types.SimpleNamespace(name='Shitaji', gpu=True, scripts=None, colours={})
+            for roles in ((), (('Shitaji', {'palette': (0.3, 1.0, 0.4)}),), (('Other', {'palette': (1.0, 0.0, 0.0)}),)):
+                conv._measured(e, None, None, None, '/Game/M.M', False, False, (1.0, 1.0, 1.0), None, None, roles)
+        finally:
+            E8.cascade, P._power = old, old_power
+        self.assertEqual(seen, [(1.0, 1.0, 1.0), (0.3, 1.0, 0.4), (1.0, 1.0, 1.0)])    # (else the system's colour)
+
     def test_no_donor_effects_is_the_definitions_choice(self):
         from ttt2char import importer
         self.assertEqual(importer._donor_effects(types.SimpleNamespace(DONOR_EFFECTS=False), b''), [])

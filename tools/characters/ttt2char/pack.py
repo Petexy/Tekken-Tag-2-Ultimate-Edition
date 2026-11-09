@@ -278,11 +278,17 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
     gauge_sound: the item sound its gauge plays as it fills up (convert/gauge.py);
     weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them), or with
     a ramp (convert/summonfade.ramps: how a fading summon is scaled):
-    k:parent:points[:summon[:ramp]], a point `n` hitting as slot n, else `n>slot`; the definition's REST_SUMMONS (the
-    summons out when no move says otherwise, through hits and throws too: roster.cpp) as rest_summons."""
-    def item(k, parent, points, summon, ramp=0):
+    k:parent:points[:summon[:ramp[:channels[:anchored]]]], a point `n` hitting as slot n, else `n>slot`; channels: the
+    pair posing a bone numbered below 800 (empty: its own), anchored 1: held in the world from each move's first frame,
+    2: a hit point following the held one (convert/prefabs8.with_channels); the definition's REST_SUMMONS (the summons out when no move says otherwise,
+    through hits and throws too: roster.cpp) as rest_summons; the definition's UNBLURRED (mesh names the port's motion blur
+    leaves out: title/unblurred.h) as unblurred."""
+    def item(k, parent, points, summon, ramp=0, channels=None, anchored=0):
         return '%d:%d:%s' % (k, parent, ','.join('%d' % n if n == slot else '%d>%d' % (n, slot) for n, slot in points)) \
-            + (':%d' % summon if summon is not None else (':' if ramp else '')) + (':%d' % ramp if ramp else '')
+            + (':%d' % summon if summon is not None else (':' if ramp or channels is not None or anchored else '')) \
+            + (':%d' % ramp if ramp or channels is not None or anchored else '') \
+            + (':%d' % channels if channels is not None else (':' if anchored else '')) \
+            + (':%d' % anchored if anchored else '')
     return ('# %s, from %s (made on this machine from the player\'s own copy)\n'
             'format = %d\ncode = %s\ndonor = %s\nsex = %s\nslot = %d\nchr_tones = %d\nrevision = %d\n'
             % (d.NAME.split(' (')[0], GAMES[game_of(d)], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones,
@@ -293,6 +299,8 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
             + ('rest_summons = %s\n' % ' '.join(map(str, d.REST_SUMMONS))
                if isinstance(getattr(d, 'REST_SUMMONS', None), tuple) else '')
+            + ('unblurred = %s\n' % ' '.join(d.UNBLURRED)
+               if isinstance(getattr(d, 'UNBLURRED', None), tuple) and d.UNBLURRED else '')
             + ('outfits = %s\n' % ' '.join(outfits) if outfits else '')
             + (gauge.ini_line(d, gauge_sound) + '\n' if gauge.ini_line(d) else ''))
 

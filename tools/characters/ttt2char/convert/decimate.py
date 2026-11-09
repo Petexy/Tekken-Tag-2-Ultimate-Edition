@@ -154,6 +154,7 @@ SMALL_LEAST = 6                 # .. and keeps this many vertices (classes' 'sma
 LIE_NEAR = 8.0                  # mm: a point of a clothing piece this close to the skin or another piece (over or
                                 # under it) lies on it (classes' 'lying': a strap, a band, a glove's cuff) ..
 LIE_PIECE = 15.0                # .. a piece at least this long (a bead's error is never seen, a buckle's parts' are) ..
+FREE_COST = 1e-4                # a point covered.mark gives up: its cost this much of what it would be
 LIE_LEAST = 1.0                 # .. and may move by its 'lying' share of its height over the skin, at least this
 LIE_COS = 0.7                   # .. over it: within 45 degrees of its normal (not beside it, past a material border)
 LIE_UNDER = 1.0                 # mm: or under it by no more than this (a strap's edge pressed in); deeper, it is hidden
@@ -1155,6 +1156,12 @@ def decimate(model, target, part_weights=None, log=print, poses=None, classes=No
         np.add.at(cnt, pt[:, k], 2)
     loc = np.where(cnt > 0, loc * scale / np.maximum(cnt, 1), 1.0)
     pfactor = np.clip(1.0 / np.maximum(loc, 1e-6) ** RELATIVE, 1.0, MOST_RELATIVE)
+    if model.get('free') is not None:   # (hidden surfaces, covered.mark: taken first, at no bound; off without a definition's)
+        used = np.unique(np.concatenate([p['tris'].reshape(-1) for p in prims]))
+        free_point = np.ones(npos, bool)
+        np.logical_and.at(free_point, pid[used], model['free'][used])
+        pfactor[free_point] *= FREE_COST
+        bound[free_point] = 1e300
     tri32 = np.ascontiguousarray(tri, np.int32)
     stats, collapses = np.zeros(_STATS), 0
     lib = _core()

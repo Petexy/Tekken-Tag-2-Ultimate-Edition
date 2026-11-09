@@ -254,6 +254,9 @@ private:
     const ShaderModule* shader(latte::Stage stage, uint32_t address, uint32_t size, uint32_t fetch_address,
                                uint32_t fetch_size, const latte::ShaderEnvironment& env);
     const latte::Program* program(uint32_t address, uint32_t size, uint64_t& hash);
+    // A draw of a polygon the title registered as still (gpu/still_draws.h): its pass's last-frame slot reads this frame's.
+    bool keep_still(const Registers& regs, const Draw& d, latte::abi::DrawConstants& dc, uint32_t* vb_address);
+    bool left_out(const Registers& regs);
     VkPipelineLayout pipeline_layout(uint32_t vs_textures, uint32_t ps_textures, bool vs_registers,
                                      bool ps_registers);
     const Pipeline* pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,

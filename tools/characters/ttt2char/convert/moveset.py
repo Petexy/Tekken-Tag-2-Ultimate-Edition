@@ -36,7 +36,7 @@ from ..ttt2 import animation, motbin, motion
 from . import arcs
 from . import gauge as G
 from . import idmaps as M
-from . import tagsystem, tagcombo, specialcancels, move_overrides, retarget
+from . import missiles8, tagsystem, tagcombo, specialcancels, move_overrides, retarget
 
 T7_END, TT_END = M.END_REQ['t7'], M.END_REQ['ttt2']
 SEQ0 = 0x800D                       # a cancel direction from here on names an input sequence
@@ -293,8 +293,19 @@ EFFECT_AT = {'t7': {0x802e, 0x803f}, 't8': set()}
 # spawns them with 0x8039 (its 0x8036, the id maps find 0x801f too, stops them as 0x8035 does: the same family of moves
 # has either at the same frame) but numbers its own effects, which nothing converts (the pack has no effects of a
 # Tekken 8 fighter): left out (PROP_DROP)
-EFFECT8_SPAWN, EFFECT8_STOP = 0x8039, 0x8035   # ... except the ids a definition attaches (convert/effects8.py)
+EFFECT8_SPAWN, EFFECT8_STOPS = 0x8039, (0x8035, 0x8036)   # ... except the ids a definition attaches (convert/effects8.py)
 EFFECT8_TRAIL, EFFECT8_TRAIL_END = 0x831c, 0x831d   # a weapon's trail: a definition's TEKKEN8_TRAILS (convert/trails8.py)
+EFFECT8_PLACED = 0x805d                 # a spawn (value as EFFECT8_SPAWN) that the rows before it place: a definition's TEKKEN8_DISKS
+EFFECT8_WEAPON = 0x839d                 # a spawn on a weapon (value: weapon << 16 | id): ... too
+EFFECT8_OFFSET, EFFECT8_TURN_A, EFFECT8_TURN_BC = 0x8058, 0x805f, 0x8077     # (the rows in front of a spawn: disk_place)
+EFFECT8_IDS = {EFFECT8_PLACED: 0xFF, EFFECT8_SPAWN: 0xFF, EFFECT8_WEAPON: 0xFFFF}     # the id in such a row's value
+# Tekken 8's body looks (value 1 << 24 | type << 16 | frames << 8): his material turns for the frames (Clive's type 0: his
+# body burns as he shifts, and the moves out of it). TTT2 has no such thing: a definition's TEKKEN8_DISKS 'skins' names
+# a type's burst on body parts (skin8_rows); the id maps have no TTT2 property for it: the rest are left out
+BODY_LOOK8 = 0x83ca
+# Tekken 8's hide (value 1 hides him, 0 shows him again; TTT2's is the tag-out's): under a body look Tekken 8 hides his
+# body but draws the look in his shape, a figure of fire; TTT2's hides him whole (a 'skins' entry's 'hidden': skin8_hidden)
+HIDE8 = 0x82c1
 PROP_OVERRIDE = {'t7': {0x8255: 0x8193, 0x8256: 0x8194, 0x8038: EFFECT_PROP}, 't8': {0x82c5: 0x8193, 0x82c6: 0x8194}}
 # Moveset variables: numbers of a player's that its moves set and test (TTT2's at player +1532 + 4k, counted down each
 # frame by the game). TTT2 tests variable k with 232 + k (>= param) and 261 + k (<= param) and sets it with VAR_SET[k]
@@ -608,6 +619,12 @@ TRAIL_SPARE = range(100, 230)        # ids for a Tekken 8 fighter's trails (conv
 DAMAGE_AMOUNT = {'t7': 0x821b, 't8': 0x828b}
 DAMAGE_DEAL = {'t7': {0x821c: 0x8058, 0x821d: 0x8059}, 't8': {0x828c: 0x8058, 0x838a: 0x8058, 0x838f: 0x8058,
                                                               0x828d: 0x8059}}
+# A definition's MOVESET['gated_damage8'] (GATED_DAMAGE8, off for the others): in a move whose amount comes under a flag
+# slot's test (Clive's 1+4 at a level: its plain and Phoenix versions), that test's own amount and deals become action
+# rows at Tekken 8's frames; and the direct damage Tekken 8 has on the victim's move (0x808e, points: its 0x141897ac2
+# takes them off its own fighter) is dealt by the attacker's move at that frame (TTT2's 0x8058 on a move a hit, not a
+# throw, put the victim in deals nothing: the game log of Clive's level moves)
+DIRECT_DAMAGE8 = 0x808E
 # Floor breaks. TTT2 breaks a stage's breakable floor when a row 0x8138 of the victim's move fires (sub_03AE6B6C; then
 # every player above the hole falls, the victim by the row's value: 0 a hit's fall, 1 a thrown one, 10 points): its
 # throws have the row some 20 frames after the victim lands (He_FRnage_y lands at 81 and breaks at 100, Jack's pile_y
@@ -642,8 +659,26 @@ FLOOR_BREAK_WAIT = 20                # TTT2's own throws: 19 .. 26 frames after 
 LYING_HIPS, STANDING_HIPS = 350.0, 600.0     # mm (an animation's hips height: channel 1 y)
 PLAIN_FRAME = 0x4000                 # Tekken 8 row frames from here on are no plain frame of the move (0x8001: all)
 THROW_LEVEL = 0xA00                  # a throw's hit level (its low half), in both games
-# Tekken 7's 2D arcs (convert/arcs.py; Tekken 8 has no 2D fighter, and its 0x8226 / 0x8227 are other properties)
-ARCS = {'t7': (arcs.ARC, arcs.AIR_MOVE), 't8': (None, None)}
+# Tekken 7's 2D arcs and Tekken 8's (Clive's; his air moves baked too: bake_air8) (convert/arcs.py; Tekken 8's 0x8226 /
+# 0x8227 are other properties)
+ARCS = {'t7': (arcs.ARC, arcs.AIR_MOVE), 't8': (arcs.ARC8, arcs.AIR_MOVE8)}
+JUGGLE_BIT = 0x40                    # a move's bitfield: TTT2 flies the fighter from its pose's height (bake_air8)
+# Tekken 8's 0x8339 (at frame 0x8001, value -n): the move goes on from frame n + 1 of its clip, where the move before it
+# left it (that one's cancel into it at its frame n; Clive's Burning Rain landing #1476 is the slam #1475's clip from
+# frame 30, its hit 3 frames in, Wavu's i3~4; 10 to 72 such moves a fighter). TTT2 goes on from the cancel's frame
+# only into a move of the same animation, and bake_air8 gives an air move's copies their own (the slam's), so it
+# becomes TT_CONTINUE (a no-op id: value the frame) and the runtime starts the move there (roster.cpp, "continued
+# moves"); played from frame 1, the landing stood in the slam's air pose for 28 frames before its hit.
+CONTINUE8 = {'t7': None, 't8': 0x8339}
+TT_CONTINUE = 0x822A
+# A move's playback speed (TTT2's 0x812A, 1/4096ths from the row's frame on: its get-ups and falls; the id maps carry
+# Tekken 8's 0x8246 over). Clive's jumps set 0x960 at 0x8001 and 0x1000 at 0x4008, a frame of no plain number
+# (PLAIN_FRAME) that TTT2 reads its own way: it slowed the jump's frame count to 0.59 once a button was queued (u/f
+# then 1 at jump frame 3: frames 3..8 over 9 updates, #1453 4 frames late) and for two updates after the take-off (a
+# plain jump landing late). Tekken 8's jump keeps time (Wavu: "Jump takes 17f", GAR.1 i32~34; its 46-frame clip on the
+# 44-frame jump is no 0.59 play either), so a move's speed rows are left out together where one has such a frame.
+TT_SPEED = 0x812A
+ODD_SPEED = {'t7': False, 't8': True}
 # A projectile row, Tekken 7 (42 x u32) -> TTT2 (34 x u32): (TTT2 field, Tekken 7 field, count). TTT2's fields as
 # its projectile code reads them: 0 effect, 1 delay, 2 forward speed, 3 upward speed, 4 hits it can deal, 5 frames
 # it lives, 6 shape (0 sphere, 1 cylinder), 7 radius, 8 height, 9 hit level, 14 sound at spawn, 16 sound on hit,
@@ -659,6 +694,7 @@ PROJ_FIELDS = [(1, 6, 3), (4, 9, 15), (21, 28, 13)]
 # level (the low half), hitting the other team once; the move keeps its animation and loses its hit boxes.
 THROWN_SOUND = 0x07000010           # the hit sound TTT2's projectile rows use (Kazumi's tiger strikes)
 PROJ_SOUNDS = (14, 16, 18)
+MISSILE_RADIUS = 50             # a Tekken 8 missile's projectile (convert/missiles8.py): it hits no one
 PROJ_EFFECT = 0                 # Tekken 7's effect ids mean nothing in TTT2: none
 # Animations. Tekken 7's are found by their bytes: one TTT2 already has (its common motions, the donor's pack) is
 # referenced, any other appended (byte-swapped). Tekken 8's are PANM (tekken8/panm.py) and come from an animation
@@ -818,6 +854,9 @@ def count_groups(T):
 
 
 class Converter:
+    disk_sampler = None                    # a definition's TEKKEN8_DISKS: convert/disks8.Sampler
+    effect_conditions = {}                 # ... its {requirement: the only parameter it passes with in TTT2} (conditions)
+
     # (a Tekken 7 source unless __init__ finds another game)
     game, end, prefix = 't7', T7_END, None
     linking = 0                         # > 0 while the links of the fighter's own (or converted) moves are made
@@ -825,6 +864,7 @@ class Converter:
     effects = None                      # its sound effects (convert/sounds.Effects; the importer's), or None
     effects8 = {}                       # Tekken 8 effect id -> its body part, or {summon: part} (convert/effects8.py)
     true_reqs = frozenset()             # (requirement, parameter) pairs true by the definition, set by __init__
+    gated_damage8 = False               # the definition's MOVESET['gated_damage8'] (GATED_DAMAGE8), set by __init__
     # reactions of the fighter's that keep their own move where the reaction evidence puts another of the same kind in
     # their place (MOVESET['own_reactions']: source names, '#<index>' for unnamed Tekken 8 moves; target()), by __init__
     own_reactions = frozenset()
@@ -893,6 +933,7 @@ class Converter:
         self.effects8_stopped = set()      # the Tekken 8 effect ids a move's list stops (effect8_rows)
         self.trail_sampler = None          # a definition's TEKKEN8_TRAILS: convert/trails8.Sampler
         self.trail_rows = []               # (property row, what shares its effect, trail) (trail8_rows)
+        self.skin8_carry = None            # move -> [(body look type, frames)] it carries from the move before (skin8_carried)
         self.projectile_effects = {}                               # effect id -> its projectile (projectile_look)
         self.electric_moves = []           # the (Tekken 8) electrics given Kazuya's lightning (electric_rows)
         self.thrown = getattr(d, 'THROWN', {})                    # move name -> its projectile (thrown_rows)
@@ -962,11 +1003,12 @@ class Converter:
         # (requirement, parameter) pairs the definition knows true for the fighter (Geese's MAX activation tests
         # Tekken 7's variable 9, which nothing he does sets)
         self.true_reqs = set(d.MOVESET.get('true_requirements', ()))
+        self.gated_damage8 = d.MOVESET.get('gated_damage8', False)
         self.flag_reqs, self.flag_props = state_flags(d.MOVESET)
         self.flag8 = self.flag8_slots()
         self.flag8_moves = collections.defaultdict(list)   # Tekken 8 move -> [(frame, gate list, TTT2 rows)] (FLAG8)
         self.drop_moves = drop_moves(d)
-        self.ground_arcs = {}           # Tekken 7 move -> (frame, value) of its 0x8226 to bake (convert/arcs.py)
+        self.ground_arcs = {}           # fighter move -> (frame, value) of its ground arc to bake (convert/arcs.py)
 
     # --- helpers ----------------------------------------------------------------------------------------
     def string(self, s):
@@ -1041,6 +1083,8 @@ class Converter:
         """The values of the fighter's id c pass the id maps as they are, so FIT tests them (a Tekken 8 fighter's)."""
         g = self.game
         if c == TIGER_PROP[g] and self.opt_anims:       # (its own part-3 animations: conv_value)
+            return False
+        if self.gauge and (c in G.REQS[g] or c in G.PROPS[g]):      # (the runtime's own ids: convert/gauge.py)
             return False
         return g == 't8' and not (c in VALUE_KIND[g] or c in SOUND_PROPS[g] or c in PROJ_PROPS[g] or
                                   c in PROP_OVERRIDE[g] or c in REQ_OVERRIDE[g] or c in REQ_OR[g] or
@@ -1294,10 +1338,12 @@ class Converter:
             b, how = (self.req_map if c < 0x8000 else self.prop_map).lookup(c)
             for x in (REQ_OVERRIDE[g].get(c), PROP_OVERRIDE[g].get(c), b if how in M.MAPPED else None):
                 mapped.setdefault(x, c)
+        # (TEKKEN8['free_flag_vars']: variables whose mapped id the definition knows only rows that do not matter use)
+        own = getattr(self.defn, 'TEKKEN8', {}).get('free_flag_vars', ())
         for v in FLAG8_VARS:
             if v not in why and donor & set(var_ids(v)):
                 why[v] = 'the donor\'s moveset uses it'
-            elif v not in why and mapped.keys() & set(var_ids(v)):
+            elif v not in why and v not in own and mapped.keys() & set(var_ids(v)):
                 why[v] = 'the fighter\'s %d maps to its id' % mapped[min(mapped.keys() & set(var_ids(v)))]
         for v, reason in sorted(why.items()):
             self.stats['Tekken 8 flag slots: moveset variable %d not taken (%s)' % (v, reason)] += 1
@@ -1855,6 +1901,18 @@ class Converter:
                                    if f != 'standing' and r[f] is not None and r[f] < len(moves)}
         return self._throw_victims
 
+    def direct8(self, move):
+        """(GATED_DAMAGE8) The direct points Tekken 8 deals in the moves `move`'s hits put its victim in (DIRECT_DAMAGE8,
+        the victim's own: in TTT2 the attacker's 0x8058 at that frame): [(frame, points)]."""
+        k, moves = self.k, self.k.tables['moves']
+        if move is None or move >= len(moves):
+            return []
+        victims = {r[f] for _, _, rx in M.hitconds(k, moves[move].get('hit_condition')) if rx is not None
+                   for r in (k.tables['reactions'][rx],) for f in REACTION_MOVE_FIELDS
+                   if r[f] is not None and r[f] < len(moves)}
+        return sorted({(f, v) for vm in victims for f, idv, v, _ in self.xp_rows(moves[vm].get('extraprops'))
+                       if idv == DIRECT_DAMAGE8})
+
     def landing_frame(self, move):
         """The first frame Tekken 8 move `move`'s TTT2 animation has its hips below LYING_HIPS after they were at
         STANDING_HIPS or above (the victim of a throw hits the floor), else None."""
@@ -1939,25 +1997,49 @@ class Converter:
         """Move `move`'s extra property list i (with rows `extra` after it) -> the new list's index, or None.
         `only`: rows [(frame, id, value, None)] converted in place of list i's, their TTT2 rows returned (FLAG8: the
         properties whose requirement list tests a flag slot)."""
-        if i is None and not extra and only is None:
-            return None
         g = self.game
+        carry = self.skin8_carried(move) if g == 't8' and only is None and move is not None and \
+            self.disk_sampler is not None and self.disk_sampler.spec.get('skins') else []
+        if i is None and not extra and only is None and not carry:
+            return None
         rows = []
         t7 = self.xp_rows(i) if only is None else only
+        if g == 't8' and self.disk_sampler is not None and self.disk_sampler.spec.get('skins'):
+            t7 = self.skin8_hidden(t7)
+        for kind, frames in carry:                          # a body look still on from the move before (skin8_carried)
+            self.skin8_rows(rows, 0x8001, 1 << 24 | kind << 16 | frames << 8, None, move, carried=frames)
         air = any(idv == ARCS[g][1] for _, idv, _, _ in t7)     # a 2D air move (convert/arcs.py)
         amounts = sorted((0 if f >= 0x8000 else f, v) for f, idv, v, _ in t7 if idv == DAMAGE_AMOUNT[g])
         dealt = collections.Counter()                       # points dealt so far (amount's frame, property)
         breaks = []                                         # Tekken 8's floor breaks (floor_break_rows)
+        # (GATED_DAMAGE8) the amounts a flag slot's test chooses: requirement list -> points
+        gated = {req: v for _, idv, v, req in t7 if idv == DAMAGE_AMOUNT[g] and req is not None
+                 and only is None and self.gated_damage8 and self.flag8_gated(req)}
         for f, idv, v, req in t7:
             if idv == 0 and f == 0:
                 break
+            if g == 't8' and self.disk_sampler is not None and idv in EFFECT8_IDS and \
+                    v & EFFECT8_IDS[idv] in self.disk_sampler.spec['looks']:                            # (disks8.py)
+                self.disk8_rows(rows, f, idv, v, req, move)
+                continue
+            if g == 't8' and self.disk_sampler is not None and idv == BODY_LOOK8 and \
+                    v >> 16 & 0xFF in self.disk_sampler.spec.get('skins', {}):                          # (skin8_rows)
+                self.skin8_rows(rows, f, v, req, move, hides=any(x[1] == HIDE8 and x[2] == 1 for x in t7))
+                continue
             if req is not None:                             # Tekken 8: the row's own requirement list
                 r, ok = self.conv_reqs(req)
                 if not ok:
                     self.stats['property dropped: requirement'] += 1
                     continue
                 if not self.always(r):                      # (TTT2's rows have none)
-                    if move is not None and self.flag8_gated(req):      # a flag slot's test: action rows (FLAG8)
+                    if req in gated and idv in DAMAGE_DEAL[g]:          # its own amount's points (GATED_DAMAGE8)
+                        points = int(round(gated[req] * v / 100.0)) if v else max(0, gated[req] - dealt[req])
+                        dealt[req] += points
+                        if points:
+                            self.flag8_moves[move].append((f, r, [dict(frame=f, id=DAMAGE_DEAL[g][idv], value=points)]))
+                        continue
+                    # a flag slot's test, or a gauge's add under a test (his 1+4's on hit, on block): action rows (FLAG8)
+                    if move is not None and (self.flag8_gated(req) or (self.gauge and idv in G.PROPS[g])):
                         self.flag8_moves[move].append((f, r, self.conv_xps(None, move, only=[(f, idv, v, None)])))
                         continue
                     self.stats['property dropped: a condition TTT2 cannot attach'] += 1
@@ -1973,6 +2055,14 @@ class Converter:
                 continue
             if idv in ARCS[g]:                              # 2D arcs (convert/arcs.py)
                 rows += [r for r in self.arc_rows(move, air, f, idv, v) if r not in rows]
+                continue
+            if idv == CONTINUE8[g]:                         # the move goes on from a frame of its clip (CONTINUE8)
+                n = -((v & 0xFFFFFFFF) - (1 << 32) if v & 0x80000000 else v & 0xFFFFFFFF)
+                if n > 0 and f >= PLAIN_FRAME:
+                    rows.append(dict(frame=arcs.BAKED_FRAME, id=TT_CONTINUE, value=n + 1))
+                    self.stats['Tekken 8 moves that go on from a frame of their clip'] += 1
+                else:
+                    self.stats['property dropped: a clip start before frame 1'] += 1
                 continue
             if idv == DAMAGE_AMOUNT[g]:
                 continue
@@ -1992,7 +2082,11 @@ class Converter:
                 rows.append(dict(frame=f, id=HAND_PROPS[g][idv], value=self.hand_map()[idv, v]))
                 self.stats['hand animations (the HANDS row\'s)'] += 1
                 continue
+            if self.gated_damage8 and idv == DIRECT_DAMAGE8:        # (GATED_DAMAGE8: the attacker's move deals it)
+                continue
             if idv in DAMAGE_DEAL[g]:                       # throw damage: points of the amount set before
+                if gated:                                   # (GATED_DAMAGE8: the deals are its own, above)
+                    continue
                 at = 0 if f >= 0x8000 else f
                 since, amount = next(((g, a) for g, a in reversed(amounts) if g <= at),
                                      amounts[0] if amounts else (0, 0))
@@ -2003,7 +2097,7 @@ class Converter:
                     rows.append(dict(frame=f, id=DAMAGE_DEAL[g][idv], value=points))
                     self.stats['throw damage dealt'] += 1
                 continue
-            if g == 't8' and v & 0xFF in self.effects8 and idv in (EFFECT8_SPAWN, EFFECT8_STOP):    # (effects8.py)
+            if g == 't8' and v & 0xFF in self.effects8 and (idv == EFFECT8_SPAWN or idv in EFFECT8_STOPS):    # (effects8.py)
                 self.effect8_rows(rows, t7, f, idv, v, move)
                 continue
             if g == 't8' and idv == EFFECT8_TRAIL and self.trail_sampler is not None:              # (trails8.py)
@@ -2035,8 +2129,16 @@ class Converter:
                 look = self.projectile_look(v, {i: x for h, i, x, _ in t7 if h == f})
                 if look is not None:
                     rows.append(dict(frame=f, id=EFFECT_PROP, value=look))
+        if ODD_SPEED[g] and any(r['id'] == TT_SPEED and PLAIN_FRAME <= r['frame'] != 0x8001 for r in rows):
+            rows = [r for r in rows if r['id'] != TT_SPEED]
+            self.stats['speed left out: a frame TTT2 reads its own way (ODD_SPEED)'] += 1
         if only is not None:
             return rows
+        if self.gated_damage8 and move is not None:          # its victims' direct points (GATED_DAMAGE8)
+            for f, v in self.direct8(move):
+                at = next((n for n, r in enumerate(rows) if f < r['frame'] < 0x8000), len(rows))
+                rows.insert(at, dict(frame=f, id=DAMAGE_DEAL[g][0x828c], value=v))
+                self.stats['direct damage (Tekken 8\'s), dealt by the attacker'] += 1
         if ELECTRIC_MARK[g] is not None and any(r['id'] == ELECTRIC_PROP and r['value'] == 1 for r in rows):
             rows += self.electric_rows(move)                # a Tekken 8 electric: Kazuya's lightning
         if breaks or FLOOR_BREAK8[g] is not None and move is not None:
@@ -2051,20 +2153,20 @@ class Converter:
 
     # --- Tekken 8 effects (convert/effects8.py) ---------------------------------------------------------------------
     def effect8_rows(self, rows, t7, f, idv, v, move):
-        """A Tekken 8 effect row (EFFECT8_SPAWN, EFFECT8_STOP; value part << 8 | id) of an effect id the definition
+        """A Tekken 8 effect row (EFFECT8_SPAWN, EFFECT8_STOPS; value part << 8 | id) of an effect id the definition
         attaches to a body part (effects8 {id: part, or {summon: part}: at the part of the summon the list shows or
         hides, the first listed when it does neither}): a spawn becomes TTT2's (EFFECT_PROP, at that part), noted
-        with the frames until the same list stops it (EFFECT8_STOP, the same id, or that summon's dismissal; else
+        with the frames until the same list stops it (EFFECT8_STOPS, the same id, or that summon's dismissal; else
         the move's frames left), which split_effects makes the end of its copy; a stop has no TTT2 row (TTT2's
         effects stop by themselves; effects8_stopped notes the id: it loops until stopped)."""
-        if idv == EFFECT8_STOP:
+        if idv in EFFECT8_STOPS:
             self.effects8_stopped.add(v & 0xFF)
             self.stats['Tekken 8 effect stops (their copies end there)'] += 1
             return
         eid, part = v & 0xFF, self.effects8[v & 0xFF]
         at = lambda g: 0 if g >= 0x8000 else g
         start = at(f)
-        ends = [at(g) for g, i, x, _ in t7 if i == EFFECT8_STOP and x & 0xFF == eid]
+        ends = [at(g) for g, i, x, _ in t7 if i in EFFECT8_STOPS and x & 0xFF == eid]
         if isinstance(part, dict):                          # a summon's effect: at its part, ending with it
             moves = SUMMON_PROPS[self.game]
             n = next((x for g, i, x, _ in t7 if moves.get(i) in (TT_SUMMON, TT_DISMISS) and x in part),
@@ -2093,16 +2195,184 @@ class Converter:
         self.trail_rows.append((rows[-1], (self.k.anim_ref(move)[0], start, frames, v), trail))
         self.stats['Tekken 8 trails'] += 1
 
+    def disk8_rows(self, rows, f, idv, v, req, move):
+        """A spawn of a slash arc (EFFECT8_PLACED or EFFECT8_SPAWN of an id in the definition's TEKKEN8_DISKS): an effect at
+        the hips (part 0) as a trail's; left out when its requirement list needs what `effect_conditions` says TTT2 never
+        has (Tekken 8 has both the ribbon's row and the arc's, for its Heat and for the rest)."""
+        eid = v & EFFECT8_IDS[idv]
+        if req and any(t[0] in self.effect_conditions and t[1] != self.effect_conditions[t[0]] for t in M.reqs(self.k, req)):
+            self.stats['Tekken 8 arcs left out (a condition TTT2 never has)'] += 1
+            return
+        if missiles8.is_missile(self.disk_sampler.spec['looks'][eid]):        # (a missile's: convert/missiles8.py)
+            self.missile_rows(rows, f, eid, self.disk_sampler.spec['looks'][eid], move)
+            return
+        start = 0 if f >= 0x8000 else f
+        place = self.disk_place(move, f, idv, v)
+        # (where Tekken 8 spawns it: a body part (value part << 8 | id) or a weapon (hi << 16 | id): disks8.Sampler.anchored)
+        anchor = ('weapon', v >> 16) if idv == EFFECT8_WEAPON else ('part', v >> 8 & 0xFF)
+        disk = self.disk_sampler(move, start, eid, place, anchor=anchor)
+        if disk is None:
+            self.stats['Tekken 8 arcs left out (no swing in the clip)'] += 1
+            return
+        rows.append(dict(frame=f, id=EFFECT_PROP, value=0, part=disk.get('part', 0)))
+        self.trail_rows.append((rows[-1], disk.get('key') or (self.k.anim_ref(move)[0], start, 'disk', eid, place), disk))
+        self.stats['Tekken 8 arcs'] += 1
+
+    def missile_rows(self, rows, f, eid, look, move):
+        """The spawn (at frame f) of Tekken 8 effect eid showing a missile (a definition's TEKKEN8_DISKS look missiles8.MISSILE):
+        the TTT2 projectiles missiles8.plan finds for it, hitting no one, each spawned from the hips at its frame and its look
+        riding it (an id assign_trails gives), put in the list before its first row of a later frame."""
+        stops = [g for g, i, x, _ in self.xp_rows(self.k.tables['moves'][move].get('extraprops'))
+                 if i in EFFECT8_STOPS and x & 0xFF == eid]
+        parts = missiles8.plan(self.disk_sampler, self.k, move, f, look, stops)
+        if not parts:
+            self.stats['Tekken 8 missiles left out (no path)'] += 1
+            return
+        for part in parts:
+            out = [0] * 34
+            out[2], out[3] = (int(round(x)) & 0xFFFFFFFF for x in part['speed'])     # forward, up: mm a frame
+            out[4], out[5], out[7] = 1, part['life'], MISSILE_RADIUS                 # (no team field: it hits no one)
+            raw = struct.pack('>34I', *out)
+            if ('missile', raw) not in self.cache:
+                self.cache['missile', raw] = self.add('projectiles', {'raw': raw})
+            m = part['frame']
+            forward, up, side = (int(round(x)) & 0xFFFF for x in part['place'])
+            look_row = dict(frame=m, id=EFFECT_PROP, value=0, part=missiles8.PART_HIPS)
+            new = [dict(frame=m, id=TT_PROJ_LIMB, value=missiles8.PART_HIPS), dict(frame=m, id=TT_PROJ_OFFSETS[0], value=forward),
+                   dict(frame=m, id=TT_PROJ_OFFSETS[1], value=up), dict(frame=m, id=TT_PROJ_OFFSETS[2], value=side),
+                   dict(frame=m, id=TT_PROJ_SPAWN, value=self.cache['missile', raw]), look_row]
+            at = next((n for n, r in enumerate(rows) if m < r['frame'] < 0x8000), len(rows))
+            rows[at:at] = new
+            self.trail_rows.append((look_row, ('missile', eid, part['phase'], part['life'], look[1]),
+                                    dict(burst=(missiles8.MISSILE, part['life'], look[1], part['phase']), id=eid)))
+            self.stats['Tekken 8 missiles: projectiles carrying their look (%s)' % part['phase']] += 1
+
+    def skin8_hidden(self, t7):
+        """Rows of a move with a body look (BODY_LOOK8) whose 'skins' entry has 'hidden': n -> the same rows, its hides
+        (HIDE8 1 .. 0) at most n frames long: Tekken 8 draws the look in his shape while his body is hidden, TTT2's hide
+        leaves nothing; he shows again, burning (skin8_rows), where Tekken 8 shows the figure."""
+        skins = self.disk_sampler.spec['skins']
+        caps = [skins[v >> 16 & 0xFF]['hidden'] for _, idv, v, _ in t7
+                if idv == BODY_LOOK8 and 'hidden' in skins.get(v >> 16 & 0xFF, {})]
+        if not caps:
+            return t7
+        cap, out, since = min(caps), [], None
+        for f, idv, v, req in t7:
+            if idv == HIDE8 and v == 1:
+                since = 1 if f >= 0x8000 else f
+            elif idv == HIDE8 and v == 0 and since is not None and since + cap < f < 0x8000:
+                f = since + cap
+                self.stats['Tekken 8 hides cut short (a body look burns over him)'] += 1
+            out.append((f, idv, v, req))
+        return out
+
+    def skin8_carried(self, move):
+        """Tekken 8's body look lasts its row's frames whatever he does next; TTT2's bursts are rows of one move. A
+        'skins' entry with 'carry': n: the moves out of a move with such a look (its cancels to moves without a body look
+        of their own; under 'with_hide' only out of a move that hides him) burn from their start for the look's frames
+        left then (the cancel's first frame), less its last n (Tekken 8's look fades out over them: his body plain by
+        then) -> [(type, frames)] for move (the most of the moves before it). Aliases (his stance, ..) never."""
+        if self.skin8_carry is None:
+            self.skin8_carry = {}
+            skins = self.disk_sampler.spec['skins']
+            if not any('carry' in s for s in skins.values()):
+                return []
+            moves = self.k.tables['moves']
+            looks = {}
+            for i, mv in enumerate(moves):
+                looks[i] = [(f, v, req) for f, idv, v, req in self.xp_rows(mv['extraprops'])
+                            if idv == BODY_LOOK8 and v >> 16 & 0xFF in skins]
+            out = collections.defaultdict(dict)
+            for i, mv in enumerate(moves):
+                rows = self.xp_rows(mv['extraprops'])
+                hides = any(idv == HIDE8 and v == 1 for _, idv, v, _ in rows)
+                for f, v, req in looks[i]:
+                    kind = v >> 16 & 0xFF
+                    skin = skins[kind]
+                    if 'carry' not in skin or skin.get('with_hide') and not hides:
+                        continue
+                    if req and any(t[0] in self.effect_conditions and t[1] != self.effect_conditions[t[0]]
+                                   for t in M.reqs(self.k, req)):
+                        continue
+                    at = 0 if f >= 0x8000 else f
+                    if mv.get('cancel') is None:
+                        continue
+                    for _, c in self.k.iter_list('cancels', mv['cancel'], lambda c: c['direction'] == M.LIST_END):
+                        # (its own moves only: not the list's end, a group, nor an alias, his stance among them: a
+                        # row at frame 1 would burn him in every stance)
+                        if c['direction'] in (M.GROUP, M.LIST_END) or c['move_id'] is None or c['move_id'] >= 0x8000:
+                            continue
+                        t = c['move_id']
+                        if t >= len(moves) or looks[t]:
+                            continue
+                        left = (v >> 8 & 0xFF) - (max(c['win_start'], c['start_frame']) - at) - skin['carry']
+                        if left > 0:
+                            out[t][kind] = max(out[t].get(kind, 0), left)
+            self.skin8_carry = {t: sorted(x.items()) for t, x in out.items()}
+            self.stats['Tekken 8 body looks carried into the moves out of them'] += len(self.skin8_carry)
+        return self.skin8_carry.get(move, [])
+
+    def skin8_rows(self, rows, f, v, req, move, hides=True, carried=None):
+        """A Tekken 8 body look (BODY_LOOK8) of a type the definition's TEKKEN8_DISKS 'skins' {type: {'look': a burst's
+        recipe that sits on its body part (disks8.py: 'hand'), 'parts': (TTT2 body parts, ..), 'share': of the row's
+        frames it burns (default all), 'burn': at most that many frames, 'with_hide': only in a move that hides him
+        (HIDE8; hides: whether move does)}} names: that burst, for the row's frames, at each of the parts (they follow
+        his body as it moves; one effect for all the moves of the same frames). Left out under a condition TTT2 never
+        has, as an arc is. carried: the frames of a look the move before left on (skin8_carried), as they are."""
+        kind = v >> 16 & 0xFF
+        skin = self.disk_sampler.spec['skins'][kind]
+        frames = min(int(round((v >> 8 & 0xFF) * skin.get('share', 1.0))), skin.get('burn', 0xFF))
+        if carried is not None:
+            frames = carried
+        elif skin.get('with_hide') and not hides:
+            self.stats['Tekken 8 body looks left out (a move that does not hide him)'] += 1
+            return
+        if req and any(t[0] in self.effect_conditions and t[1] != self.effect_conditions[t[0]] for t in M.reqs(self.k, req)):
+            self.stats['Tekken 8 body looks left out (a condition TTT2 never has)'] += 1
+            return
+        values = self.disk_sampler.trails.clip(move)
+        if values is None or not frames:
+            self.stats['Tekken 8 body looks left out (no clip)'] += 1
+            return
+        start = 0 if f >= 0x8000 else f
+        disk = self.disk_sampler.body(values, max(0, start - 1), BODY_LOOK8, (skin['look'], frames))
+        for part in skin['parts']:
+            rows.append(dict(frame=f, id=EFFECT_PROP, value=0, part=part))
+            self.trail_rows.append((rows[-1], ('skin', kind, skin['look'], frames), disk))
+        self.stats['Tekken 8 body looks (bursts at body parts)%s' % (', carried' if carried is not None else '')] += 1
+
+    def disk_place(self, move, f, idv, v):
+        """What the rows in front of move's spawn (its frame, id and value) say of its place: ((up, forward, sideways) in mm,
+        (a, b, c) in degrees), or None when they say nothing."""
+        signed = lambda v, bits: ((int(v) + (1 << (bits - 1))) & ((1 << bits) - 1)) - (1 << (bits - 1))
+        offset, a, bc = None, 0, 0
+        for _, x in self.k.iter_list('extra_move_properties', self.k.tables['moves'][move]['extraprops'],
+                                     lambda x: x['id'] == 0 and x['frame'] == 0):
+            if x['frame'] != f:
+                continue
+            if x['id'] == EFFECT8_OFFSET:
+                offset = tuple(signed(x[k], 32) for k in ('value', 'value2', 'value3'))
+            elif x['id'] == EFFECT8_TURN_A:
+                a = signed(x['value'], 32)
+            elif x['id'] == EFFECT8_TURN_BC:
+                bc = int(x['value']) & 0xFFFFFFFF
+            elif x['id'] == idv and self.prop_value(x) == v:
+                break
+        if offset is None:
+            return None
+        return offset, (a, signed(bc & 0xFFFF, 16), signed(bc >> 16, 16))
+
     def assign_trails(self, used):
         """The ids of the trails trail8_rows met: one for each clip, start, length and value, none of `used` or
         effect_ids; the rows name them -> {id: trail}."""
-        spare = iter([i for i in TRAIL_SPARE if i not in used and i not in self.effect_ids])
+        more = self.disk_sampler.spec.get('more_ids', ()) if self.disk_sampler is not None else ()    # (TEKKEN8_DISKS)
+        spare = iter([i for i in list(TRAIL_SPARE) + list(more) if i not in used and i not in self.effect_ids])
         ids, out = {}, {}
         for row, key, trail in self.trail_rows:
             if key not in ids:
                 ids[key] = next(spare)
                 out[ids[key]] = trail
-            row['value'] = ids[key]
+            row['value'] = row.pop('part', 0) << 8 | ids[key]
         self.effect_ids |= set(out)
         return out
 
@@ -2433,8 +2703,8 @@ class Converter:
         return out
 
     def arc_rows(self, move, air, f, idv, v):
-        """The TTT2 rows of a Tekken 7 2D-arc property (convert/arcs.py) of move `move`."""
-        if idv == arcs.AIR_MOVE:
+        """The TTT2 rows of a 2D-arc property (convert/arcs.py: Tekken 7's, Tekken 8's) of move `move`."""
+        if idv == ARCS[self.game][1]:
             self.stats['2D arcs: air moves'] += 1
             return [dict(frame=arcs.AIR_MARK_FRAME, id=arcs.AIR_MARK, value=0)]
         v &= 0xFFFFFFFF
@@ -2450,12 +2720,12 @@ class Converter:
     def bake_arcs(self):
         """The moves that start a 2D arc on the ground play their animation with the arc in the hips height,
         extended to the landing (convert/arcs.py)."""
-        k = self.k
-        whole = {k.anim_name(i): k.tables['moves'][i]['anim'] for i in range(len(k.tables['moves']))
-                 if '_sabun' not in k.anim_name(i).lower()}
+        k, t8 = self.k, self.game == 't8'
+        whole = {} if t8 else {k.anim_name(i): k.tables['moves'][i]['anim'] for i in range(len(k.tables['moves']))
+                               if '_sabun' not in k.anim_name(i).lower()}
         # the neutral jump (the whole of the fighter's "_sabun" jumps): the air height of other relative animations
-        jump = next((whole[arcs.whole_name(n)] for n in map(k.anim_name, range(len(k.tables['moves'])))
-                     if '_sabun' in n.lower() and arcs.whole_name(n) in whole), None)
+        jump = None if t8 else next((whole[arcs.whole_name(n)] for n in map(k.anim_name, range(len(k.tables['moves'])))
+                                     if '_sabun' in n.lower() and arcs.whole_name(n) in whole), None)
         baked = {}
         for i, (f0, value) in sorted(self.ground_arcs.items()):
             if i not in self.newidx:
@@ -2463,12 +2733,12 @@ class Converter:
             row, mv = self.T['moves'][self.newidx[i]], k.tables['moves'][i]
             a, g, _ = arcs.params(value)
             hold = mv['ground_fall'] or mv['airborne_end']
-            off, name = mv['anim'], k.anim_name(i)
+            off, name = (row['anim'], None) if t8 else (mv['anim'], k.anim_name(i))
             key = (off, f0, a, g, hold)
             if key not in baked:
-                dec = arcs.decode_t7(k, off)
+                dec = animation.decode(*self.animation_bytes(off)) if t8 else arcs.decode_t7(k, off)  # (its clip)
                 frames = dec['frames']
-                if '_sabun' in name.lower() and arcs.whole_name(name) in whole:
+                if not t8 and '_sabun' in name.lower() and arcs.whole_name(name) in whole:
                     dec, _, _ = arcs.absolute_sabun(dec, arcs.decode_t7(k, whole[arcs.whole_name(name)]))
                     self.stats['2D arcs: delta animations made absolute'] += 1
                 elif jump is not None and arcs.relative_hips(dec, f0):
@@ -2476,6 +2746,8 @@ class Converter:
                     self.stats['2D arcs: relative animations made absolute'] += 1
                 desc, values, ext = arcs.bake(dec, f0, a, g, hold)
                 baked[key] = (0x4000 | (self.pack0_count + len(self.new_anims)), ext, frames)
+                if t8 and (off & 0x3FFF) - self.pack0_count in self.converted8 and not off & ANIM_COMMON:
+                    self.converted8.add(len(self.new_anims))                    # (handoffs8)
                 self.new_anims.append(arcs.encode(desc, values))
                 self.stats['2D arcs: animations baked'] += 1
             row['anim'], ext, frames = baked[key]
@@ -2502,6 +2774,155 @@ class Converter:
                     c['start_frame'] += ext
             row['cancel'] = len(self.T['cancels'])
             self.T['cancels'] += cl
+
+    def bake_air8(self):
+        """Tekken 8: the 2D air moves (0x822C) baked as the runtime would fly them (convert/arcs.py): each way into one
+        (a cancel row, its own or its group's, of a move with a baked ground arc or of an air move baked so) gives the
+        height, vertical speed and gravity it starts with at the cancel's start frame (its window's start when that is
+        later); arcs.fly() flies it from there, its own 0x8226 restarting the arc. One copy of the air move per
+        distinct start: its animation baked (arcs.bake_air), its frames (ground_fall, airborne_end, active frames,
+        properties, cancels) moved, neither 0x822C nor 0x8226, and the way in leads to it (the lists copied: they are
+        shared). The air move itself stays for any other way in (the runtime flies it). One that throws a projectile
+        (the runtime hangs it until the throw) or restarts its arc on no plain frame stays flown."""
+        rows, P, C, G = self.T['moves'], self.T['extra_move_properties'], self.T['cancels'], self.T['group_cancels']
+
+        def props(row):
+            out, j = [], row['extraprops']
+            while j is not None and j < len(P):
+                out.append(P[j])
+                if P[j]['frame'] == 0 and P[j]['id'] == 0:
+                    break
+                j += 1
+            return out
+        ground, air = {}, {}            # row -> (f0, A, g) of its baked arc; row -> {frame: (A, g)} of its restarts
+        for r, row in enumerate(rows):
+            ps = props(row)
+            if any(x['id'] == arcs.BAKED for x in ps):
+                v = next(x['value'] for x in ps if x['id'] == arcs.BAKED)
+                ground[r] = (v & 0xFF,) + arcs.params(v)[:2]
+            elif any(x['id'] == arcs.AIR_MARK for x in ps):
+                restarts = {(0 if x['frame'] == arcs.BAKED_FRAME else x['frame']): arcs.params(x['value'])[:2]
+                            for x in ps if x['id'] == arcs.ARC}
+                if all(f < PLAIN_FRAME for f in restarts) and not any(x['id'] == TT_PROJ_SPAWN for x in ps):
+                    air[r] = restarts
+                else:
+                    self.stats['2D arcs: air moves left to the runtime (Tekken 8)'] += 1
+        if not air:
+            return
+
+        def target(mid):
+            r = self.aliases[mid - 0x8000] if mid >= 0x8000 and mid - 0x8000 < len(self.aliases) else mid
+            return r if r is not None and r < len(rows) else None
+        # an air move whose clip a ground move goes on with (TT_CONTINUE: Burning Rain's slam #1475, its landing #1476
+        # from frame 30) is on the floor by its ground_fall, where the clip lands him (the crouch at 28): flown from
+        # his height after the jump's 2 (1.27 m), the slam's own arcs (40 up, gravity 1; at 20, 10 and 20) touched
+        # down at 34 and its first hit (26-27) swung 1.4 m over the dummy
+        continued = {r for r, row in enumerate(rows) if any(x['id'] == TT_CONTINUE for x in props(row))
+                     and not any(x['id'] == arcs.AIR_MARK for x in props(row))}
+        land_by = {r: rows[r]['ground_fall'] for r in air if rows[r]['ground_fall'] and any(
+            target(c['move_id']) in continued for c in tagsystem.cancels(self.T, rows[r]['cancel'])
+            if c['direction'] not in (M.LIST_END, M.GROUP, M.GROUP_END))}
+
+        def state(src, fly, frames, frame):
+            """(height, vertical speed, gravity) of move src at its frame `frame` (as the runtime has them: its
+            AIR_MARK), from its baked ground arc or (an air move baked) its flight; past it, landed"""
+            if fly is None:
+                f0, a, g = ground[src]
+                n = max(0, frame - f0)
+                return max(1.0, arcs.height(n, a, g)), a - g * n, g
+            return fly[frame] if frame < len(fly) - 1 and frame <= frames[0] else (0.0, 0.0, fly[-1][2])
+
+        def copy_rows(table, j, end, change):
+            """A copy of the list at table[j] (to its end row) with change(row) applied, appended; or j if none changes."""
+            out = []
+            while j + len(out) < len(table):
+                x = dict(table[j + len(out)])
+                out.append(x)
+                if x['direction'] == end:
+                    break
+            new = [change(dict(x)) for x in out]
+            if new == out:
+                return j
+            table += new
+            return len(table) - len(new)
+        self.air8_anims = {}
+        made, queue, copies = {}, [(r, None, None, 0) for r in sorted(ground)], {}
+        while queue:
+            src, fly, frames, depth = queue.pop(0)     # frames: (hold, shift) of a baked air move's own frames
+
+            def change(c, fly=fly, frames=frames, depth=depth, src=src):
+                if c['direction'] in (M.LIST_END, M.GROUP_END):
+                    return c
+                if c['direction'] == M.GROUP:
+                    c['move_id'] = copy_rows(G, c['move_id'], M.GROUP_END, change)
+                    return c
+                t = target(c['move_id'])
+                if t in air and depth < 8:
+                    y, vy, g = state(src, fly, frames, max(c['start_frame'], c['win_start']))
+                    key = (t, round(y, 2), round(vy, 3), g)
+                    if key not in made:
+                        made[key] = self.air8_copy(t, air[t], y, vy, g, queue, depth + 1, land_by.get(t))
+                    c['move_id'] = made[key]
+                    self.stats['2D arcs: ways into air moves led to their baked copies (Tekken 8)'] += 1
+                if frames is not None:
+                    for f in ('win_start', 'win_end', 'start_frame'):
+                        if c[f] < 32767:
+                            c[f] = arcs.moved(c[f], *frames)
+                return c
+            row = rows[src]
+            if row['cancel'] is not None:
+                key = (row['cancel'], ground[src] if fly is None else tuple(fly), frames)
+                if key not in copies:
+                    copies[key] = copy_rows(C, row['cancel'], M.LIST_END, change)
+                row['cancel'] = copies[key]
+
+    def air8_copy(self, t, restarts, y, vy, g, queue, depth, land_by=None):
+        """(bake_air8) The row of a copy of air move t baked as entered with height y, vertical speed vy and gravity
+        g, on the floor by frame land_by if given; it joins the queue (its own ways into air moves)."""
+        rows, P = self.T['moves'], self.T['extra_move_properties']
+        row = dict(rows[t])
+        fly = arcs.fly(y, vy, g, restarts)
+        if land_by is not None and len(fly) - 1 > land_by:
+            fly = arcs.land_by(fly, land_by)
+            self.stats['2D arcs: air moves brought down where a ground move goes on with their clip (Tekken 8)'] += 1
+        hold = row['ground_fall'] or row['airborne_end']
+        key = (row['anim'], hold, tuple(round(h, 1) for h, _, _ in fly))
+        if key not in self.air8_anims:
+            dec = animation.decode(*self.animation_bytes(row['anim']))
+            desc, values, shift = arcs.bake_air(dec, [h for h, _, _ in fly], hold)
+            self.air8_anims[key] = (ANIM_PACK | (self.pack0_count + len(self.new_anims)), shift)
+            self.new_anims.append(arcs.encode(desc, values))
+            self.stats['2D arcs: air move animations baked (Tekken 8)'] += 1
+        row['anim'], shift = self.air8_anims[key]
+        # (no bit 0x40, TTT2's juggle flag, which no TTT2 or other added fighter's jump attack has: a move with it
+        # starts with the fighter lifted to its pose's height and falling, and his baked u/f+1 came out 1.7 m higher)
+        row['bitfield'] &= ~JUGGLE_BIT
+        frames = (hold, shift)
+        for f in ('airborne_end', 'ground_fall'):
+            if row[f]:
+                row[f] = arcs.moved(row[f], *frames, held=True)
+        if row['first_active']:
+            row['first_active'], row['last_active'] = (arcs.moved(row[f], *frames) for f in ('first_active', 'last_active'))
+        if shift < 0:
+            self.stats['2D arcs: air moves cut at an early touchdown (Tekken 8)'] += 1
+        ps, j = [], row['extraprops']
+        while j is not None and j < len(P):
+            x = dict(P[j])
+            j += 1
+            if x['id'] in (arcs.AIR_MARK, arcs.ARC):
+                continue
+            if x['frame'] < PLAIN_FRAME and (x['frame'] or x['id']):
+                x['frame'] = arcs.moved(x['frame'], *frames)
+            ps.append(x)
+            if x['frame'] == 0 and x['id'] == 0:
+                break
+        if ps:
+            row['extraprops'] = len(P)
+            P += ps
+        rows.append(row)
+        queue.append((len(rows) - 1, fly, frames, depth))
+        self.stats['2D arcs: air move copies baked (Tekken 8)'] += 1
+        return len(rows) - 1
 
     def arc_landings(self):
         """A ground move that only 2D air moves land into (their cancel one frame after their ground_fall; every
@@ -2654,7 +3075,7 @@ class Converter:
         out[0] = PROJ_EFFECT
         for to, fr, n in PROJ_FIELDS:
             out[to:to + n] = v[fr:fr + n]
-        if self.gauge and out[4]:                           # its hits on one fighter (convert/gauge.py)
+        if self.gauge and out[4] and G.PROJECTILE_HIT[self.game]:     # its hits on one fighter (convert/gauge.py)
             out[4] = G.projectile_hits(self.k, pi, self.game, M.cancels, M.reqs)
         for f in PROJ_SOUNDS:
             if out[f] and out[f] not in self.known_sounds and not self.own_voice(out[f]):
@@ -2977,6 +3398,8 @@ class Converter:
         if self.game == 't8':
             self.handoffs8()
         self.flag8_rows()                   # Tekken 8's flag slots: the properties that set or test them (FLAG8)
+        if self.game == 't8':
+            self.bake_air8()                # (last: copies of whole moves)
         # every move belongs to the new motion row
         for n, row in enumerate(self.T['moves']):
             combined = (self.newid << 16) + n - (self.newid - 1)
@@ -3115,10 +3538,13 @@ class Converter:
         the donor's row among the fighter's rows of those buttons (0: all of them), whatever their conditions (an
         earlier row of a button takes the press first: the donor's u/f+2 [214] in front of her u/f+1+2 played the
         donor's jump punch for it; the donor's item moves, which the fighter answers with her own item rows, need an
-        item an added fighter cannot wear). Otherwise (or for another game) always False."""
+        item an added fighter cannot wear). A fighter with jumps of its own (Clive's Okm_sJUMP_00F, which his u/f+1 and the
+        others follow) answers the donor's plain jump rows, in front of them, the same way. Otherwise (or for another game)
+        always False."""
         if not OWN_INPUT[self.game]:
             return lambda y: False
-        dirs, specials = collections.defaultdict(int), set()
+        dirs, specials, jumps = collections.defaultdict(int), set(), 0
+        own_jump = '%s_sJUMP' % self.prefix
         for x in cl:
             rows = [x]
             if x['direction'] == M.GROUP:
@@ -3127,7 +3553,12 @@ class Converter:
                     rows.append(t[j])
                     j += 1
             for y in rows:
-                if y['direction'] in (M.LIST_END, M.GROUP_END, M.GROUP) or not y['button']:
+                if y['direction'] in (M.LIST_END, M.GROUP_END, M.GROUP):
+                    continue
+                if not y['button']:
+                    if y['direction'] < 0x8000 and y['move_id'] < len(self.T['moves']) \
+                            and self.move_name(y['move_id']).startswith(own_jump):
+                        jumps |= y['direction'] & ALL_DIRECTIONS
                     continue
                 if y['direction'] < 0x8000:
                     dirs[y['button']] |= (y['direction'] & ALL_DIRECTIONS) or ALL_DIRECTIONS
@@ -3135,8 +3566,12 @@ class Converter:
                     specials.add((y['direction'], y['button']))
 
         def answered(y):
-            if not y['button'] or y['direction'] in (M.LIST_END, M.GROUP_END, M.GROUP):
+            if y['direction'] in (M.LIST_END, M.GROUP_END, M.GROUP):
                 return False
+            if not y['button']:
+                return (jumps and 0 < y['direction'] < 0x8000 and y['direction'] & ALL_DIRECTIONS & ~jumps == 0
+                        and y['move_id'] < len(self.d.tables['moves'])
+                        and self.d.move_name(y['move_id']).startswith('sJUMP'))
             if y['direction'] >= 0x8000:
                 return (y['direction'], y['button']) in specials
             want = (y['direction'] & ALL_DIRECTIONS) or ALL_DIRECTIONS

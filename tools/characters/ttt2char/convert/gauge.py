@@ -32,8 +32,9 @@ SLOW_MOTION = {'t7': 0x828c, 't8': None}
 SLOW_MOTION_IMMUNE = {'t7': 0x828d, 't8': None}
 # Geese's MAX mode (Tekken 7: the timer at player +0xcd8): 176 tests it running, 0x82a9 adds frames to it (activation
 # 720, the MAX cancel dash 360; EX moves -160, his supers -720), capped at 720 (0x1434df508)
-REQS = {'t7': {629: AT_LEAST, 635: BELOW, 176: MAX_ON}, 't8': {}}
-PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH, 0x82a9: MAX_ADD}, 't8': {}}
+# Tekken 8's Clive: 738 the gauge (player +0x1c94) >= param, 739 < param; 0x8232 adds its value (convert/gauge8.py)
+REQS = {'t7': {629: AT_LEAST, 635: BELOW, 176: MAX_ON}, 't8': {738: AT_LEAST, 739: BELOW}}
+PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH, 0x82a9: MAX_ADD}, 't8': {0x8232: ADD}}
 
 
 def stop_frames(rows, idv, v, game):
@@ -72,12 +73,17 @@ def full_sound(defn):
 
 def ini_line(defn, full_sound=None):
     """character.ini's `gauge` line (title/gauge.h), or None; full_sound: its item sound number (the runtime plays it
-    as the gauge fills up)."""
+    as the gauge fills up). A gauge the definition turns off (its 'on' False) is written commented out under a line
+    saying how to turn it on: the port reads no `gauge` line then, so the fighter has none (no HUD, no levels)."""
     g = of(defn)
     if not g:
         return None
     line = 'gauge = %d %d %d %d %d %d' % ((g['max'], g['stock']) + tuple(g.get('gain', (50, 100, 150, 300))))
-    return line + (' %d' % full_sound if full_sound is not None else '')
+    line += ' %d' % full_sound if full_sound is not None else ''
+    if g.get('on', True):
+        return line
+    return ('# %s: off. To turn it on, delete the # at the start of the next line (put it back to turn it off)\n#%s'
+            % (g.get('name', 'gauge'), line))
 
 
 # ------------------------------------------------------------------------------------------------ the HUD

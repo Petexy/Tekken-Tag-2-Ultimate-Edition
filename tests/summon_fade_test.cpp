@@ -104,5 +104,19 @@ int main() {
         // its origin in the parent's unscaled frame: 200 along y, as before the fade
         assert(std::fabs(at(l, 13) * parent[1] - 200.0f) < 1e-3f);
     }
+
+    // a dissolving material (kRampDissolve): whole, its own reference (107 / 255: every texel, alpha 107/255 .. 1, drawn);
+    // half, the texels whose alpha is in the upper half of that span; at 0 only alpha 1 and above
+    assert(std::fabs(dissolve_ref(1.0f) - 107.0f / 255.0f) < 1e-6f);
+    assert(std::fabs(dissolve_ref(0.5f) - (107.0f / 255.0f + 0.5f * (1.0f - 107.0f / 255.0f))) < 1e-6f);
+    assert(dissolve_ref(0.0f) == 1.0f && dissolve_ref(-1.0f) == 1.0f);
+    assert(is_dissolve_ref(107.0f / 255.0f) && is_dissolve_ref(107.0f / 256.0f));
+    // every reference TTT2's own models take is left alone (10 .. 250; 106 and 108 none, nor the cut at 150)
+    for (int r = 0; r <= 255; ++r) {
+        if (r != 107) assert(!is_dissolve_ref(static_cast<float>(r) / 255.0f) && !is_dissolve_ref(static_cast<float>(r) / 256.0f));
+    }
+    assert((kRampDissolve & (kRampRows | kRampUnder)) == 0);
+    // a gone summon's reference draws none of its texels (alpha at most 1), and is not taken for the material's own
+    assert(kDissolveGone > dissolve_ref(0.0f) && !is_dissolve_ref(kDissolveGone) && kDissolveGoneFrames > 0);
     return 0;
 }

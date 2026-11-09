@@ -395,6 +395,16 @@ class Bakes(unittest.TestCase):
         self.assertAlmostEqual(float(bake.ab_blend(a, b, 12)), 0.25)     # overlay, a < 0.5: 2ab
         self.assertAlmostEqual(float(bake.ab_blend(np.float32(0.75), b, 12)), 0.75)   # 1 - 2(1 - a)(1 - b)
 
+    def test_stubble_from_its_opacity_map(self):
+        """A base of its own (no colour map): the opacity map's red, its brightest the alpha test's whole, root to tip."""
+        tex = Textures({'O': (np.array([[[100, 0, 0, 255], [200, 0, 0, 255]]], np.uint8), False)})
+        eff = {'base': 'M_CH_made_up_stubble', 'textures': {'OBD': 'O'}, 'scalars': {}, 'switches': {},
+               'vectors': {'RootColor': col(0.0, 0.0, 0.0), 'TipColor': col(0.5, 0.25, 1.0)}}
+        rgb, alpha = bake.bake_albedo(eff, tex)
+        np.testing.assert_allclose(alpha[0], [0.5, 1.0], atol=1e-6)
+        np.testing.assert_allclose(rgb[0, 0], [0.25, 0.125, 0.5], atol=1e-6)
+        np.testing.assert_allclose(rgb[0, 1], [0.5, 0.25, 1.0], atol=1e-6)
+
     def test_costume_formula(self):
         purple, white = (0.25, 0.13, 0.92), (1.0, 1.0, 1.0)
         tex = Textures({'A': flat(1, 6, GREY, GREY, GREY),

@@ -36,7 +36,7 @@ import struct
 
 import numpy as np
 
-from . import particles as P, trails8
+from . import disks8, particles as P, trails8
 from ..tekken7.particles import Distribution, Emitter
 from ..tekken8 import material as material8, niagara, niagarasim, staticmesh as staticmesh8, texture as texture8
 
@@ -407,7 +407,8 @@ def tuned(name, roles):
     pitch, yaw), alpha (a factor), colour (a factor per channel), turn (random turn: half range in turns, per axis),
     add (drawn additively whatever its brightness: Tekken 8's dim glows light the picture, they do not darken it),
     dim (a factor on its light on the screen: dimmed), wh (its size as a sprite, cm: the GPU's numbers are out of
-    reach), fade (its alpha falls from the start to the end of its life: Tekken 8 gives it none)."""
+    reach), fade (its alpha falls from the start to the end of its life: Tekken 8 gives it none), drop (left out),
+    palette (a GPU emitter's colour, out of the scripts' reach: else its system's measured_palette)."""
     for pattern, values in roles:
         if re.search(pattern, name, re.I):
             return values
@@ -767,15 +768,17 @@ class Converter(P.Converter):
         for pattern, factor in self.tune.get('material_alpha', ()):     # (one material of an emitter's two)
             if re.search(pattern, mat):
                 alpha *= factor
+        over = tuned(e.name, roles)
+        if over.get('drop'):                # (a definition leaves this emitter of this system out)
+            return []
         m = measure(e)
         rgb = brightest(e.colours) or colour
-        over = tuned(e.name, roles)
         hot = over.get('add') or \
             peak_brightness(m, power, rgb) * (1.0 if m is not None else GPU_BRIGHTNESS) > HOT_BRIGHTNESS
         key = mat + Materials.ADDITIVE if hot and desc['blend'] != 'BLEND_Additive' else mat
         if m is None:
-            em = cascade(e, r, colour, None if sprite else sm, floor, alpha, once, roles, fade_alpha=True,
-                         offset=offset, mat_key=key)
+            em = cascade(e, r, over.get('palette') or colour, None if sprite else sm, floor, alpha, once, roles,
+                         fade_alpha=True, offset=offset, mat_key=key)
             made = self.emitter(em, cap_frames)
         else:
             drifts = m.drifts if max(m.speed_half) > 1.0 else [None]
@@ -898,7 +901,7 @@ def systems_of(store, code, ids, log=None):
 
 
 def convert_fighter(store, archives, systems, spec, first_texture_id, copies=None, log=None, stopped=None, tune=None,
-                    trails=None):
+                    trails=None, spec_code=None):
     """The effects a fighter's moves spawn: systems {Tekken 8 id: niagara.System} (systems_of), spec {id: (part,
     floor)} (parts), copies {id: (Tekken 8 id, frames it may emit for)} (moveset.Converter.split_effects), stopped:
     the ids moves stop (looped), tune: the definition's TEKKEN8_EFFECT_TUNE ({'skip': emitter names left out,
@@ -923,7 +926,12 @@ def convert_fighter(store, archives, systems, spec, first_texture_id, copies=Non
             name = EFFECT_NAME % i + suffix
             names.setdefault(i, []).append(name)
             files['alo/%s.alo' % name] = data
-    for i, data in trails8.effects(conv, trails or {}).items():
+    bands = {i: t for i, t in (trails or {}).items() if 'band' in t or 'burst' in t}     # (a definition's TEKKEN8_DISKS: disks8.py)
+    made = trails8.effects(conv, {i: t for i, t in (trails or {}).items() if i not in bands})
+    if bands:
+        table = niagara.effect_table(store, spec_code)
+        made.update(disks8.effects(conv, bands, lambda t8: niagara.read(store, table[t8]['system'])))
+    for i, data in made.items():
         names[i] = [EFFECT_NAME % i]
         files['alo/%s.alo' % names[i][0]] = data
     for name, data in conv.textures.files.items():

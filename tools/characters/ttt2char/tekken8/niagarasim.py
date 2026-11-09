@@ -34,7 +34,7 @@ BOOL_TRUE = -1
 class Script:
     """A script's code and constants, ready to run."""
 
-    def __init__(self, props, curves, label='', arrays=None):
+    def __init__(self, props, curves, label='', arrays=None, user=None):
         self.vm = props.get('CachedScriptVM') or {}
         self.script = niagara.Script(props)
         self.curves = curves
@@ -63,6 +63,15 @@ class Script:
                 where = offset % size if size else 0
                 for start in self.sets:
                     self.table[(start + ENGINE_SET + where) // 4] = 1
+        for name, values in (user or {}).items():          # (the system's exposed parameters, at their defaults)
+            for k, prefix in enumerate(('', 'PREV_')):
+                offset = self.params.get(prefix + name)
+                if offset is None:
+                    continue
+                offset = offset % size if size else 0
+                for start in self.sets[k:k + 1] or self.sets[:1]:
+                    first = (start + ENGINE_SET + offset) // 4
+                    self.table[first:first + len(values)] = np.frombuffer(np.float32(values).tobytes(), '<u4')
         self.externals = [(x.get('Name'), (x.get('OwnerName') or '')) for x in self.vm.get('CalledVMExternalFunctions')
                           or []]
         self.warned = set()
@@ -349,11 +358,13 @@ class Run:
         return self.history.get(name)
 
 
-def simulate(spawn_props, update_props, curves, arrays=None, age=0.0, particles=PARTICLES, frames=MAX_FRAMES, seed=1):
-    """Spawns `particles` at emitter age `age`, runs them `frames` frames (the emitter's age going on) -> Run."""
+def simulate(spawn_props, update_props, curves, arrays=None, age=0.0, particles=PARTICLES, frames=MAX_FRAMES, seed=1,
+             user=None):
+    """Spawns `particles` at emitter age `age`, runs them `frames` frames (the emitter's age going on) -> Run. user: the
+    system's exposed parameters {'User.Scale': [2.0, 2.0, 2.0]} (niagara.System.user), left at 0 without it."""
     rng = np.random.default_rng(seed)
-    spawn = Script(spawn_props, curves, 'spawn', arrays)
-    update = Script(update_props, curves, 'update', arrays)
+    spawn = Script(spawn_props, curves, 'spawn', arrays, user)
+    update = Script(update_props, curves, 'update', arrays, user)
     nf, ni = spawn.counts()
     floats = [np.zeros(particles, np.float32) for _ in range(nf)]
     ints = [np.zeros(particles, np.int32) for _ in range(ni)]

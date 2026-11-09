@@ -352,6 +352,17 @@ def bake_hair(eff, textures):
     return rgb, alpha
 
 
+def bake_stubble(eff, textures):
+    """A stubble material with a base of its own (Clive's M_CH_okm_fah_1p: strand cards with an OBD map, no ADI map): the
+    OBD map's red is the strands' opacity, its brightest texel the alpha test's full opacity; the colour runs from
+    RootColor to TipColor along it. (The graph is cooked: read from its parameters and the map's look.)"""
+    t, v = eff['textures'], eff['vectors']
+    r = textures.image(t['OBD'])[0][..., 0].astype(np.float32) / 255.0
+    r = r / max(float(r.max()), 1e-3)
+    root, tip = _col(v.get('RootColor', {'r': 0, 'g': 0, 'b': 0})), _col(v.get('TipColor', {'r': 0, 'g': 0, 'b': 0}))
+    return np.clip(root + r[..., None] * (tip - root), 0, 1).astype(np.float32), r
+
+
 def hair_look(rgb, adi, alpha, eff):
     """Tekken 8 head hair's base colour (hair_colour) -> a TTT2 hair texture's colours: the measured TTT2 look of a
     hair colour, then the strands' shading from the ADI map's green (their depth), its mean kept."""
@@ -427,6 +438,13 @@ def bright_hair(rgb, alpha, eff):
             break
         grown = thicken(alpha, texels)
     return out, grown
+
+
+def thick_hair(rgb, alpha, eff, texels):
+    """A dark head hair (a definition's TEKKEN8['hair_thick']) with its strands grown by `texels` at the ADI map's size, the
+    colour under the new texels its neighbours': Tekken 8 draws thin lines over and over and blends them, an alpha test
+    cuts them to wire with the background between (Clive's hair: a frizz where Tekken 8 has clumps)."""
+    return fill_under(rgb, alpha >= _hair_clip(eff)), thicken(alpha, texels)
 
 
 def bake_eye(eff, textures, size=EYE_SIZE):
@@ -533,9 +551,9 @@ def satin_colour(rgb):
     return np.clip(linear_to_srgb(SATIN_GAIN * srgb_to_linear(rgb) + SATIN_ADD), 0, 1)
 
 
-def layer_colour(rgb):
-    """The same for the other group of a satin material."""
-    return np.clip(linear_to_srgb(LAYER_GAIN * srgb_to_linear(rgb)), 0, 1)
+def layer_colour(rgb, gain=LAYER_GAIN):
+    """The same for the other group of a satin material; gain: a definition's own (TEKKEN8['layer_lift'])."""
+    return np.clip(linear_to_srgb(gain * srgb_to_linear(rgb)), 0, 1)
 
 
 # ------------------------------------------------------------------------------------------------ the API
@@ -556,6 +574,8 @@ def bake_albedo(eff, textures, grey=False):
         if textures.exists(t.get(slot)):
             rgb, a = _texture(textures, t[slot], grey)
             return rgb, None
+    if textures.exists(t.get('OBD')) and 'TipColor' in eff['vectors']:
+        return bake_stubble(eff, textures)
     return None, None
 
 

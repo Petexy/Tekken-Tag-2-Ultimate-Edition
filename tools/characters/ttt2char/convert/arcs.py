@@ -27,6 +27,18 @@ hips channel, the fighter's own height stays 0), so:
   the fighter's own height and vertical speed, holds them on their ground_fall frame and lands them.
 
 TTT2's property interpreter ignores 0x8226, 0x822C and 0x822D, and no TTT2 moveset uses them.
+
+Tekken 8 flies Clive Rosfield's jumps and air moves the same way, with the ids 0x8296 (an arc, the same value bytes:
+his jumps 110, 60, 100 at frame 9) and 0x8297 (at frame 0x8001: this air move continues the arc); its other fighters
+carry their jumps' arcs in their animations, as TTT2 does. They convert as Tekken 7's do, and then the air moves are
+baked too (moveset.bake_air8): TTT2 turns a queued cancel's pose toward the next move's first frame before that move
+starts, and with the jump's arc baked and the air attack's not (its hips flat: physics lifted it) u/f+1 pressed early
+sank him from 1.9 m to 1.0 m by its jump frame 17, then he leapt back up. Each way into an air move (a cancel of a baked
+move, at its start frame) gives the height, vertical speed and gravity it starts with; fly() flies it from there as
+the runtime would, its own 0x8226 restarting the arc, and bake_air() puts that in its hips: held on its ground_fall
+frame until the touchdown or, landing before it, cut to it there (the runtime goes to ground_fall at the touchdown).
+An air move whose clip a ground move goes on with (moveset.CONTINUE8: Burning Rain's slam, its landing the same clip
+from frame 30) is on the floor by its ground_fall, its flight brought down to it (land_by).
 """
 import re
 
@@ -35,6 +47,7 @@ import numpy as np
 from ..ttt2 import animation as A
 
 ARC, AIR_MOVE = 0x8226, 0x8227            # Tekken 7: start an arc; this air move continues the arc
+ARC8, AIR_MOVE8 = 0x8296, 0x8297          # Tekken 8's
 BAKED, AIR_MARK = 0x822D, 0x822C          # TTT2 (no-op ids): a baked ground arc; a 2D air move
 AIR_MARK_FRAME, BAKED_FRAME = 0x4001, 0x8001
 
@@ -108,3 +121,59 @@ def whole_name(sabun_name):
 def encode(descriptors, values):
     """The raw TTT2 (big-endian) animation."""
     return A.encode_raw(descriptors, values, '>')
+
+
+def fly(y, vy, g, restarts, limit=600):
+    """[(height, vertical speed, gravity)] of an air move's frames from 0 to its touchdown, flown from its frame 0
+    with the state it was entered with: each frame vy -= g, then y += vy (TTT2's integration, as height()), then the
+    move's own arcs at that frame (restarts {frame: (A, g)}) start (vy = A); the last frame is the touchdown (height
+    <= 0, made 0)."""
+    out = []
+    for k in range(limit):
+        if k:
+            vy -= g
+            y += vy
+            if y <= 0:
+                out.append((0.0, 0.0, g))
+                break
+        if k in restarts:
+            vy, g = restarts[k]
+        out.append((y, vy, g))
+    return out
+
+
+def land_by(flight, t):
+    """fly()'s flight brought down to touch down at frame t (< its own touchdown): its heights less a ramp from 0 at
+    frame 0 to its height at t (an arc stays above the ramp: no frame goes under the floor), the speeds their steps."""
+    top = flight[t][0]
+    ys = [y - top * k / t for k, (y, _, _) in enumerate(flight[:t])]
+    return [(y, y - ys[k - 1] if k else flight[0][1], flight[k][2]) for k, y in enumerate(ys)] + \
+        [(0.0, 0.0, flight[t][2])]
+
+
+def bake_air(dec, heights, hold):
+    """(descriptors, values (frames', nch, 3), shift) of a raw animation: dec (decoded) with `heights` (one a frame
+    from frame 0, the last the touchdown: fly()) added to the hips height, timed as the runtime flies an air move: the
+    frame `hold` (its ground_fall) repeated until the touchdown, or, landing before it, the frames from the touchdown
+    to it left out (the touchdown shows the frame `hold`). shift: the frames added at `hold` (< 0: left out)."""
+    values = A.to_raw(dec['descriptors'], dec['values'], dec['type'])
+    desc = [7 if A.is_rotation(d) and dec['type'] != A.RAW else d for d in dec['descriptors']]
+    hold = min(hold, dec['frames'] - 1)
+    t = len(heights) - 1
+    shift = t - hold
+    if shift >= 0:
+        out = np.concatenate([values[:hold + 1]] + [values[hold:hold + 1]] * shift + [values[hold + 1:]], 0).copy()
+    else:
+        out = np.concatenate([values[:t], values[hold:]], 0).copy()
+    out[:t + 1, 1, 1] += np.asarray(heights, np.float32)
+    return desc, out.astype(np.float32), shift
+
+
+def moved(frame, hold, shift, held=False):
+    """A move frame after bake_air() (hold, shift): past `hold` (from it on: held=True, ground_fall and
+    airborne_end) it moves by `shift`; cut (shift < 0), the frames left out come at the touchdown."""
+    if shift >= 0:
+        return frame + shift if frame > hold or (held and frame == hold) else frame
+    t = hold + shift
+    return frame if frame < t else t if frame < hold else frame + shift
+

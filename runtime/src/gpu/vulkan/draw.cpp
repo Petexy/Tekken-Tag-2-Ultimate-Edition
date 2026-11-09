@@ -4,6 +4,7 @@
 #include "gpu/vulkan/renderer.h"
 
 #include "gpu/latte.h"
+#include "gpu/still_draws.h"
 #include "gx2/types.h"
 
 #include "cafe/runtime.h"
@@ -480,6 +481,35 @@ uint32_t read_extent(uint32_t size, uint32_t extent) {
 }
 } // namespace
 
+// A polygon the title registered as standing still (gpu/still_draws.h), in
+// its pass: the slot of last frame's positions reads this frame's (the same
+// buffer: video-memory copies redirect both alike), so that pass sees no
+// motion. Cheapest tests first: every other draw stops at the count's bit.
+bool Renderer::keep_still(const Registers& regs, const Draw& d, abi::DrawConstants& dc, uint32_t* vb_address) {
+    const StillDraws* still = still_draws();
+    if (still == nullptr || d.source != Draw::kIndexBuffer || !still->counted(d.count)) return false;
+    const uint32_t current = still->current, previous = still->previous;
+    if (current >= 16 || previous >= 16 || dc.vb[current].size == 0 || dc.vb[previous].size == 0 ||
+        dc.vb[current].stride != dc.vb[previous].stride) {
+        return false;
+    }
+    uint64_t hash = 0;
+    program(regs[reg::SQ_PGM_START_VS] << 8, regs[reg::SQ_PGM_START_VS + 4] << 3, hash);
+    if (hash != still->vertex_program || !still->still(d.index_address, d.count)) return false;
+    dc.vb[previous] = dc.vb[current];
+    vb_address[previous] = vb_address[current];
+    return true;
+}
+
+// The pass left out whole (StillDraws::all, a test switch): its vertex shader.
+bool Renderer::left_out(const Registers& regs) {
+    const StillDraws* still = still_draws();
+    if (still == nullptr || !still->all) return false;
+    uint64_t hash = 0;
+    program(regs[reg::SQ_PGM_START_VS] << 8, regs[reg::SQ_PGM_START_VS + 4] << 3, hash);
+    return hash == still->vertex_program;
+}
+
 void Renderer::draw(const Registers& regs, const Draw& d) {
     if (!replaying_) ++draws_;
     const auto r = [&](uint32_t address) { return regs[address]; };
@@ -512,7 +542,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         ++skipped_draws_;
         return;
     }
-    if (d.count == 0) return;
+    if (d.count == 0 || left_out(regs)) return;
     const bool indexed = d.source != Draw::kAuto || convert != Convert::kNone;
     const bool restart = indexed && (r(reg::VGT_MULTI_PRIM_IB_RESET_EN) & 1) && d.source != Draw::kAuto;
     // (Vulkan restarts strips and fans only: lists draw the marker as a vertex.)
@@ -646,6 +676,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         dc.vb[i] = buffer(resource::kVsAttrib + i, -1, 0);
         if (dc.vb[i].size != 0) vb_address[i] = r(kResourceBase + (resource::kVsAttrib + i) * resource::kWords * 4);
     }
+    keep_still(regs, d, dc, vb_address);
     // Stream-out writes guest memory, which a replay must not touch (the
     // draws that read it use what the frame wrote): a replayed draw keeps
     // its rasterised output, its stream-out buffers are empty. With
