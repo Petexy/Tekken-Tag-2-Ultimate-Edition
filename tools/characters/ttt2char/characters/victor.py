@@ -198,6 +198,14 @@ MOVESET = {
     'direct': [(r'^La_sKAM00_$', 'move', ['Lon_sKAM00_']),                      # Lars's stance -> his
                (r'^(la|mk)_s', 'anim', ['lon_s%02d' % k for k in range(3)]),    # intros
                (r'^la_w', 'anim', ['lon_w%02d' % k for k in range(3)])],        # win poses
-    # TTT2 bounds: the user lists them (Tekken 8 has none; tornados do not become any)
-    'bounds': {},
+    # TTT2 bounds (Tekken 8 has none, and his tornados do not become any): an air hit slams the opponent into the
+    # floor once per juggle (convert/move_overrides.py). Iai Stance 1,2,2's last hit (Clarent), Perfumer 1+2
+    # (Hengroen), f+1+2 Durandal and u+1+2 Caliburnus. (Moves no name is known for are '#<index>': indices of the
+    # game build the names were read from.)
+    'bounds': {
+        '#1667': True,         # IAI 1,2,2, last hit
+        '#1709': True,         # PRF 1+2
+        '#1758': True,         # f+1+2
+        'Lon_8WP': True,       # u+1+2
+    },
 }
