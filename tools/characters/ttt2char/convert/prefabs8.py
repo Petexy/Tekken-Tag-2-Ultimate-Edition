@@ -44,9 +44,15 @@ asks for it; a fighter without one is not touched.
   'scene_cuts' names such moves with the cut's frame, the victim's move and the frame his push away from the
   attacker starts (scene_cuts()): the attacker's clip has the jump taken back from the cut on (his Top's path,
   tekken8/anim.py channels' shift), the victim's clip the same, grown with his push (he is thrown that much further,
-  so the gap after the cut is Tekken 8's), and the held scene goes with them from the cut on (pair_values poses it
-  from the clip's own path). Torgal shows from the cut on (his clip's scale, 0.001 before it), so nothing of the
-  scene's step is seen.
+  so the gap after the cut is Tekken 8's), and the held scene stands where the cut leaves it all through the move
+  (pair_values poses it from the clip's own path, moved by the jump): Torgal meets them as in Tekken 8.
+* LEAD-INS. Such a cut also hides where a creature comes from: Torgal is parked under the floor (his clip's scale
+  0.001) until the cut, then leaps 2 m up at the victim; TTT2 showed him out of nowhere. A model's 'lead_ins' {kind:
+  {clip: lead}} gives that clip a way in from another of its clips (lead_in()): the donor's run-up (lead 'run': its
+  frames, the last one in the air), turned and moved so that it leaves the ground along the way the creature goes at
+  the cut, then a flight of lead 'flight' frames: the mover (the bone that carries it) on an arc that meets the cut's
+  place, speed and height under one pull down, its pose from the donor's as it leaves the ground into the cut's (the
+  donor's own flight may be another: Torgal's pounce somersaults).
 * BONES. Each prefab keeps the definition's count of bones: reduced() merges the weighted bone whose vertices move
   least if it goes into its nearest kept ancestor, over its clips, until the count is reached.
 * SPACE. Prefab space (UE: x left, y forward, z up, cm) -> TTT2's (x, y up, z forward, mm): P swaps y and z; a bone
@@ -262,10 +268,18 @@ class Rig:
         return at.mean(0)[[0, 2, 1]] if len(at) else np.zeros(3)
 
     def locals_of(self, kind, clip, place):
-        """(frames, kept, 4, 4) TTT2 locals of a clip: roots relative to the still weapon at `place` (cached)."""
+        """(frames, kept, 4, 4) TTT2 locals of a clip: roots relative to the still weapon at `place` (cached); with
+        its way in when the model's 'lead_ins' gives one (LEAD-INS)."""
         key = kind, clip
         if key not in self._clips:
-            L = snakes8.ttt2_locals(self._world_of(kind, clip), self.skeleton['parents'], self.keep_sk, A)
+            W = self._world_of(kind, clip)
+            lead = self.spec.get('lead_ins', {}).get(kind, {}).get(clip)
+            if lead:
+                W = lead_in(W, self._world_of(kind, lead['donor']), self.skeleton['parents'],
+                            list(self.skeleton['names']).index(lead['mover']), lead['run'], lead['flight'])
+                self.log('  prefab %s: clip %d led in by clip %d\'s run-up (frames %d-%d) and a %d-frame flight' % (
+                    self.name, clip, lead['donor'], lead['run'][0], lead['run'][1], lead['flight']))
+            L = snakes8.ttt2_locals(W, self.skeleton['parents'], self.keep_sk, A)
             for k, u in enumerate(self.up):
                 if u < 0:
                     L[:, k, :3, 3] -= place
@@ -1313,6 +1327,97 @@ def scene_cuts(k, d, path, log=print):
         log('scene cut: %s at frame %d, %.0f mm taken back; %s pushed that much further from frame %d (his own push: '
             '%.0f mm)' % (name, cut, size, victim, push, away[-1]))
     return out
+
+
+# ------------------------------------------------------------------------------------------------ lead-ins
+UP = 2                          # the prefabs' worlds: Unreal's, z up
+
+
+def _locals_of(W, parents):
+    """Local matrices (..., bones, 4, 4) of worlds."""
+    L = W.copy()
+    for b, p in enumerate(parents):
+        if p >= 0:
+            L[..., b, :, :] = np.linalg.inv(W[..., p, :, :]) @ W[..., b, :, :]
+    return L
+
+
+def _worlds_of(L, parents):
+    W = L.copy()
+    for b, p in enumerate(parents):
+        if p >= 0:
+            W[..., b, :, :] = W[..., p, :, :] @ L[..., b, :, :]
+    return W
+
+
+def _mix(A, B, w):
+    """Matrices (..., 4, 4) of a uniform scale a fraction w (broadcast over the leading axes) of the way from A to B:
+    the rotation the shorter way, the translation and the scale straight."""
+    from .retarget import slerp
+    w = np.asarray(w, np.float64)
+    sa, sb = (np.linalg.norm(M[..., :3, 0], axis=-1) for M in (A, B))
+    out = np.zeros(np.broadcast_shapes(A.shape[:-2], B.shape[:-2], w.shape) + (4, 4))
+    out[..., :3, :3] = slerp(A[..., :3, :3] / sa[..., None, None], B[..., :3, :3] / sb[..., None, None], w) * \
+        ((1 - w) * sa + w * sb)[..., None, None]
+    out[..., :3, 3] = (1 - w[..., None]) * A[..., :3, 3] + w[..., None] * B[..., :3, 3]
+    out[..., 3, 3] = 1.0
+    return out
+
+
+def lead_in(W, D, parents, mover, run, flight):
+    """Worlds (frames, bones, 4, 4) of a clip W whose creature shows only from a cut on (its mover's scale tiny before
+    it), with a way in before the cut (LEAD-INS): D the donor clip's worlds (the same skeleton), mover the bone that
+    carries the creature (the bones above it as at the cut), run (first, last) the donor's run-up frames (the last one
+    in the air, the flight's first), flight the frames from there to the cut."""
+    W, D = np.array(W, np.float64), np.asarray(D, np.float64)
+    size = np.linalg.norm(W[:, mover, :3, 0], axis=1)
+    shown = size > 0.1 * size.max()
+    cut = int(np.argmax(shown))
+    first = cut - flight - (run[1] - run[0])
+    if not (0 < cut < len(W) - 1 and not shown[:cut].any() and first >= 0 and flight >= 1 and
+            0 <= run[0] < run[1] < len(D) - 1):
+        raise ValueError('lead-in: cut at %d of %d frames, run %s, flight %d, donor of %d frames' % (
+            cut, len(W), run, flight, len(D)))
+    at = W[cut, mover, :3, 3]
+    v = W[cut + 1, mover, :3, 3] - at
+    src = D[:, mover, :3, 3]
+    pull = 2.0 * (at[UP] - v[UP] * flight - src[run[1], UP]) / flight ** 2
+    if pull <= 0:
+        raise ValueError('lead-in: the cut is no higher than the run-up leaves the ground')
+    t = np.arange(-flight, 0, dtype=np.float64)
+    path = at + t[:, None] * v
+    path[:, UP] = at[UP] + v[UP] * t - 0.5 * pull * t ** 2
+    flat = np.ones(3)
+    flat[UP] = 0.0
+    a, b = (src[run[1] + 1] - src[run[1]]) * flat, v * flat
+    x, y = [i for i in range(3) if i != UP]
+    turn = np.arctan2(b[y], b[x]) - np.arctan2(a[y], a[x])
+    G = np.eye(4)
+    G[[x, x, y, y], [x, y, x, y]] = np.cos(turn), -np.sin(turn), np.sin(turn), np.cos(turn)
+    G[:3, 3] = (path[0] - G[:3, :3] @ src[run[1]]) * flat
+    under = [b_ for b_ in range(len(parents)) if b_ != mover and _below(parents, b_, mover)]
+    Lc, Ld = _locals_of(W[cut], parents), _locals_of(D, parents)
+    up = np.linalg.inv(W[cut, parents[mover]])
+    L = np.repeat(Lc[None], cut - first, 0)
+    k = run[1] - run[0]
+    L[:k, under] = Ld[run[0]:run[1]][:, under]
+    L[:k, mover] = up @ G @ D[run[0]:run[1], mover]
+    w = np.arange(flight) / flight
+    w = w * w * (3 - 2 * w)                                             # (from leaving the ground into the cut's pose)
+    L[k:, under] = _mix(Ld[run[1]][None, under], Lc[None, under], w[:, None])
+    M = _mix((G @ D[run[1], mover])[None], W[cut, mover][None], w)
+    M[:, :3, 3] = path
+    L[k:, mover] = up @ M
+    W[first:cut] = _worlds_of(L, parents)
+    return W
+
+
+def _below(parents, b, top):
+    while b >= 0:
+        if b == top:
+            return True
+        b = parents[b]
+    return False
 
 
 # ------------------------------------------------------------------------------------------------ hit points

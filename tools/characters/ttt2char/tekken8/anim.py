@@ -220,14 +220,14 @@ class Converter:
         with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
         offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
         convert/snakes8.py) are given (pair_values). shift: (F, 3) mm added to his Top's path (a scene cut taken back:
-        convert/prefabs8.py SCENE CUTS); his scene's pairs keep the clip's own path."""
+        convert/prefabs8.py SCENE CUTS); his scene stands where the shift leaves it, all through the clip."""
         world, root, D, yaw, leg, J = self.pose(anim)
         k = self.leg / leg
         travel = None
         if shift is not None:
             if len(shift) != len(D):
                 raise ValueError('a shift of %d frames for a clip of %d' % (len(shift), len(D)))
-            travel = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)[:, 0]
+            travel = retarget.body_channels(self.cal, world, root, D + shift - shift[-1], yaw, k, self.kind)[:, 0]
             D = D + shift
         values = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)
         count = 0
@@ -492,7 +492,7 @@ def pair_values(conv, WR, Wp, values, k, roots, count, snakes=None, ground=False
     offsets (or None: those pairs hold their bind), snakes (heads (G, m, 3) mm in the parent's frame, the frame
     index the summoned clip starts at) or None; ground: True to pose the ground (where his Top is with a following
     ground), HELD to pose it where the move began all the same (its scene's root points with it); travel: the root
-    channel the scene keeps to when his own was shifted (channels' shift: the clip's own), else None."""
+    channel the scene keeps to when his own was shifted (channels' shift: where the shift leaves it), else None."""
     F = len(values)
     idx = conv.sub.index
     follows = getattr(conv, 'follows', False) and ground != HELD

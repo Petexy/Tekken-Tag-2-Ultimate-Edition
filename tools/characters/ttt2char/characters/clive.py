@@ -132,7 +132,12 @@ _PREFAB_MODELS = [
     {'name': 'kar', 'weapon': 'pf_kar', 'mesh': _EXP % ('pka', 'pka_R'), 'kinds': ('pka', 'pka_r'), 'summon': 9,
      'bones': 6, 'vertices': 3400},
     {'name': 'smf', 'weapon': 'pf_smf', 'mesh': _EXP % ('smf', 'smf'), 'kinds': ('smf',), 'summon': 10,
-     'bones': 26, 'vertices': 2500},
+     'bones': 26, 'vertices': 2500,
+     # (Torgal's way into 1+3 (clip 1) and its left-side version (4): Tekken 8 cuts to him 2 m up in his leap at the
+     # victim, parked under the floor before it. Led in by his pounce of Phoenix Shift's kicks (clip 2): its run-up,
+     # frames 0-29, then from its frame 30, in the air, a 28-frame flight (its own somersaults), whose pull down then
+     # is his fall's after the cut (2.5 mm a frame per frame): prefabs8 LEAD-INS)
+     'lead_ins': {'smf': {c: {'donor': 2, 'mover': 'Hip', 'run': (0, 30), 'flight': 28} for c in (1, 4)}}},
     {'name': 'pko', 'weapon': 'pf_pko', 'mesh': _EXP % ('pko', 'pko'), 'kinds': ('pko',), 'summon': 11,
      'bones': 6, 'vertices': 700,
      # (Shiva's ice veils: decimated to 400 they were straight-edged triangles, their torn hems gone; as grids over
