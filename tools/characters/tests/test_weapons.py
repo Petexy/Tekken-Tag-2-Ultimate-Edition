@@ -313,7 +313,8 @@ class Weapons(unittest.TestCase):
                                          strings=bytearray(b'[X]\0'),
                                          defn=types.SimpleNamespace(MOVESET={'name': '[X]'}), string=lambda s: 0,
                                          T={t: [] for t in TABLE_ORDER}, donor_pack=motion_pack(hands([b'\x30\0'])),
-                                         new_anims=[], hand_anims=[], part3=None, hands_reference=reference)
+                                         new_anims=[], hand_anims=[], part3=None, hands_reference=reference,
+                                         stats=collections.Counter())
             return motbin.read(moveset.Converter.write(conv)[0])
         out = written((motbin.read(row), None))
         self.assertEqual(motbin.slot_bytes(out, motbin.HAND_SHAPES), motbin.slot_bytes(motbin.read(row), 2))
