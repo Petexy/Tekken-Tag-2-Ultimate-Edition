@@ -799,6 +799,24 @@ def anim_index(sources):
     return idx
 
 
+def count_groups(T):
+    """Each group row (0x800B) given its group's length in start_frame; -> the rows changed. TTT2 goes through that
+    many rows of the group, never looking for its 0x800C end (every cancel reader, 0x039943C4 and on: `lwz 24(row)`
+    the count), and each of its own 40532 group rows holds its group's length. The source's was copied, so a group
+    left shorter (rows dropped or merged) read on into the next groups: a Tekken 8 fighter's walks and runs took
+    118 of other lists' rows (a jump attack from any frame)."""
+    groups, changed = T['group_cancels'], 0
+    for row in T['cancels']:
+        if row['direction'] == M.GROUP:
+            n = 0
+            while groups[row['move_id'] + n]['direction'] != M.GROUP_END:
+                n += 1
+            if row['start_frame'] != n:
+                row['start_frame'] = n
+                changed += 1
+    return changed
+
+
 class Converter:
     # (a Tekken 7 source unless __init__ finds another game)
     game, end, prefix = 't7', T7_END, None
@@ -3376,6 +3394,7 @@ class Converter:
     # --- output -----------------------------------------------------------------------------------------
     def write(self):
         """-> (motbin bytes, motion pack bytes)"""
+        self.stats['group rows given their converted group\'s length'] += count_groups(self.T)
         hdr, strings, blob, slots = motbin.split(self.d)
         if self.hands_reference is not None:             # the HANDS row's hand shapes
             blob, slots = motbin.with_slot(blob, slots, motbin.HAND_SHAPES,

@@ -62,7 +62,7 @@ FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
 SOURCE = 'source'               # a pack's copy of what shared/ takes from its game
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
-REVISION = 7                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
+REVISION = 8                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
                                 # 2: tag combos; Reina's throws, bounds and icon; 3: face animations and eyelids;
                                 # 5: main sync; 6: the definitions' bounds alone, Tekken 7's after the Bound Mod:
                                 # screws, tornados and slams no longer bound; 7: hit reactions that keep what they
@@ -70,7 +70,8 @@ REVISION = 7                    # what packs made before lack, for every fighter
                                 # launches and stun falls; Tekken 7's hit points past the limbs and in the trunk,
                                 # Negan's 0x72; Tekken 7's contact tests and moveset variables, Starburst and the
                                 # cane, the opponent's move by its own id; the Tag Assault's incoming partner
-                                # attacks with its own d/f+1, a string's continued bound move can Tag Assault)
+                                # attacks with its own d/f+1, a string's continued bound move can Tag Assault;
+                                # 8: a group cancel row counts its own group's rows, not the source's)
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24), then (ROW_CELLS) a new top row
