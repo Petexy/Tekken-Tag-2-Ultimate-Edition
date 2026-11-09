@@ -621,10 +621,10 @@ class GroundPairTest(unittest.TestCase):
         self.values = TR.smooth_values(self.F)
         self.values[:, 0] = np.linspace(0.0, -4400.0, self.F)[:, None] * np.array([0.1, 0.0, 1.0])  # Top: 4.4 m back
 
-    def world(self, follow, ground):
+    def world(self, follow, ground, travel=None):
         conv = types.SimpleNamespace(sub=types.SimpleNamespace(index={}), pairs=[dict(kind='ground', follow=follow)],
                                      scale=0.98, kind=animation.COMPRESSED, follows=follow)
-        out = T8.pair_values(conv, None, None, self.values, 1.0, None, 1, None, ground)
+        out = T8.pair_values(conv, None, None, self.values, 1.0, None, 1, None, ground, travel)
         H = animation.local_rotation(self.values[:, RT.HARA_CH], animation.COMPRESSED)
         return 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, out[:, 0])     # HARA_ROT1 x the pair
 
@@ -638,6 +638,13 @@ class GroundPairTest(unittest.TestCase):
         np.testing.assert_allclose(self.world(False, True), want, atol=1e-6)
         self.assertGreater(np.linalg.norm(want[-1]), 4000)
 
+    def test_a_shifted_clip_s_held_scene_goes_with_the_shift(self):
+        travel = self.values[:, 0].copy()
+        self.values[2:, 0] += (220.0, 0.0, 0.0)                 # (a scene cut at frame 2 taken back: prefabs8.py)
+        turn = animation.local_rotation(self.values[:, RT.TURN], animation.COMPRESSED)
+        want = -0.98 * np.einsum('fij,fj->fi', turn, travel)    # (from his shifted Top: where it began, shifted)
+        np.testing.assert_allclose(self.world(True, T8.HELD, travel), want, atol=1e-6)
+
     def test_animations_pass_held_for_its_clips(self):
         seen = {}
 
@@ -648,6 +655,20 @@ class GroundPairTest(unittest.TestCase):
         cache = T8.Animations(banks, types.SimpleNamespace(animation=animation_), ground={1, 2}, held={2})
         cache(1), cache(2), cache(3)
         self.assertEqual(seen, {1: True, 2: T8.HELD, 3: None})
+
+    def test_animations_pass_shifts_for_their_clips_over_tekken_tag_2_s_own(self):
+        seen = {}
+
+        def animation_(blob, **extra):
+            seen[blob] = extra.get('shift')
+            return b''
+        banks = types.SimpleNamespace(blob=lambda kind, key: key, where=lambda kind, key: 'own')
+        shift = np.ones((3, 3))
+        cache = T8.Animations(banks, types.SimpleNamespace(animation=animation_), originals={1: 9, 2: 9},
+                              shifts={1: shift})
+        self.assertEqual(cache(2), 9)                          # (an original of TTT2's own: as before)
+        cache(1)
+        self.assertIs(seen[1], shift)
 
 
 class AppendTest(unittest.TestCase):

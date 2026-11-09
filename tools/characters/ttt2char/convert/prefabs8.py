@@ -39,6 +39,14 @@ asks for it; a fighter without one is not touched.
   away (Clive's 1+3 cuts him 4.4 m back while Torgal bites the victim 1.6 m ahead of the origin; followed, the dog
   played 4.4 m short of the victim). The definition's PREFABS 'held_moves' names them: their clips pose the ground
   as held (tekken8/anim.py pair_values: his travel taken back), the runtime's ground left as it is.
+* SCENE CUTS. Tekken 8 cuts its throw scenes with the camera, and a clip may jump there: Clive's 1+3 moves him 2.26 m
+  back in one frame (66) as the camera cuts to Torgal. TTT2 has no cut: he teleported. The definition's PREFABS
+  'scene_cuts' names such moves with the cut's frame, the victim's move and the frame his push away from the
+  attacker starts (scene_cuts()): the attacker's clip has the jump taken back from the cut on (his Top's path,
+  tekken8/anim.py channels' shift), the victim's clip the same, grown with his push (he is thrown that much further,
+  so the gap after the cut is Tekken 8's), and the held scene goes with them from the cut on (pair_values poses it
+  from the clip's own path). Torgal shows from the cut on (his clip's scale, 0.001 before it), so nothing of the
+  scene's step is seen.
 * BONES. Each prefab keeps the definition's count of bones: reduced() merges the weighted bone whose vertices move
   least if it goes into its nearest kept ancestor, over its clips, until the count is reached.
 * SPACE. Prefab space (UE: x left, y forward, z up, cm) -> TTT2's (x, y up, z forward, mm): P swaps y and z; a bone
@@ -1262,6 +1270,49 @@ def dissolve_frames(frames, share):
 def _fade(n, frames):
     from .summons8 import fade_value
     return fade_value(n, frames)
+
+
+# ------------------------------------------------------------------------------------------------ scene cuts
+CUT_LEAST = 1000.0              # mm: a scene cut's one-frame jump of the attacker's Top is at least this long
+
+
+def scene_cuts(k, d, path, log=print):
+    """{body clip key: (frames, 3) mm added to its Top's path} for the definition's PREFABS 'scene_cuts' (SCENE CUTS:
+    {attacker move: (cut frame, victim move, the frame his push starts)}): the attacker's clip the jump at the cut
+    (beyond the steps either side of it) taken back from that frame on, the victim's the same jump, grown with his
+    travel along it from the push's first frame to the cut. k: Tekken 8 moveset; path: body clip key -> its Top's path (frames, 3) mm in its scene, y up
+    (anim.Converter.pose's)."""
+    cuts = (spec(d) or {}).get('scene_cuts', {})
+    if not cuts:
+        return {}
+    index = {k.move_name(i) or '#%d' % i: i for i in range(len(_table(k, 'moves')))}
+    out = {}
+    for name, (cut, victim, push) in sorted(cuts.items()):
+        missing = [n for n in (name, victim) if n not in index]
+        if missing:
+            raise ValueError('scene_cuts: no move %s' % ', '.join(missing))
+        keys = [k.anim_ref(index[n])[0] for n in (name, victim)]
+        A, V = (np.asarray(path(key), np.float64) for key in keys)
+        if not (2 <= cut < len(A) - 1 and 0 <= push < cut < len(V)):
+            raise ValueError('scene_cuts: %s: cut at %d, push from %d, of %d and %d frames' % (
+                name, cut, push, len(A), len(V)))
+        jump = A[cut - 1] + (A[cut - 1] - A[cut - 2] + A[cut + 1] - A[cut]) / 2.0 - A[cut]
+        jump[1] = 0.0
+        size = float(np.linalg.norm(jump))
+        if size < CUT_LEAST:
+            raise ValueError('scene_cuts: %s moves %.0f mm at frame %d, no cut' % (name, size, cut))
+        away = (V[push:cut + 1] - V[push]) @ (jump / size)
+        if away[-1] <= 0:
+            raise ValueError('scene_cuts: %s does not move away from frame %d to %d' % (victim, push, cut))
+        grow = np.zeros(len(V))
+        grow[push:cut + 1] = np.clip(np.maximum.accumulate(away) / away[-1], 0.0, 1.0)
+        grow[cut + 1:] = 1.0
+        shift = np.zeros_like(A)
+        shift[cut:] = jump
+        out[keys[0]], out[keys[1]] = shift, grow[:, None] * jump
+        log('scene cut: %s at frame %d, %.0f mm taken back; %s pushed that much further from frame %d (his own push: '
+            '%.0f mm)' % (name, cut, size, victim, push, away[-1]))
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ hit points
