@@ -387,5 +387,66 @@ class SceneCutsTest(unittest.TestCase):
         assert prefabs8.scene_cuts(self.k, types.SimpleNamespace(), None) == {}
 
 
+class LeadInTest(unittest.TestCase):
+    """prefabs8.lead_in: a creature parked until a cut (its scale tiny), then flying along +y 2 m up, led in by a donor
+    that runs along +x and leaves the ground at its frame 10; made-up worlds of Root, Top, Hip (the mover), Paw."""
+    PARENTS = [-1, 0, 1, 2]
+    CUT, RUN, FLIGHT = 24, (2, 10), 10
+
+    @staticmethod
+    def worlds(sizes, hips, turns):
+        W = np.repeat(np.eye(4)[None, None], len(hips), 0).repeat(4, 1)
+        for f, (size, hip, turn) in enumerate(zip(sizes, hips, turns)):
+            c, s_ = np.cos(turn), np.sin(turn)
+            R = np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])
+            W[f, 1, :3, :3] = size * np.eye(3)
+            W[f, 2, :3, :3], W[f, 2, :3, 3] = size * R, hip
+            W[f, 3, :3, :3], W[f, 3, :3, 3] = size * R, hip + size * R @ (0.0, 0.0, -30.0)   # (the paw 30 under)
+        return W
+
+    def setUp(self):
+        F = 40
+        t = np.arange(F) - self.CUT
+        hips = np.stack([np.zeros(F), 10.0 * t, 200.0 - 0.1 * t ** 2], 1)
+        self.W = self.worlds(np.where(t < 0, 0.001, 1.0), np.where(t[:, None] < 0, (0.0, 0.0, -300.0), hips),
+                             np.full(F, np.pi / 2))
+        g = np.arange(20)
+        donor = np.stack([20.0 * np.minimum(g, 10) + 15.0 * np.maximum(g - 10, 0), np.zeros(20),
+                          np.where(g < 10, 50.0, 60.0 + 5.0 * (g - 10))], 1)
+        self.D = self.worlds(np.ones(20), donor, np.zeros(20))
+
+    def lead(self, **kw):
+        a = dict(run=self.RUN, flight=self.FLIGHT)
+        a.update(kw)
+        return prefabs8.lead_in(self.W, self.D, self.PARENTS, 2, a['run'], a['flight'])
+
+    def test_the_creature_runs_in_and_flies_into_the_cut(self):
+        out = self.lead()
+        first = self.CUT - self.FLIGHT - (self.RUN[1] - self.RUN[0])
+        np.testing.assert_allclose(out[:first], self.W[:first])
+        np.testing.assert_allclose(out[self.CUT:], self.W[self.CUT:])
+        hip = out[:, 2, :3, 3]
+        np.testing.assert_allclose(np.linalg.norm(out[first:, 2, :3, 0], axis=1), 1.0)   # (shown all through)
+        steps = np.linalg.norm(np.diff(hip[first:self.CUT + 2], axis=0), axis=1)
+        assert steps.max() < 30.0                                       # (no jump: the donor's run, the arc's launch)
+        np.testing.assert_allclose(hip[self.CUT, :2] - hip[self.CUT - 1, :2], (0.0, 10.0), atol=1e-6)   # (the cut's)
+        took = first + self.RUN[1] - self.RUN[0]                         # (the flight's first frame: leaving the ground)
+        self.assertAlmostEqual(hip[took, 2], 60.0)
+        way = hip[took] - hip[took - 1]
+        assert abs(way[0]) < 1e-6 and way[1] > 0                        # (the run-up turned along the cut's way)
+        assert (np.diff(hip[took:self.CUT + 1, 2]) > 0).all()            # (rising to the cut)
+        paw = np.linalg.norm(out[first:, 3, :3, 3] - hip[first:], axis=1)
+        np.testing.assert_allclose(paw, 30.0)
+
+    def test_a_lead_in_that_does_not_fit_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.lead(flight=self.CUT)                                   # (starts before the clip)
+        with self.assertRaises(ValueError):
+            self.lead(run=(0, 19))                                       # (no donor frame after its takeoff)
+        self.W[self.CUT:, 2, 2, 3] -= 180.0                              # (the cut lower than the takeoff)
+        with self.assertRaises(ValueError):
+            self.lead()
+
+
 if __name__ == '__main__':
     unittest.main()
