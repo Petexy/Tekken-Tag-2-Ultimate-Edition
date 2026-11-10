@@ -191,6 +191,9 @@ VOICE = 'lon'
 # ------------------------------------------------------------------------------------------------ moveset
 MOVESET = {
     'name': '[VICTOR]',         # the moveset's name (in its header)
+    # his throws' victims (and those of some knockdowns) stay where Tekken 8 leaves them as they go down, facing as
+    # they lie (convert/moveset.py handoffs8): the hand-off's turn sweep spun them 45 to 755 degrees on the ground
+    'keep_body_handoffs': True,
     # his round-start move (the donor's is kept: its mode checks are Tekken 8's)
     # and his Rage Art (no cancel leads to it here: Tekken 8's entry rows test rage, 159)
     'drop_moves': r'^Lon_Direct$|^#20(6[0-6])$',
