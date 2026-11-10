@@ -285,9 +285,10 @@ class Animations(unittest.TestCase):
         self.assertEqual(a['values'].shape, (6, 3, 3))
         self.assertTrue(np.allclose(a['values'][:, 1, 1], 4) and np.allclose(a['values'][:, 0, 0], 0))
 
-    def handoff_converter(self, rows):
+    def handoff_converter(self, rows, keep_body=False):
         """A converter with one converted clip (new_anims[0], 0x4001: HARA_ROT1 upright, ending turned) and the donor
-        pack's one animation (0x4000): a down move's start, HARA_ROT1 lying, the same world pose."""
+        pack's one animation (0x4000): a down move's start, HARA_ROT1 lying, the same world pose. keep_body: the
+        definition's MOVESET 'keep_body_handoffs'."""
         from test_retarget import lying_next, smooth_values
         from ttt2char.convert import retarget
         v = smooth_values(40)
@@ -298,8 +299,11 @@ class Animations(unittest.TestCase):
         empty = b'MOTA\0\1\0\0' + struct.pack('>III', 0x14, 0, 0)
         down = retarget.encode(np.repeat(nxt[None], 2, 0))
         c = converter(Source8())
+        if keep_body:
+            c.defn.MOVESET = dict(c.defn.MOVESET, keep_body_handoffs=True)
         c.donor_pack = motion.build_pack([motion.extend_mota(empty, [down])] + [b''] * 5)
         c.pack0_count, c.new_anims, c.converted8, c.aliases = 1, [retarget.encode(v)], {0}, []
+        self.clip_in = animation.decode(c.new_anims[0])['values']
         c.T['moves'] = [dict(anim=a, transition=t) for a, t in rows]
         c.handoffs8()
         return c, animation.decode(down)['values'][0]
@@ -314,6 +318,18 @@ class Animations(unittest.TestCase):
         self.assertLess(retarget.handoff_mismatch(out, animation.COMPRESSED, down, animation.COMPRESSED), 0.1)
         self.assertLess(retarget.angle(animation.local_rotation(out[-1, 2]), animation.local_rotation(down[2])), 0.1)
         self.assertEqual(c.stats['hand-offs: converted clips re-split for the next move\'s HARA_ROT1'], 1)
+
+    def test_handoff_keep_body(self):
+        """MOVESET 'keep_body_handoffs': every converted clip keeps his body in the hand-off (no sweep of the turn) and
+        HARA_ROT1's world (T^T H) is the down move's."""
+        from ttt2char.convert import retarget
+        c, down = self.handoff_converter([(0x4001, 1), (0x4000, 1)], keep_body=True)
+        out = animation.decode(c.new_anims[0])['values']
+        rot = lambda x: animation.local_rotation(np.asarray(x, np.float64)[None])[0]
+        self.assertLess(float(retarget.angle(rot(out[-1, 2]).T @ rot(out[-1, 3]), rot(down[2]).T @ rot(down[3]))), 0.5)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        self.assertLess(abs(yaw(out)[-1] - yaw(self.clip_in)[-1]), 0.01)
+        self.assertEqual(c.stats['hand-offs: kept the body, the facing to match'], 1)
 
     def test_handoff_copy(self):
         """A clip played by a move handing off to a down move and by one handing off upright: a copy for the first."""
