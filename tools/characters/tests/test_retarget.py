@@ -389,7 +389,9 @@ class HandoffTest(Fixture):
                     ramp = yaw * s[f] * s[f] * (3 - 2 * s[f])
                     self.assertLess(RT.angle(K1[f], K0[f] @ rot_about(b, ramp)), 1e-6)
                 self.assertLess(RT.angle(K1[flat], Ry @ K0[flat]), 1e-6)
-                self.assertLess(RT.angle(K1[flat + RT.FLAT_BLEND:], Ry @ K0[flat + RT.FLAT_BLEND:]).max(), 1e-6)
+                # (to sqrt(eps): the relative rotation's arccos at a half turn, the channels' Euler at its gimbal pole
+                # and axis-angle at a half turn; 8.5e-7 degrees here, 1.2e-6 on Windows)
+                self.assertLess(RT.angle(K1[flat + RT.FLAT_BLEND:], Ry @ K0[flat + RT.FLAT_BLEND:]).max(), 1e-4)
                 np.testing.assert_allclose(t[:, 2], old[:, 2])
         t = RT.twist(r, kind, first, last, np.pi, flat)
         old = RT.twist(r, kind, first, last, np.pi)
