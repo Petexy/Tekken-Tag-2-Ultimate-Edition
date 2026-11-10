@@ -25,8 +25,9 @@ MOVESET_SOURCE = 'tekken8'
 STAND_IN = ('hei', 13)        # Heihachi Mishima
 # what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: her bounds; 2: Tekken 8's
 # limb hit points, on-hit follow-ups (1,1 into Libertador), air reactions (d+2,3), slams after the bound, wall
-# pushbacks, the run's contact stop, her u/f+1+2's catch
-REVISION = 2
+# pushbacks, the run's contact stop, her u/f+1+2's catch; 3: her select cell's and fight faces' colours as her whole
+# body's
+REVISION = 3
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_cat_<name> (tekken8/costume.py: its meshes, their merge order and the
