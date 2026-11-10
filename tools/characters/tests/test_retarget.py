@@ -349,6 +349,35 @@ class HandoffTest(Fixture):
         self.assertTrue(np.array_equal(out[0], v[0]))
         self.assertLess(RT.handoff_mismatch(out, animation.COMPRESSED, nxt, animation.COMPRESSED), 1e-4)
 
+    def test_keep_body(self):
+        """keep_body: the drawn body (H and its children: the game draws them from the facing the turn books) as the
+        clip leaves it, every frame, and the turn at the end the facing in which it lies as the next's frame 0 lies in
+        its own; without it the turn sweeps to the next's (the fixture's 5.5 rad: the body spun that far). The clip
+        keeps its turn; one whose turn alone was moved (the body drawn as before) gets the clip's back."""
+        v = self.clip()
+        nxt = lying_next(self.sk, v)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        swept = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED)
+        self.assertGreater(abs(yaw(swept)[-1] - yaw(v)[-1]), 5.0)
+        moved = v.copy()
+        moved[20:, 2, 2] -= 0.6                         # (the compressed turn: (-pi / 2, 0, -yaw))
+        for clip in (v, moved):
+            out = RT.handoff(clip, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_body=True)
+            W0, P0 = RT.pose(self.sk, clip, root_motion=False)
+            W1, P1 = RT.pose(self.sk, out, root_motion=False)
+            self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)    # (HARA_ROT1's own frame aside)
+            self.assertLess(np.abs(P1 - P0).max(), 1e-4)                        # (mm)
+            self.assertAlmostEqual(float(yaw(out)[-1]), float(yaw(v)[-1]), delta=1e-4)
+            G1, Gn = game_world(self.sk, out)[0][-1], game_world(self.sk, nxt[None])[0][0]
+            self.assertLess(RT.angle(G1[1:22], Gn[1:22]).max(), 1e-3)           # lying as the next, in his facing
+        prone = nxt.copy()                              # the next lying face down: no turn lays him so
+        prone[3] = animation.axis_angle_from_matrix(rot_about((1, 0, 0), -np.pi / 2))
+        out = RT.handoff(moved, animation.COMPRESSED, prone, animation.COMPRESSED, keep_body=True)
+        self.assertAlmostEqual(float(yaw(out)[-1]), float(yaw(moved)[-1]), delta=1e-6)
+        W0, P0 = RT.pose(self.sk, moved, root_motion=False)
+        W1, P1 = RT.pose(self.sk, out, root_motion=False)
+        self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)
+
     def test_upright_next_needs_nothing(self):
         v = self.clip()
         nxt = v[0].copy()                                 # a converted stance: HARA_ROT1 upright too
