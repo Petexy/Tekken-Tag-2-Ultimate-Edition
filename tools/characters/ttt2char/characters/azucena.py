@@ -28,7 +28,7 @@ STAND_IN = ('hei', 13)        # Heihachi Mishima
 # pushbacks, the run's contact stop, her u/f+1+2's catch; 3: with Miary Zo's work: her model's elbow and knee rings,
 # her eyelids' turn, hit points from her ground origin, hit box summaries;
 # her moves' sound effects from Tekken 8, Tekken 8's hand clips, guard and hit stun; her throws' victims no longer
-# spin on the ground as they go down
+# spin on the ground as they go down; her select cell's and fight faces' colours as her whole body's
 REVISION = 3
 
 # ------------------------------------------------------------------------------------------------ model

@@ -28,10 +28,11 @@ The fighter's own pictures come from its game through a picture source: anything
 uint8 and `game` ('tekken7', 'tekken8'; source.py's sources), or Tekken 7's paks as such (Tekken7Pictures). Its
 definition's ART names them: a bust (head and shoulders), its whole body, its name and its costume, with where the
 face is in the first two. Some kinds have a glow around the fighter that TTT2's pictures do not have, taken off
-(GLOWS): Tekken 7's whole-body pictures a pale one, Tekken 8's busts a pink rim light. Tekken 8's busts also show
-more of the fighter below the face than TTT2's pictures do: the pictures cut from them show the face bigger
-(BUST_FRAME). Tekken 7's costume picture is a render on a grey panel, Tekken 8's one on a transparent background
-(cut_out takes either).
+(GLOWS): Tekken 7's whole-body pictures a pale one, Tekken 8's busts a pink rim light. Tekken 8's busts are also
+cooler and pinker than its whole-body pictures, whose colours the big portraits show: theirs are warmed (GRADES).
+They also show more of the fighter below the face than TTT2's pictures do: the pictures cut from them show the face
+bigger (BUST_FRAME). Tekken 7's costume picture is a render on a grey panel, Tekken 8's one on a transparent
+background (cut_out takes either).
 
 Nothing of either game is in this file: it reads the player's files.
 """
@@ -46,6 +47,7 @@ from ..tekken7.uasset import load
 from ..pack import place
 from ..ttt2 import lmb, nut
 from ..ttt2.archive import key_of
+from .model import linear_to_srgb, srgb_to_linear
 
 PAUL = 'pau'                      # UI position 0: the runtime shows the added fighter in Paul's place
 LAYOUTS = 'data007'               # the 2D layouts (LMB), each followed by its texture container (NTP3)
@@ -189,6 +191,7 @@ class Sources:
     def __init__(self, source, d):
         source = picture_source(source)
         glows = GLOWS.get(getattr(source, 'game', None), {})
+        grades = GRADES.get(getattr(source, 'game', None), {})
         zoom, drop = BUST_FRAME.get(getattr(source, 'game', None), (1.0, 0.0))
         self.pictures, self.faces = {}, {}
         for kind in ('bust', 'body'):
@@ -196,9 +199,15 @@ class Sources:
             img = _float(source.picture(path))
             if kind in glows:
                 img = glows[kind](img)
+            if kind in grades:
+                img = grades[kind](img)
             if kind == 'bust' and (zoom, drop) != (1.0, 0.0):
                 face = (face[0], face[1] - drop * face[2], face[2] / zoom)
             self.pictures[kind], self.faces[kind] = img, face
+        if 'bust' in grades:                # (the bust's face as it is: its eyes-to-chin as BUST_FRAME takes it)
+            ex, ey, ec = d.ART['bust'][1]
+            self.pictures['bust'] = skin_matched(self.pictures['bust'], (ex, ey, ec / zoom), self.pictures['body'],
+                                                 self.faces['body'])
         self.name = _float(source.picture(d.ART['name']))
 
     def framed(self, place, w, h, mirror=False):
@@ -295,8 +304,116 @@ def deglow_rim(img):
     return out
 
 
-# The glows taken off each game's pictures, by kind
+# Tekken 8's busts are graded cooler and pinker than its whole-body pictures (the arena's, whose colours the big
+# portraits show): their greys have a blue cast (Victor's hair b* -6, his whole body's about 0) and their warm
+# colours lean to magenta (the skin's hue about 20 degrees against the whole body's 47, b* 10 to 17 lower;
+# Azucena's top and feathers pink and red, not red and orange; Miary Zo's hair red, not brown; all five fighters,
+# 2026-11-10; Tekken 7's two pictures agree). Their colours taken back, in CIELAB (warmed): blue's share of the light
+# (linear) times BUST_BLUE (the cast greys come out grey); warm hues turned towards yellow (BUST_TURN: by that many
+# degrees at that hue, less and less to none that far from it; greys and other hues stay) where they are no
+# stronger than skin (BUST_STRONG: all up to that chroma, less and less to none at the next: Azucena's top turns
+# red, not orange); the colour (chroma) times BUST_CHROMA. Then each fighter's skin is taken the rest of the way to
+# its whole body's (skin_matched): the warm hues turned and their chroma scaled until the skin's mean hue and chroma
+# are the whole body's, within SKIN_TURN degrees and SKIN_CHROMA times, for colours about as strong as the skin only
+# (SKIN_STRONG: all up to that many times its mean chroma, less and less to none at the next). Reina's and Azucena's
+# skin is lit paler than in their whole bodies, Clive's richer; Victor's has too little colour to measure a hue by
+# and stays about as warmed leaves it.
+BUST_BLUE = 0.85
+BUST_TURN = (20.0, 20.0, 70.0)            # (degrees turned, at hue, none from this far)
+BUST_STRONG = (25.0, 45.0)
+BUST_CHROMA = 1.2
+SKIN_TURN, SKIN_CHROMA = 15.0, (0.8, 1.4)
+SKIN_STRONG = (1.5, 2.5)
+SKIN_BOX = (-0.55, -0.1, 0.55, 0.85)      # the skin measured: from the eyes, in eyes-to-chin lengths (x0, y0, x1, y1)
+SKIN_PIXELS = 500                         # fewer opaque pixels there in either picture: no match
+_XYZ = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]], np.float32)
+_WHITE = _XYZ.sum(1)              # D65
+_EDGE = 6.0 / 29.0
+
+
+def _lab(linear):
+    """Linear RGB (..., 3) as CIELAB."""
+    t = (linear @ _XYZ.T) / _WHITE
+    f = np.where(t > _EDGE ** 3, np.cbrt(t), t / (3 * _EDGE ** 2) + 4.0 / 29.0)
+    return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
+
+
+def _linear(lab):
+    """CIELAB (..., 3) as linear RGB."""
+    fy = (lab[..., 0] + 16) / 116
+    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+    t = np.where(f > _EDGE, f ** 3, 3 * _EDGE ** 2 * (f - 4.0 / 29.0))
+    return (t * _WHITE) @ np.linalg.inv(_XYZ).T
+
+
+def _turned(lab, at, turn, gain, reach, strong=None):
+    """CIELAB colours with the hues near `at` (degrees) turned by `turn` and their chroma times `gain`, less and
+    less to none `reach` degrees from it; strong (c0, c1): only colours of chroma up to c0, less and less to none at
+    c1."""
+    hue = np.degrees(np.arctan2(lab[..., 2], lab[..., 1]))
+    chroma = np.hypot(lab[..., 1], lab[..., 2])
+    off = (hue - at + 180.0) % 360.0 - 180.0
+    near = np.where(np.abs(off) < reach, 0.5 + 0.5 * np.cos(np.pi * off / reach), 0.0)
+    if strong is not None:
+        near = near * np.clip((strong[1] - chroma) / (strong[1] - strong[0]), 0.0, 1.0)
+    hue = np.radians(hue + turn * near)
+    chroma = chroma * (1.0 + (gain - 1.0) * near)
+    out = lab.copy()
+    out[..., 1], out[..., 2] = chroma * np.cos(hue), chroma * np.sin(hue)
+    return out
+
+
+def warmed(img):
+    """A Tekken 8 bust in the colours of Tekken 8's whole-body pictures (see BUST_BLUE)."""
+    lab = _lab(srgb_to_linear(img[..., :3]) * np.array([1.0, 1.0, BUST_BLUE], np.float32))
+    turn, at, reach = BUST_TURN
+    lab = _turned(lab, at, turn, 1.0, reach, BUST_STRONG)
+    lab[..., 1:] *= BUST_CHROMA
+    out = img.copy()
+    out[..., :3] = linear_to_srgb(_linear(lab))
+    return out
+
+
+def _skin(img, face):
+    """CIELAB colours (n, 3) of img's opaque pixels in SKIN_BOX of the face at `face` (eyes' x, y, eyes-to-chin)."""
+    ex, ey, ec = face
+    x0, y0, x1, y1 = SKIN_BOX
+    h, w = img.shape[:2]
+    a = img[max(0, int(ey + y0 * ec)):min(h, int(ey + y1 * ec)), max(0, int(ex + x0 * ec)):min(w, int(ex + x1 * ec))]
+    return _lab(srgb_to_linear(a[a[..., 3] > 0.98][:, :3]))
+
+
+def _hue_chroma(lab):
+    """The mean hue (degrees) and chroma of CIELAB colours (n, 3)."""
+    a, b = lab[:, 1:].mean(0)
+    return float(np.degrees(np.arctan2(b, a))), float(np.hypot(lab[:, 1], lab[:, 2]).mean())
+
+
+def skin_matched(bust, bust_face, body, body_face):
+    """The bust with its skin's warm hues and chroma taken to the whole body's (see SKIN_TURN); faces: (eyes' x, y,
+    eyes-to-chin) in each."""
+    mine, theirs = _skin(bust, bust_face), _skin(body, body_face)
+    if len(mine) < SKIN_PIXELS or len(theirs) < SKIN_PIXELS:
+        return bust
+    reach = BUST_TURN[2]
+    at, own = _hue_chroma(mine)
+    strong = (own * SKIN_STRONG[0], own * SKIN_STRONG[1])
+    hue, chroma = _hue_chroma(theirs)
+    turn, gain = 0.0, 1.0
+    for _ in range(6):                    # (the skin's hues spread round its mean: not all turn and scale fully)
+        now = _hue_chroma(_turned(mine, at, turn, gain, reach, strong))
+        turn = float(np.clip(turn + (hue - now[0] + 180.0) % 360.0 - 180.0, -SKIN_TURN, SKIN_TURN))
+        gain = float(np.clip(gain * chroma / max(now[1], 1e-3), *SKIN_CHROMA))
+    out = bust.copy()
+    out[..., :3] = linear_to_srgb(_linear(_turned(_lab(srgb_to_linear(bust[..., :3])), at, turn, gain, reach,
+                                                  strong)))
+    return out
+
+
+# The glows taken off each game's pictures, by kind, and the grades they are given after (a graded bust is then
+# skin_matched to the whole body)
 GLOWS = {'tekken7': {'body': deglow}, 'tekken8': {'bust': deglow_rim}}
+GRADES = {'tekken8': {'bust': warmed}}
 # How the pictures cut from each game's bust (its select screen cells, the faces in fights) frame the face against
 # FACE_*'s measures: (how much bigger, how much lower in eyes-to-chin lengths of the bust). Tekken 8's busts show a
 # front-facing head with much of the jacket below, and the definitions' eyes-to-chin (ART) ends on the neck, about
