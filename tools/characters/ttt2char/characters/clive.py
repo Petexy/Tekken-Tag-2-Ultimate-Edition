@@ -234,6 +234,10 @@ PREFABS = {
     # teleported); taken back, and the victim thrown that much further from frame 40, where his push starts, so the
     # bite and the slash meet as in Tekken 8. #1924 is #1923's victim
     'scene_cuts': {'Okm_FLnage_n': (66, 'Okm_FLnage_y', 40), '#1923': (66, '#1924', 40)},
+    # .. and their victim's landing (prefabs8 TWISTS): Tekken 8 leaves him on his back, head toward Clive, where
+    # TTT2's get-up sat him up turned away and spun him round; a half twist in his flight (hips above 1 m from 162 to
+    # 190) lands him feet toward Clive, as TTT2's throws do, and he rises straight
+    'twists': {'Okm_FLnage_y': (168, 190, 180.0), '#1924': (168, 190, 180.0)},
 }
 WEAPONS = [
     {'mesh': _EX0, 'bone': 'ATH_swordR_1st', 'parent': 'TE_R_jnt', 'pair': 0, 'summon': 0,

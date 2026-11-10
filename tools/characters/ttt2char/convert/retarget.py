@@ -344,14 +344,48 @@ def handoff_mismatch(values, kind, nxt, next_kind):
     return float(angle(H, Hn))
 
 
-def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW):
+def end_turn(phi, phi_n):
+    """The yaw (radians) a twisted clip's turn ends on for its hand-off (handoff keep_turn), from phi (its own at the
+    last frame, unwrapped): the next animation's phi_n plus the whole or half turns that bring it nearest. The game
+    takes the turn's every change within a move into the fighter's facing and poses the body from that (checked in
+    game: Tekken 8's 180 degree MUKI steps, twist(), the hand-offs' sweeps), so a turn that sweeps in the hand-off
+    spins the body on the ground that far, and the next move is posed from the facing it leaves; a twisted landing
+    (prefabs8 TWISTS) keeps the facing its twist gave him."""
+    return phi_n + np.pi * np.round((phi - phi_n) / np.pi)
+
+
+def twist(values, kind, first, last, yaw):
+    """Body channel values (F, nch, 3) of type `kind` with the turn `yaw` (radians) further on from frame `first`
+    to `last` (smoothstep; on after it) and HARA_ROT1 turned back by as much about the vertical (T^T H as before):
+    the same pose in the turn's frame, the fighter's facing (which the turn drives: end_turn) and with it his body
+    turned about his hips. float64; the turn's own steps keep their winding."""
+    v = np.array(values, np.float64)
+    F = len(v)
+    if not 0 < first < last < F:
+        raise ValueError('a twist over frames %d to %d of a clip of %d' % (first, last, F))
+    s = np.clip((np.arange(F) - first) / float(last - first), 0.0, 1.0)
+    ramp = yaw * s * s * (3.0 - 2.0 * s)
+    tail = slice(first, F)
+    Ry = _rotations(_turn_values(ramp[tail], animation.RAW), animation.RAW)
+    H = Ry @ _rotations(v[tail, HARA_CH], kind)                  # T' = T Ry: T'^T H' = Ry^T T^T Ry H = T^T H
+    if kind == animation.COMPRESSED:
+        v[tail, TURN, 2] -= ramp[tail]                          # (the turn's axis-angle: (-pi / 2, 0, -yaw))
+        v[tail, HARA_CH] = animation.axis_angles(H[:, None], v[first - 1, [HARA_CH]])[:, 0]
+    else:
+        v[tail, TURN, 1] += ramp[tail]
+        v[tail, HARA_CH] = _euler(H)
+    return v
+
+
+def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW, keep_turn=False):
     """Body channel values (F, nch, 3) of an animation of type `kind` whose tail is re-split for the hand-off to an
     animation whose frame 0 has values `nxt` (nch', 3) of type `next_kind` (see PREBLEND): over `window` frames ending
-    one frame before the pre-blend the turn goes to the next's and HARA_ROT1 to the next's (or, when the two world
-    poses are further apart than HANDOFF_MATCH, to the rotation that gives KOSHI the next's), MUNE1 and KOSHI taking
-    the difference, so every world rotation and position stays as it was (HARA_ROT1's own frame aside); the frames
-    before the window are unchanged. The returned values are float64; the first frames' rotation values carry on into
-    the changed ones (animation.axis_angles' continuity)."""
+    one frame before the pre-blend the turn goes to the next's (keep_turn: the whole or half turns on that are
+    nearest the clip's own, end_turn) and HARA_ROT1's world (T^T H) to the next's (or, when the two world poses are
+    further apart than HANDOFF_MATCH, to the rotation that gives KOSHI the next's), MUNE1 and KOSHI taking the
+    difference, so every world rotation and position stays as it was (HARA_ROT1's own frame aside); the frames before
+    the window are unchanged. The returned values are float64; the first frames' rotation values carry on into the
+    changed ones (animation.axis_angles' continuity)."""
     v = np.array(values, np.float64)
     F = len(v)
     if F < 2:
@@ -372,6 +406,8 @@ def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WIND
     # the turn's yaw: the clip's (continuous) to the next's (its value: the hemisphere the game samples)
     phi = np.unwrap(np.arctan2(T[:, 0, 2], T[:, 0, 0]))
     phi_n = float(np.arctan2(Tn[0, 2], Tn[0, 0]))
+    if keep_turn:
+        phi_n = end_turn(phi[last], phi_n)
     f = np.arange(F)
     s = np.clip((f - w0) / max(1, w1 - w0), 0.0, 1.0)
     s = s * s * (3 - 2 * s)                                       # smoothstep

@@ -386,6 +386,16 @@ class SceneCutsTest(unittest.TestCase):
         assert prefabs8.scene_cuts(self.k, types.SimpleNamespace(PREFABS={}), None) == {}
         assert prefabs8.scene_cuts(self.k, types.SimpleNamespace(), None) == {}
 
+    def test_twists_name_the_victims_clips(self):
+        d = types.SimpleNamespace(PREFABS={'twists': {'Okm_thrown': (3, 9, 180.0)}})
+        out = prefabs8.twists(self.k, d, log=lambda *a: None)
+        assert list(out) == ['V'] and out['V'][:2] == (3, 9)
+        np.testing.assert_allclose(out['V'][2], np.pi)
+        assert prefabs8.twists(self.k, types.SimpleNamespace(PREFABS={})) == {}
+        for bad in ({'Okm_nobody': (3, 9, 180.0)}, {'Okm_thrown': (9, 3, 180.0)}):
+            with self.assertRaises(ValueError):
+                prefabs8.twists(self.k, types.SimpleNamespace(PREFABS={'twists': bad}), log=lambda *a: None)
+
 
 class LeadInTest(unittest.TestCase):
     """prefabs8.lead_in: a creature parked until a cut (its scale tiny), then flying along +y 2 m up, led in by a donor

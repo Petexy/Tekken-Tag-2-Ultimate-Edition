@@ -601,7 +601,8 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
                                      ground=prefab_plan.keys if prefab_plan else None,
                                      held=prefab_plan.held if prefab_plan else None,
                                      shifts=prefabs8.scene_cuts(k, d, lambda key: converter.pose(panm.Animation(
-                                         banks.blob(anmbin.BODY, key)))[2], log=sub) if prefab_plan else None)
+                                         banks.blob(anmbin.BODY, key)))[2], log=sub) if prefab_plan else None,
+                                     twists=prefabs8.twists(k, d, log=sub) if prefab_plan else None)
         c = moveset.Converter(k, None, ttt2_movesets[d.DONOR_ROW], archives.entry('data005', d.DONOR_ROW),
                               ttt2_movesets[13], common, (req, prop, reactions, hitboxes), usage, place['row'], d)
         c.animations = animations
