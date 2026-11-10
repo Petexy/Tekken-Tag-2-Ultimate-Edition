@@ -170,6 +170,9 @@ VOICE = 'wkz'
 # ------------------------------------------------------------------------------------------------ moveset
 MOVESET = {
     'name': '[MIARY_ZO]',       # the moveset's name (in its header)
+    # her throws' victims (and those of some knockdowns) stay where Tekken 8 leaves them as they go down, facing as
+    # they lie (convert/moveset.py handoffs8): the hand-off's turn sweep spun them 90 to 360 degrees on the ground
+    'keep_body_handoffs': True,
     # her round-start move (the donor's is kept: its mode checks are Tekken 8's)
     'drop_moves': r'^Wkz_Direct$',
     # the donor's round-start list keeps its targets except its own moves (Wkz_Direct picks 3 intros wkz_s00..02 and 3
