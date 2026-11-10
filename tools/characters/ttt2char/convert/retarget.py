@@ -282,6 +282,8 @@ def body_channels(cal, world, root, displacement=None, yaw=None, root_scale=1.0,
 PREBLEND = 15                      # frames of the game's pre-blend (Jun's and Reina's throws in game: 15)
 HANDOFF_WINDOW = 10                # frames over which the split moves, ending one frame before the pre-blend
 HANDOFF_MATCH = 20.0               # degrees: HARA_ROT1 becomes exactly the next's when KOSHI's world is this close
+KEEP_BODY_FIT = 1.0                # handoff keep_body: 1 + cos of his hips' roll off any lie of the next's (2: none);
+                                   # below it no turn lays him as the next lies (face down to face up): his own facing
 HANDOFF_NEEDED = 10.0              # degrees between the clip's last HARA_ROT1 and the next's that call for a re-split
 TURN, HARA_CH, CHILD_CHANNELS = 2, 3, (4, 5)      # channels: the turn, HARA_ROT1, its children MUNE1 and KOSHI
 
@@ -344,14 +346,20 @@ def handoff_mismatch(values, kind, nxt, next_kind):
     return float(angle(H, Hn))
 
 
-def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW):
+def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW, keep_body=False):
     """Body channel values (F, nch, 3) of an animation of type `kind` whose tail is re-split for the hand-off to an
     animation whose frame 0 has values `nxt` (nch', 3) of type `next_kind` (see PREBLEND): over `window` frames ending
     one frame before the pre-blend the turn goes to the next's and HARA_ROT1 to the next's (or, when the two world
     poses are further apart than HANDOFF_MATCH, to the rotation that gives KOSHI the next's), MUNE1 and KOSHI taking
     the difference, so every world rotation and position stays as it was (HARA_ROT1's own frame aside); the frames
-    before the window are unchanged. The returned values are float64; the first frames' rotation values carry on into
-    the changed ones (animation.axis_angles' continuity)."""
+    before the window are unchanged. The game takes the turn's every change within a move into the fighter's facing
+    and draws the body (H and its children) from that facing, and the facing does not take the turn's jump at the
+    next move: so the sweep turns the body on the ground as far (Tekken 8's throws: 90 to 360 degrees) and leaves the
+    facing that much off Tekken 8's. keep_body: the drawn body stays as the clip leaves it and the turn goes to the
+    facing that lays it as the next move's frame 0 lies in its own (KOSHI's yaw), which is not seen: no turn on the
+    ground, and the facing (the get-up's) Tekken 8's own, to within a few degrees; where no turn lays it so
+    (KEEP_BODY_FIT), the clip's own. The returned values are float64; the first frames' rotation values carry on
+    into the changed ones (animation.axis_angles' continuity)."""
     v = np.array(values, np.float64)
     F = len(v)
     if F < 2:
@@ -367,18 +375,28 @@ def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WIND
     Tn = _rotations(nxt[TURN][None], next_kind)[0]
     Hn = _rotations(nxt[HARA_CH][None], next_kind)[0]
     Rn = Tn.T @ Hn
-    Rk = Wc[5][last] @ _rotations(nxt[5][None], next_kind)[0].T  # KOSHI exactly the next's
-    R_end = Rn if angle(Rk, Rn) <= HANDOFF_MATCH else Rk
+    K5n = _rotations(nxt[5][None], next_kind)[0]
     # the turn's yaw: the clip's (continuous) to the next's (its value: the hemisphere the game samples)
     phi = np.unwrap(np.arctan2(T[:, 0, 2], T[:, 0, 0]))
     phi_n = float(np.arctan2(Tn[0, 2], Tn[0, 0]))
+    if keep_body:                                                 # the yaw that takes the next's KOSHI nearest his
+        N = (T[last] @ Wc[5][last]) @ (Rn @ K5n).T
+        a, b = N[0, 2] - N[2, 0], N[0, 0] + N[2, 2]
+        yaw = np.arctan2(a, b) if np.hypot(a, b) >= KEEP_BODY_FIT else phi[last]
+        phi_n = float(phi[last] + (yaw - phi[last] + np.pi) % (2 * np.pi) - np.pi)
     f = np.arange(F)
     s = np.clip((f - w0) / max(1, w1 - w0), 0.0, 1.0)
     s = s * s * (3 - 2 * s)                                       # smoothstep
     s[f >= w1] = 1.0
     new_phi = (1 - s) * phi + s * phi_n
-    R_new = slerp(R, np.broadcast_to(R_end, R.shape), s)
     T_new = _rotations(_turn_values(new_phi, kind), kind)
+    if keep_body:                                                 # the body (T R, T Wc) in the new facing
+        D = np.swapaxes(T_new, -1, -2) @ T
+        R = D @ R
+        Wc = {c: D @ w for c, w in Wc.items()}
+    Rk = Wc[5][last] @ K5n.T                                      # KOSHI exactly the next's
+    R_end = Rn if angle(Rk, Rn) <= HANDOFF_MATCH else Rk
+    R_new = slerp(R, np.broadcast_to(R_end, R.shape), s)
     H_new = T_new @ R_new
     tail = slice(w0, F)
     out = v.copy()
