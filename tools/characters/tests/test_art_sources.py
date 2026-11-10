@@ -73,8 +73,8 @@ class Pictures(unittest.TestCase):
         src = self.source('tekken8', {'/b': as_bytes, '/w': as_bytes, '/n': as_bytes})
         s = art.Sources(src, self.definition())
         self.assertEqual(sorted(src.asked), ['/b', '/n', '/w'])
-        # the bust's face framed bigger and lower (BUST_FRAME: 1.5 times, 0.1 of eyes-to-chin), the body's as measured
-        self.assertEqual(s.faces, {'bust': (10, 17.0, 20.0), 'body': (5, 6, 7)})
+        # the bust's face framed bigger and lower (BUST_FRAME: 1.25 times, 0.1 of eyes-to-chin), the body's as measured
+        self.assertEqual(s.faces, {'bust': (10, 17.0, 24.0), 'body': (5, 6, 7)})
         self.assertLess(s.pictures['bust'][..., 3][~disc & ~strands].max(), 0.01)     # the bust's rim light is off
         np.testing.assert_array_equal(s.pictures['body'], art._float(as_bytes))     # the body as it is
 
