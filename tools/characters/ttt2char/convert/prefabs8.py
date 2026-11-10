@@ -49,11 +49,13 @@ asks for it; a fighter without one is not touched.
 * TWISTS. A throw may leave the victim on his back, head toward the thrower: TTT2's downs lie feet toward the
   fighter's facing, so he faces away, and its get-up from there sits him up turned away and spins him round (Clive's
   1+3; TTT2's own throws leave him feet toward the thrower, and he rises straight). The definition's PREFABS
-  'twists' {victim move: (first frame, last frame, degrees)} turn him that much about his hips over those frames, in
-  the air (twists(); convert/retarget.py twist: his turn grows, smoothly, and stays, HARA_ROT1 turned back as far; the
-  game takes the turn into his facing and draws the body from it): he lands the other way round. The hand-off into
-  the down state (convert/moveset.py handoffs8) keeps his body and the facing it lies in (retarget.handoff keep_body)
-  where any other clip's sweeps to the down move's own turn, which would spin him back on the ground.
+  'twists' {victim move: (first frame, last frame, degrees[, flat])} turn him that much about his hips over those
+  frames, in the air (twists(); convert/retarget.py twist: his turn grows, smoothly, and stays, for his facing; the
+  game takes the turn into his facing and draws the body from it, HARA_ROT1 turning the body): he lands the other way
+  round. A victim who somersaults gives the frame he lies by (flat): the body then turns in his hips' own frame, so
+  his spin carries on (a turn about the vertical reversed it, Clive's 1+3), into a turn about the vertical as he lies.
+  The hand-off into the down state (convert/moveset.py handoffs8) keeps that turn (retarget.handoff keep_turn) where
+  any other clip's sweeps to the down move's own, which would spin him back on the ground.
 * LEAD-INS. Such a cut also hides where a creature comes from: Torgal is parked under the floor (his clip's scale
   0.001) until the cut, then leaps 2 m up at the victim; TTT2 showed him out of nowhere. A model's 'lead_ins' {kind:
   {clip: lead}} gives that clip a way in from another of its clips (lead_in()): the donor's run-up (lead 'run': its
@@ -1338,21 +1340,25 @@ def scene_cuts(k, d, path, log=print):
 
 
 def twists(k, d, log=print):
-    """{body clip key: (first frame, last frame, radians)} for the definition's PREFABS 'twists' (TWISTS: {move: (first
-    frame, last frame, degrees)}): the clip's turn about his hips over those frames (tekken8/anim.py channels' twist).
-    k: Tekken 8 moveset."""
+    """{body clip key: (first frame, last frame, radians, flat frame or None)} for the definition's PREFABS 'twists'
+    (TWISTS: {move: (first frame, last frame, degrees[, flat frame])}): the clip's turn about his hips over those
+    frames (tekken8/anim.py channels' twist; retarget.twist's flat). k: Tekken 8 moveset."""
     spec_ = (spec(d) or {}).get('twists', {})
     if not spec_:
         return {}
     index = {k.move_name(i) or '#%d' % i: i for i in range(len(_table(k, 'moves')))}
     out = {}
-    for name, (first, last, degrees) in sorted(spec_.items()):
+    for name, entry in sorted(spec_.items()):
+        first, last, degrees = entry[:3]
+        flat = entry[3] if len(entry) > 3 else None
         if name not in index:
             raise ValueError('twists: no move %s' % name)
-        if not 0 < first < last:                         # (retarget.twist: from the frame after the first)
-            raise ValueError('twists: %s: frames %d to %d' % (name, first, last))
-        out[k.anim_ref(index[name])[0]] = (int(first), int(last), float(np.radians(degrees)))
-        log('twist: %s turned %g degrees about his hips over frames %d-%d' % (name, degrees, first, last))
+        if not 0 < first < last or flat is not None and flat < last:     # (retarget.twist: after the first)
+            raise ValueError('twists: %s: frames %d to %d (flat by %s)' % (name, first, last, flat))
+        out[k.anim_ref(index[name])[0]] = (int(first), int(last), float(np.radians(degrees)),
+                                           None if flat is None else int(flat))
+        log('twist: %s turned %g degrees about his hips over frames %d-%d%s' % (
+            name, degrees, first, last, '' if flat is None else ', in their own frame, flat by %d' % flat))
     return out
 
 

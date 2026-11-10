@@ -285,6 +285,7 @@ HANDOFF_MATCH = 20.0               # degrees: HARA_ROT1 becomes exactly the next
 KEEP_BODY_FIT = 1.0                # handoff keep_body: 1 + cos of his hips' roll off any lie of the next's (2: none);
                                    # below it no turn lays him as the next lies (face down to face up): his own facing
 HANDOFF_NEEDED = 10.0              # degrees between the clip's last HARA_ROT1 and the next's that call for a re-split
+FLAT_BLEND = 5                     # frames over which a twist in the hips' frame eases into one about the vertical
 TURN, HARA_CH, CHILD_CHANNELS = 2, 3, (4, 5)      # channels: the turn, HARA_ROT1, its children MUNE1 and KOSHI
 
 
@@ -323,6 +324,35 @@ def slerp(Ra, Rb, s):
     return _matrix(wa[..., None] * qa + wb[..., None] * qb)
 
 
+def _about(axis, angle):
+    """Rotation matrices (..., 3, 3) by `angle` (...) about unit axes (..., 3) (right-handed, column vectors)."""
+    a = np.asarray(axis, np.float64)
+    a = np.broadcast_to(a, np.shape(angle) + (3,)) if a.ndim == 1 else a
+    c, s = np.cos(angle)[..., None, None], np.sin(angle)[..., None, None]
+    X = np.zeros(a.shape[:-1] + (3, 3))
+    X[..., 0, 1], X[..., 0, 2], X[..., 1, 2] = -a[..., 2], a[..., 1], -a[..., 0]
+    X[..., 1, 0], X[..., 2, 0], X[..., 2, 1] = a[..., 2], -a[..., 1], a[..., 0]
+    return np.eye(3) + s * X + (1 - c) * (X @ X)
+
+
+def _axis_and_angle(R, scale=1.0):
+    """Unit axes (..., 3) and angles (radians, in [0, pi]) times `scale` of rotation matrices (..., 3, 3); a half
+    turn's axis from the symmetric part."""
+    R = np.asarray(R, np.float64)
+    angle = np.arccos(np.clip((np.trace(R, axis1=-2, axis2=-1) - 1) / 2, -1.0, 1.0))
+    axis = np.stack([R[..., 2, 1] - R[..., 1, 2], R[..., 0, 2] - R[..., 2, 0], R[..., 1, 0] - R[..., 0, 1]], -1)
+    norm = np.linalg.norm(axis, axis=-1)
+    half = (norm < 1e-6) & (angle > 1e-6)
+    if half.any():
+        S = (R[half] + np.eye(3)) / 2
+        d = np.sqrt(np.clip(np.diagonal(S, axis1=-2, axis2=-1), 0, None))
+        k = np.argmax(d, -1)
+        r = np.arange(len(k))
+        axis[half] = S[r, k] / d[r, k][:, None]
+    axis /= np.maximum(np.linalg.norm(axis, axis=-1, keepdims=True), 1e-300)
+    return axis, angle * scale
+
+
 def _rotations(v, kind):
     return animation.local_rotation(np.asarray(v, np.float64), kind)
 
@@ -346,20 +376,32 @@ def handoff_mismatch(values, kind, nxt, next_kind):
     return float(angle(H, Hn))
 
 
-def twist(values, kind, first, last, yaw):
-    """Body channel values (F, nch, 3) of type `kind` with the turn `yaw` (radians) further on from frame `first`
-    to `last` (smoothstep; on after it) and HARA_ROT1 turned back by as much about the vertical (T^T H as before):
-    the same pose in the turn's frame, the fighter's facing (which the turn drives: handoff) and with it his body
-    turned about his hips. float64; the turn's own steps keep their winding."""
+def twist(values, kind, first, last, yaw, flat=None):
+    """Body channel values (F, nch, 3) of type `kind` with the fighter turned `yaw` (radians) about his hips from frame
+    `first` to `last` (smoothstep; on after it). The game takes the turn's every change within a move into the
+    fighter's facing and poses the body from that (checked in game: Tekken 8's 180 degree MUKI steps, the hand-offs'
+    sweeps), so the turn grows by yaw for his facing and HARA_ROT1 carries the body's turn: without `flat` about the
+    vertical (T^T H as before: the same pose in the turn's frame); with `flat`, the frame by which he lies, in his hips'
+    own frame about their axis that is upright at `flat`, so a spin he has in the air carries on (a turn about the
+    vertical reverses a somersault's; Clive's 1+3), easing from `flat` into the turn about the vertical over
+    FLAT_BLEND frames, which keeps him on the floor. float64; the turn's own steps keep their winding."""
     v = np.array(values, np.float64)
     F = len(v)
-    if not 0 < first < last < F:
-        raise ValueError('a twist over frames %d to %d of a clip of %d' % (first, last, F))
+    if not 0 < first < last < F or flat is not None and not last <= flat < F:
+        raise ValueError('a twist over frames %d to %d (flat by %s) of a clip of %d' % (first, last, flat, F))
     s = np.clip((np.arange(F) - first) / float(last - first), 0.0, 1.0)
     ramp = yaw * s * s * (3.0 - 2.0 * s)
     tail = slice(first, F)
-    Ry = _rotations(_turn_values(ramp[tail], animation.RAW), animation.RAW)
-    H = Ry @ _rotations(v[tail, HARA_CH], kind)                  # T' = T Ry: T'^T H' = Ry^T T^T Ry H = T^T H
+    Ry = _rotations(_turn_values(ramp, animation.RAW), animation.RAW)
+    if flat is not None:
+        H0 = _rotations(v[:, HARA_CH], kind)
+        K = H0 @ _rotations(v[:, CHILD_CHANNELS[1]], kind)       # KOSHI's world, the turn aside
+        up = K[flat].T @ np.array([0.0, 1.0, 0.0])               # his hips' axis that is upright at flat
+        Q = K @ _about(up, ramp) @ np.swapaxes(K, -1, -2)       # Q(flat) = Ry(yaw)
+        t = np.clip((np.arange(F) - flat) / float(FLAT_BLEND), 0.0, 1.0)
+        D = np.swapaxes(Q, -1, -2) @ Ry                          # (Q and Ry are half turns: _quat's signs miss)
+        Ry = Q @ _about(*_axis_and_angle(D, t * t * (3.0 - 2.0 * t)))
+    H = Ry[tail] @ _rotations(v[tail, HARA_CH], kind)            # T' = T Ry(ramp): the body drawn Ry H L
     if kind == animation.COMPRESSED:
         v[tail, TURN, 2] -= ramp[tail]                          # (the turn's axis-angle: (-pi / 2, 0, -yaw))
         v[tail, HARA_CH] = animation.axis_angles(H[:, None], v[first - 1, [HARA_CH]])[:, 0]
