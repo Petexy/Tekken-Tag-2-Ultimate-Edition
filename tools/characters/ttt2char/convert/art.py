@@ -299,9 +299,10 @@ def deglow_rim(img):
 GLOWS = {'tekken7': {'body': deglow}, 'tekken8': {'bust': deglow_rim}}
 # How the pictures cut from each game's bust (its select screen cells, the faces in fights) frame the face against
 # FACE_*'s measures: (how much bigger, how much lower in eyes-to-chin lengths of the bust). Tekken 8's busts show a
-# front-facing head with much of the jacket below; TTT2's cells fill with the head (Reina's cell next to Violet's,
-# user 2026-10-26)
-BUST_FRAME = {'tekken8': (1.5, 0.1)}
+# front-facing head with much of the jacket below, and the definitions' eyes-to-chin (ART) ends on the neck, about
+# 1.25 times the face's (all five, 2026-11-10): framed 1.25 times bigger, the face is as big as TTT2's and the
+# shoulders show as in theirs (1.5 showed only the head, user 2026-11-10; 1.0 a small head, user 2026-10-26)
+BUST_FRAME = {'tekken8': (1.25, 0.1)}
 
 
 def compose(others, picture, fade=None):
