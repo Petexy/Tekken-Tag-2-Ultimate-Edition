@@ -990,6 +990,7 @@ class Converter:
         self.pack0_count = len(motion.mota_offsets(donor_pack, o0)[1])
         self.new_anims, self.anim_id = [], {}
         self.converted8 = set()         # positions in new_anims of converted Tekken 8 clips (handoffs8)
+        self.twisted8 = set()           # .. of those, the twisted ones (prefabs8 TWISTS: handoffs8)
         self.seq_index = {}
         T = self.T
         for i, s in enumerate(T['input_sequences']):
@@ -2748,6 +2749,8 @@ class Converter:
                 baked[key] = (0x4000 | (self.pack0_count + len(self.new_anims)), ext, frames)
                 if t8 and (off & 0x3FFF) - self.pack0_count in self.converted8 and not off & ANIM_COMMON:
                     self.converted8.add(len(self.new_anims))                    # (handoffs8)
+                    if (off & 0x3FFF) - self.pack0_count in getattr(self, 'twisted8', ()):
+                        self.twisted8.add(len(self.new_anims))
                 self.new_anims.append(arcs.encode(desc, values))
                 self.stats['2D arcs: animations baked'] += 1
             row['anim'], ext, frames = baked[key]
@@ -3265,8 +3268,11 @@ class Converter:
                     self.stats['animations: TTT2\'s'] += 1
                 elif got is not None:
                     aid = ANIM_PACK | (self.pack0_count + len(self.new_anims))
-                    if ref[0] not in getattr(self.animations, 'originals', ()):   # a converted clip, not TTT2's
+                    twisted = ref[0] in getattr(self.animations, 'twists', {})    # (converted even if TTT2's)
+                    if twisted or ref[0] not in getattr(self.animations, 'originals', ()):  # a converted clip
                         vars(self).setdefault('converted8', set()).add(len(self.new_anims))     # (handoffs8)
+                    if twisted:
+                        vars(self).setdefault('twisted8', set()).add(len(self.new_anims))       # (handoffs8)
                     self.new_anims.append(bytes(got))
                     self.stats['animations: new'] += 1
                 else:
@@ -3749,7 +3755,8 @@ class Converter:
         up over the last 15 frames of each of Reina's throws and dropped back at the next move (retarget.PREBLEND).
         Each converted clip whose move hands off (its transition) to a move whose frame 0 holds HARA_ROT1 more than
         retarget.HANDOFF_NEEDED degrees elsewhere gets its tail re-split for that move (retarget.handoff: the same
-        world pose); a clip handing off to several such moves gets a copy per target."""
+        world pose); a clip handing off to several such moves gets a copy per target. A twisted clip (prefabs8
+        TWISTS) keeps its turn there, the whole or half turns nearest its own (retarget.end_turn)."""
         rows = self.T['moves']
 
         def target(mid):
@@ -3783,7 +3790,11 @@ class Converter:
                     fixes[b] = None
                     if len(nv) >= len(animation.BODY_DESCRIPTORS) and \
                             retarget.handoff_mismatch(v, kind, nv, nk) > retarget.HANDOFF_NEEDED:
-                        fixes[b] = retarget.encode(retarget.handoff(v, kind, nv[:len(v[0])], nk), kind)
+                        twisted = n in getattr(self, 'twisted8', ())
+                        split = retarget.handoff(v, kind, nv[:len(v[0])], nk, keep_turn=twisted)
+                        if twisted:
+                            self.stats['hand-offs: twisted clips kept their turn (retarget.end_turn)'] += 1
+                        fixes[b] = retarget.encode(split, kind)
             for b, data in sorted((b, d) for b, d in fixes.items() if d is not None):
                 if all(c == b for _, c in lst):
                     self.new_anims[n] = data

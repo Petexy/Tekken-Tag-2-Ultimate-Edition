@@ -285,9 +285,10 @@ class Animations(unittest.TestCase):
         self.assertEqual(a['values'].shape, (6, 3, 3))
         self.assertTrue(np.allclose(a['values'][:, 1, 1], 4) and np.allclose(a['values'][:, 0, 0], 0))
 
-    def handoff_converter(self, rows):
-        """A converter with one converted clip (new_anims[0], 0x4001: HARA_ROT1 upright, ending turned) and the donor
-        pack's one animation (0x4000): a down move's start, HARA_ROT1 lying, the same world pose."""
+    def handoff_converter(self, rows, twisted=False):
+        """A converter with one converted clip (new_anims[0], 0x4001: HARA_ROT1 upright, ending turned; twisted: half a
+        turn over frames 5-15, retarget.twist) and the donor pack's one animation (0x4000): a down move's start,
+        HARA_ROT1 lying, the same world pose as the untwisted clip's end."""
         from test_retarget import lying_next, smooth_values
         from ttt2char.convert import retarget
         v = smooth_values(40)
@@ -299,7 +300,10 @@ class Animations(unittest.TestCase):
         down = retarget.encode(np.repeat(nxt[None], 2, 0))
         c = converter(Source8())
         c.donor_pack = motion.build_pack([motion.extend_mota(empty, [down])] + [b''] * 5)
-        c.pack0_count, c.new_anims, c.converted8, c.aliases = 1, [retarget.encode(v)], {0}, []
+        clip = retarget.twist(v, animation.COMPRESSED, 5, 15, np.pi) if twisted else v
+        c.pack0_count, c.new_anims, c.converted8, c.aliases = 1, [retarget.encode(clip)], {0}, []
+        c.twisted8 = {0} if twisted else set()
+        self.clip_in = animation.decode(c.new_anims[0])['values']
         c.T['moves'] = [dict(anim=a, transition=t) for a, t in rows]
         c.handoffs8()
         return c, animation.decode(down)['values'][0]
@@ -314,6 +318,19 @@ class Animations(unittest.TestCase):
         self.assertLess(retarget.handoff_mismatch(out, animation.COMPRESSED, down, animation.COMPRESSED), 0.1)
         self.assertLess(retarget.angle(animation.local_rotation(out[-1, 2]), animation.local_rotation(down[2])), 0.1)
         self.assertEqual(c.stats['hand-offs: converted clips re-split for the next move\'s HARA_ROT1'], 1)
+
+    def test_handoff_twisted(self):
+        """A twisted clip (prefabs8 TWISTS) keeps its turn in the hand-off (retarget.end_turn): half a turn from the
+        down move's, no sweep, HARA_ROT1's world (T^T H) the down move's."""
+        from ttt2char.convert import retarget
+        c, down = self.handoff_converter([(0x4001, 1), (0x4000, 1)], twisted=True)
+        out = animation.decode(c.new_anims[0])['values']
+        rot = lambda x: animation.local_rotation(np.asarray(x, np.float64)[None])[0]
+        self.assertAlmostEqual(float(retarget.angle(rot(out[-1, 2]), rot(down[2]))), 180.0, delta=0.5)
+        self.assertLess(float(retarget.angle(rot(out[-1, 2]).T @ rot(out[-1, 3]), rot(down[2]).T @ rot(down[3]))), 0.5)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        self.assertLess(abs(yaw(out)[-1] - yaw(self.clip_in)[-1]), np.pi / 2)     # (no sweep: 8.6 rad as it stood)
+        self.assertEqual(c.stats['hand-offs: twisted clips kept their turn (retarget.end_turn)'], 1)
 
     def test_handoff_copy(self):
         """A clip played by a move handing off to a down move and by one handing off upright: a copy for the first."""

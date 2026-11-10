@@ -332,6 +332,51 @@ class HandoffTest(Fixture):
         self.assertGreater(before, 80)
         self.assertLess(after, 1e-4)
 
+    def test_twisted_clips_keep_their_turn(self):
+        """keep_turn (a twisted clip): the next's turn taken by the whole or half turns nearest the clip's own, so the
+        turn does not sweep round (the game spins the body with it) and a clip twisted half a turn (retarget.twist)
+        ends half a turn on; the world pose as without it. Without keep_turn the next's value as it stands."""
+        v = self.clip()
+        nxt = lying_next(self.sk, v)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        rot = lambda x: animation.local_rotation(np.asarray(x)[None])[0]
+        tail = slice(-RT.PREBLEND - RT.HANDOFF_WINDOW - 3, None)
+        swept = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED)
+        self.assertGreater(abs(yaw(swept)[-1] - yaw(v)[-1]), 5.0)       # (the fixture's 5.5 rad, swept back)
+        plain = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_turn=True)
+        self.assertLess(abs(yaw(plain)[-1] - yaw(v)[-1]), np.pi / 2)
+        W0, P0 = game_world(self.sk, swept)
+        for clip, turns, apart in ((v, 0.0, 0.0), (RT.twist(v, animation.COMPRESSED, 5, 15, 2 * np.pi), 2 * np.pi, 0.0),
+                                   (RT.twist(v, animation.COMPRESSED, 5, 15, np.pi), np.pi, 180.0)):
+            out = RT.handoff(clip, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_turn=True)
+            W1, P1 = game_world(self.sk, out)
+            self.assertLess(RT.angle(W1, W0).max(), 1e-5)               # the same world as the swept clip's
+            self.assertLess(np.abs(P1 - P0).max(), 1e-4)                # (mm)
+            np.testing.assert_allclose(yaw(out)[tail] - yaw(plain)[tail], turns, atol=1e-6)
+            self.assertAlmostEqual(float(RT.angle(rot(out[-1, 2]), rot(nxt[2]))), apart, delta=1e-3)
+
+    def test_end_turn(self):
+        self.assertAlmostEqual(RT.end_turn(0.1, 0.0), 0.0)
+        self.assertAlmostEqual(RT.end_turn(2 * np.pi - 0.2, 0.1), 2 * np.pi + 0.1)
+        self.assertAlmostEqual(RT.end_turn(np.pi + 0.3, 0.1), np.pi + 0.1)
+        self.assertAlmostEqual(RT.end_turn(-3 * np.pi, 0.0), -3 * np.pi)
+
+    def test_twist_raw(self):
+        v = self.clip()
+        raw = RT.handoff(v, animation.COMPRESSED, lying_next(self.sk, v), animation.COMPRESSED)
+        r = np.array(raw)
+        r[:, 2] = RT._turn_values(np.linspace(0, 2, len(v)), animation.RAW)
+        r[:, 3] = RT._euler(animation.local_rotation(raw[:, 3]))
+        for c in RT.CHILD_CHANNELS:
+            r[:, c] = RT._euler(animation.local_rotation(raw[:, c]))
+        t = RT.twist(r, animation.RAW, 4, 20, np.pi)
+        T0, T1 = (animation.local_rotation(x[:, 2], animation.RAW) for x in (r, t))
+        H0, H1 = (animation.local_rotation(x[:, 3], animation.RAW) for x in (r, t))
+        self.assertLess(RT.angle(np.swapaxes(T1, -1, -2) @ H1, np.swapaxes(T0, -1, -2) @ H0).max(), 1e-6)
+        self.assertAlmostEqual(float(RT.angle(T1[-1], T0[-1])), 180.0, delta=1e-4)
+        with self.assertRaises(ValueError):
+            RT.twist(r, animation.RAW, 4, len(r), np.pi)
+
     def test_raw(self):
         v = self.clip()
         nxt = lying_next(self.sk, v)

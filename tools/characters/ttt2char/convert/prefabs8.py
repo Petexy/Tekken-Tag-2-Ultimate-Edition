@@ -46,6 +46,14 @@ asks for it; a fighter without one is not touched.
   tekken8/anim.py channels' shift), the victim's clip the same, grown with his push (he is thrown that much further,
   so the gap after the cut is Tekken 8's), and the held scene stands where the cut leaves it all through the move
   (pair_values poses it from the clip's own path, moved by the jump): Torgal meets them as in Tekken 8.
+* TWISTS. A throw may leave the victim on his back, head toward the thrower: TTT2's downs lie feet toward the
+  fighter's facing, so he faces away, and its get-up from there sits him up turned away and spins him round (Clive's
+  1+3; TTT2's own throws leave him feet toward the thrower, and he rises straight). The definition's PREFABS
+  'twists' {victim move: (first frame, last frame, degrees)} turn him that much about his hips over those frames, in
+  the air (twists(); convert/retarget.py twist: his turn grows, smoothly, and stays, HARA_ROT1 turned back as far; the
+  game takes the turn into his facing and draws the body from it): he lands the other way round. The hand-off into
+  the down state (convert/moveset.py handoffs8) keeps that turn (retarget.end_turn) where any other clip's sweeps to
+  the down move's own, which would spin him back on the ground.
 * LEAD-INS. Such a cut also hides where a creature comes from: Torgal is parked under the floor (his clip's scale
   0.001) until the cut, then leaps 2 m up at the victim; TTT2 showed him out of nowhere. A model's 'lead_ins' {kind:
   {clip: lead}} gives that clip a way in from another of its clips (lead_in()): the donor's run-up (lead 'run': its
@@ -1326,6 +1334,25 @@ def scene_cuts(k, d, path, log=print):
         out[keys[0]], out[keys[1]] = shift, grow[:, None] * jump
         log('scene cut: %s at frame %d, %.0f mm taken back; %s pushed that much further from frame %d (his own push: '
             '%.0f mm)' % (name, cut, size, victim, push, away[-1]))
+    return out
+
+
+def twists(k, d, log=print):
+    """{body clip key: (first frame, last frame, radians)} for the definition's PREFABS 'twists' (TWISTS: {move: (first
+    frame, last frame, degrees)}): the clip's turn about his hips over those frames (tekken8/anim.py channels' twist).
+    k: Tekken 8 moveset."""
+    spec_ = (spec(d) or {}).get('twists', {})
+    if not spec_:
+        return {}
+    index = {k.move_name(i) or '#%d' % i: i for i in range(len(_table(k, 'moves')))}
+    out = {}
+    for name, (first, last, degrees) in sorted(spec_.items()):
+        if name not in index:
+            raise ValueError('twists: no move %s' % name)
+        if not 0 < first < last:                         # (retarget.twist: from the frame after the first)
+            raise ValueError('twists: %s: frames %d to %d' % (name, first, last))
+        out[k.anim_ref(index[name])[0]] = (int(first), int(last), float(np.radians(degrees)))
+        log('twist: %s turned %g degrees about his hips over frames %d-%d' % (name, degrees, first, last))
     return out
 
 

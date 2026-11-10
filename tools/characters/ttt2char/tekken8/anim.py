@@ -215,12 +215,14 @@ class Converter:
             yaw = np.zeros(F)
         return world, root, D, yaw, LEGACY_LEG if anim.legacy else self.own_leg, J
 
-    def channels(self, anim, roots=None, snakes=None, ground=False, shift=None):
+    def channels(self, anim, roots=None, snakes=None, ground=False, shift=None, twist=None):
         """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale', 'pairs'}) of a panm.Animation;
         with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
         offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
         convert/snakes8.py) are given (pair_values). shift: (F, 3) mm added to his Top's path (a scene cut taken back:
-        convert/prefabs8.py SCENE CUTS); his scene stands where the shift leaves it, all through the clip."""
+        convert/prefabs8.py SCENE CUTS); his scene stands where the shift leaves it, all through the clip. twist:
+        (first frame, last frame, radians) by which his facing and body turn about his hips over those frames
+        (prefabs8 TWISTS: retarget.twist)."""
         world, root, D, yaw, leg, J = self.pose(anim)
         k = self.leg / leg
         travel = None
@@ -230,6 +232,8 @@ class Converter:
             travel = retarget.body_channels(self.cal, world, root, D + shift - shift[-1], yaw, k, self.kind)[:, 0]
             D = D + shift
         values = retarget.body_channels(self.cal, world, root, D, yaw, k, self.kind)
+        if twist is not None:
+            values = retarget.twist(values, self.kind, *twist)
         count = 0
         if self.pairs:
             moving = any(n in self.moved and (j.stored_rotation or j.stored_translation) for n, j in J.items())
@@ -243,9 +247,9 @@ class Converter:
                                                          travel)], 1)
         return values, dict(frames=anim.frames, leg=leg, root_scale=k, pairs=count)
 
-    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False, shift=None):
-        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground, shift: channels())."""
-        values, info = self.channels(panm.Animation(blob), roots, snakes, ground, shift)
+    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False, shift=None, twist=None):
+        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground, shift, twist: channels())."""
+        values, info = self.channels(panm.Animation(blob), roots, snakes, ground, shift, twist)
         self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
 
@@ -627,14 +631,16 @@ class Animations:
     clip is converted once; .stats counts them, .seconds the time taken. roots: {clip key: root point offsets} of the
     clips whose moves hit from root points (convert/summons8.py): converted with those pairs (TTT2's own original
     left aside); snakes: {clip key: (heads, start)} of the clips whose moves start a summoned model's clip
-    (convert/snakes8.py), likewise; shifts: {clip key: (frames, 3) mm added to its Top's path} (prefabs8.scene_cuts)."""
+    (convert/snakes8.py), likewise; shifts: {clip key: (frames, 3) mm added to its Top's path} (prefabs8.scene_cuts);
+    twists: {clip key: (first frame, last frame, radians)} (prefabs8.twists)."""
 
     def __init__(self, banks, converter, originals=None, roots=None, snakes=None, ground=None, held=None,
-                 shifts=None):
+                 shifts=None, twists=None):
         self.banks, self.converter = banks, converter
         self.ground = set(ground or ())    # (the clips of moves showing a prefab: convert/prefabs8.py)
         self.held = set(held or ())        # (... of those, the ones whose scene stays where the move began)
         self.shifts = dict(shifts or {})   # (clip key -> its Top's shift: prefabs8.scene_cuts)
+        self.twists = dict(twists or {})   # (clip key -> its turn about the hips: prefabs8.twists)
         self.originals = dict(originals or {})
         self.roots = dict(roots or {})
         self.snakes = dict(snakes or {})
@@ -648,7 +654,7 @@ class Animations:
         if key in self.cache:
             return self.cache[key]
         if key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground \
-                and key not in self.shifts:
+                and key not in self.shifts and key not in self.twists:
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
             self.cache[key] = self.originals[key]
             return self.cache[key]
@@ -666,6 +672,8 @@ class Animations:
                     extra['ground'] = HELD if key in self.held else True
                 if key in self.shifts:
                     extra['shift'] = self.shifts[key]
+                if key in self.twists:
+                    extra['twist'] = self.twists[key]
                 out = self.converter.animation(blob, **extra)
                 self.stats['body animations converted (%s)' % self.banks.where(anmbin.BODY, key)] += 1
                 if getattr(self.converter, 'pairs', None) and getattr(self.converter, 'last_pairs', 0):
