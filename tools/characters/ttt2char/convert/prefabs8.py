@@ -52,8 +52,8 @@ asks for it; a fighter without one is not touched.
   'twists' {victim move: (first frame, last frame, degrees)} turn him that much about his hips over those frames, in
   the air (twists(); convert/retarget.py twist: his turn grows, smoothly, and stays, HARA_ROT1 turned back as far; the
   game takes the turn into his facing and draws the body from it): he lands the other way round. The hand-off into
-  the down state (convert/moveset.py handoffs8) keeps that turn (retarget.end_turn) where any other clip's sweeps to
-  the down move's own, which would spin him back on the ground.
+  the down state (convert/moveset.py handoffs8) keeps his body and the facing it lies in (retarget.handoff keep_body)
+  where any other clip's sweeps to the down move's own turn, which would spin him back on the ground.
 * LEAD-INS. Such a cut also hides where a creature comes from: Torgal is parked under the floor (his clip's scale
   0.001) until the cut, then leaps 2 m up at the victim; TTT2 showed him out of nowhere. A model's 'lead_ins' {kind:
   {clip: lead}} gives that clip a way in from another of its clips (lead_in()): the donor's run-up (lead 'run': its

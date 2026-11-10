@@ -27,7 +27,8 @@ STAND_IN = ('hei', 13)        # Heihachi Mishima
 # jab's), on-hit follow-ups (WS1 into Sentai), the sweeps' Sentai rows, Heaven's Wrath 3,4, air reactions, slams after
 # the bound, wall pushbacks, the run's contact stop; 7: floor breaks (her throws' and SSH.CH.3's), and with Miary
 # Zo's work: her model's elbow and knee rings, her eyelids' turn, hit points from her ground origin, hit box summaries;
-# her moves' sound effects from Tekken 8, Tekken 8's hand clips, guard and hit stun (her 4 blocked)
+# her moves' sound effects from Tekken 8, Tekken 8's hand clips, guard and hit stun (her 4 blocked); her throws'
+# victims no longer spin on the ground as they go down
 REVISION = 7
 
 # ------------------------------------------------------------------------------------------------ model
@@ -88,6 +89,9 @@ VOICE = 'zbr'
 # ------------------------------------------------------------------------------------------------ moveset
 MOVESET = {
     'name': '[REINA]',          # the moveset's name (in its header)
+    # her throws' victims stay where Tekken 8 leaves them as they go down, facing as they lie (convert/moveset.py
+    # handoffs8): the hand-off's turn sweep spun them 135 to 360 degrees on the ground
+    'keep_body_handoffs': True,
     # her own moves that are not converted (besides convert/moveset.py's DROP_MOVES): her round-start move
     # Zbr_Direct (the donor's is kept: its mode checks are Tekken 8's). (Zbr_SUPER_0 is her Ki Charge, 1+2+3+4, not
     # her Rage Art: that is #2162, d/f+1+2 during Rage, whose rows are false without Rage)

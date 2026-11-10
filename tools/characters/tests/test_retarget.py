@@ -332,34 +332,36 @@ class HandoffTest(Fixture):
         self.assertGreater(before, 80)
         self.assertLess(after, 1e-4)
 
-    def test_twisted_clips_keep_their_turn(self):
-        """keep_turn (a twisted clip): the next's turn taken by the whole or half turns nearest the clip's own, so the
-        turn does not sweep round (the game spins the body with it) and a clip twisted half a turn (retarget.twist)
-        ends half a turn on; the world pose as without it. Without keep_turn the next's value as it stands."""
+    def test_keep_body(self):
+        """keep_body: the drawn body (H and its children: the game draws them from the facing the turn books) as the
+        clip leaves it, every frame, and the turn at the end the facing in which it lies as the next's frame 0 lies in
+        its own; without it the turn sweeps to the next's (the fixture's 5.5 rad: the body spun that far). The clip,
+        and one twisted half a turn (body and facing), keep their turn; one whose turn alone was moved (the body
+        drawn as before) gets the clip's back."""
         v = self.clip()
         nxt = lying_next(self.sk, v)
         yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
-        rot = lambda x: animation.local_rotation(np.asarray(x)[None])[0]
-        tail = slice(-RT.PREBLEND - RT.HANDOFF_WINDOW - 3, None)
         swept = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED)
-        self.assertGreater(abs(yaw(swept)[-1] - yaw(v)[-1]), 5.0)       # (the fixture's 5.5 rad, swept back)
-        plain = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_turn=True)
-        self.assertLess(abs(yaw(plain)[-1] - yaw(v)[-1]), np.pi / 2)
-        W0, P0 = game_world(self.sk, swept)
-        for clip, turns, apart in ((v, 0.0, 0.0), (RT.twist(v, animation.COMPRESSED, 5, 15, 2 * np.pi), 2 * np.pi, 0.0),
-                                   (RT.twist(v, animation.COMPRESSED, 5, 15, np.pi), np.pi, 180.0)):
-            out = RT.handoff(clip, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_turn=True)
-            W1, P1 = game_world(self.sk, out)
-            self.assertLess(RT.angle(W1, W0).max(), 1e-5)               # the same world as the swept clip's
-            self.assertLess(np.abs(P1 - P0).max(), 1e-4)                # (mm)
-            np.testing.assert_allclose(yaw(out)[tail] - yaw(plain)[tail], turns, atol=1e-6)
-            self.assertAlmostEqual(float(RT.angle(rot(out[-1, 2]), rot(nxt[2]))), apart, delta=1e-3)
-
-    def test_end_turn(self):
-        self.assertAlmostEqual(RT.end_turn(0.1, 0.0), 0.0)
-        self.assertAlmostEqual(RT.end_turn(2 * np.pi - 0.2, 0.1), 2 * np.pi + 0.1)
-        self.assertAlmostEqual(RT.end_turn(np.pi + 0.3, 0.1), np.pi + 0.1)
-        self.assertAlmostEqual(RT.end_turn(-3 * np.pi, 0.0), -3 * np.pi)
+        self.assertGreater(abs(yaw(swept)[-1] - yaw(v)[-1]), 5.0)
+        moved = v.copy()
+        moved[20:, 2, 2] -= 0.6                         # (the compressed turn: (-pi / 2, 0, -yaw))
+        twisted = RT.twist(v, animation.COMPRESSED, 5, 15, np.pi)
+        for clip, end in ((v, yaw(v)[-1]), (twisted, yaw(v)[-1] + np.pi), (moved, yaw(v)[-1])):
+            out = RT.handoff(clip, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_body=True)
+            W0, P0 = RT.pose(self.sk, clip, root_motion=False)
+            W1, P1 = RT.pose(self.sk, out, root_motion=False)
+            self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)    # (HARA_ROT1's own frame aside)
+            self.assertLess(np.abs(P1 - P0).max(), 1e-4)                        # (mm)
+            self.assertAlmostEqual(float(yaw(out)[-1]), float(end), delta=1e-4)
+            G1, Gn = game_world(self.sk, out)[0][-1], game_world(self.sk, nxt[None])[0][0]
+            self.assertLess(RT.angle(G1[1:22], Gn[1:22]).max(), 1e-3)           # lying as the next, in his facing
+        prone = nxt.copy()                              # the next lying face down: no turn lays him so
+        prone[3] = animation.axis_angle_from_matrix(rot_about((1, 0, 0), -np.pi / 2))
+        out = RT.handoff(moved, animation.COMPRESSED, prone, animation.COMPRESSED, keep_body=True)
+        self.assertAlmostEqual(float(yaw(out)[-1]), float(yaw(moved)[-1]), delta=1e-6)
+        W0, P0 = RT.pose(self.sk, moved, root_motion=False)
+        W1, P1 = RT.pose(self.sk, out, root_motion=False)
+        self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)
 
     def test_twist_raw(self):
         v = self.clip()
