@@ -3755,9 +3755,12 @@ class Converter:
         up over the last 15 frames of each of Reina's throws and dropped back at the next move (retarget.PREBLEND).
         Each converted clip whose move hands off (its transition) to a move whose frame 0 holds HARA_ROT1 more than
         retarget.HANDOFF_NEEDED degrees elsewhere gets its tail re-split for that move (retarget.handoff: the same
-        world pose); a clip handing off to several such moves gets a copy per target. A twisted clip (prefabs8
-        TWISTS) keeps its turn there, the whole or half turns nearest its own (retarget.end_turn)."""
+        world pose); a clip handing off to several such moves gets a copy per target. The re-split's turn sweep turns
+        the body on the ground (retarget.handoff), so a twisted clip (prefabs8 TWISTS), and every clip of a definition
+        whose MOVESET 'keep_body_handoffs' is set, keeps the body and takes the facing that lays it as the next move
+        lies (keep_body): the thrown opponent stays where Tekken 8 leaves him and gets up as he lies."""
         rows = self.T['moves']
+        keep_all = bool(getattr(self.defn, 'MOVESET', {}).get('keep_body_handoffs'))
 
         def target(mid):
             r = self.aliases[mid - 0x8000] if mid >= 0x8000 and mid - 0x8000 < len(self.aliases) else mid
@@ -3790,10 +3793,10 @@ class Converter:
                     fixes[b] = None
                     if len(nv) >= len(animation.BODY_DESCRIPTORS) and \
                             retarget.handoff_mismatch(v, kind, nv, nk) > retarget.HANDOFF_NEEDED:
-                        twisted = n in getattr(self, 'twisted8', ())
-                        split = retarget.handoff(v, kind, nv[:len(v[0])], nk, keep_turn=twisted)
-                        if twisted:
-                            self.stats['hand-offs: twisted clips kept their turn (retarget.end_turn)'] += 1
+                        keep = n in getattr(self, 'twisted8', ()) or keep_all
+                        split = retarget.handoff(v, kind, nv[:len(v[0])], nk, keep_body=keep)
+                        if keep:
+                            self.stats['hand-offs: kept the body, the facing to match'] += 1
                         fixes[b] = retarget.encode(split, kind)
             for b, data in sorted((b, d) for b, d in fixes.items() if d is not None):
                 if all(c == b for _, c in lst):

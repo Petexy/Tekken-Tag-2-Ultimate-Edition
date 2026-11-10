@@ -27,7 +27,8 @@ STAND_IN = ('hei', 13)        # Heihachi Mishima
 # limb hit points, on-hit follow-ups (1,1 into Libertador), air reactions (d+2,3), slams after the bound, wall
 # pushbacks, the run's contact stop, her u/f+1+2's catch; 3: with Miary Zo's work: her model's elbow and knee rings,
 # her eyelids' turn, hit points from her ground origin, hit box summaries;
-# her moves' sound effects from Tekken 8, Tekken 8's hand clips, guard and hit stun
+# her moves' sound effects from Tekken 8, Tekken 8's hand clips, guard and hit stun; her throws' victims no longer
+# spin on the ground as they go down
 REVISION = 3
 
 # ------------------------------------------------------------------------------------------------ model
@@ -90,6 +91,9 @@ VOICE = 'cat'
 # ------------------------------------------------------------------------------------------------ moveset
 MOVESET = {
     'name': '[AZUCENA]',        # the moveset's name (in its header)
+    # her throws' victims stay where Tekken 8 leaves them as they go down, facing as they lie (convert/moveset.py
+    # handoffs8): the hand-off's turn sweep spun them 135 to 360 degrees on the ground
+    'keep_body_handoffs': True,
     # her own moves that are not converted (besides convert/moveset.py's DROP_MOVES): her round-start move
     # Cat_Direct (the donor's is kept: its mode checks are Tekken 8's)
     'drop_moves': r'^Cat_Direct$',
