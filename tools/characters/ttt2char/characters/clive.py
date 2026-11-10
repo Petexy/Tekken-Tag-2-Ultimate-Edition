@@ -500,6 +500,10 @@ VOICE = 'okm'
 # ------------------------------------------------------------------------------------------------ moveset
 MOVESET = {
     'name': '[CLIVE]',          # the moveset's name (in its header)
+    # his throws' victims (and those of some knockdowns) stay where Tekken 8 leaves them as they go down, facing as
+    # they lie (convert/moveset.py handoffs8; his twisted 1+3 did already): the hand-off's turn sweep spun them 90 to
+    # 360 degrees on the ground
+    'keep_body_handoffs': True,
     # his round-start move (the donor's is kept: its mode checks are Tekken 8's)
     'drop_moves': r'^Okm_Direct$|^#20(0[89]|1[013])$',
     # the donor's round-start list keeps its targets except its own moves
