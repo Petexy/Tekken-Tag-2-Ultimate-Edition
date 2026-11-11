@@ -449,8 +449,9 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     c.opt_anims, c.part3 = opt_anims, part3
     c.effects = effects
     c.run()
-    copies = c.split_effects(particles.emitting_frames(paks, d.TEKKEN7_CODE, c.effect_ids),
-                             set(c.projectile_effects) | set(itemdb.effect_ids(donor_xml)))
+    used = set(c.projectile_effects) | set(itemdb.effect_ids(donor_xml))
+    copies = c.split_effects(particles.emitting_frames(paks, d.TEKKEN7_CODE, c.effect_ids), used)
+    at_weapons = c.weapon_effects(copies, used)
     moves, motions = c.write()
     for line in c.summary():
         log('         ' + line)
@@ -459,7 +460,10 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     own_files, own_effects = particles.convert_fighter(
         paks, archives, d.TEKKEN7_CODE, c.effect_ids | {particles.HIT_EFFECT},
         model.GIDX_BASE + model.SLOT_GIDX * slot + particles.FIRST_ID, c.projectile_effects,
-        log=lambda s: log('         ' + s), copies=copies)
+        log=lambda s: log('         ' + s), copies=copies,
+        staying={i for i in c.effect_ids if copies.get(i, (i, None))[0] in c.aimed_effects},
+        at_weapons=at_weapons, options=getattr(d, 'EFFECTS', {}),
+        weapons={w['summon']: w for w in getattr(d, 'WEAPONS', []) if w.get('summon') is not None})
     xml = itemdb.body_only(donor_xml, {i: [(name, None) for name in names] for i, names in own_effects.items()})
     effect_files = fx.still_named(effect_files, itemdb.effect_files_named(xml))    # the donor's not replaced
     effect_files.update(own_files)

@@ -4,6 +4,7 @@
 #include "gpu/vulkan/renderer.h"
 
 #include "gpu/latte.h"
+#include "gpu/looks.h"
 #include "gx2/types.h"
 
 #include "cafe/runtime.h"
@@ -480,6 +481,61 @@ uint32_t read_extent(uint32_t size, uint32_t extent) {
 }
 } // namespace
 
+// A draw of a fighter with a look (gpu/looks.h): its kind for the pixel
+// shader (ShaderEnvironment::fighter_look; 0 none) and the look. The
+// fighter's colour in the draw's constants carries the look's number (read
+// where the shaders read it: block 8 bound to a stage that does not read
+// it may be another draw's); the motion blur's velocity pass draws the
+// fighter's meshes without that colour, from the vertex buffers its draws
+// before used in the frame (its static data, this frame's skinned
+// vertices), and draws no velocities while the look has just brought it
+// from elsewhere. A replay draws as its frame did.
+uint8_t Renderer::fighter_look(const Registers& regs, const ShaderModule* vs, uint32_t draw_index, uint32_t& look) {
+    FrameRecord& f = frame_records_[current_record_];
+    DrawRecord* record = logging_ && draw_index < f.draws.size() ? &f.draws[draw_index] : nullptr;
+    if (replaying_) {
+        if (record == nullptr) return 0;
+        look = record->look;
+        return record->look_kind;
+    }
+    const auto r = [&](uint32_t address) { return regs[address]; };
+    const auto number_at = [&](uint32_t cache, uint32_t size, uint32_t at) -> uint32_t {
+        const uint32_t block = r(cache + looks::kColourBlock * 4) << 8;
+        const uint32_t bytes = r(size + looks::kColourBlock * 4) << 8;
+        if (block == 0 || bytes < at + 12 || !guest_memory_committed(block + at, 12)) return 0;
+        uint32_t rgb[3];
+        std::memcpy(rgb, guest_pointer(block + at), sizeof(rgb)); // (in the GPU's byte order)
+        return looks::marked(rgb);
+    };
+    uint32_t number = 0;
+    if ((vs->info.constant_bank_mask >> looks::kColourBlock) & 1) {
+        number = number_at(reg::SQ_ALU_CONST_CACHE_VS_0, reg::SQ_ALU_CONST_BUFFER_SIZE_VS_0, looks::kVertexColourAt);
+        if (number != 0 && number_at(reg::SQ_ALU_CONST_CACHE_PS_0, reg::SQ_ALU_CONST_BUFFER_SIZE_PS_0,
+                                     looks::kPixelColourAt) != number) {
+            number = 0; // (the pixel shader's colour too, where it is bound: both are the fighter's)
+        }
+    }
+    uint64_t vertices = 0;
+    for (uint32_t i = 0; i < 2; ++i) {
+        const uint32_t base = kResourceBase + (resource::kVsAttrib + i) * resource::kWords * 4;
+        if ((r(base + 24) >> 30) == (resource::kTypeValidBuffer >> 30)) vertices |= uint64_t{r(base)} << (32 * (1 - i));
+    }
+    uint8_t kind = 0;
+    look = 0;
+    if (number != 0 && (look = looks::look(number)) != 0) {
+        kind = 1;
+        if (vertices >> 32 && vertices & 0xFFFFFFFFu) look_vertices_[vertices] = look;
+    } else if (const auto it = look_vertices_.find(vertices); it != look_vertices_.end()) {
+        kind = 2;
+        look = it->second | (it->second & looks::kStill ? looks::kHidden : 0);
+    }
+    if (record != nullptr) {
+        record->look = look;
+        record->look_kind = kind;
+    }
+    return kind;
+}
+
 void Renderer::draw(const Registers& regs, const Draw& d) {
     if (!replaying_) ++draws_;
     const auto r = [&](uint32_t address) { return regs[address]; };
@@ -551,6 +607,8 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     build_environment(regs.value, Stage::kPixel, ps_env);
     const ShaderModule* vs = shader(Stage::kVertex, r(reg::SQ_PGM_START_VS) << 8, r(reg::SQ_PGM_START_VS + 4) << 3,
                                     r(reg::SQ_PGM_START_FS) << 8, r(reg::SQ_PGM_START_FS + 4) << 3, vs_env);
+    uint32_t look = 0;
+    if (vs != nullptr && (looks::active() || replaying_)) ps_env.fighter_look = fighter_look(regs, vs, draw_index, look);
     const ShaderModule* ps = shader(Stage::kPixel, r(reg::SQ_PGM_START_PS) << 8, r(reg::SQ_PGM_START_PS + 4) << 3, 0, 0,
                                     ps_env);
     if (vs == nullptr || ps == nullptr) {
@@ -692,6 +750,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         if (vs_textures[slot].scaled) dc.vs_scaled_textures |= 1u << slot;
         if (ps_textures[slot].scaled) dc.ps_scaled_textures |= 1u << slot;
     }
+    dc.look = look;
     if (record) record_constants(draw_index, sources, dc);
     if (replaying_) replace_constants(draw_index, dc);
     // TTT2_SHADOW_CHECK=2: the draw as it was, writing guest memory.

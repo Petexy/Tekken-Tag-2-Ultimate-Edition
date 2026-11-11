@@ -5,6 +5,7 @@
 #include "title/noctis_hitbox.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
+#include "title/warp.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -50,6 +51,7 @@ struct Traces {
     bool eliza_assist = std::getenv("TTT2_TRACE_ELIZA_ASSIST") != nullptr;
     bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
     bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
+    bool effect_marks = std::getenv("TTT2_TRACE_EFFECT_MARKS") != nullptr; // effects that stay, effects at weapons
 };
 const Traces& traces() {
     static const Traces read;
@@ -3337,6 +3339,12 @@ struct WeaponBone {
 };
 std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last
 std::map<uint32_t, uint64_t> g_summoned; // player -> its summoned weapons (bit n: summon n)
+// A summoned weapon's place this frame, for the effects at it (its particles: level effects, kWeaponMark): its
+// bone's world rows and origin, shown or not (a weapon not shown is posed at its hand: summoned or dismissed there).
+struct WeaponFrame {
+    float rows[3][3], origin[3];
+};
+std::map<std::pair<uint32_t, int32_t>, WeaponFrame> g_weapon_frames; // (player, summon) -> its frame
 struct PosedWeapons {
     uint32_t player = 0;
     const std::vector<Weapon>* weapons = nullptr;
@@ -3533,12 +3541,9 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
     if (records == 0) return;
     // the points: position = p L R + t R + T (rows: L the local axes, R the parent's world axes; p the point's
     // local translation); the summoned weapons' first, then a slot none of them wrote from the first weapon with it
-    uint32_t written = 0;
-    auto write_points = [&](size_t w, bool only_unwritten) {
-        const Weapon& weapon = weapons[w];
+    auto frame_of = [&](size_t w, float axes[3][3], float origin[3]) {
         const std::array<uint32_t, 16>& local = locals[w];
-        const uint32_t parent = records + kRecordSize * weapon.parent + kRecordWorld;
-        float axes[3][3], origin[3];
+        const uint32_t parent = records + kRecordSize * weapons[w].parent + kRecordWorld;
         for (int c = 0; c < 3; ++c) {
             origin[c] = loadf(parent + 48 + 4 * c);
             for (int row = 0; row < 3; ++row) {
@@ -3547,6 +3552,17 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
                 origin[c] += value(local[12 + row]) * loadf(parent + 16 * row + 4 * c);
             }
         }
+    };
+    for (size_t w = 0; w < weapons.size(); ++w) {
+        if (weapons[w].summon < 0) continue;
+        WeaponFrame& frame = g_weapon_frames[{player, weapons[w].summon}];
+        frame_of(w, frame.rows, frame.origin);
+    }
+    uint32_t written = 0;
+    auto write_points = [&](size_t w, bool only_unwritten) {
+        const Weapon& weapon = weapons[w];
+        float axes[3][3], origin[3];
+        frame_of(w, axes, origin);
         for (const WeaponPoint& point : weapon.points) {
             if (point.slot >= kWeaponPoints || (only_unwritten && (written >> point.slot & 1))) continue;
             ctx.r[3] = load(model + kModelBones);
@@ -3657,16 +3673,65 @@ PPC_FUNC(sub_069D8B30) {
     ctx.lr = lr;
 }
 
+// A fighter vanished in a warp (title/warp.cpp) is not drawn: the title
+// draws a model from its bones' local transforms as its update leaves them
+// (the hit test, the effects and the camera take the world matrices the
+// update makes from them), so their axes are collapsed as the update ends,
+// the model drawn as a point, and put back as its next update starts, before
+// the animation and the posing above write them (a still extra bone's local,
+// which neither writes, would stay collapsed).
+namespace {
+constexpr uint32_t kBoneCount = 24, kLocalAxes = 12; // the bone container's; the words of a local's rows 0-2
+struct CollapsedBones {
+    uint32_t records = 0;
+    std::vector<uint32_t> axes; // kLocalAxes words a bone
+};
+std::map<uint32_t, CollapsedBones> g_collapsed; // by model
+
+void collapse_bones(uint32_t model) {
+    const uint32_t bones = load(model + kModelBones);
+    if (bones == 0) return;
+    CollapsedBones& c = g_collapsed[model];
+    c.records = load(bones + kSkeletonRecords);
+    c.axes.resize(kLocalAxes * load(bones + kBoneCount));
+    for (uint32_t k = 0; k < c.axes.size(); ++k) {
+        const uint32_t at = c.records + kRecordSize * (k / kLocalAxes) + 4 * (k % kLocalAxes);
+        c.axes[k] = load(at);
+        store(at, 0u);
+    }
+}
+
+void restore_bones(uint32_t model) {
+    const auto it = g_collapsed.find(model);
+    if (it == g_collapsed.end()) return;
+    const CollapsedBones& c = it->second;
+    const uint32_t bones = load(model + kModelBones);
+    if (bones != 0 && load(bones + kSkeletonRecords) == c.records &&
+        kLocalAxes * load(bones + kBoneCount) == c.axes.size()) { // (still the same bones)
+        for (uint32_t k = 0; k < c.axes.size(); ++k)
+            store(c.records + kRecordSize * (k / kLocalAxes) + 4 * (k % kLocalAxes), c.axes[k]);
+    }
+    g_collapsed.erase(it);
+}
+} // namespace
+
 // A model's update (it samples the animation, poses the bones through
 // sub_069D8B30 above, then makes their world matrices): then the added
-// fighter's weapon points, from those matrices.
+// fighter's weapon points, from those matrices, and its bones collapsed
+// while it is vanished.
 PPC_FUNC(sub_069DF470_orig);
 PPC_FUNC(sub_069DF470) {
     const uint32_t model = ctx.r[3];
+    if (!g_collapsed.empty()) restore_bones(model);
     sub_069DF470_orig(ctx, base);
-    if (g_posed_weapons.empty()) return;
+    if (g_posed_weapons.empty() && !warp::warping()) return;
     const uint32_t r3 = ctx.r[3], lr = ctx.lr;
     weapon_points(ctx, base, model);
+    if (warp::warping()) {
+        ctx.r[3] = model;
+        cafe_ppc_lookup(load(load(model + kModelInterface) + 68))(ctx, base);
+        if (warp::vanished(ctx.r[3])) collapse_bones(model);
+    }
     ctx.r[3] = r3;
     ctx.lr = lr;
 }
@@ -3895,6 +3960,9 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
         store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
 }
 
+void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player); // (level effects, below)
+uint32_t g_property_player = 0; // the player whose move property runs (level effects, below: an effect's owner)
+
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
@@ -3909,6 +3977,11 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     if ((id == kSummonProp || id == kDismissProp || id == kHoldProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         summon_property(player, id, load(ctx.r[4] + 4));
+    if (id == warp::kProperty && ctx.r[5] == 0 && slot_of_id(load(player + kPlayerSelectId)) >= 0) {
+        const uint32_t value = load(ctx.r[4] + 4), flag = value >> 24 & 0xFF;
+        if (flag == warp::kOut || flag == warp::kStart) record_warp_start(ctx, base, player);
+        if (flag != warp::kStart) warp::property(player, value);
+    }
     const bool trace_special = traces().special_cancels && (id == 0x8093 || id == 0x80a5) && ctx.r[5] == 0;
     const uint32_t trace_value = trace_special ? load(ctx.r[4] + 4) : 0;
     const uint32_t trace_frame = trace_special ? load(player + kPlayerFrame) : 0;
@@ -3920,7 +3993,10 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     // without sub_03AE1704. A hit-grab's takes the scale of the airborne hit it continues (sub_03AE1704 above).
     const int32_t throw_points = (id == 0x8058 || id == 0x8059) && pass == 0 && added_slot(player) >= 0
                                  ? static_cast<int16_t>(load(ctx.r[4] + 4)) : 0;
+    const uint32_t property_player = g_property_player;
+    g_property_player = player;
     sub_03AE86A0_orig(ctx, base);
+    g_property_player = property_player;
     if (throw_points > 0 && load(player + 0x4a4) == uint32_t(throw_points) && load8(player + 0x487) == id - 0x8057)
         if (const uint32_t percent = hit_grab_percent(player))
             store(player + 0x4a4, static_cast<uint32_t>(damage::scale_hit(throw_points, percent)));
@@ -4421,9 +4497,45 @@ PPC_FUNC(sub_08BF4D44) {
 // Tekken 7 places some emitters from the floor's height rather than the bone's
 // (ground smoke, a low wave): the converter puts them in a second file of the
 // effect, which kFloorMark marks; its height is the floor's under the fighter.
+//
+// An effect's first placements come from the move property spawning it,
+// before the placement callback's: the effect object's slot (+720) is still
+// player 1's first member, so they are for that property's player
+// (effect_player). The particles its emitters spawn there keep that frame's
+// directions (their place follows a local emitter): the frame is the level
+// facing of its own fighter, the last one his bones gave while he is vanished
+// (collapsed bones give none: a frame of zeros there laid the first strands
+// of his streak along the world's z, in front of him when he faced -z,
+// through the opponent and beyond).
+//
+// Tekken 7 spawns an aimed effect (Noctis's warps' streak of light) where the
+// fighter is at that moment and leaves it there: kStayMark keeps the place the
+// placement callback (sub_06BE756C) gives it first (the library places a new
+// effect at 0 0 0 before that: it is at his hips meanwhile) and its first
+// frame. Tekken 7 aims it along the warp, from where it started (his hips as he
+// vanishes or, later, where the move he appears with records them:
+// warp::kStart, Tekken 7's 0x82b1; record_warp_start) to its place; when that
+// way is more than ~25 degrees off his facing (cosine 0.9) and not near
+// straight up, along his facing (the level frame) as before (its handler
+// 0x14071ca19); a warp without a start of its own keeps the facing
+// (title/warp.cpp). One left in his facing frame (past a guard, a whiff) goes
+// with him and is seen only while it lies behind him and short of the
+// opponent (following_place): the moves he appears with there carry him on
+// after he appears. The library draws an effect at its place (+944, which the
+// world matrix it builds takes for its translation), turned by the matrix's
+// rows: a streak whose matrix alone went with him stayed where it started.
+// A summoned weapon's particles (Noctis's sword glowing as he
+// summons, throws and dismisses it) are at that weapon, in its bone's frame:
+// kWeaponMark | the summon number, with the weapon's place the weapons' update
+// keeps (g_weapon_frames); the frame's rows are the bone's y, z and x, so that
+// the converter's Tekken 7 axes (x ahead, y right, z up, as TTT2's left, up and
+// ahead) are the Tekken 7 bone's (the weapon bone's y is the reverse of that
+// one's: weapons.py), its fighter the effect's (effect_player).
 constexpr uint32_t kLevelMark = 0x54374658, kLevelMarkAt = 700;       // "T7FX"
 constexpr uint32_t kProjectileMark = 0x50524F4A, kProjectileMarkAt = 704; // "PROJ"
 constexpr uint32_t kFloorMark = 0x464C4F52, kFloorMarkAt = 708;           // "FLOR"
+constexpr uint32_t kStayMark = 0x53544159, kStayMarkAt = 712;             // "STAY"
+constexpr uint32_t kWeaponMark = 0x57504E00, kWeaponMarkAt = 716;         // "WPN" + the summon
 constexpr uint32_t kEffectFile = 932, kEffectPlayer = 720;      // effect object: its loaded file, its slot
 constexpr uint32_t kRigBones = 32, kBoneLocal = 0, kBoneWorld = 64; // sub_04E1A518's model: its bone records
 constexpr float kOutOfSight = -100000.0f;
@@ -4479,11 +4591,161 @@ float effect_pitch(PPCContext& ctx, uint8_t* base, uint32_t effect) {
     return e.pitch;
 }
 
+struct StayingEffect {
+    uint32_t file;
+    bool framed;
+    float place[3];
+    uint32_t matrix[16];
+    bool follows = false; // not aimed along a warp: behind its fighter as he goes on (following_place)
+    bool gone = false;    // ... and out of sight for good: it no longer lay behind him, short of the opponent
+    int failing = 0;      // ... frames in a row it has not lain so
+    float at[3] = {};     // ... where it is this frame
+};
+std::map<uint32_t, StayingEffect> g_staying; // effect object -> where it stays (kStayMark)
+std::set<uint32_t> g_traced_marks;            // effects at weapons traced (TTT2_TRACE_EFFECT_MARKS)
+std::map<uint32_t, uint32_t> g_effect_owners; // effect object -> the player whose move property set it up
+std::map<uint32_t, std::array<float, 2>> g_facings; // a fighter's hips -> his last level facing (x, z)
+int g_placing = 0;          // sub_06BE756C running (its depth)
+int32_t g_placing_slot = -1; // ... for this player slot (sub_06BE6CFC's first argument)
+
 // sub_08BE5650(effect, file, ...): the library sets an effect object up for a new effect (objects are reused).
 PPC_FUNC(sub_08BE5650_orig);
 PPC_FUNC(sub_08BE5650) {
-    if (g_active) g_projectile_looks.erase(ctx.r[3]), g_effect_pitches.erase(ctx.r[3]);
+    if (g_active) {
+        g_projectile_looks.erase(ctx.r[3]), g_effect_pitches.erase(ctx.r[3]), g_staying.erase(ctx.r[3]);
+        g_traced_marks.erase(ctx.r[3]);
+        if (g_property_player) g_effect_owners[ctx.r[3]] = g_property_player;
+        else g_effect_owners.erase(ctx.r[3]);
+        if (traces().effect_marks && ctx.r[4] && load(ctx.r[4] + kStayMarkAt) == kStayMark)
+            std::fprintf(stderr, "ttt2: effect %08X set up to stay (file %08X, player %08X)\n", ctx.r[3], ctx.r[4],
+                         g_property_player);
+    }
     sub_08BE5650_orig(ctx, base);
+}
+
+PPC_FUNC(sub_06BE756C_orig);
+PPC_FUNC(sub_06BE756C) {
+    if (!g_active) return sub_06BE756C_orig(ctx, base);
+    const int32_t before = g_placing_slot;
+    ++g_placing, g_placing_slot = -1;
+    sub_06BE756C_orig(ctx, base);
+    --g_placing, g_placing_slot = before;
+}
+
+// sub_06BE6CFC(slot, bone, out): the bone's place for the placement callback.
+PPC_FUNC(sub_06BE6CFC_orig);
+PPC_FUNC(sub_06BE6CFC) {
+    if (g_active && g_placing > 0) g_placing_slot = static_cast<int32_t>(ctx.r[3]);
+    sub_06BE6CFC_orig(ctx, base);
+}
+
+// The player slot an effect is placed for: the placement callback's, else the effect object's.
+uint32_t effect_slot(uint32_t effect) {
+    return g_placing > 0 && g_placing_slot >= 0 && g_placing_slot < 4 ? static_cast<uint32_t>(g_placing_slot)
+                                                                      : load(effect + kEffectPlayer);
+}
+
+// The player an effect is placed for. A new effect's first placements come before the placement callback's (the
+// effect object's slot is player 1's first member until then): they are for the player whose move property set it
+// up (sub_03AE86A0 spawning it), so that player 2's effects start in his frame too.
+uint32_t effect_player(PPCContext& ctx, uint8_t* base, uint32_t effect) {
+    if (g_placing <= 0 || g_placing_slot < 0 || g_placing_slot >= 4) {
+        if (const auto it = g_effect_owners.find(effect); it != g_effect_owners.end()) return it->second;
+    }
+    return guest_call(ctx, base, sub_05C5EF74, {effect_slot(effect)});
+}
+
+PPC_FUNC(sub_04E1A518); // a player's model
+
+// The hips' bone record of the fighter an effect belongs to (effect_player), or 0.
+uint32_t effect_hips(PPCContext& ctx, uint8_t* base, uint32_t effect) {
+    const uint32_t player = effect_player(ctx, base, effect);
+    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
+    return model ? load(model + kRigBones) : 0;
+}
+
+// The place of a summoned weapon an effect is at (kWeaponMark): its rows (the bone's y, z, x) and origin. -> false
+// for other effects or when the weapon is not known.
+bool weapon_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint32_t file, float rows[3][3], float origin[3]) {
+    const uint32_t mark = load(file + kWeaponMarkAt);
+    if ((mark & 0xFFFFFF00u) != kWeaponMark) return false;
+    const uint32_t player = effect_player(ctx, base, effect);
+    const auto it = g_weapon_frames.find({player, static_cast<int32_t>(mark & 0xFF)});
+    if (traces().effect_marks && g_traced_marks.insert(effect).second)
+        std::fprintf(stderr, "ttt2: effect %08X at weapon %u of slot %u (%08X): %s\n", effect, mark & 0xFF,
+                     effect_slot(effect), player, it == g_weapon_frames.end() ? "not known" : "placed");
+    if (it == g_weapon_frames.end()) return false;
+    for (int i = 0; i < 3; ++i) {
+        origin[i] = it->second.origin[i];
+        for (int c = 0; c < 3; ++c) rows[i][c] = it->second.rows[(i + 1) % 3][c];
+    }
+    return true;
+}
+
+// A staying effect not aimed along a warp (its frame his level facing as it started: the guarded or whiffed
+// Warp-Strike's streak, from far behind him to 20 cm before his hips) goes with its fighter, at his hips' x/z and the
+// height it started at, its frame kept: his move carries him 1.3-2.4 m on after he appears, back off a guard at a
+// wall, sideways along it, past an opponent getting up, and a streak left where he appeared reached into the
+// opponent. It is seen in a frame it lies behind him and short of the opponent: his facing within 60 degrees of its
+// ahead (kTurned) and the opponent's hips kClear or more ahead of his along it; kGone frames in a row not, and it is
+// out of sight for good (its strands keep the frame they were spawned in). One frame alone does not end it: a reading
+// of the opponent's hips can be off for a frame (once 0.6 m behind him, the opponent standing 1.1 m ahead).
+constexpr float kClear = 500.0f, kTurned = 0.5f;
+constexpr int kGone = 2;
+void following_place(PPCContext& ctx, uint8_t* base, uint32_t effect, StayingEffect& stay) {
+    const uint32_t player = effect_player(ctx, base, effect);
+    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
+    const uint32_t hips = model ? load(model + kRigBones) : 0;
+    if (!hips) return; // (where it was)
+    const float x = loadf(hips + kBoneWorld + 48), z = loadf(hips + kBoneWorld + 56);
+    float ax, az;
+    std::memcpy(&ax, &stay.matrix[8], 4), std::memcpy(&az, &stay.matrix[10], 4);
+    const float n = std::sqrt(ax * ax + az * az);
+    float facing = 1.0f, along = kClear;
+    if (n > 1e-3f) {
+        ax /= n, az /= n;
+        if (const auto kept = g_facings.find(hips); kept != g_facings.end())
+            facing = kept->second[0] * ax + kept->second[1] * az;
+        const uint32_t opponent = load(player + kPlayerOpponent);
+        const uint32_t its = opponent ? guest_call(ctx, base, sub_04E1A518, {opponent}) : 0;
+        if (const uint32_t its_hips = its ? load(its + kRigBones) : 0)
+            along = (loadf(its_hips + kBoneWorld + 48) - x) * ax + (loadf(its_hips + kBoneWorld + 56) - z) * az;
+    }
+    const bool seen = facing >= kTurned && along >= kClear;
+    stay.failing = seen ? 0 : stay.failing + 1;
+    if (!stay.gone && stay.failing >= kGone) {
+        stay.gone = true;
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: effect %08X out of sight: facing %.2f along it, the opponent %.0f mm ahead "
+                         "(player %08X, hips at %.0f %.0f)\n", effect, facing, along, player, x, z);
+    }
+    stay.at[0] = x, stay.at[1] = seen && !stay.gone ? stay.place[1] : kOutOfSight, stay.at[2] = z;
+}
+
+// A staying effect's place (kStayMark): the one the placement callback gave it first (its fighter's hips before
+// that), or the one following_place gives it. -> false for other effects.
+bool staying_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint32_t file, float place[3]) {
+    if (load(file + kStayMarkAt) != kStayMark) return false;
+    const auto it = g_staying.find(effect);
+    if (it != g_staying.end() && it->second.file == file && it->second.follows) {
+        following_place(ctx, base, effect, it->second);
+        std::copy(it->second.at, it->second.at + 3, place);
+        return true;
+    }
+    if (it == g_staying.end() || it->second.file != file) {
+        if (g_placing <= 0 || g_placing_slot < 0) { // (not its bone's place yet)
+            if (const uint32_t hips = effect_hips(ctx, base, effect))
+                for (int i = 0; i < 3; ++i) place[i] = loadf(hips + kBoneWorld + 48 + 4 * i);
+            return true;
+        }
+        g_staying.insert_or_assign(effect, StayingEffect{file, false, {place[0], place[1], place[2]}, {}});
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: effect %08X stays at %.0f %.0f %.0f (slot %u)\n", effect, place[0], place[1],
+                         place[2], effect_slot(effect));
+        return true;
+    }
+    std::copy(it->second.place, it->second.place + 3, place);
+    return true;
 }
 
 PPC_FUNC(sub_041CE354_orig);
@@ -4536,13 +4798,46 @@ bool projectile_look_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint
     return true;
 }
 
-PPC_FUNC(sub_04E1A518); // a player's model
+void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player) {
+    const uint32_t model = guest_call(ctx, base, sub_04E1A518, {player});
+    if (const uint32_t hips = model ? load(model + kRigBones) : 0) {
+        float place[3];
+        for (int i = 0; i < 3; ++i) place[i] = loadf(hips + kBoneWorld + 48 + 4 * i);
+        warp::start(player, place);
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: warp of %08X starts at %.0f %.0f %.0f\n", player, place[0], place[1], place[2]);
+    }
+}
 
-// The hips' bone record of the fighter an effect belongs to (its slot's player), or 0.
-uint32_t effect_hips(PPCContext& ctx, uint8_t* base, uint32_t effect) {
-    const uint32_t player = guest_call(ctx, base, sub_05C5EF74, {load(effect + kEffectPlayer)});
-    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
-    return model ? load(model + kRigBones) : 0;
+// An aimed effect's frame (kStayMark) as it starts: rows (left, up, ahead) with ahead along its player's warp from
+// where it started to `place`, unless that is more than ~25 degrees off the level frame's ahead (not near straight
+// up): then the level frame as it is. -> whether it is aimed along the warp.
+bool aim_along_warp(PPCContext& ctx, uint8_t* base, uint32_t effect, const float place[3], uint32_t level) {
+    float start[3], d[3], n = 0;
+    if (!warp::take_start(effect_player(ctx, base, effect), start)) return false;
+    for (int i = 0; i < 3; ++i) d[i] = place[i] - start[i], n += d[i] * d[i];
+    if ((n = std::sqrt(n)) < 1.0f) return false;
+    for (float& x : d) x /= n;
+    float facing = 0;
+    for (int i = 0; i < 3; ++i) facing += d[i] * loadf(level + 32 + 4 * i);
+    const bool along = d[1] >= 0.9f || facing >= 0.9f;
+    if (traces().effect_marks)
+        std::fprintf(stderr, "ttt2: effect %08X aimed from %.0f %.0f %.0f: way %.2f %.2f %.2f, %.0f mm, facing %.2f %.2f "
+                     "%.2f (%s)\n", effect, start[0], start[1], start[2], d[0], d[1], d[2], n, loadf(level + 32),
+                     loadf(level + 36), loadf(level + 40), along ? "along the warp" : "along the facing, behind him");
+    if (!along) return false;
+    float left[3] = {d[2], 0, -d[0]}; // up x ahead, level
+    const float l = std::sqrt(left[0] * left[0] + left[2] * left[2]);
+    if (l < 1e-3f) return false;
+    left[0] /= l, left[2] /= l;
+    const float up[3] = {d[1] * left[2] - d[2] * left[1], d[2] * left[0] - d[0] * left[2],
+                         d[0] * left[1] - d[1] * left[0]}; // ahead x left
+    for (int i = 0; i < 3; ++i) {
+        storef(level + 4 * i, left[i]);
+        storef(level + 16 + 4 * i, up[i]);
+        storef(level + 32 + 4 * i, d[i]);
+    }
+    return true;
 }
 
 // A floor part's place (kFloorMark): its height that of the floor under the fighter (the player's +72: 7000 mm
@@ -4567,13 +4862,25 @@ PPC_FUNC(sub_08BE5688) {
     if (g_active) {
         if (const uint32_t file = level_file(ctx.r[3])) {
             float place[3] = {float(ctx.f[1].ps0), float(ctx.f[2].ps0), float(ctx.f[3].ps0)};
+            float rows[3][3];
+            const bool at_weapon = weapon_place(ctx, base, ctx.r[3], file, rows, place);
             const bool rides = projectile_look_place(ctx, base, ctx.r[3], file, place);
-            if (floor_place(ctx, base, ctx.r[3], file, place) || rides) {
+            const bool stays = staying_place(ctx, base, ctx.r[3], file, place);
+            if (floor_place(ctx, base, ctx.r[3], file, place) || rides || stays || at_weapon) {
                 for (int i = 0; i < 3; ++i) ctx.f[1 + i].ps0 = place[i];
             }
         }
     }
     sub_08BE5688_orig(ctx, base);
+}
+
+// Hands the library an effect's place again this frame (sub_08BE5688); the caller's registers are kept.
+void replace_effect(PPCContext& ctx, uint8_t* base, uint32_t effect, const float place[3]) {
+    const PPCContext saved = ctx;
+    ctx.r[3] = effect;
+    for (int i = 0; i < 3; ++i) ctx.f[1 + i] = {place[i], place[i]};
+    sub_08BE5688_orig(ctx, base);
+    ctx = saved;
 }
 
 PPC_FUNC(sub_08BE56E4_orig);
@@ -4594,8 +4901,9 @@ PPC_FUNC(sub_08BE56E4) {
                     for (int j = 0; j < 3; ++j) ahead[j] += l * loadf(hips + kBoneWorld + 16 * k + 4 * j);
                 }
                 const float n = std::sqrt(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
-                if (n > 1e-3f) {
-                    const float x = ahead[0] / n, z = ahead[2] / n;
+                if (n > 1e-3f) g_facings[hips] = {ahead[0] / n, ahead[2] / n};
+                if (const auto kept = g_facings.find(hips); kept != g_facings.end()) {
+                    const float x = kept->second[0], z = kept->second[1];
                     const float rows[12] = {z, 0, -x, 0, 0, 1, 0, 0, x, 0, z, 0}; // left = up x ahead, up, ahead
                     for (int i = 0; i < 12; ++i) storef(level + 4 * i, rows[i]);
                     levelled = true;
@@ -4651,6 +4959,37 @@ PPC_FUNC(sub_08BE56E4) {
             }
             for (int i = 0; i < 3; ++i) storef(level + 48 + 4 * i, place[i]);
             storef(level + 60, 1.0f);
+            // A summoned weapon's particles: in its bone's frame, at it.
+            float rows[3][3], origin[3];
+            if (weapon_place(ctx, base, effect, file, rows, origin)) {
+                for (int i = 0; i < 3; ++i) {
+                    for (int c = 0; c < 3; ++c) storef(level + 16 * i + 4 * c, rows[i][c]);
+                    storef(level + 48 + 4 * i, origin[i]);
+                }
+            }
+            // An aimed effect: where it was, as it was, when it started; one not aimed along a warp goes with its
+            // fighter in that frame (following_place, also its place: sub_08BE5688, from the frame it is framed
+            // in, whose place went out before its frame was known). Before the callback places it: at his hips.
+            if (load(file + kStayMarkAt) == kStayMark) {
+                const auto it = g_staying.find(effect);
+                if (it != g_staying.end() && it->second.file == file) {
+                    StayingEffect& stay = it->second;
+                    if (!stay.framed) {
+                        stay.follows = !aim_along_warp(ctx, base, effect, stay.place, level);
+                        for (int i = 0; i < 16; ++i) stay.matrix[i] = load(level + 4 * i);
+                        std::copy(stay.place, stay.place + 3, stay.at);
+                        stay.framed = true;
+                        if (stay.follows) {
+                            following_place(ctx, base, effect, stay);
+                            replace_effect(ctx, base, effect, stay.at);
+                        }
+                    }
+                    if (stay.follows) std::memcpy(&stay.matrix[12], stay.at, 12);
+                    for (int i = 0; i < 16; ++i) store(level + 4 * i, stay.matrix[i]);
+                } else if (const uint32_t hips = effect_hips(ctx, base, effect)) { // (not placed yet: at his hips)
+                    for (int i = 0; i < 3; ++i) store(level + 48 + 4 * i, load(hips + kBoneWorld + 48 + 4 * i));
+                }
+            }
             ctx.r[4] = level;
         }
     }

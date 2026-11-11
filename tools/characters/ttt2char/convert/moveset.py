@@ -510,12 +510,38 @@ SUMMON_PROPS = {'t7': {0x82a7: TT_SUMMON, 0x82a8: TT_DISMISS, 0x82c4: TT_SUMMON,
                        0x8300: TT_SUMMON, 0x8301: TT_DISMISS},
                 't8': {0x8317: TT_SUMMON, 0x8318: TT_DISMISS}}
 SUMMON_EFFECT = {'t7': 0x82af, 't8': 0x831f}
+# Tekken 7 spawns a summon's particles at that summon's weapon bone, whatever bone the particle system names (Noctis's
+# shards, effect 104, name his left sword's for every weapon; the 0x82af handler passes the summon's attach point).
+# With the definition's EFFECTS['weapon_flashes'] they are placed at the summoned weapon (convert/particles.py
+# WEAPON_MARK): an effect for each weapon, so an id several weapons spawn gets a copy for each but the one spawning it
+# most (weapon_effects)
+# Tekken 7's aimed effect (Noctis's warps' streak of light, 0x82b0: bone << 16 | effect id): its handler spawns the
+# effect at the bone's place, aimed from the warp's start (0x82b1, or the vanish's) to the bone, or along the
+# fighter's facing when that is more than about 25 degrees off it, and the effect stays there. Its bones are the
+# skeleton's records as 0x8036's parts number them (Tekken 7's part resolver takes the same records for every part
+# but the hands' and feet's item points), as TTT2's effect parts do: an effect row at the part, the effect fixed
+# where it starts (convert/particles.py STAY_MARK), in the fighter's facing frame (the aim, for these forward warps)
+AIMED_EFFECT = {'t7': 0x82b0, 't8': None}
 # A thrown weapon that hits stays where it hit (Noctis's Warp-Strike: Tekken 7 dismisses the sword as it hits, with
 # particles of its mesh lingering there, which convert/particles.py leaves out): the move a hit leads to (the
 # definition's WEAPON_HOLD, by Tekken 7 name) starts with this property (another id TTT2 ignores and no moveset uses),
 # and the runtime keeps the thrown weapons there, drawn though dismissed, until the warp takes them back (roster.cpp,
 # weapons)
 WEAPON_HOLD_PROP = 0x822B
+# Tekken 7's warps (Noctis vanishing and appearing again: his Warp-Strike, teleports, escapes): 0x82ae, its value
+# out << 24 | flash << 16 | fade frames << 8 | flash frames, in extra properties and in end lists, becomes TT_WARP
+# (another id TTT2 ignores and no moveset uses) with the value as it is, which fades the fighter out or in
+# (runtime/src/title/warp.cpp). Tekken 7 shows the fighter again when he is hit (its game, not the moveset): the
+# donor's moves, the reactions among them, start with WARP_APPEAR (shown at once: appear_when_hit).
+# The definition's WARP_OUT (a pattern of Tekken 7 move names, a value) are moves Tekken 7 starts with the fighter
+# warping out though their rows only warp him in (Noctis's after a guarded Warp-Strike: its clips show him going):
+# they start with that warp out (warp_out_at_start).
+WARP_PROP = {'t7': 0x82ae, 't8': None}
+TT_WARP, WARP_APPEAR = 0x822A, 0
+# Where a warp starts, the aimed effects' aim (Tekken 7's 0x82b1: bone, always 0; frame 2 of the moves Noctis appears
+# with, after his warp out): TT_WARP with WARP_START | the bone, which fades nothing (the runtime records the place)
+WARP_START_PROP = {'t7': 0x82b1, 't8': None}
+WARP_START = 0x02000000
 EFFECT_STEP = 6                      # frames: effect ends closer than this share a copy (split_effects)
 EFFECT_SPARE = range(229, 160, -1)   # ids for the copies: above Tekken 7's (100..160), below the projectiles' (230)
 DAMAGE_AMOUNT = {'t7': 0x821b, 't8': 0x828b}
@@ -712,6 +738,8 @@ class Converter:
         self.own_reactions = frozenset(d.MOVESET.get('own_reactions', ()))
         self.effect_ids = set()                                   # the Tekken 7 effect ids the moves spawn
         self.effect_rows = []              # (property row, Tekken 7 effect id, frames left of its move or None)
+        self.aimed_effects = set()         # the Tekken 7 effect ids spawned where they stay (AIMED_EFFECT)
+        self.weapon_rows = []              # (property row, summon) of the weapons' particles (summon_rows)
         self.projectile_effects = {}                               # effect id -> its projectile (projectile_look)
         self.electric_moves = []           # the (Tekken 8) electrics given Kazuya's lightning (electric_rows)
         self.thrown = getattr(d, 'THROWN', {})                    # move name -> its projectile (thrown_rows)
@@ -840,6 +868,9 @@ class Converter:
             return VAR_SET[self.flag_props[p]]
         if p in PROP_OVERRIDE[g]:
             return PROP_OVERRIDE[g][p]
+        if p == WARP_PROP[g]:
+            self.stats['warps (vanishing, appearing)'] += 1
+            return TT_WARP
         if p in PROJ_PROPS[g]:
             return PROJ_PROPS[g][p]
         if EVADE[g] is not None and p in EVADE[g].values():        # (made into cancel rows: evade_rows)
@@ -1447,6 +1478,13 @@ class Converter:
             if idv in SUMMON_PROPS[g] or idv == SUMMON_EFFECT[g]:  # summoned weapons
                 rows += self.summon_rows([(f, idv, v)], move)
                 continue
+            if idv == AIMED_EFFECT[g]:                      # an aimed effect (Noctis's warps' streak)
+                rows += self.aimed_rows(f, v, move)
+                continue
+            if idv == WARP_START_PROP[g]:                   # where his warp starts (the aimed effects' aim)
+                rows.append(dict(frame=f, id=TT_WARP, value=WARP_START | v & 0xFF))
+                self.stats['warp starts (the aim of aimed effects)'] += 1
+                continue
             if (idv, v) in self.hand_map():                 # a hand animation the HANDS row has
                 rows.append(dict(frame=f, id=HAND_PROPS[g][idv], value=self.hand_map()[idv, v]))
                 self.stats['hand animations (the HANDS row\'s)'] += 1
@@ -1513,7 +1551,49 @@ class Converter:
                 rows.append(dict(frame=f, id=EFFECT_PROP, value=self.summons[v >> 16]['part'] << 8 | eid))
                 self.effect_ids.add(eid)
                 self.effect_rows.append((rows[-1], eid, self.frames_left(move, f)))
+                self.weapon_rows.append((rows[-1], v >> 16))
         return rows
+
+    def aimed_rows(self, f, v, move=None):
+        """The row of a Tekken 7 aimed effect (AIMED_EFFECT, bone << 16 | effect id): the effect at that part (the
+        base for a part TTT2 places none on), as [row], or [] for an id an effect row cannot name."""
+        part, eid = v >> 16, v & 0xFFFF
+        if eid > 0xFF:
+            return []
+        row = dict(frame=f, id=EFFECT_PROP, value=(part if part <= EFFECT_PARTS else 0) << 8 | eid)
+        self.effect_ids.add(eid)
+        self.aimed_effects.add(eid)
+        self.effect_rows.append((row, eid, self.frames_left(move, f)))
+        self.stats['aimed effects (at their part, staying where they start)'] += 1
+        return [row]
+
+    def weapon_effects(self, copies, used):
+        """The weapons' particles at the summoned weapon (SUMMON_EFFECT; the definition's EFFECTS['weapon_flashes']):
+        an id several weapons spawn keeps the weapon spawning it most, the others get a copy under a spare id
+        (EFFECT_SPARE, none of `used`), their rows naming it. copies: split_effects' (the copies' sources), given
+        the new ones. -> {effect id: summon} ({} without the option)."""
+        if not getattr(self.defn, 'EFFECTS', {}).get('weapon_flashes'):
+            return {}
+        by_id = collections.defaultdict(lambda: collections.defaultdict(list))
+        for row, n in self.weapon_rows:
+            by_id[row['value'] & 0xFF][n].append(row)
+        spare = [i for i in EFFECT_SPARE if i not in used and i not in self.effect_ids]
+        out = {}
+        for effect, by_summon in sorted(by_id.items()):
+            order = sorted(by_summon, key=lambda n: (-len(by_summon[n]), n))
+            out[effect] = order[0]
+            for n in order[1:]:
+                if not spare:
+                    self.stats['weapon effect copies: no spare id (left at the hand)'] += 1
+                    continue
+                copy_id = spare.pop(0)
+                copies[copy_id] = copies.get(effect, (effect, None))
+                out[copy_id] = n
+                self.effect_ids.add(copy_id)
+                for row in by_summon[n]:
+                    row['value'] = (row['value'] & ~0xFF) | copy_id
+                self.stats['weapon effect copies (one for each weapon spawning it)'] += 1
+        return out
 
     def default_summons(self):
         """The definition's summons out before any move takes them out (Kunimitsu II's kunai in her right fist, the
@@ -1598,6 +1678,41 @@ class Converter:
                 made[start] = self.with_props(start, self.summon_reset())
             row['extraprops'] = made[start]
             self.stats['weapon summons: dismissed by the donor\'s moves'] += 1
+
+    def appear_when_hit(self):
+        """A fighter whose moves warp (WARP_PROP) shows again when hit: each of the donor's moves but the intro and win
+        poses that play the fighter's animations starts with WARP_APPEAR, as dismiss_when_hit puts the summons away."""
+        g = self.game
+        if WARP_PROP[g] is None or not any(r['id'] == WARP_PROP[g] for t in ('extra_move_properties', 'move_end_props')
+                                           for r in self.k.tables.get(t, ())):
+            return
+        made = {}
+        for i in range(len(self.d.tables['moves'])):
+            if i in self.posed:
+                continue
+            row = self.T['moves'][i]
+            start = row['extraprops']
+            if start not in made:
+                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_WARP, value=WARP_APPEAR)])
+            row['extraprops'] = made[start]
+            self.stats['warps: shown by the donor\'s moves'] += 1
+
+    def warp_out_at_start(self):
+        """The definition's WARP_OUT moves start with its warp out (TT_WARP; a fighter going or gone already stays
+        so, runtime/src/title/warp.cpp)."""
+        pattern, value = getattr(self.defn, 'WARP_OUT', (None, None))
+        if not pattern or WARP_PROP[self.game] is None:
+            return
+        made = {}
+        for t7, i in sorted(self.newidx.items()):
+            if not re.search(pattern, self.name(t7)):
+                continue
+            row = self.T['moves'][i]
+            start = row['extraprops']
+            if start not in made:
+                made[start] = self.with_props(start, [dict(frame=0x8001, id=TT_WARP, value=value)])
+            row['extraprops'] = made[start]
+            self.stats['warps: out as a move starts (WARP_OUT)'] += 1
 
     def dismiss_at_start(self):
         """Tekken 7 puts a fighter's weapons away as a round starts (its game, not the moveset: Kunimitsu II's intros
@@ -2253,6 +2368,8 @@ class Converter:
         move_overrides.apply(self)
         specialcancels.apply(self)
         self.dismiss_when_hit()
+        self.appear_when_hit()
+        self.warp_out_at_start()
         self.dismiss_at_start()
         self.hold_thrown()
         # TTT2's tag system on the converted moves (convert/tagsystem.py; the slams were gated while linking): the

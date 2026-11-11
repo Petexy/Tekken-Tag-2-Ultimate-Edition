@@ -259,6 +259,9 @@ private:
     const Pipeline* pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
                              const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class);
     latte::abi::Buffer buffer_descriptor(uint32_t address, uint32_t size, uint32_t stride) const;
+    uint8_t fighter_look(const Registers& regs, const ShaderModule* vs, uint32_t draw_index, uint32_t& look);
+    // This frame's draws with a look by their first two vertex buffers (high, low word): the look.
+    std::unordered_map<uint64_t, uint32_t> look_vertices_;
 
     // -------------------------------------- video-memory copies (shadows.cpp)
     // Guest memory is system memory, which a discrete GPU reads over the bus
@@ -390,6 +393,8 @@ public: // record types, shared with interpolate.cpp's helpers
         bool blend;    // a depth-tested (3D) draw: its constants blend in replays
         bool has_range = false; // its vertex indices' range is known (shadows.cpp), for replays:
         uint32_t first_index = 0, last_index = 0;
+        uint32_t look = 0;      // a fighter's look (draw.cpp's fighter_look), for replays
+        uint8_t look_kind = 0;
     };
     // A frame's draws and the constant data they read, copied into
     // GPU-visible memory: the frame's own draws read it there too, so a

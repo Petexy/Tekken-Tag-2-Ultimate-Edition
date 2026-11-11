@@ -66,6 +66,7 @@
 
 #include "title/framedata.h"
 #include "title/gauge.h"
+#include "title/warp.h"
 
 #include "gpu/overlay.h"
 #include "host/window.h"
@@ -1246,6 +1247,7 @@ PPC_FUNC(sub_04E1A0FC_orig);
 PPC_FUNC(sub_04E1A0FC) {
     const uint32_t fighter = ctx.r[3];
     sub_04E1A0FC_orig(ctx, base);
-    if (const uint32_t colour = cafe::title::framedata::colour(fighter)) ctx.r[3] = colour;
+    if (const uint32_t warping = cafe::title::warp::colour(fighter)) ctx.r[3] = warping; // (title/warp.cpp)
+    else if (const uint32_t colour = cafe::title::framedata::colour(fighter)) ctx.r[3] = colour;
     else if (const uint32_t flash = cafe::title::gauge::colour(fighter)) ctx.r[3] = flash; // (title/gauge.cpp)
 }
