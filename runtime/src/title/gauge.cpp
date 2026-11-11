@@ -53,6 +53,7 @@
 #include "title/framedata.h"
 #include "title/image.h"
 #include "title/roster.h"
+#include "title/warp.h"
 
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
@@ -1010,5 +1011,6 @@ PPC_FUNC(sub_039C2DB0_orig);
 PPC_FUNC(sub_039C2DB0) {
     cafe::title::gauge::situation(ctx.r[3]);
     cafe::title::summons_situation(ctx.r[3]);
+    cafe::title::warp::situation(); // (title/warp.cpp)
     sub_039C2DB0_orig(ctx, base);
 }

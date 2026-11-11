@@ -37,11 +37,12 @@ import copy
 import math
 import re
 import struct
+import zlib
 
 import numpy as np
 
 from ..tekken7 import mesh as t7mesh, staticmesh, texture as t7tex
-from ..tekken7.particles import ParticleSystem, EffectMaterials, effect_table, missile_systems
+from ..tekken7.particles import Distribution, ParticleSystem, EffectMaterials, effect_table, missile_systems
 from ..tekken7.material import short_ref
 from ..tekken7.uasset import load
 from ..ttt2 import alo, nud, nut
@@ -82,12 +83,48 @@ PFLAG_DIRECTED = 0x27043           # particle flags: fixed directions (0x40), th
 SFLAG_SPRITE = 0x30400             # spawner flags: camera-facing sprite (0x400), one random for both sizes
 SFLAG_MODEL = 0x30000
 SFLAG_LOCAL = 0x1                  # particles follow the emitter
+BOX_SHAPE = 4                      # particle emission shape: a box, its full sizes the shape's first three f32
 ROOT_AUTOSTART = 4                 # root s16 +132: the effect starts by itself (0: it waits for a signal)
 LEVEL_MARK = (700, 0x54374658)     # root u32 (zero in the game's files): the runtime places the effect in the
                                    # fighter's level facing frame at its bone, as Tekken 7 does (roster.cpp)
 PROJECTILE_MARK = (704, 0x50524F4A)  # ... and this one where the fighter's newest projectile is, while it is
 FLOOR_MARK = (708, 0x464C4F52)     # ... and this one at the fighter's floor (Tekken 7: FloorHeight), height 0 there
+STAY_MARK = (712, 0x53544159)      # ... and this one where it starts (Tekken 7's aimed effects: moveset.AIMED_EFFECT)
+WEAPON_MARK = (716, 0x57504E00)    # ... and this one (| the summon) at that summoned weapon, in its bone's frame
 FLOOR_SUFFIX = '_floor'            # the second file of an effect: its emitters placed from the floor
+# The definition's EFFECTS options (each changes only the fighters whose definition asks for it):
+# 'weapon_flashes': the particles of a summon (moveset.SUMMON_EFFECT) at its weapon, with the mesh particles of the
+# fighter's item meshes (left out otherwise: ITEM_MESHES) drawn as a shell of the weapon (weapon_shell);
+# 'lines': GPU bursts of a thousand dots of light along a line metres long (Noctis's warp streak), which TTT2 cannot
+# draw (MAX_BURST of them, a few millimetres each, would hardly show), drawn as the thin wavering filaments of light
+# Tekken 7's vector fields blow them into, with sparks along them (_line);
+# 'constant_acceleration': Cascade's AccelerationConstant (a plain vector, not a distribution) taken into the motion.
+MAX_BURST = 64                     # particles of a burst
+LINE_BURST = 500                   # a burst of this many dots or more ...
+LINE_DOT = 2.0                     # ... of at most this size (cm) ...
+LINE_SPAN = 100.0                  # ... spread along this long a line (cm) at least is a line ('lines')
+# A line's filament (_line): a ribbon FILAMENT_WIDTH across (crossed three ways, so that it shows from any side), its
+# core the middle third, the rest the glow Tekken 7's bloom gives the dots; it waves as the emitter's vector field
+# blows its dots (WAVE_GAIN cm of wave per unit of the field's intensity x its scale over the life, in seconds, at
+# most WAVE_MAX: Noctis's streak is a quarter to a fifth of his height across) and wanders by JAG, a point every FILAMENT_STEP
+# (or an eighth of its wave); a field scale below STRAIGHT at first: it starts as a straight line (STRAIGHT_LIFE of
+# its life), then waves; its dots are drawn as dashes (_filament_source), its light as it is lit: the core's
+# brightness CORE_GAIN, the glow's GLOW_GAIN times the dots' colour (a thousand dots overlap), tone mapped; drawn
+# blended, not added (added, a stage's bright background turned the light white); SPARKS sparks along it
+FILAMENT_WIDTH = 4.0
+FILAMENT_STEP = 4.0
+WAVE_GAIN, WAVE_MAX, JAG = 1.0, 20.0, 0.8
+WAVE_IN = 60.0                     # cm from the fighter over which a filament's wave grows (its dots start there)
+STRAIGHT, STRAIGHT_LIFE = 0.05, 0.35
+CORE_GAIN, GLOW_GAIN = 3.0, 0.5
+DASH_REPEAT = 100.0                # cm of filament a repeat of its dashes covers
+SPARKS, SPARK_SIZE, SPARK_LIFE = 24, 2.5, 12   # sparks a filament, their size (cm) and life (frames)
+SHRINK_FADE = 0.5                  # a filament's light as its dots shrink: their size to this power (they stay lit)
+SHELL_CELL = 2.5                   # cm: a weapon shell's vertices welded onto a grid of this side (weapon_shell:
+                                   # 300 to 1,300 vertices, 10 to 40 KB a weapon)
+SHELL_GROW = 0.3                   # cm: the shell outside the weapon's surface (the drawn weapon would hide it)
+SHELL_PEAK = 1.5                   # a weapon flash's brightest colour channel at most (Converter._colour display)
+SHELL_FACE = 0.3                   # a shell's light on a blade's flat faces, of its edges' (_rim_colours: glassy)
 
 
 def to_ttt2(v):
@@ -399,8 +436,10 @@ class Converter:
 
     flat_models = False                # flat quads stay models of their own proportions (a thin card, not a square)
 
-    def __init__(self, paks, archives, first_texture_id, log=None):
+    def __init__(self, paks, archives, first_texture_id, log=None, options=None):
         self.paks, self.archives, self.log = paks, archives, log or (lambda s: None)
+        self.options = options or {}       # the definition's EFFECTS
+        self.weapon = None                 # the definition's weapon the system converted now is placed at, if any
         self.materials = EffectMaterials(paks)
         self.textures = Textures(paks, first_texture_id)
         self.models = {}                   # file name -> nud bytes
@@ -455,10 +494,11 @@ class Converter:
         img[..., 3] = np.clip(1.0 - r, 0.0, 1.0) ** 2
         return Source(('glow',), img, n, _power(mat), subtractive=_subtractive(mat))
 
-    def _doc(self, projectile=False, floor=False):
+    def _doc(self, projectile=False, floor=False, staying=False, summon=None):
         """An effect with no emitters yet: it starts by itself, in the fighter's level facing frame at its body part
         (LEVEL_MARK); a projectile's look also rides the projectile (PROJECTILE_MARK); a floor part has its height
-        from the fighter's floor (FLOOR_MARK)."""
+        from the fighter's floor (FLOOR_MARK); an aimed effect stays where it starts (STAY_MARK); a summon's
+        particles are at its weapon (WEAPON_MARK | summon)."""
         doc = {'root': copy.deepcopy(self.root), 'textures': [], 'models': [], 'emitters': [], 'pool': alo.POOL_HEAD,
                'extra': []}
         _set(doc['root'], '>h', 132, ROOT_AUTOSTART)
@@ -467,11 +507,16 @@ class Converter:
             _set(doc['root'], '>I', *PROJECTILE_MARK)
         if floor:
             _set(doc['root'], '>I', *FLOOR_MARK)
+        if staying:
+            _set(doc['root'], '>I', *STAY_MARK)
+        if summon is not None:
+            _set(doc['root'], '>I', WEAPON_MARK[0], WEAPON_MARK[1] | summon)
         return doc
 
-    def _docs(self, projectile=False):
+    def _docs(self, projectile=False, staying=False, summon=None):
         """An effect's two files: the emitters placed from the body part, those placed from the floor."""
-        return self._doc(projectile), self._doc(projectile, floor=True)
+        return self._doc(projectile, staying=staying, summon=summon), \
+            self._doc(projectile, floor=True, staying=staying, summon=summon)
 
     def _add_system(self, docs, path, cap_frames=None):
         """Appends the emitters of a Tekken 7 particle system to docs (_docs; at most MAX_EMITTERS each): those
@@ -510,11 +555,17 @@ class Converter:
         self.stats['systems'] += bool(out)
         return out
 
-    def system(self, path, cap_frames=None):
+    def system(self, path, cap_frames=None, staying=False, weapon=None):
         """-> {file name suffix: ALO bytes} (_write); empty when nothing of the system can be shown. cap_frames:
-        Tekken 7 stops a move's effect when the move ends: the frames left of the longest move that spawns it."""
-        docs = self._docs()
-        self._add_system(docs, path, cap_frames)
+        Tekken 7 stops a move's effect when the move ends: the frames left of the longest move that spawns it.
+        staying: the effect stays where it starts (STAY_MARK); weapon: the definition's weapon (WEAPONS) whose
+        summon spawns it, at which it is placed (WEAPON_MARK), its item meshes drawn as that weapon's shell."""
+        docs = self._docs(staying=staying, summon=weapon['summon'] if weapon is not None else None)
+        self.weapon = weapon
+        try:
+            self._add_system(docs, path, cap_frames)
+        finally:
+            self.weapon = None
         return self._write(docs)
 
     def projectile(self, path, spec):
@@ -656,19 +707,27 @@ class Converter:
         mat_ref = req.get('Material')
         plane = None
         pre = None
+        shell = False                        # the mesh is a weapon's: drawn as its shell (weapon_shell)
+        if self.options.get('lines') and td is not None and td.cls == 'TypeDataGpu':
+            line = _line_of(em)
+            if line is not None:
+                return self._line(em, line)
         if td is not None and td.cls == 'TypeDataMesh' and td.get('Mesh'):
             pre = td.dist('RollPitchYawRange', 3, [0.0, 0.0, 0.0])
             mesh = short_ref(td.get('Mesh'))
-            if ITEM_MESHES in mesh:          # the fighter's own item (Noctis's summoned weapons): its model draws it
-                raise Invisible()
-            sm = self._static_mesh(mesh)
-            if sm is not None and not td.get('bOverrideMaterial') and sm.materials:
-                mat_ref = sm.materials[0]
-            plane = _plane(sm)
-            if not _drawn_as_model(em, sm) and not self.flat_models:   # a flat quad: drawn as a sprite of its size
-                mesh = None                                            # (models are few in TTT2)
+            if ITEM_MESHES in mesh:          # the fighter's own item (Noctis's summoned weapons): its model draws it,
+                if self.weapon is None or not td.get('bOverrideMaterial'):  # glowing at its weapon as a shell
+                    raise Invisible()
+                shell = True
             else:
-                plane = None
+                sm = self._static_mesh(mesh)
+                if sm is not None and not td.get('bOverrideMaterial') and sm.materials:
+                    mat_ref = sm.materials[0]
+                plane = _plane(sm)
+                if not _drawn_as_model(em, sm) and not self.flat_models:   # a flat quad: drawn as a sprite of its
+                    mesh = None                                            # size (models are few in TTT2)
+                else:
+                    plane = None
         mat = self.materials.describe(mat_ref) if mat_ref else None
         if mat is None or DISTORTION_MATERIAL.search(mat['base'] or ''):
             return []
@@ -676,7 +735,7 @@ class Converter:
         src = material_source(self.textures, mat, sheet)
         if src is None and any(v and WHITE not in v for v in mat['textures'].values()):
             return []                      # only a distortion texture: a refraction effect
-        additive = mat['blend'] == 'BLEND_Additive'
+        additive = mat['blend'] == 'BLEND_Additive'   # (a shell too: a glow added, a layer of colour blended over)
         duration_s = req.get('EmitterDuration', 1.0) or 0.0
         loops = req.get('EmitterLoops', 0) or 0      # Cascade's default: 0, endless
         delay_s = float(req.get('EmitterDelay') or 0.0)
@@ -693,7 +752,7 @@ class Converter:
         life_s = max(1.0 / FPS, life_s)
         life_f = life_s * FPS
         model = None
-        if mesh is not None and self.models_allowed is not None and mesh not in self.models_allowed:
+        if mesh is not None and not shell and self.models_allowed is not None and mesh not in self.models_allowed:
             sm = self._static_mesh(mesh)       # over the fighter's budget of models: a sprite of the mesh's size
             if sm is None:
                 return []
@@ -704,19 +763,23 @@ class Converter:
             src = self._plain(mesh is not None, mat)
         base = copy.deepcopy(self.model_tmpl if mesh is not None else self.sprite)
         alo.unpin(base)
-        tex = self._colour(em, base, src, additive, life_f)
+        tex = self._colour(em, base, src, additive, life_f, display=self.weapon is not None)
         shape = None
         if mesh is not None:
             shape = self._model_shape(em)
-            model = self._mesh_nud(mesh, tex[1], MODEL_ADD if additive else MODEL_ALPHA, shape[0],
-                                   tuple(pre.mean()) if pre is not None else (0.0, 0.0, 0.0))
+            if shell:
+                model = self._shell_nud(self.weapon, tex[1], MODEL_ADD if additive else MODEL_ALPHA)
+            else:
+                model = self._mesh_nud(mesh, tex[1], MODEL_ADD if additive else MODEL_ALPHA, shape[0],
+                                       tuple(pre.mean()) if pre is not None else (0.0, 0.0, 0.0))
             if model is None:
                 return []
         sp, pa = base['spawner'], base['particle']
         sp['modifiers'] = []
         _set(sp, '>B', 251, 0)
         # flags, blend, type
-        sflags = (SFLAG_MODEL if model else SFLAG_SPRITE) | (SFLAG_LOCAL if req.get('bUseLocalSpace') else 0)
+        local = req.get('bUseLocalSpace') or (self.weapon is not None and _follows_bone(em))
+        sflags = (SFLAG_MODEL if model else SFLAG_SPRITE) | (SFLAG_LOCAL if local else 0)
         _set(sp, '>I', 136, sflags)
         _set(sp, '>I', 236, (MODEL_BLEND_ADD if additive else MODEL_BLEND_ALPHA) if model else
              (BLEND_ADD if additive else BLEND_ALPHA))
@@ -728,9 +791,11 @@ class Converter:
         _set(sp, '>HH', alo.LIFE, _u16(life_f), _u16(life_d.spread()[0] * FPS if life_d else 0))
         self._size(em, sp, model is not None, life_f, plane, shape)
         self._rotation(em, sp, model is not None, pre if model is not None else None)
+        if shell:                          # (made in its bone's frame: as the weapon is)
+            _set(sp, '>12f', 164, *([0.0] * 12))
         frame = emitter_frame(req)
         self._motion(em, sp, pa, life_f, frame[0])
-        self._location(em, pa, frame)
+        self._location(em, pa, frame, box=self.weapon is not None)
         self._texture(sp, tex, _particle_scroll(em, mat, life_s) or src.scroll, req, life_f)
         # timing: one emitter for the rate, one per burst
         out = []
@@ -761,7 +826,7 @@ class Converter:
                 continue
             e = copy.deepcopy(base)
             _set(e, '>HHHHHH', alo.INTERVAL, 0xFFFF, 0, 1, 0, _u16((delay_s + t) * FPS), 0)
-            alo._set_keys(e['particle']['tracks'][alo.COUNT_TRACK], [[0, min(n, 64)]])
+            alo._set_keys(e['particle']['tracks'][alo.COUNT_TRACK], [[0, min(n, MAX_BURST)]])
             out.append((e, tname, model))
         return out
 
@@ -815,10 +880,15 @@ class Converter:
             keys = _keys([(t * life_f, sum(lo[a] for a in axes) / len(axes)) for t, lo, hi in ld.samples])
         alo._set_keys(sp['tracks'][alo.SIZE_TRACK], keys)
 
-    def _colour(self, em, e, src, additive, life_f):
+    def _colour(self, em, e, src, additive, life_f, display=False):
         """The particles' colour and opacity over their life: Tekken 7's are often far above 1 (bright, thick
         effects); the brightest of them is baked into the emitter's texture (Textures.lit), the tracks keep each
-        moment's share of it. -> the lit texture."""
+        moment's share of it. display (a weapon's flash: its shells and particles): the brightest baked at SHELL_PEAK
+        at most (its hue kept: Noctis's sword flashes 150 times over and his shards up to 600, which baked white), the
+        colour track each moment's share of it as Tekken 7's tone mapping shows it (else the moments after such a
+        flash are lost, and the shards' brief red tint, (3, 0.3, 0.3) times colours of 20 and more, which Tekken 7
+        shows white, would show red); the opacity track stays each moment's plain share (the fade Tekken 7 gives it).
+        -> the lit texture."""
         sp = e['spawner']
         c = em.module('Color')
         col = c.dist('StartColor', 3, [1.0, 1.0, 1.0]) if c else Distribution1(3)
@@ -855,14 +925,19 @@ class Converter:
             raise Invisible()
         peak = [max(rgb[k] for rgb in cols) for k in range(3)]
         peak_a = max(alphas)
-        share = lambda x, p: min(1.0, max(0.0, x / p)) if p > 1e-6 else 0.0
+        share = opacity = lambda x, p: min(1.0, max(0.0, x / p)) if p > 1e-6 else 0.0
+        if display:
+            shown = lambda x: float(lit_texels(np.full((1, 1, 4), 1.0, np.float32), (x, x, x), 1.0, True)[0, 0, 0])
+            share = lambda x, p: min(1.0, max(0.0, shown(x) / shown(p))) if p > 1e-6 else 0.0
         alo.set_emitter_colour(e, [1.0, 1.0, 1.0])
         alo._set_keys(sp['tracks'][alo.COLOUR_TRACK],
                       _keys([(t * life_f, *[share(x, p) for x, p in zip(rgb, peak)]) for t, rgb in zip(times, cols)]))
         alo._set_keys(sp['tracks'][alo.ALPHA_TRACK],
-                      _keys([(t * life_f, share(a, peak_a)) for t, a in zip(times, alphas)]))
+                      _keys([(t * life_f, opacity(a, peak_a)) for t, a in zip(times, alphas)]))
         _set(sp, '>fff', 12, *[share(s * power, max(peak)) for s in rgb_spread])
-        _set(sp, '>f', 36, share(alpha.spread()[0], peak_a))
+        _set(sp, '>f', 36, opacity(alpha.spread()[0], peak_a))
+        if display and max(peak) > SHELL_PEAK:
+            peak = [x * SHELL_PEAK / max(peak) for x in peak]
         return self.textures.lit(src, peak, peak_a, additive)
 
     def _rotation(self, em, sp, is_model, pre=None):
@@ -927,6 +1002,8 @@ class Converter:
         acc = [0.0, 0.0, 0.0]
         for m in em.all('Acceleration') + em.all('AccelerationConstant'):
             d = m.dist('Acceleration', 3, [0.0, 0.0, 0.0])
+            if m.cls == 'AccelerationConstant' and self.options.get('constant_acceleration'):
+                d = Distribution.constant(m.get('Acceleration') or 0.0, 3)    # (a plain vector)
             acc = [a + b for a, b in zip(acc, to_ttt2(d.mean()))]
         direct = em.module('LocationDirect')
         path = direct.dist('Location', 3) if direct is not None else None
@@ -955,9 +1032,12 @@ class Converter:
         for o in (4, 16, 28, 40):
             alo._set_keys(pa['tracks'][o], [[0, 0.0]])
 
-    def _location(self, em, pa, frame=(None, (0.0, 0.0, 0.0))):
+    def _location(self, em, pa, frame=(None, (0.0, 0.0, 0.0)), box=False):
         """Spawn offset and its random half range: the location modules' offsets turned by the emitter's rotation,
-        plus its origin (emitter_frame). (The character-bone module's offset is left as it is: unverified.)"""
+        plus its origin (emitter_frame). (The character-bone module's offset is left as it is: unverified.) box: the
+        range as the emission shape's box (BOX_SHAPE: full sizes) instead of +76, which the game's emitters leave
+        at 0 (1 of 4134 with shape 0): a weapon's particles (Noctis's shards along his blade, from its hilt to 40 cm
+        past its tip, were all at one point)."""
         rot, origin = frame
         mean = [0.0 + x for x in to_ttt2(origin)]           # (0.0 + -0.0: no negative zeros from a zero origin)
         spread = [0.0, 0.0, 0.0]
@@ -985,6 +1065,10 @@ class Converter:
             ext[{'PMLPC_HEIGHTAXIS_X': 2, 'PMLPC_HEIGHTAXIS_Y': 0}.get(axis, 1)] = h / 2
             spread = [a + b for a, b in zip(spread, ext)]
         alo._set_keys(pa['tracks'][64], [[0] + [x * CM for x in mean]])
+        if box and any(spread):
+            _set(pa, '>B', alo.SHAPE, BOX_SHAPE)
+            pa['shape'] = {'raw': struct.pack('>6f', *[2.0 * x * CM for x in spread], 0.0, 0.0, 0.0), 'tracks': {}}
+            spread = [0.0, 0.0, 0.0]
         _set(pa, '>fff', 76, *[x * CM for x in spread])
 
     def _texture(self, sp, tex, scroll, req, life_f):
@@ -1051,6 +1135,17 @@ class Converter:
         if any(pre):
             turn = frotation(pre[1], pre[2], pre[0]).astype(np.float32)
             p, n = p @ turn, n @ turn
+        tris = np.concatenate([t for _, t in sm.triangles()])[:, ::-1]      # mirrored axes: keep the winding
+        name = self._model(p, n, sm.uvs[:, 0, :], sm.colors[:, :4] if sm.colors is not None else None, tris,
+                           tex_id, blend, path)
+        if name is not None:
+            self._mesh_names[key] = name
+        return name
+
+    def _model(self, p, n, uv, colors, tris, tex_id, blend, what, wrap=None):
+        """An effect model: a mesh in Tekken 7's effect axes (positions in cm, normals, UVs, vertex colours or None:
+        white; triangles wound for TTT2's mirrored axes) -> its file name in self.models, or None (too big). wrap:
+        the texture's wrap along U (1: repeated; None: the template's, clamped)."""
         pos = np.stack([-p[:, 1], p[:, 2], p[:, 0]], 1) * CM
         nrm = np.stack([-n[:, 1], n[:, 2], n[:, 0]], 1)
         m = copy.deepcopy(self.nud_template)
@@ -1062,15 +1157,14 @@ class Converter:
         v['nrm'][:, :3] = nrm
         v['nrm'][:, 3] = 1.0
         if 'color' in dt.names:
-            if sm.colors is not None:
-                v['color'] = sm.colors[:, :4]
+            if colors is not None:
+                v['color'] = colors
             else:
                 v['color'] = VERTEX_WHITE
-        v['uv'][:, 0, :] = sm.uvs[:, 0, :]
-        tris = np.concatenate([t for _, t in sm.triangles()])[:, ::-1]      # mirrored axes: keep the winding
+        v['uv'][:, 0, :] = uv
         strip = strips.stripify(tris)
         if len(strip) >= 0x10000 or len(pos) >= 0xFFFF:
-            self.log('effects: mesh %s too big (%d vertices)' % (path, len(pos)))
+            self.log('effects: mesh %s too big (%d vertices)' % (what, len(pos)))
             return None
         poly['verts'] = v
         poly['indices'] = np.array(strip, np.uint16)
@@ -1078,29 +1172,199 @@ class Converter:
             mat['src'], mat['dst'] = blend
             for t in mat['textures']:
                 t['id'] = tex_id
+                if wrap is not None:
+                    t['wrap_s'] = wrap
         c = (pos.min(0) + pos.max(0)) / 2
         r = float(np.linalg.norm(pos - c, axis=1).max())
         m['sphere'] = mesh['sphere'] = (float(c[0]), float(c[1]), float(c[2]), r)
         mesh['center'] = (float(c[0]), float(c[1]), float(c[2]))
         name = 'mfm_t7_%03d.nud' % len(self.models)
         self.models[name] = nud.write(m)
-        self._mesh_names[key] = name
         return name
+
+    def weapon_shell(self, weapon):
+        """The surface of a weapon as Tekken 7's mesh particles of it show it (Noctis's sword flashing as he summons
+        and dismisses it; the item mesh itself is several times what the effect library holds): the triangles of the
+        weapon's bone in the definition's weapon mesh (weapons.py draws the same), in that bone's frame (Tekken 7's
+        axes, cm: the frame the runtime gives an effect at a weapon, WEAPON_MARK), welded onto a grid of SHELL_CELL
+        (each side of a thin blade apart: the side a normal faces counts) and SHELL_GROW outside the surface.
+        -> (positions, normals, UVs, triangles wound for TTT2), or None."""
+        key = ('shell', weapon['mesh'], weapon['bone'])
+        if key in self._mesh_names:
+            return self._mesh_names[key]
+        self._mesh_names[key] = None
+        sk = t7mesh.SkeletalMesh(load(self.paks, weapon['mesh']))
+        g = sk.geometry()
+        names = sk.skeleton['names']
+        if weapon['bone'] not in names:
+            self.log('effects: %s has no bone %s' % (weapon['mesh'].split('/')[-1], weapon['bone']))
+            return None
+        b = names.index(weapon['bone'])
+        main = g['joints'][np.arange(len(g['joints'])), np.argmax(g['weights'], 1)]
+        tris = np.concatenate([t[(main[t] == b).all(1)] for t in g['triangles']])
+        if not len(tris):
+            return None
+        gm = t7mesh.global_matrices(sk.skeleton['pose'], sk.skeleton['parents'])[b]
+        r = gm[:3, :3] / np.linalg.norm(gm[:3, :3], axis=0)               # columns: the bone's axes, unscaled
+        local = (g['positions'].astype(np.float64) - gm[:3, 3]) @ r
+        normal = g['normals'].astype(np.float64) @ r
+        used = np.unique(tris)
+        axis = np.argmax(np.abs(normal[used]), 1)
+        side = 2 * axis + (normal[used, axis] < 0)
+        cells = np.concatenate([np.floor(local[used] / SHELL_CELL).astype(np.int64), side[:, None]], 1)
+        _, inverse = np.unique(cells, axis=0, return_inverse=True)
+        inverse = inverse.ravel()
+        k = int(inverse.max()) + 1
+        count = np.bincount(inverse, minlength=k)[:, None]
+        mean = lambda x: np.stack([np.bincount(inverse, x[:, a], k) for a in range(x.shape[1])], 1)
+        pos, nrm, uv = mean(local[used]) / count, mean(normal[used]), mean(g['uvs'][used, 0, :].astype(np.float64)) / count
+        nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-6)
+        pos += nrm * SHELL_GROW
+        remap = np.full(len(local), -1, np.int64)
+        remap[used] = inverse
+        t = remap[tris]
+        t = t[(t[:, 0] != t[:, 1]) & (t[:, 1] != t[:, 2]) & (t[:, 0] != t[:, 2])]
+        _, first = np.unique(np.sort(t, 1), axis=0, return_index=True)
+        t = t[np.sort(first)]
+        t = t[:, ::-1] if np.linalg.det(r) > 0 else t                   # mirrored axes: keep the winding
+        self._mesh_names[key] = (pos.astype(np.float32), nrm.astype(np.float32), uv.astype(np.float32), t)
+        return self._mesh_names[key]
+
+    def _shell_nud(self, weapon, tex_id, blend):
+        """The effect model of a weapon's shell (weapon_shell) drawn with `blend` (MODEL_ADD: a glow, its edges lit
+        (_rim_colours); MODEL_ALPHA: a layer of colour over the weapon, its texture's opacity): one for every emitter
+        of it that blends so, their sizes their particles' scale -> its file name, or None."""
+        key = ('shell', weapon['mesh'], weapon['bone'], blend)
+        if key not in self._mesh_names:
+            shell = self.weapon_shell(weapon)
+            if shell is None:
+                return None
+            pos, nrm, uv, tris = shell
+            colours = _rim_colours(pos, nrm) if blend == MODEL_ADD else None
+            self._mesh_names[key] = self._model(pos, nrm, uv, colours, tris, tex_id, blend, weapon['bone'])
+        return self._mesh_names[key]
+
+    # -------------------------------------------------------------------------------------------- lines of light
+    def _line(self, em, line):
+        """A GPU emitter's bursts of dots of light along a line (_line_of), drawn as the filament its vector field
+        blows them into (_waves: a straight line first, then waving, or waving at once), fading as the dots shrink
+        (SizeMultiplyLife), with sparks along it. -> [(ALO emitter, texture file name, model file name)]."""
+        req = em.module('Required')
+        mat = self.materials.describe(req.get('Material')) if req.get('Material') else None
+        if mat is None:
+            return []
+        life = em.module('Lifetime')
+        life_d = life.dist('Lifetime', 1, 1.0) if life else None
+        life_f = max(1.0, (life_d.mean()[0] if life_d else 1.0) * FPS)
+        mult = em.module('SizeMultiplyLife')
+        shrink = mult.dist('LifeMultiplier', 3, [1.0, 1.0, 1.0]) if mult else None
+        delay_s = float(req.get('EmitterDelay') or 0.0)
+        duration_s = req.get('EmitterDuration', 1.0) or 0.0
+        bursts = (em.module('Spawn').get('BurstList') or []) if em.module('Spawn') is not None else []
+        start = min(float(b.get('Time') or 0.0) for b in bursts) * duration_s if bursts else 0.0
+        emits = _u16((delay_s + start) * FPS)
+        out = []
+        for first, last, wave in _waves(em, life_f / FPS):
+            e = copy.deepcopy(self.model_tmpl)
+            alo.unpin(e)
+            straight = wave['amplitude'] <= 0.0
+            tex = self._colour(em, e, _filament_source(mat, CORE_GAIN * (1.5 if straight else 1.0)), False, life_f)
+            model = self._filament_nud(line, wave, tex[1])
+            if model is None:
+                return []
+            sp, pa = e['spawner'], e['particle']
+            sp['modifiers'] = []
+            _set(sp, '>B', 251, 0)
+            _set(sp, '>I', 136, SFLAG_MODEL | (SFLAG_LOCAL if req.get('bUseLocalSpace') else 0))
+            _set(sp, '>I', 236, MODEL_BLEND_ALPHA)
+            _set(pa, '>I', alo.START_FLAGS, PFLAG_DIRECTED)
+            _set(pa, '>B', alo.SHAPE, 0)
+            pa.pop('shape', None)
+            e['name'] = model
+            _set(sp, '>HH', alo.LIFE, _u16(life_f), _u16(life_d.spread()[0] * FPS if life_d else 0))
+            _set(sp, '>ffff', alo.SIZE, 1.0, 1.0, 0.0, 0.0)
+            alo._set_keys(sp['tracks'][alo.SIZE_TRACK], [[0, 1.0]])
+            # its share of the life: in from `first` over a few frames, out over the second half of the stage, and
+            # as the dots shrink
+            alo._set_keys(sp['tracks'][alo.ALPHA_TRACK], _keys(_stage_alpha(first, last, 3.0 / life_f, shrink, life_f)))
+            _set(sp, '>12f', 164, *([0.0] * 12))
+            _set(sp, '>6f', 212, 0, 0, 0, 0, 0, 0)
+            for off in alo.VELOCITY_TRACKS:                 # (it stays where it is: Tekken 7's dots drift a little)
+                alo._set_keys(sp['tracks'][off], [[0, 0.0]])
+            for o in (4, 16, 28, 40):
+                alo._set_keys(pa['tracks'][o], [[0, 0.0]])
+            alo._set_keys(pa['tracks'][64], [[0, 0.0, 0.0, 0.0]])          # (the model lies along the line)
+            _set(pa, '>fff', 76, 0.0, 0.0, 0.0)
+            # the dashes crawl along it toward the fighter, as the dots stream (DASH_REPEAT cm a repeat)
+            self._texture(sp, tex, (wave['crawl'] / DASH_REPEAT, 0.0), req, life_f)
+            _set(e, '>HHHHHH', alo.INTERVAL, 0xFFFF, 0, 1, 0, emits, 0)
+            alo._set_keys(pa['tracks'][alo.COUNT_TRACK], [[0, 1]])
+            out.append((e, tex[0], model))
+        out += self._sparks(em, line, life_f, emits, max(w['amplitude'] for _, _, w in _waves(em, life_f / FPS)))
+        return out
+
+    def _sparks(self, em, line, life_f, emits, across):
+        """Sparks of light along a line's filament (camera-facing dots, added): SPARKS of them, one every other frame
+        from its start, anywhere along it and up to `across` cm off it, each SPARK_LIFE frames."""
+        req = em.module('Required')
+        mat = self.materials.describe(req.get('Material'))
+        e = copy.deepcopy(self.sprite)
+        alo.unpin(e)
+        tex = self._colour(em, e, _spark_source(mat), True, SPARK_LIFE)
+        sp, pa = e['spawner'], e['particle']
+        sp['modifiers'] = []
+        _set(sp, '>B', 251, 0)
+        _set(sp, '>I', 136, SFLAG_SPRITE | (SFLAG_LOCAL if req.get('bUseLocalSpace') else 0))
+        _set(sp, '>I', 236, BLEND_ADD)
+        _set(pa, '>I', alo.START_FLAGS, PFLAG_DIRECTED)
+        _set(pa, '>B', alo.SHAPE, 0)
+        pa.pop('shape', None)
+        _set(sp, '>HH', alo.LIFE, SPARK_LIFE, SPARK_LIFE // 2)
+        _set(sp, '>ffff', alo.SIZE, SPARK_SIZE * CM, SPARK_SIZE * CM, SPARK_SIZE * CM / 2, SPARK_SIZE * CM / 2)
+        alo._set_keys(sp['tracks'][alo.SIZE_TRACK], [[0, 1.0], [SPARK_LIFE, 0.3]])
+        alo._set_keys(sp['tracks'][alo.ALPHA_TRACK], [[0, 1.0], [SPARK_LIFE // 3, 1.0], [SPARK_LIFE, 0.0]])
+        _set(sp, '>12f', 164, *([0.0] * 12))
+        _set(sp, '>6f', 212, 0, 0, 0, 0, 0, 0)
+        for off in alo.VELOCITY_TRACKS:
+            alo._set_keys(sp['tracks'][off], [[0, 0.0]])
+        for o in (4, 16, 28, 40):
+            alo._set_keys(pa['tracks'][o], [[0, 0.0]])
+        a, b = (np.asarray(to_ttt2(list(x)), np.float64) for x in line)
+        alo._set_keys(pa['tracks'][64], [[0] + [float(x) * CM for x in (a + b) / 2]])
+        half = np.abs(b - a) / 2
+        half = np.where(half < 1.0, across, half)           # (along the line, and `across` off it)
+        _set(pa, '>fff', 76, *[float(x) * CM for x in half])
+        self._texture(sp, tex, (0.0, 0.0), req, SPARK_LIFE)
+        _set(e, '>HHHHHH', alo.INTERVAL, 2, 0, _u16(2 * SPARKS), 0, emits, 0)
+        alo._set_keys(pa['tracks'][alo.COUNT_TRACK], [[0, 1]])
+        return [(e, tex[0], None)]
+
+    def _filament_nud(self, line, wave, tex_id):
+        """A filament's model (_filament: its ribbons) -> its file name, or None."""
+        key = ('filament', tuple(np.round(line[0], 1)), tuple(np.round(line[1], 1)), tuple(sorted(wave.items())))
+        if key not in self._mesh_names:
+            pos, nrm, uv, tris = _filament(line, wave)
+            self._mesh_names[key] = self._model(pos, nrm, uv, None, tris, tex_id, MODEL_ALPHA, 'filament', wrap=1)
+        return self._mesh_names[key]
 
 
 EFFECT_NAME = 'eff_t7_%d'            # the converted effect of a Tekken 7 id, in the pack's alo/
 HIT_EFFECT = 0                     # id 0: the fighter's own hit effect (TTT2 spawns it on hits; the donor's otherwise)
 
 
-def convert_fighter(paks, archives, code, ids, first_texture_id, projectiles=None, log=None, copies=None):
+def convert_fighter(paks, archives, code, ids, first_texture_id, projectiles=None, log=None, copies=None,
+                    staying=(), at_weapons=None, options=None, weapons=None):
     """The effects a fighter's moves spawn (Tekken 7 ids `ids`) and the looks of its projectiles ({effect id:
     moveset.Converter.projectile_look's spec}) -> (pack files {'alo/...': bytes}, {id: [effect names]}: one or two
     files an id, the item database spawns them all); ids the fighter's effect item does not name, or whose systems
     show nothing, are left out. copies: {id: (Tekken 7 id, frames it may emit for)} (moveset.Converter.
-    split_effects): an effect stopped with the move that spawns it."""
+    split_effects): an effect stopped with the move that spawns it. staying: the ids of aimed effects (they stay
+    where they start); at_weapons: {id: the summon whose particles it is} (moveset.Converter.weapon_effects), placed
+    at that summon's weapon of `weapons` ({summon: the definition's weapon}); options: the definition's EFFECTS."""
     log = log or (lambda s: None)
     table = effect_table(paks, code)
-    conv = Converter(paks, archives, first_texture_id, log=log)
+    conv = Converter(paks, archives, first_texture_id, log=log, options=options)
+    at_weapons, weapons = at_weapons or {}, weapons or {}
     missiles = missile_systems(paks, code) if projectiles else {}
     used = [table[i] for i in ids if i in table] + [missiles[p['missile']] for p in (projectiles or {}).values()
                                                      if p.get('missile') in missiles]
@@ -1121,7 +1385,7 @@ def convert_fighter(paks, archives, code, ids, first_texture_id, projectiles=Non
         if path is None:
             continue
         try:
-            add(i, conv.system(path, cap))
+            add(i, conv.system(path, cap, staying=i in staying, weapon=weapons.get(at_weapons.get(i))))
         except (KeyError, ValueError) as error:
             log('effects: id %d (%s) left out: %s' % (i, path.split('/')[-1], error))
     for i, spec in sorted((projectiles or {}).items()):
@@ -1177,6 +1441,208 @@ def emitting_frames(paks, code, ids):
                 end = max(end, delay + float(b.get('Time') or 0.0) * duration)
         out[i] = int(math.ceil(end * FPS)) if end * FPS > 2 else None
     return out
+
+
+def _line_of(em):
+    """The ends (cm, Tekken 7's effect axes) of the line a GPU emitter bursts its dots of light along: LINE_BURST
+    dots or more at a time, at most LINE_DOT across, spread over LINE_SPAN or more along one axis and a tenth of that
+    across at most (Noctis's warp streak: 2 x 1000 dots of 2 to 12 mm along 5 m, four times over), or None."""
+    spawn, size, req = em.module('Spawn'), em.module('Size'), em.module('Required')
+    if spawn is None or size is None or req is None:
+        return None
+    if max([int(b.get('Count') or 0) for b in spawn.get('BurstList') or []] or [0]) < LINE_BURST:
+        return None
+    if max(max(lo[0], hi[0]) for _, lo, hi in size.dist('StartSize', 3, [1.0, 1.0, 1.0]).samples) > LINE_DOT:
+        return None
+    lo, hi = np.zeros(3), np.zeros(3)
+    for m in em.all('Location') + em.all('Location_Seeded'):
+        a, b = (np.asarray(x, np.float64) for x in m.dist('StartLocation', 3, [0.0, 0.0, 0.0]).at(0.0))
+        lo, hi = lo + np.minimum(a, b), hi + np.maximum(a, b)
+    span = hi - lo
+    axis = int(np.argmax(span))
+    if span[axis] < LINE_SPAN or np.delete(span, axis).max() > 0.1 * span[axis]:
+        return None
+    rot, origin = emitter_frame(req)
+    centre = (lo + hi) / 2
+    ends = []
+    for x in (lo[axis], hi[axis]):
+        p = centre.copy()
+        p[axis] = x
+        ends.append(np.asarray(in_frame(list(p), rot), np.float64) + np.asarray(origin))
+    return tuple(ends)
+
+
+def _xyz(v, default=(0.0, 0.0, 0.0)):
+    """A vector property ({x, y, z}, a list, or none) -> [x, y, z]."""
+    if isinstance(v, dict):
+        return [float(v.get(k) or 0.0) for k in 'xyz']
+    if isinstance(v, (list, tuple)) and len(v) >= 3:
+        return [float(x or 0.0) for x in v[:3]]
+    return list(default)
+
+
+def _waves(em, life_s):
+    """The stages of a line emitter's filament as its vector field blows its dots: [(life fraction it shows from, to,
+    wave)], wave = {'amplitude' cm, 'wavelength' cm, 'phase', 'turn' (the plane it waves in, turns about the line),
+    'width' (of FILAMENT_WIDTH), 'jag' cm, 'crawl' (cm/s its dashes run along it), 'seed'}. The wave: WAVE_GAIN x the
+    field's intensity x its scale over the life (the product of the VectorFieldScaleOverLife modules) summed up to
+    the stage's middle (seconds), at most WAVE_MAX; its wavelength twice the field's size along the line (40 cm to
+    2 m), its phase the field's offset along it, its plane the field's roll; the dashes crawl as fast as the dots'
+    constant acceleration takes them in a quarter of their life. A field whose scale starts below STRAIGHT (Noctis's
+    core line) leaves the dots a straight line for STRAIGHT_LIFE of their life first, then waves."""
+    vf = em.module('VectorFieldLocal')
+    scales = [m.dist('VectorFieldScaleOverLifeRaw', 1, 1.0) for m in em.all('VectorFieldScaleOverLife')]
+    scale = lambda t: float(np.prod([d.mean(t)[0] for d in scales])) if scales else 1.0
+    intensity = float(vf.get('Intensity') or 0.0) if vf is not None else 0.0
+    size = _xyz(vf.get('RelativeScale3D') if vf is not None else None, (100.0, 100.0, 100.0))
+    offset = _xyz(vf.get('RelativeTranslation') if vf is not None else None)
+    roll = float((vf.get('RelativeRotation') or {}).get('roll') or 0.0) if vf is not None else 0.0
+    wavelength = round(min(200.0, max(40.0, 2.0 * abs(size[0]))), 1)
+    acc = max([abs(_xyz(m.get('Acceleration'))[0]) for m in em.all('AccelerationConstant')] or [0.0])
+    req = em.module('Required')
+    delay = float(req.get('EmitterDelay') or 0.0) if req is not None else 0.0
+    base = dict(wavelength=wavelength, phase=round(2.0 * math.pi * offset[0] / wavelength % (2.0 * math.pi), 3),
+                turn=round(roll / 360.0, 3), crawl=round(acc * life_s / 4.0, 1),
+                seed=zlib.crc32(repr((round(intensity, 2), [round(x, 1) for x in offset], round(roll, 1),
+                                      round(delay, 3))).encode()))
+
+    def amplitude(t):
+        steps = 64
+        total = sum(scale((i + 0.5) / steps * t) for i in range(steps)) / steps * t * life_s
+        return round(min(WAVE_MAX, WAVE_GAIN * intensity * total), 1)
+
+    if intensity <= 0.0:
+        return [(0.0, 1.0, dict(base, amplitude=0.0, width=1.0, jag=JAG))]
+    if scale(0.0) < STRAIGHT:
+        return [(0.0, STRAIGHT_LIFE, dict(base, amplitude=0.0, width=1.25, jag=round(JAG / 3, 2))),
+                (STRAIGHT_LIFE / 2, 1.0, dict(base, amplitude=amplitude(0.7), width=0.8, jag=JAG))]
+    a = amplitude(0.5)
+    return [(0.0, 1.0, dict(base, amplitude=a, width=0.8 if a > WAVE_MAX / 2 else 1.0, jag=JAG))]
+
+
+def _stage_alpha(first, last, ramp, shrink, life_f):
+    """A filament stage's opacity over the life: [(frame, opacity)], at most CURVE_KEYS points: from `first` (life
+    fraction) in over `ramp`, out over the second half of the stage to `last` (a stage to the end fades only as the
+    dots shrink: SizeMultiplyLife's X factor, `shrink`, to SHRINK_FADE: Tekken 7's dots stay as bright, overlapping
+    less)."""
+    if first <= 0.0 and last >= 1.0:
+        times = [i / (CURVE_KEYS - 1) for i in range(CURVE_KEYS)]
+    elif first <= 0.0:
+        times = [0.0, last / 2.0, last, 1.0]
+    else:
+        times = [0.0, first] + [first + ramp + (1.0 - first - ramp) * i / 5.0 for i in range(6)]
+
+    def alpha(t):
+        shown = 1.0 if first <= 0.0 else min(1.0, max(0.0, (t - first) / ramp))
+        if last < 1.0:
+            shown *= min(1.0, max(0.0, (last - t) / max(1e-6, (last - first) / 2.0)))
+        return shown * (abs(shrink.mean(t)[0]) ** SHRINK_FADE if shrink else 1.0)
+    return [(t * life_f, alpha(t)) for t in times]
+
+
+def _filament(line, wave):
+    """A filament's ribbons along a line (_line_of's ends, the far one first, the fighter's second; Tekken 7's effect
+    axes, cm): its points wave across the line in the wave's plane (_waves; none at the fighter, where its dots
+    start: growing over WAVE_IN), by a third of that out of it at 0.6 of its wavelength, and wander by its jag; three
+    ribbons FILAMENT_WIDTH x its width across, turned 60 degrees apart about it, each drawn from both sides; U runs
+    along it (a repeat every DASH_REPEAT cm from the fighter), V across. -> (positions, normals, UVs, triangles)."""
+    far, near = (np.asarray(x, np.float64) for x in line)
+    length = float(np.linalg.norm(far - near))
+    d = (far - near) / max(1e-6, length)
+    p1 = np.cross(d, [0.0, 0.0, 1.0] if abs(d[2]) < 0.9 else [1.0, 0.0, 0.0])
+    p1 /= np.linalg.norm(p1)
+    p2 = np.cross(d, p1)
+    turn = wave['turn'] * TURN
+    u = math.cos(turn) * p1 + math.sin(turn) * p2
+    w = np.cross(d, u)
+    lam = wave['wavelength']
+    n = int(math.ceil(length / min(FILAMENT_STEP, lam / 8.0))) + 1
+    s = np.linspace(0.0, length, n)
+    rng = np.random.default_rng(wave['seed'])
+    jag = rng.normal(0.0, wave['jag'], (n, 2))
+    jag[1:-1] = 0.25 * jag[:-2] + 0.5 * jag[1:-1] + 0.25 * jag[2:]
+    jag *= np.clip(s / 10.0, 0.0, 1.0)[:, None]
+    grow = np.clip(s / WAVE_IN, 0.0, 1.0) * wave['amplitude']
+    across = grow * np.sin(2.0 * math.pi * s / lam + wave['phase']) + jag[:, 0]
+    out = grow / 3.0 * np.sin(2.0 * math.pi * s / (0.6 * lam) + 1.7 * wave['phase']) + jag[:, 1]
+    pts = near + s[:, None] * d + across[:, None] * u + out[:, None] * w
+    t = np.gradient(pts, axis=0)
+    t /= np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-6)
+    half = FILAMENT_WIDTH * wave['width'] / 2.0
+    pos, nrm, uv, tris = [], [], [], []
+    for k in range(3):
+        q = math.cos(k * math.pi / 3.0) * u + math.sin(k * math.pi / 3.0) * w
+        q = q[None, :] - (t @ q)[:, None] * t
+        q /= np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-6)
+        o = sum(len(p) for p in pos)
+        side = np.stack([pts - half * q, pts + half * q], 1).reshape(-1, 3)
+        pos.append(side)
+        nrm.append(np.repeat(np.cross(t, q), 2, axis=0))
+        uv.append(np.stack([np.repeat(s / DASH_REPEAT, 2), np.tile([0.0, 1.0], n)], 1))
+        i = o + 2 * np.arange(n - 1)[:, None]
+        a0, a1, b0, b1 = i, i + 1, i + 2, i + 3
+        tris.append(np.concatenate([np.hstack([a0, a1, b0]), np.hstack([b0, a1, b1]),
+                                    np.hstack([b0, a1, a0]), np.hstack([b1, a1, b0])]))
+    return (np.concatenate(pos).astype(np.float32), np.concatenate(nrm).astype(np.float32),
+            np.concatenate(uv).astype(np.float32), np.concatenate(tris))
+
+
+def _filament_source(mat, core):
+    """A filament's texture (Source): along U dashes of light with dark gaps (a faint trace left in them; one repeat),
+    grainy (Tekken 7's filaments are a thousand dots each), across V a bright core (the middle third, `core` times the
+    dots' brightness: they overlap) in a soft glow (GLOW_GAIN)."""
+    h, w = 16, 256
+    c = np.abs((np.arange(h) + 0.5) / h - 0.5) * 2.0
+    core_a = np.exp(-(c / 0.3) ** 2)
+    glow_a = 0.55 * np.exp(-(c / 0.75) ** 2) * (1.0 - core_a)
+    shape = core_a + glow_a
+    bright = (core_a * core + glow_a * GLOW_GAIN) / np.maximum(shape, 1e-6)
+    rng = np.random.default_rng(101)
+    along = np.empty(w, np.float32)
+    i, on = 0, True
+    while i < w:
+        k = int(rng.integers(6, 30) if on else rng.integers(2, 10))
+        along[i:i + k] = 1.0 if on else 0.2
+        i, on = i + k, not on
+    grain = rng.random((h, w))
+    grain = (np.roll(grain, 1, 1) + 2.0 * grain + np.roll(grain, -1, 1)) / 4.0       # (wrapping, as U repeats)
+    grain = np.clip((grain - 0.3) / 0.5, 0.0, 1.0)
+    img = np.ones((h, w, 4), np.float32)
+    img[..., :3] = bright[:, None, None]
+    img[..., 3] = shape[:, None] * along[None, :] * (0.3 + 0.7 * grain)
+    return Source(('filament', core), img, SHEET_SIDE, _power(mat))
+
+
+def _spark_source(mat):
+    """A spark's texture (Source): a bright point with a soft glow and a faint cross."""
+    n = WHITE_SIDE
+    y, x = (np.mgrid[0:n, 0:n] + 0.5) / n * 2.0 - 1.0
+    r = np.hypot(x, y)
+    shape = np.clip(np.exp(-(r / 0.3) ** 2) + 0.4 * np.exp(-(np.minimum(np.abs(x), np.abs(y)) / 0.05) ** 2) *
+                    np.clip(1.0 - r, 0.0, 1.0), 0.0, 1.0)
+    img = np.ones((n, n, 4), np.float32)
+    img[..., :3] = 1.0 + 2.0 * np.exp(-(r / 0.15) ** 2)[..., None]
+    img[..., 3] = shape
+    return Source(('spark',), img, n, _power(mat))
+
+
+def _rim_colours(pos, nrm):
+    """A weapon shell's vertex colours: its edges lit, its flat faces SHELL_FACE of that (Tekken 7's fresnel lights a
+    blade's silhouette: seen as it mostly is, from a side, its edges and tip). The flat faces' normal is the axis the
+    weapon is thinnest along. -> RGBA 0..255 a vertex."""
+    centred = pos - pos.mean(0)
+    thin = np.linalg.eigh(centred.T @ centred)[1][:, 0]
+    edge = 1.0 - np.abs(nrm @ thin)
+    light = SHELL_FACE + (1.0 - SHELL_FACE) * np.clip(edge, 0.0, 1.0) ** 1.5
+    out = np.full((len(pos), 4), 255, np.uint8)
+    out[:, :3] = np.round(light * 255.0)[:, None]
+    return out
+
+
+def _follows_bone(em):
+    """Whether an emitter's character-bone module keeps its particles at its bone as that moves (Noctis's sword
+    flashing as it flies; bUpdatePositionEachFrame)."""
+    return any(m.get('bUpdatePositionEachFrame') for c in ('PM_CharacterBone', 'PM_CharacterBone2') for m in em.all(c))
 
 
 def _on_floor(em):

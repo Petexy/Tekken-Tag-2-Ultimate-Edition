@@ -120,6 +120,7 @@ uint64_t environment_key(const ShaderEnvironment& env) {
         h.add(env.multiwrite);
         for (TextureKind k : env.color_kind) h.add(static_cast<uint8_t>(k));
         h.add(env.alpha_func);
+        if (env.fighter_look) h.add(0x4C4F4F4B00ull | env.fighter_look); // (only then: the other keys stay as they were)
     }
     return h.h;
 }

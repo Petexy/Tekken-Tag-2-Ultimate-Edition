@@ -51,7 +51,10 @@ struct DrawConstants {
     float texture_scale;
     uint32_t vs_scaled_textures; // texture slots holding upscaled images
     uint32_t ps_scaled_textures;
-    uint32_t pad[2];
+    // A fighter's look (gpu/looks.h), for the pixel shaders of its draws
+    // translated for one (ShaderEnvironment::fighter_look).
+    uint32_t look;
+    uint32_t pad;
 };
 static_assert(sizeof(DrawConstants) % 16 == 0);
 

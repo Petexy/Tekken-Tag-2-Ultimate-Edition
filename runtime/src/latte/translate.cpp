@@ -1078,7 +1078,10 @@ void Translator::emit_export(const CfInstruction& cf) {
         }
         for (int target : targets) {
             switch (env_.color_kind[target]) {
-            case TextureKind::kFloat: line(format("o%d = %s;", target, vec(b).c_str())); break;
+            case TextureKind::kFloat:
+                if (index == 0 && env_.fighter_look == 1) line(format("o%d = look_colour(%s);", target, vec(b).c_str()));
+                else line(format("o%d = %s;", target, vec(b).c_str()));
+                break;
             case TextureKind::kSint:
                 line(format("o%d = ivec4(%s, %s, %s, %s);", target, component(b, 0, false).c_str(), component(b, 1, false).c_str(),
                             component(b, 2, false).c_str(), component(b, 3, false).c_str()));
@@ -1392,6 +1395,44 @@ std::string Translator::header() const {
                 "    return ivec4(GuestVec4s(uvec2(b.x & ~15u, b.y)).v[index]);\n"
                 "}\n",
                 vs_ ? "vs" : "ps");
+    if (!vs_ && env_.fighter_look) {
+        // A fighter's look (gpu/looks.h; its bytes in dc.scaled.z): the
+        // pixels an ordered dither of the title's pixels leaves out (a 4x4
+        // Bayer matrix against the opacity) are not drawn, edges stay while
+        // they light up; edges are where the surface's distance changes
+        // fast from pixel to pixel (the silhouette, surfaces seen edge on);
+        // surfaces turning away from the camera are lit more (look_lit).
+        h += "float look_rim = 0.0, look_lit = 0.0;\n"
+             "float look_byte(uint shift) { return float((dc.scaled.z >> shift) & 0xFFu) / 255.0; }\n"
+             "void look_cut() {\n"
+             "    float w = 1.0 / gl_FragCoord.w;\n"
+             "    float slope = length(vec2(dFdx(w), dFdy(w))) * dc.params.z / max(w, 1e-6);\n"
+             "    look_rim = smoothstep(0.002, 0.007, slope);\n"
+             "    look_lit = smoothstep(0.0003, 0.004, slope);\n"
+             "    const float bayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);\n"
+             "    ivec2 p = ivec2(gl_FragCoord.xy / dc.params.z) & 3;\n"
+             "    bool kept = (bayer[p.y * 4 + p.x] + 0.5) / 16.0 < look_byte(0u) || look_rim * look_byte(16u) > 0.5;\n"
+             "    if ((dc.scaled.z & 0x2000000u) != 0u || !kept) demote;\n"
+             "}\n";
+        // Its colours: lighter and darker tones of the warp's light (the
+        // brightness flattened, so that near-black clothes come near the
+        // skin; highlights glassy), from sky blue to a grey blue as it fades
+        // out; fading in, from sky blue through indigo to its own colours
+        // tinted violet; edges blue-white. (The title's scene image holds a
+        // third or so of what it shows: these show about Tekken 7's colours.)
+        h += "vec4 look_colour(vec4 c) {\n"
+             "    float glow = look_byte(8u), rim = look_rim * look_byte(16u);\n"
+             "    bool appearing = (dc.scaled.z & 0x1000000u) != 0u;\n"
+             "    float l = clamp(dot(c.rgb, vec3(0.299, 0.587, 0.114)) * 4.0, 0.0, 1.0);\n"
+             "    float shade = 0.72 + 0.3 * sqrt(l) + 0.35 * look_lit;\n"
+             "    vec3 blue = vec3(0.11, 0.17, 0.3) * shade + vec3(0.09, 0.09, 0.07) * smoothstep(0.7, 1.0, l);\n"
+             "    vec3 dim = (appearing ? vec3(0.08, 0.066, 0.2) : vec3(0.105, 0.115, 0.155)) * shade;\n"
+             "    vec3 rgb;\n"
+             "    if (appearing && glow < 0.5) rgb = mix(c.rgb, c.rgb * vec3(0.9, 0.8, 1.2) + vec3(0.01, 0.0, 0.03), min(1.0, glow * 2.5));\n"
+             "    else rgb = mix(dim, blue, appearing ? glow * 2.0 - 1.0 : glow);\n"
+             "    return vec4(mix(rgb, vec3(0.22, 0.28, 0.36), rim), c.a);\n"
+             "}\n";
+    }
     h += "float mul_ni(float a, float b) { return (a == 0.0 || b == 0.0) ? 0.0 : a * b; }\n";
     h += "int mulhi_i(int a, int b) { int hi, lo; imulExtended(a, b, hi, lo); return hi; }\n";
     h += "uint mulhi_u(uint a, uint b) { uint hi, lo; umulExtended(a, b, hi, lo); return hi; }\n";
@@ -1501,6 +1542,10 @@ bool Translator::run(std::string& error) {
                         env_.ps_front_face_all_bits ? "gl_FrontFacing ? -1 : 0"
                                                     : "floatBitsToInt(gl_FrontFacing ? 1.0 : 0.0)"));
         }
+    }
+    if (!vs_ && env_.fighter_look) {
+        line("look_cut();"); // (first: its derivatives need every pixel of a quad)
+        uses_kill_ = true;
     }
     emit_program(p_, 0, false);
     std::string main_body = body_;
