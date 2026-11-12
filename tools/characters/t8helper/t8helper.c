@@ -37,9 +37,9 @@
  * reimplemented here.
  *
  * The game's functions are called on a thread of their own; no address or code comes from the connection. The only
- * functions ever called are the four below, each checked by a hash of its first bytes before any call, so another
- * build of the game is refused, not crashed. The moveset archive (tkdata.bin) is never opened by the helper, and
- * nothing is written into the game's files, saves or prefix (but the helper's copy at C:\t8helper.exe).
+ * functions ever called are the four of a build below, each checked by a hash of its first bytes before any call, so
+ * another build of the game is refused, not crashed. The moveset archive (tkdata.bin) is never opened by the helper,
+ * and nothing is written into the game's files, saves or prefix (but the helper's copy at C:\t8helper.exe).
  *
  * Written for this project (MIT); no third-party code.
  */
@@ -51,29 +51,38 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------ the game (TEKKEN 8, Steam build 25221600) */
+/* ------------------------------------------------------------ the game (TEKKEN 8) */
 
 #define GAME_EXE "Polaris-Win64-Shipping.exe"
 /* Addresses are the ones at the exe's preferred base; `attach` moves them all to where the game is loaded. */
 #define PREFERRED_BASE 0x140000000ull
 
-/* The game's functions the helper calls, each checked before any call by a hash (64-bit FNV-1a) of its first bytes. */
+/* A function of the game the helper calls, checked before any call by a hash (64-bit FNV-1a) of its first bytes. */
 struct Function {
     unsigned long long address;
     size_t length;               /* bytes hashed */
     unsigned long long hash;
 };
-/* memory = ALLOCATE(size): the game's allocator (16-byte aligned), for the motbin's copy and the field table */
-static const struct Function ALLOCATE = {0x142cd0070ull, 16, 0x9A0F7237C356D9F4ull};
-/* request = REQUEST_FILE(archive, path): makes a request (0xa0 bytes, the path copied) and queues it on the archive */
-static const struct Function REQUEST_FILE = {0x1459f9c50ull, 16, 0xAD224657991D6490ull};
-/* PROTECT_FIELDS(motbin): the motbin request's completion callback; turns the six fields of every move into the
- * game's 16-byte form, in place, at the same offsets */
-static const struct Function PROTECT_FIELDS = {0x1418acfb0ull, 16, 0xEF46830222BE4AC8ull};
-/* value = READ_FIELD(field): the getter the battle code reads a protected field with (a u32 in eax) */
-static const struct Function READ_FIELD = {0x141809d00ull, 16, 0x4C7611802A9CD63Bull};
-/* Read, never called: the archive (a pointer to it) and the task manager (a pointer to it). */
-static const unsigned long long ARCHIVE = 0x149b8b970ull, TASK_MANAGER = 0x149880000ull;
+/* A build of the game the helper knows (its Steam build id); a game update moves what the helper uses:
+ *   memory = allocate(size): the game's allocator (16-byte aligned), for the motbin's copy and the field table
+ *   request = request_file(archive, path): makes a request (0xa0 bytes, the path copied) and queues it on the archive
+ *   protect_fields(motbin): the motbin request's completion callback; turns the six fields of every move into the
+ *       game's 16-byte form, in place, at the same offsets
+ *   value = read_field(field): the getter the battle code reads a protected field with (a u32 in eax)
+ *   archive, task_manager: read, never called: a pointer to the archive, a pointer to the task manager */
+struct Build {
+    const char* steam_build;
+    struct Function allocate, request_file, protect_fields, read_field;
+    unsigned long long archive, task_manager;
+};
+static const struct Build BUILDS[] = {
+    {"25221600", {0x142cd0070ull, 16, 0x9A0F7237C356D9F4ull}, {0x1459f9c50ull, 16, 0xAD224657991D6490ull},
+     {0x1418acfb0ull, 16, 0xEF46830222BE4AC8ull}, {0x141809d00ull, 16, 0x4C7611802A9CD63Bull},
+     0x149b8b970ull, 0x149880000ull},
+    {"26155785", {0x142cdc060ull, 16, 0x9A0F7237C356D9F4ull}, {0x145a1a2f0ull, 16, 0xAD224657991D6490ull},
+     {0x1418b2f00ull, 16, 0xEF46830222BE4AC8ull}, {0x14180dab0ull, 16, 0x4C7611802A9CD63Bull},
+     0x149bdc500ull, 0x1498d0700ull},
+};
 enum {
     ARCHIVE_OPEN = 0x80,         /* u8: 1 once the moveset archive is open */
     ARCHIVE_READING = 0xc0,      /* the read in flight (0: none) */
@@ -95,6 +104,7 @@ static const unsigned FIELD_OFFSETS[FIELDS] = {0x00, 0x20, 0x58, 0x78, 0xd0, 0xf
 enum { IDLE_WAIT = 30000, REQUEST_WAIT = 120000, CALL_WAIT = 30000, FIELDS_WAIT = 120000, POLL = 5 };
 
 static HANDLE g_game;
+static const struct Build* g_build;          /* the game's build (once `attach` has checked it) */
 static int g_checked, g_ready;
 static unsigned long long g_delta;           /* where the game is loaded - PREFERRED_BASE */
 static unsigned long long g_archive;         /* the archive (once `ready`) */
@@ -247,6 +257,7 @@ static int matches(const struct Function* f) {
 
 static void attach(DWORD requested_pid) {
     g_checked = g_ready = 0;
+    g_build = NULL;
     const DWORD pid = requested_pid ? requested_pid : game_pid();
     if (!pid) {
         out_printf("error Tekken 8 is not running\n");
@@ -265,12 +276,16 @@ static void attach(DWORD requested_pid) {
         return;
     }
     g_delta = base - PREFERRED_BASE;
-    const struct Function* all[] = {&ALLOCATE, &REQUEST_FILE, &PROTECT_FIELDS, &READ_FIELD};
-    for (size_t i = 0; i < sizeof all / sizeof all[0]; ++i) {
-        if (!matches(all[i])) {
-            out_printf("error this Tekken 8 build is not the one the helper knows\n");
-            return;
+    for (size_t i = 0; i < sizeof BUILDS / sizeof BUILDS[0] && !g_build; ++i) {
+        const struct Build* b = &BUILDS[i];
+        if (matches(&b->allocate) && matches(&b->request_file) && matches(&b->protect_fields) &&
+            matches(&b->read_field)) {
+            g_build = b;
         }
+    }
+    if (!g_build) {
+        out_printf("error this Tekken 8 build is not the one the helper knows\n");
+        return;
     }
     g_checked = 1;
     out_printf("ok\n");
@@ -278,9 +293,9 @@ static void attach(DWORD requested_pid) {
 
 static void ready(void) {
     unsigned char open = 0;
-    g_archive = g_checked ? read_u64(at(ARCHIVE)) : 0;
+    g_archive = g_checked ? read_u64(at(g_build->archive)) : 0;
     if (g_archive) read_game(g_archive + ARCHIVE_OPEN, &open, 1);
-    g_ready = g_archive && open == 1 && read_u64(at(TASK_MANAGER));
+    g_ready = g_archive && open == 1 && read_u64(at(g_build->task_manager));
     out_printf("%d\n", g_ready);
 }
 
@@ -339,7 +354,7 @@ static int call(const struct Function* f, unsigned long long a1, unsigned long l
 
 static unsigned long long allocate(unsigned long long size) {
     unsigned long long memory = 0;
-    return call(&ALLOCATE, size, 0, &memory) ? memory : 0;
+    return call(&g_build->allocate, size, 0, &memory) ? memory : 0;
 }
 
 /* ------------------------------------------------------------ reading files with the game's reader */
@@ -403,7 +418,7 @@ static unsigned long long read_file(const char* path) {
     SIZE_T done;
     unsigned long long request = 0;
     if (!text || !WriteProcessMemory(g_game, text, path, len, &done) ||
-        !call(&REQUEST_FILE, g_archive, (unsigned long long)(size_t)text, &request) || !request) {
+        !call(&g_build->request_file, g_archive, (unsigned long long)(size_t)text, &request) || !request) {
         if (text) VirtualFreeEx(g_game, text, 0, MEM_RELEASE);
         return 0;
     }
@@ -452,9 +467,10 @@ static void fetch(void) {
 
 /* ------------------------------------------------------------ the protected move fields */
 
-/* Calls READ_FIELD on every field of every move (`moves` moves of MOVE_SIZE bytes from `first`), all on one thread of
- * its own, storing the u32 values one after the other at `table`: -> whether the thread finished. The stub keeps its
- * state in rbx (the move), esi (moves left), rdi (the table) and r13 (the getter), which the getter preserves. */
+/* Calls the getter (the build's read_field) on every field of every move (`moves` moves of MOVE_SIZE bytes from
+ * `first`), all on one thread of its own, storing the u32 values one after the other at `table`: -> whether the thread
+ * finished. The stub keeps its state in rbx (the move), esi (moves left), rdi (the table) and r13 (the getter), which
+ * the getter preserves. */
 static int read_fields(unsigned long long first, unsigned moves, unsigned long long table) {
     unsigned char code[256];
     size_t n = 0;
@@ -464,7 +480,7 @@ static int read_fields(unsigned long long first, unsigned moves, unsigned long l
     put64(code, &n, 0x48, 0xBB, first);                                       /* mov rbx, first */
     code[n++] = 0xBE; memcpy(code + n, &moves, 4); n += 4;                    /* mov esi, moves */
     put64(code, &n, 0x48, 0xBF, table);                                       /* mov rdi, table */
-    put64(code, &n, 0x49, 0xBD, at(READ_FIELD.address));                      /* mov r13, getter */
+    put64(code, &n, 0x49, 0xBD, at(g_build->read_field.address));            /* mov r13, getter */
     const size_t loop = n;
     code[n++] = 0x85; code[n++] = 0xF6;                                       /* test esi, esi */
     code[n++] = 0x74; const size_t done = n++;                                /* je done (rel8: 107 bytes on) */
@@ -533,7 +549,7 @@ static void protected_fields(const char* path) {
         out_printf("error cannot copy the motbin in the game\n");
         return;
     }
-    if (!call(&PROTECT_FIELDS, copy, 0, &ignored) ||
+    if (!call(&g_build->protect_fields, copy, 0, &ignored) ||
         !read_fields(copy + MOTBIN_BASE + moves_at, (unsigned)moves, table)) {
         out_printf("error the game did not give the fields\n");
         return;

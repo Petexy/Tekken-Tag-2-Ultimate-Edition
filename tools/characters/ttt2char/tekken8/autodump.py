@@ -120,12 +120,16 @@ ANMBIN_ENTRY = 0x38
 ANMBIN_HEAD = 0x68                               # the counts (4) and the list offsets (0x38) end here
 MVL_MAGIC = b'MVLT'
 
-# the build of the game the helper knows: the four functions it calls (t8helper.c's ALLOCATE, REQUEST_FILE,
-# PROTECT_FIELDS, READ_FIELD) as its `attach` checks them, (address at the exe's preferred base, bytes, their 64-bit
-# FNV-1a hash); known_build reads them from the exe's file
+# the builds of the game the helper knows (Steam's build ids): the four functions it calls in each (t8helper.c's
+# BUILDS: allocate, request_file, protect_fields, read_field) as its `attach` checks them, (address at the exe's
+# preferred base, bytes, their 64-bit FNV-1a hash); known_build reads them from the exe's file
 PREFERRED_BASE = 0x140000000
-HELPER_FUNCTIONS = ((0x142cd0070, 16, 0x9A0F7237C356D9F4), (0x1459f9c50, 16, 0xAD224657991D6490),
-                    (0x1418acfb0, 16, 0xEF46830222BE4AC8), (0x141809d00, 16, 0x4C7611802A9CD63B))
+HELPER_BUILDS = {
+    '25221600': ((0x142cd0070, 16, 0x9A0F7237C356D9F4), (0x1459f9c50, 16, 0xAD224657991D6490),
+                 (0x1418acfb0, 16, 0xEF46830222BE4AC8), (0x141809d00, 16, 0x4C7611802A9CD63B)),
+    '26155785': ((0x142cdc060, 16, 0x9A0F7237C356D9F4), (0x145a1a2f0, 16, 0xAD224657991D6490),
+                 (0x1418b2f00, 16, 0xEF46830222BE4AC8), (0x14180dab0, 16, 0x4C7611802A9CD63B)),
+}
 REFUSED = 'this Tekken 8 build is not the one the helper knows'       # (its attach's answer for another build)
 UNKNOWN_BUILD = ('this Tekken 8 build (Steam build %s, a game update) is not the one the helper knows: Tekken 8 is not '
                  'started (a later version of Tekken Tag 2 Ultimate Edition will know it)')
@@ -240,9 +244,10 @@ def _fnv1a(data):
 
 
 def known_build(game):
-    """Whether the Tekken 8 in `game` is the build the helper knows: HELPER_FUNCTIONS' bytes, read from the exe's file
-    (its sections as the PE header lays them out) as the helper's attach checks them in the running game. False when
-    they differ (a game update), or the exe cannot be read. Nothing is started; a few bytes are read."""
+    """Whether the Tekken 8 in `game` is a build the helper knows: one of HELPER_BUILDS whose functions' bytes, read
+    from the exe's file (its sections as the PE header lays them out), all match, as the helper's attach checks them in
+    the running game. False when none does (a game update), or the exe cannot be read. Nothing is started; a few bytes
+    are read."""
     try:
         with open(os.path.join(game, EXE), 'rb') as f:
             head = f.read(0x1000)
@@ -253,18 +258,19 @@ def known_build(game):
             optional, = struct.unpack_from('<H', head, pe + 20)
             # (virtual size, address, size in the file, offset in the file) of each section
             sections = [struct.unpack_from('<IIII', head, pe + 24 + optional + 40 * i + 8) for i in range(count)]
-            for address, length, hash64 in HELPER_FUNCTIONS:
+
+            def matches(address, length, hash64):
                 rva = address - PREFERRED_BASE
                 raw = next((raw + rva - va for vsize, va, size, raw in sections
                             if va <= rva and rva + length <= va + min(vsize, size)), None)
                 if raw is None:
                     return False
                 f.seek(raw)
-                if _fnv1a(f.read(length)) != hash64:
-                    return False
+                return _fnv1a(f.read(length)) == hash64
+
+            return any(all(matches(*function) for function in functions) for functions in HELPER_BUILDS.values())
     except (OSError, struct.error):
         return False
-    return True
 
 
 def ready_helper(cache):
