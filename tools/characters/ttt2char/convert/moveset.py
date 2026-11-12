@@ -43,6 +43,47 @@ SEQ0 = 0x800D                       # a cancel direction from here on names an i
 # A move the Tekken 8 reader could not name (its move_name is '') is '#<index>' here (the converter's `name`, idmaps'
 # reaction evidence) and '<own prefix>_#<index>' in the TTT2 moveset (Zbr_#1523)
 UNNAMED = M.UNNAMED
+# A definition names such a move by its name key instead (+0x00: the same in every build of Tekken 8, where an update
+# that adds moves changes the index): 'key:<8 hex digits>' ('key:22ca2406'; in a pattern, drop_moves, as part of it),
+# which resolve_keys makes the move's name here once its moveset's moves are named
+KEY_REF = re.compile(r'key:([0-9a-f]{8})')
+KEYED = ('MOVESET', 'PREFABS')
+
+
+def resolve_keys(d, k):
+    """Sets the definition's MOVESET and PREFABS with every move named by its key (KEY_REF, anywhere in them) named
+    as Tekken 8 moveset k names it (its name, else UNNAMED + its index; escaped in a longer string: a pattern), from
+    the definition as written: so again for another moveset (another build's). A definition without keys stays as it
+    is. ValueError for a key none of k's moves has."""
+    written = vars(d).setdefault('_KEYED_AS_WRITTEN', {n: getattr(d, n) for n in KEYED if hasattr(d, n)})
+    index = {}                          # {name key: move index}, once a key is found
+    missing = set()
+
+    def name(found, alone):
+        if not index:
+            index.update((move['name_key'], i) for i, move in enumerate(k.tables['moves']))
+        i = index.get(int(found.group(1), 16))
+        if i is None:
+            missing.add(found.group(0))
+            return found.group(0)
+        n = k.move_name(i) or UNNAMED + str(i)
+        return n if alone else re.escape(n)
+
+    def resolved(v):
+        if isinstance(v, dict):
+            return {resolved(a): resolved(b) for a, b in v.items()}
+        if isinstance(v, (list, tuple, set, frozenset)):
+            return type(v)(resolved(x) for x in v)
+        if not isinstance(v, str):
+            return v
+        return KEY_REF.sub(lambda found: name(found, found.group(0) == v), v)
+    named = {n: resolved(v) for n, v in written.items()}
+    if missing:
+        raise ValueError('%s\'s Tekken 8 moveset has no move of %s' % (d.NAME, ', '.join(sorted(missing))))
+    if index:
+        for n, v in named.items():
+            setattr(d, n, v)
+
 
 # ------------------------------------------------------------------------------------------------ rules
 # The requirement ids that are always false in TTT2 (the mode or system does not exist there)
@@ -893,7 +934,8 @@ class Converter:
     true_reqs = frozenset()             # (requirement, parameter) pairs true by the definition, set by __init__
     gated_damage8 = False               # the definition's MOVESET['gated_damage8'] (GATED_DAMAGE8), set by __init__
     # reactions of the fighter's that keep their own move where the reaction evidence puts another of the same kind in
-    # their place (MOVESET['own_reactions']: source names, '#<index>' for unnamed Tekken 8 moves; target()), by __init__
+    # their place (MOVESET['own_reactions']: source names, '#<index>' for unnamed Tekken 8 moves (resolve_keys);
+    # target()), by __init__
     own_reactions = frozenset()
     flag_reqs, flag_props = {}, {}      # the definition's state flags (FLAG_ON): test id -> (variable, kind), property
                                         # id -> variable, set by __init__

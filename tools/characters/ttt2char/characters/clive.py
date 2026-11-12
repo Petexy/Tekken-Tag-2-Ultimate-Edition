@@ -218,27 +218,27 @@ PREFABS = {
     # what reaches in these moves is a later box: the middle of the blade's sweep, not its tip (u/f+1 follow-ups, up,
     # d/f+2 hit on ground), and the hand's point half a metre out (u/f+2's last); d/b+2,1's ice spikes (0.74 to 2.01 m
     # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall)
-    'hit_boxes': {'#1475': (0, 2), '#1477': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3)},
+    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3)},
     # u/f+4, in the air: the toe's line to a point past the knee (TTT2 has no such points)
-    'hit_spots': {'#1495': (16, 0, ('joint', 'R_Foot', (75.2, -151.5, 0.0), (0.0, 0.0, 0.0)),
+    'hit_spots': {'key:ecfbc7f8': (16, 0, ('joint', 'R_Foot', (75.2, -151.5, 0.0), (0.0, 0.0, 0.0)),
                             ('joint', 'R_LowerLeg', (0.0, 500.0, 200.0), (0.0, 0.0, 0.0)))},
     # the last hit of phoenix 3,2: she is launched further than in Tekken 8 here; the path is 800 mm longer ahead (the same)
-    'scene_reach': {'#1667': 800.0},
+    'scene_reach': {'key:5c7c9f59': 800.0},
     # the loops of Wings of Light and of its walks: no row of their own, nothing hides the wings; clip 0 is as long (80)
-    'body_clip_moves': {'#1602': 0, '#1604': 0, '#1605': 0, '#1606': 0, '#1607': 0},
+    'body_clip_moves': {'key:50cc78a8': 0, 'key:d6291e44': 0, 'key:8b2abee3': 0, 'key:b463dca1': 0, 'key:0fcdd6ec': 0},
     # the throws with Torgal: their scene stays where they began (prefabs8 HELD SCENES). 1+3 takes him 4.4 m back
-    # while Torgal bites the victim 1.6 m ahead of the scene's origin; followed, the dog played 4.4 m short. #1923 is
-    # its version from the opponent's left side (1+3 or 2+4)
-    'held_moves': ('Okm_FLnage_n', '#1923'),
+    # while Torgal bites the victim 1.6 m ahead of the scene's origin; followed, the dog played 4.4 m short.
+    # key:22ca2406 is its version from the opponent's left side (1+3 or 2+4)
+    'held_moves': ('Okm_FLnage_n', 'key:22ca2406'),
     # .. and their scene cut (prefabs8 SCENE CUTS): 2.26 m of that is one frame, 66, where Tekken 8 cuts to Torgal (he
     # teleported); taken back, and the victim thrown that much further from frame 40, where his push starts, so the
-    # bite and the slash meet as in Tekken 8. #1924 is #1923's victim
-    'scene_cuts': {'Okm_FLnage_n': (66, 'Okm_FLnage_y', 40), '#1923': (66, '#1924', 40)},
+    # bite and the slash meet as in Tekken 8. key:fbb1941f is key:22ca2406's victim
+    'scene_cuts': {'Okm_FLnage_n': (66, 'Okm_FLnage_y', 40), 'key:22ca2406': (66, 'key:fbb1941f', 40)},
     # .. and their victim's landing (prefabs8 TWISTS): Tekken 8 leaves him on his back, head toward Clive, where
     # TTT2's get-up sat him up turned away and spun him round; a half twist in his flight (hips above 1 m from 162 to
     # 190), in his hips' own frame so his somersault carries on, lands him feet toward Clive by frame 196, as TTT2's
     # throws do, and he rises straight
-    'twists': {'Okm_FLnage_y': (164, 188, 180.0, 196), '#1924': (164, 188, 180.0, 196)},
+    'twists': {'Okm_FLnage_y': (164, 188, 180.0, 196), 'key:fbb1941f': (164, 188, 180.0, 196)},
 }
 WEAPONS = [
     {'mesh': _EX0, 'bone': 'ATH_swordR_1st', 'parent': 'TE_R_jnt', 'pair': 0, 'summon': 0,
@@ -283,7 +283,7 @@ UNBLURRED = tuple('%s_%s' % (CODE, m['name']) for m in _PREFAB_MODELS) + ('%s_wp
 # (y along the blade: (0, 1000, 0) is the sword's tip, (0, 1300, 0) the longer blades'), 120 the left hand's
 # (the holding joints leave the hands in 18 moves, up to 3 m: Dia's shot, Garuda's claw: 'joint': summons8.AT_JOINT)
 HIT_JOINTS = {121: ('R_Have', 'joint'), 120: ('L_Have', 'joint'),
-              127: ('R_Have', 'joint'),     # (127: #1697, the blade's tip as on 121)
+              127: ('R_Have', 'joint'),     # (127: key:a91bb3a0, the blade's tip as on 121)
               12: ('L_Hand', 12)}           # (Leviathan's shots: lines up to 4 m from his left hand, d/b+1,1, d/f+3,1)
 # his Tekken 8 effects converted (convert/effects8.py): effect id -> TTT2 body part (0 his hips, 8 / 12 his right / left
 # forearm, 9 / 13 his right / left hand, 15 his right knee; Tekken 8's 120, his left hand's holding joint: 13). 2 is only
@@ -367,12 +367,12 @@ TEKKEN8_DISKS = {'looks': {30: 'ink', 36: 'ink', 37: 'ink', 94: 'ink', 2: 'fire'
                                              ice='Ice_model', wing='Wing')},
                  'blades': (('R_Have', (0.0, 1000.0, 0.0)), ('L_Have', (0.0, 1000.0, 0.0))), 'conditions': {1028: 0},
                  # his body burning as the Phoenix Shift starts (Tekken 8's body look 0: his material; here flames on
-                 # his body parts that go with him). Tekken 8's look burns him until he vanishes (#1649: f1-9 a molten
+                 # his body parts that go with him). Tekken 8's look burns him until he vanishes (key:4235193d: f1-9 a molten
                  # body, hidden from f10): 9 frames of flames (each lives 12 more) and none of a move that does not hide
                  # him. Hidden, TTT2's hide leaves nothing where Tekken 8 has a dark haze and his body forming: his hides
                  # last 5 frames. The look's 60 frames go on into the moves out of it (from its f15): Tekken 8's clips
                  # show him molten through their first ~18 frames (PHX.2, .4: f50-66), fading by ~f70 (its last ~30
-                 # frames: plain), so 60 - 15 - 30 = 15 frames of flames there (carry: skin8_carried); Heatwave (#1650)
+                 # frames: plain), so 60 - 15 - 30 = 15 frames of flames there (carry: skin8_carried); Heatwave (key:436afc2c)
                  # sets its own 30 frames (his body forming, grey): none
                  'skins': {0: dict(look='hand', parts=(2, 3, 5, 7, 8, 9, 11, 12, 13, 15, 16, 18, 19), burn=9,
                                with_hide=True, hidden=5, carry=30)},
@@ -505,7 +505,7 @@ MOVESET = {
     # 360 degrees on the ground
     'keep_body_handoffs': True,
     # his round-start move (the donor's is kept: its mode checks are Tekken 8's)
-    'drop_moves': r'^Okm_Direct$|^#20(0[89]|1[013])$',
+    'drop_moves': r'^Okm_Direct$|^(key:4e6639ee|key:0dac91b5|key:8ae82b83|key:65b77185|key:d36b5f13)$',
     # the donor's round-start list keeps its targets except its own moves
     'direct': [(r'^La_sKAM00_$', 'move', ['Okm_sKAM00_']),                      # Lars's stance -> his
                (r'^(la|mk)_s', 'anim', ['okm_s%02d' % k for k in range(3)]),    # intros
@@ -513,19 +513,19 @@ MOVESET = {
     # TTT2 bounds (Tekken 8 has none, and his tornados do not become any): an air hit slams the opponent into the
     # floor once per juggle (convert/move_overrides.py). f+3 Knight's Gambit, f,F+2 Soul Cleave, f+2,2,2's last hit
     # (Burning Chain) and jump 1 (Griffin Hunter) out of every jump, on time or late (bake_air8's copies of the air
-    # moves are made after the bounds, so they bound alike). (Moves no name is known for are '#<index>': indices of
-    # the game build the names were read from.)
+    # moves are made after the bounds, so they bound alike). (Moves no name is known for are named by their key,
+    # 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
     'bounds': {
         'Okm_6LK': True,       # f+3
         'Okm_66RP': True,      # f,F+2
-        '#1632': True,         # f+2,2,2, last hit
-        '#1451': True,         # jump 1: straight up
-        '#1452': True,         # ... straight up, late
-        '#1453': True,         # ... forward (u/f+1 too)
-        '#1454': True,         # ... forward, late
-        '#1455': True,         # ... out of #1423, late
-        '#1456': True,         # ... back (u/b+1 too)
-        '#1457': True,         # ... back, late
+        'key:df8d3d8d': True,         # f+2,2,2, last hit
+        'key:19192c47': True,         # jump 1: straight up
+        'key:6a0b9902': True,         # ... straight up, late
+        'key:65a1ea48': True,         # ... forward (u/f+1 too)
+        'key:0585562f': True,         # ... forward, late
+        'key:0ca5fca3': True,         # ... out of key:a14f5e76, late
+        'key:c42755c9': True,         # ... back (u/b+1 too)
+        'key:4bd7b552': True,         # ... back, late
     },
     # the generic throw keeps the donor's row, active at 12 only: Tekken 8's frames
     'active_frames': {'Thrmv_B2_01': (15, 17),

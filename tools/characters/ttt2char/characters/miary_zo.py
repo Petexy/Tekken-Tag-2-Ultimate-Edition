@@ -184,14 +184,14 @@ MOVESET = {
     # floor once per juggle (convert/move_overrides.py). d+2 Famakin'naina, d/f+1,1,2's last hit (Famakin'ny Ala),
     # b+1+2 Ampinga Afo, Morengy Miroso 1+2 (Tafika Maitso) and ws3 Daka Manorana; d+2 and d/f+1,1,2 go on from frame
     # 24 in a copy of themselves under Tekken 8's requirement 126, which bounds alike. (Moves no name is known for are
-    # '#<index>': indices of the game build the names were read from.)
+    # named by their key, 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
     'bounds': {
         'Wkz_2RP': True,       # d+2
-        '#1663': True,         # d+2, its copy
+        'key:feef0f9b': True,         # d+2, its copy
         'Wkz_3LPLPRP': True,   # d/f+1,1,2, last hit
-        '#1672': True,         # d/f+1,1,2, its copy
+        'key:2c183b94': True,         # d/f+1,1,2, its copy
         'Wkz_4WP': True,       # b+1+2
         'Wkz_6LK_WP': True,    # MOR 1+2
-        '#1705': True,         # ws3
+        'key:d55d0c73': True,         # ws3
     },
 }
