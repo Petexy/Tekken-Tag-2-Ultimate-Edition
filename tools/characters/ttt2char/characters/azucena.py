@@ -106,14 +106,15 @@ MOVESET = {
     # TTT2 bounds (Tekken 8 has none, and her tornados do not become any): an air hit slams the opponent into the
     # floor once per juggle (convert/move_overrides.py). d+1 Hand Drip Hammer, d/f+1,4,1~2's last hit (Full Body
     # Grande Combo), Libertador 3,1's 1 (Blend Reganar), Libertador 4,2's 2 (Blend Martillo), u/f+4 Tacones Drip,
-    # u/f+3+4's second kick (Ortiz Molino: #1620 kicks first) and f,f+4 Demitasse Molino. (Moves no name is known
-    # for are '#<index>', 'Cat_#<index>' in her TTT2 moveset: indices of the game build the names were read from.)
-    'bounds': {'Cat_t_slp00': True, '#1807': True, '#1677': True, '#1696': True, 'Cat_jprk00F': True,
-               '#1621': True, 'Cat_66rk': True},
+    # u/f+3+4's second kick (Ortiz Molino: key:b24b14e0 kicks first) and f,f+4 Demitasse Molino. (Moves no name is known
+    # for are named by their key, 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
+    'bounds': {'Cat_t_slp00': True, 'key:c577d66e': True, 'key:b949c552': True, 'key:42ebda7e': True,
+               'Cat_jprk00F': True, 'key:17ee0001': True, 'Cat_66rk': True},
     # her reactions that keep Tekken 8's move (convert/moveset.py Converter.target): f+2,1,4's and d/b+3+4's launch
-    # away from her (#391, from behind #392), which the reaction evidence (only Feng's f+2,1,4 has the same notation)
-    # made ym_y01L, a flip back over her: both launch, so neither the fall classes nor the frames tell them apart
-    'own_reactions': ('#391', '#392'),
+    # away from her (key:d206d081, from behind key:3be55c5b), which the reaction evidence (only Feng's f+2,1,4 has the
+    # same notation) made ym_y01L, a flip back over her: both launch, so neither the fall classes nor the frames tell
+    # them apart
+    'own_reactions': ('key:d206d081', 'key:3be55c5b'),
     # u/f+1+2 (Thrmv_B1_R0): Tekken 8's catch point is the left hand (13, 0)(13, 1), but her animation reaches with the
     # right one (TE_R 670 mm ahead of her at the catch frame, TE_L 400 ahead and 400 to the side), so TTT2's catch
     # at the left hand never touched anyone: the right hand, the chest kept
