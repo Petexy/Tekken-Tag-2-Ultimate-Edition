@@ -32,8 +32,11 @@ build the helper knows, so Steam running saves it); a Tekken 7 fighter's entry i
 whether that folder is an installed game the importer can read.
 
 owned: which DLC fighters the player's Steam account owns, as Steam tells the game ({"owned": {name: true|false}}):
-the helper runs hidden in Tekken 7's Proton prefix while Proton starts it and it asks (not the game). Steam must be
-running; when it is not (or Tekken 7 cannot be used) the answer is {"error": "<why>"} at once. Steam is never started.
+each game's helper runs hidden in that game's Proton prefix while Proton starts it and it asks (not the game): Tekken
+7's for its DLC fighters, Tekken 8's for its own, each when that game is installed. A game that cannot be asked
+leaves its fighters out, and "errors": {"tekken7"|"tekken8": "<why>"} says why. Steam must be running; when it is not
+(or no game can be asked) the answer is {"error": "<why>"} at once (with "errors" when both games were asked). Steam
+is never started. Only the answer goes to stdout: what runs meanwhile prints to stderr.
 SIGTERM (the launcher's Cancel) ends the helper's session as its end does, and nothing is printed (exit code 143).
 
 main: what this repository's main branch has that the build of commit SHA (the launcher's) lacks, as GitHub tells
@@ -47,6 +50,7 @@ The exit code is 0 whenever the object is printed; adding and removing fighters 
 Needs only Python 3; works from a read-only copy (nothing is written next to it).
 """
 import argparse
+import contextlib
 import json
 import os
 import platform
@@ -195,15 +199,27 @@ def status(game=None, movesets=None, movesets8=None):
 
 
 def owned():
-    dlc = {definition(name).TEKKEN7_ID: name for name in CHARACTERS
-           if game_of(definition(name)) == 'tekken7' and definition(name).TEKKEN7_ID in autodump.DLC}
-    try:
-        unowned = autodump.unowned(list(dlc))               # (Steam not running: an error at once)
-    except autodump.DumpError as error:
-        return {'error': str(error)}
-    except Exception as error:              # (building or running the helper: the launcher shows why)
-        return {'error': 'the helper failed: %s: %s' % (type(error).__name__, error)}
-    return {'owned': {name: fid not in unowned for fid, name in dlc.items()}}
+    """Each game's DLC fighters, as Steam tells that game, for each game installed (Tekken 8's: its Miary Zo and
+    Clive). A game that cannot be asked leaves its fighters out and says why in "errors"; none answering: {"error": the
+    first one's why} (with "errors" when both games were asked)."""
+    answer, errors = {}, {}
+    for game, module, field in (('tekken7', autodump, 'TEKKEN7_ID'), ('tekken8', dump8, 'TEKKEN8_ID')):
+        dlc = {getattr(definition(name), field): name for name in CHARACTERS
+               if game_of(definition(name)) == game and getattr(definition(name), field) in module.DLC}
+        if not dlc or not (tekken7()['found'] if game == 'tekken7' else source.find_tekken8() is not None):
+            continue
+        try:
+            unowned = module.unowned(list(dlc))             # (Steam not running: an error at once)
+        except module.DumpError as error:
+            errors[game] = str(error)
+            continue
+        except Exception as error:          # (building or running the helper: the launcher shows why)
+            errors[game] = 'the helper failed: %s: %s' % (type(error).__name__, error)
+            continue
+        answer.update({name: fid not in unowned for fid, name in dlc.items()})
+    if not answer and errors:
+        return dict({'error': next(iter(errors.values()))}, **({'errors': errors} if len(errors) > 1 else {}))
+    return dict({'owned': answer}, **({'errors': errors} if errors else {}))
 
 
 REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
@@ -290,8 +306,11 @@ def main():
     asked.add_argument('--branch', default='main', help=argparse.SUPPRESS)
     args = parser.parse_args()
     signals.stop_on_signals()               # (owned: the launcher's Cancel ends the hidden helper too)
-    answer = (status(args.game, args.movesets, args.tekken8_movesets) if args.command == 'status' else
-              main_news(args.commit, args.branch) if args.command == 'main' else owned())
+    # (What runs meanwhile prints to stderr: the launchers read stdout whole as the answer, and the hidden helpers'
+    # sessions print where their logs are.)
+    with contextlib.redirect_stdout(sys.stderr):
+        answer = (status(args.game, args.movesets, args.tekken8_movesets) if args.command == 'status' else
+                  main_news(args.commit, args.branch) if args.command == 'main' else owned())
     print(json.dumps(answer), flush=True)
 
 

@@ -247,6 +247,21 @@ void test_status() {
           "owned: answer");
     check(parse_owned(R"({"error": "Steam is not running"})").error == "Steam is not running", "owned: error");
     check(!parse_owned("garbage").error.empty() && !parse_owned("{}").error.empty(), "owned: malformed");
+    // Tekken 8 answered, Tekken 7 could not be asked: its fighters left out, and why.
+    const Ownership partly = parse_owned(R"({"owned": {"clive": true, "miary_zo": false},
+        "errors": {"tekken7": "Tekken 7 is running: close it first"}})");
+    check(partly.error.empty() && partly.owned.size() == 2 && partly.owned.at("clive") &&
+              partly.errors.at("tekken7") == "Tekken 7 is running: close it first" && partly.errors.size() == 1,
+          "owned: one game not asked");
+    const Ownership both_failed = parse_owned(R"({"error": "Tekken 7 is running: close it first",
+        "errors": {"tekken7": "Tekken 7 is running: close it first", "tekken8": "Tekken 8 is running: close it first"}})");
+    check(both_failed.error == "Tekken 7 is running: close it first" && both_failed.owned.empty() &&
+              both_failed.errors.at("tekken8") == "Tekken 8 is running: close it first",
+          "owned: neither game asked");
+    const Ownership again = parse_owned(ownership_json({{"clive", true}, {"eliza", false}}));
+    check(again.error.empty() && again.owned == std::map<std::string, bool>{{"clive", true}, {"eliza", false}} &&
+              again.errors.empty() && parse_owned(ownership_json({})).owned.empty(),
+          "owned: kept as JSON");
 
     const MainNews news = parse_main_news(R"({"ahead": 3, "head": "f434935", "page": "https://github.com/x/compare",
         "changes": ["Newest", "Older"], "fighters": ["kazumi"], "new": [{"name": "jin", "display": "Jin Kazama"}]})");

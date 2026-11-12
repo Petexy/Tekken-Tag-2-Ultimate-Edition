@@ -75,6 +75,8 @@ class Window:
         self.game = None            # the game, when started from here
         self.status, self.status_error, self.status_loading, self.status_time = None, '', False, 0.0
         self.owned, self.owned_state = None, 'unknown'
+        self.owned_errors = {}      # the last answer's: each game Steam could not be asked through, and why
+        self.owned_error = ''       # why the last asking failed
         self.outfits = {}           # the outfit boxes clicked: {fighter: whether to make their outfits}
         self.release = dict(newer=None, checking=False, time=time.monotonic())
         # What main has beyond this build (launcher.py main), when its commit is known: a test build's
@@ -311,6 +313,14 @@ class Window:
         if self.owned is None: return None
         return self.owned.get(f['name'])
 
+    def unknown_owned_why(self, f):
+        """Why a DLC fighter's ownership is not known (as the Linux launcher says it)."""
+        game = 'tekken8' if self.of(f, 'tekken8') else 'tekken7'
+        if not self.status['steam']['running']: return 'Start Steam: it tells which DLC you own'
+        why = self.owned_errors.get(game) or (self.owned_error if self.owned_state == 'failed' else '')
+        if why: return 'Steam could not tell which DLC you own (%s): Refresh asks it again' % why
+        return 'Which %s DLC you own is not known yet' % ('Tekken 8' if game == 'tekken8' else 'Tekken 7')
+
     def can_import(self):
         """None, or why no character can be added now."""
         s = self.status
@@ -354,9 +364,14 @@ class Window:
         if not s or (self.added(f) and not f['update'] and not self.outfits_changed(f)) or f['newer'] or \
                 self.owns(f) is False: return False
         steam = s['steam']['running']
-        if f['dlc']:
-            # (Which DLC is owned not known: Steam is asked when adding, which says so then.)
-            return steam and (self.owns(f) is True or self.owned_state == 'failed')
+        if f['dlc'] and self.of(f, 'tekken8'):
+            # (Tekken 8's: only those Steam said are owned, as on Linux; then as Tekken 8's others.)
+            if self.owns(f) is not True: return False
+        elif f['dlc']:
+            # (Tekken 7's, which is owned not known, Steam not asked or not through Tekken 7: Steam is asked when
+            # adding, which skips one not owned.)
+            return steam and (self.owns(f) is True or self.owned_state == 'failed' or
+                              (self.owns(f) is None and 'tekken7' in self.owned_errors))
         if self.of(f, 'tekken8'): return f['moveset_saved'] or steam
         return steam or (f['moveset_saved'] and s['movesets']['heihachi'])
 
@@ -526,8 +541,10 @@ class Window:
         toggle = L.button(head, 'DLC characters', self.toggle_dlc, 'flat', surface='card',
                           icon='expanded' if self.dlc_open else 'collapsed')
         toggle.pack(side='left')
+        # (A game's DLC with no answer of Steam's (not asked through it, or it could not be) shows none.)
+        answered = self.owned is not None and any(f['name'] in self.owned for f in dlc)
         if self.owned_state == 'checking': L.pill(head, 'Checking ownership…').pack(side='left', padx=(px(6), 0))
-        elif self.owned is not None:
+        elif answered and game not in self.owned_errors:
             owned = sum(1 for f in dlc if self.owned.get(f['name']))
             L.pill(head, '%d of %d owned' % (owned, len(dlc))).pack(side='left', padx=(px(6), 0))
         later = sum(1 for f in dlc if f['update'])
@@ -537,10 +554,14 @@ class Window:
         add_owned.configure(state='normal' if owned_to_add and not busy else 'disabled')
         add_owned.pack(side='right')
         if not self.dlc_open: return
-        if self.owned is not None:
+        if answered and game not in self.owned_errors:
             text = 'Your Steam account owns %d of them.' % sum(1 for f in dlc if self.owned.get(f['name']))
-        elif self.owned_state == 'failed':
-            text = 'Steam could not tell which you own: adding one asks it again.'
+        elif self.owned_state == 'failed' or game in self.owned_errors:
+            reason = self.owned_errors.get(game) or self.owned_error
+            text = ('Steam could not tell which you own (%s): adding one asks it again.' % reason if game == 'tekken7'
+                    else 'Steam could not tell which you own (%s): Refresh asks it again.' % reason)
+        elif self.status['steam']['running']:
+            text = 'Which of them you own is not known yet.'
         else:
             text = 'Start Steam to add them: it tells which of them you own.'
         L.label(card, text, 'small', wrap=True).pack(fill='x', pady=(px(6), 0))
@@ -596,7 +617,7 @@ class Window:
                 add = L.button(line, text, lambda n=f['name']: self.start('import', [n]), width=-8)
                 can = not why and not self.busy() and self.addable(f)
                 add.configure(state='normal' if can else 'disabled')
-                tip = '' if why or can else ('Start Steam: it tells which DLC you own' if owned is None and f['dlc']
+                tip = '' if why or can else (self.unknown_owned_why(f) if owned is None and f['dlc']
                                              else 'Your Steam account does not own their DLC' if owned is False
                                              else self.not_addable_why(f))
                 if tip and not self.busy(): look.Tooltip(add, tip, L)
@@ -657,10 +678,11 @@ class Window:
     def check_ownership(self):
         """Which DLC the Steam account owns, asked once Steam runs (as the Linux launcher asks)."""
         s = self.status
-        if (not s or self.owned_state != 'unknown' or not s['steam']['running'] or not s['tekken7']['found']
-                or not any(f['dlc'] for f in s['fighters'])):
+        # (Each game's DLC is asked through that game: Tekken 7's and Tekken 8's, when one of them is there.)
+        if (not s or self.owned_state != 'unknown' or not s['steam']['running']
+                or not any(f['dlc'] and s[f.get('game', 'tekken7')]['found'] for f in s['fighters'])):
             return
-        self.owned_state = 'checking'
+        self.owned_state, self.owned_errors = 'checking', {}
         def ask():
             try:
                 answer = importer(self.settings, 'owned', timeout=300)
@@ -672,10 +694,13 @@ class Window:
 
     def owned_known(self, answer):
         if 'owned' in answer:
-            self.owned, self.owned_state = answer['owned'], 'known'
+            # (A game Steam could not be asked through keeps its fighters' last answer.)
+            self.owned, self.owned_state = dict(self.owned or {}, **answer['owned']), 'known'
+            self.owned_errors = answer.get('errors', {})
         else:
             print('Ultimate Launcher: Steam could not tell which DLC is owned:', answer.get('error'), flush=True)
-            self.owned_state = 'failed'
+            self.owned_state, self.owned_error = 'failed', answer.get('error') or 'no answer'
+            self.owned_errors = answer.get('errors', {})
         self.show_characters()
 
     # ---------------------------------------------------------------- refreshing
@@ -686,7 +711,9 @@ class Window:
         self.load_status()
 
     def check_again(self):
-        if self.owned_state == 'failed': self.owned_state = 'unknown'
+        # (A game Steam could not be asked through is asked again: it may be closed now.)
+        if self.owned_state == 'failed' or (self.owned_state == 'known' and self.owned_errors):
+            self.owned_state = 'unknown'
         self.refresh()
 
     def focused(self, event):

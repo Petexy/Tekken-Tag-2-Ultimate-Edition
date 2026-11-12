@@ -200,6 +200,10 @@ def importer(settings, *args, timeout=None):
     try:
         return json.loads(result.stdout)
     except ValueError:
+        pass
+    try:            # (what printed to stdout before the answer: the answer is its last line)
+        return json.loads([line for line in result.stdout.splitlines() if line.strip()][-1])
+    except (ValueError, IndexError):
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         raise RuntimeError(lines[-1] if lines else 'the importer ended with code %d' % result.returncode)
 

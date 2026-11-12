@@ -241,7 +241,11 @@ void Launcher::refresh() {
 }
 
 void Launcher::check_again() {
-    if (owned_state_ == Owned::kFailed) owned_state_ = Owned::kUnknown;
+    // (A game Steam could not be asked through is asked again: it may be
+    // closed now.)
+    if (owned_state_ == Owned::kFailed || (owned_state_ == Owned::kKnown && !owned_errors_.empty())) {
+        owned_state_ = Owned::kUnknown;
+    }
     refresh();
 }
 
@@ -342,18 +346,20 @@ void Launcher::load_status() {
 }
 
 void Launcher::check_ownership() {
-    if (!status_ || owned_state_ != Owned::kUnknown || task_ || !status_->steam_running || !status_->tekken7_usable()) {
-        return;
-    }
-    // (Tekken 7's DLC: Tekken 8's are not asked yet.)
+    if (!status_ || owned_state_ != Owned::kUnknown || task_ || !status_->steam_running) return;
+    // (Each game's DLC is asked through that game: Tekken 7's and Tekken 8's,
+    // when one of them can be used.)
     bool dlc = false;
-    for (const Fighter& f : status_->fighters) dlc = dlc || (f.dlc != 0 && f.of(kTekken7));
+    for (const Fighter& f : status_->fighters) {
+        dlc = dlc || (f.dlc != 0 && (f.of(kTekken8) ? status_->tekken8_usable() : status_->tekken7_usable()));
+    }
     if (!dlc) return;
     std::vector<std::string> argv = importer_command("launcher.py");
     argv.push_back("owned");
     auto out = std::make_shared<std::string>();
     std::string error;
     owned_state_ = Owned::kChecking;
+    owned_errors_.clear();
     const auto process = Process::start(
         argv, importer_environment(),
         {[out](const std::string& line, bool is_error) {
@@ -363,12 +369,16 @@ void Launcher::check_ownership() {
          [this, out](int) {
              Ownership answer = parse_owned(*out);
              if (answer.error.empty()) {
-                 owned_ = std::move(answer.owned);
+                 // (A game Steam could not be asked through keeps its
+                 // fighters' last answer.)
+                 for (const auto& [name, owns] : answer.owned) owned_[name] = owns;
+                 owned_errors_ = std::move(answer.errors);
                  owned_answer_ = true;
                  owned_state_ = Owned::kKnown;
-                 save_ownership(places_.owned_cache(), *out);
+                 save_ownership(places_.owned_cache(), ownership_json(owned_));
              } else {
                  owned_error_ = answer.error;
+                 owned_errors_ = std::move(answer.errors);
                  owned_state_ = Owned::kFailed;
              }
              show_characters();
@@ -554,6 +564,24 @@ void Launcher::run_next_test() {
     } else if (a.name == "update-launcher") {
         update_launcher();
     } else if (a.name == "add") {
+        // (As the rows' buttons: a character the window would not let add
+        // fails the test.)
+        for (const std::string& name : a.args) {
+            const Fighter* found = nullptr;
+            if (status_) {
+                for (const Fighter& f : status_->fighters) {
+                    if (f.name == name) found = &f;
+                }
+            }
+            if (!found || !addable(*found)) {
+                const std::string why = !found                     ? "is not known"
+                                        : !owns(*found).has_value() ? "cannot be added: " + unknown_owned_why(*found)
+                                        : owns(*found) == false     ? "cannot be added: their DLC is not owned"
+                                                                    : "cannot be added: " + not_addable_why(*found);
+                test_done(false, name + " " + why);
+                return;
+            }
+        }
         start_import(a.args);
     } else if (a.name == "get-packages") {
         start_get_packages();

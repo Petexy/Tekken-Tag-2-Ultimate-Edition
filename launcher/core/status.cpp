@@ -109,6 +109,12 @@ Ownership parse_owned(std::string_view text) {
         out.error = doc ? "the answer is not a JSON object" : "the answer is not JSON (" + error + ")";
         return out;
     }
+    const json::Value& errors = (*doc)["errors"];
+    if (errors.is_object()) {
+        for (size_t i = 0; i < errors.keys().size(); ++i) {
+            if (errors.values()[i].is_string()) out.errors[errors.keys()[i]] = errors.values()[i].string();
+        }
+    }
     if ((*doc)["error"].is_string()) {
         out.error = (*doc)["error"].string();
         return out;
@@ -120,6 +126,15 @@ Ownership parse_owned(std::string_view text) {
     }
     for (size_t i = 0; i < owned.keys().size(); ++i) out.owned[owned.keys()[i]] = owned.values()[i].boolean();
     return out;
+}
+
+std::string ownership_json(const std::map<std::string, bool>& owned) {
+    std::string out = "{\"owned\": {";
+    for (const auto& [name, owns] : owned) {
+        if (out.back() != '{') out += ", ";
+        out += "\"" + name + "\": " + (owns ? "true" : "false");
+    }
+    return out + "}}\n";
 }
 
 bool save_ownership(const std::filesystem::path& file, std::string_view json) {

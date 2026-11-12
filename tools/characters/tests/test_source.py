@@ -632,7 +632,9 @@ class Launcher(unittest.TestCase):
                 self.assertIsNone(launcher.tekken8()['run_error'])
 
     def test_owned_asks_for_tekken7_dlc_only(self):
-        with mock.patch.object(autodump, 'unowned', return_value={}) as unowned:
+        with mock.patch.object(autodump, 'unowned', return_value={}) as unowned, \
+                mock.patch.object(launcher, 'tekken7', return_value={'found': True}), \
+                mock.patch.object(source, 'find_tekken8', return_value=None):    # (this PC's Tekken 8 is never asked)
             launcher.owned()
         self.assertTrue(all(isinstance(app, int) for app in unowned.call_args[0][0]))
 
