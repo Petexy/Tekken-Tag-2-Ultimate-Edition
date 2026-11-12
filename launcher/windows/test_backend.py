@@ -1,4 +1,6 @@
 """Contract tests for launcher paths and actual backend command arguments."""
+import contextlib
+import io
 from pathlib import Path
 import os
 import sys
@@ -180,5 +182,24 @@ class T8Extraction(unittest.TestCase):
 
     def test_incomplete_azucena_does_not_start_import(self):
         self.extract(['azucena'], complete=False)
+
+    def test_a_failed_save_says_why(self):
+        from backend import worker
+        from ttt2char.tekken8 import autodump as t8
+        settings = mock.Mock()
+        settings.root = Path(__file__).resolve().parents[2]
+        settings.values = {'tools': str(settings.root / 'local/windows-tools')}
+        settings.environment.return_value = {}
+        settings.import_command.return_value = ['python', '-u', 'import_character.py', 'clive']
+        out = io.StringIO()
+        with mock.patch.object(t8, 'find_tekken8', return_value=SimpleNamespace(game='g', library='l')), \
+             mock.patch.object(t8, 'dump', side_effect=t8.DumpError('this Tekken 8 build is not known')), \
+             mock.patch('runpy.run_path') as run, mock.patch('setup_game.ensure_importer'), \
+             mock.patch.object(sys, 'argv', sys.argv[:]), mock.patch.object(sys, 'path', sys.path[:]), \
+             contextlib.redirect_stdout(out):
+            with self.assertRaises(t8.DumpError):
+                worker(settings, 'import', ['clive'])
+        run.assert_not_called()
+        self.assertIn('@error this Tekken 8 build is not known\n', out.getvalue())
 
 if __name__=='__main__':unittest.main()
