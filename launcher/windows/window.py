@@ -729,8 +729,9 @@ class Window:
     def show_notice(self):
         newer, news = self.release['newer'], self.main_news
         L = self.look
+        # (A release's build says nothing about main's changes: they mark fighters, not this notice.)
         offered = bool(self.exe and newer) or bool(self.branch and news and news['ahead'])
-        if (self.exe and newer) or (news and news['ahead']):
+        if offered:
             if self.exe and newer:
                 self.notice_title.configure(text='Version %s of the launcher is out' % newer.version)
                 self.notice_detail.configure(text='You have %s. Update replaces this launcher with it and opens it.'
@@ -739,15 +740,13 @@ class Window:
                 show_page = newer.page.startswith('https://') or (self_update.custom_releases() and newer.page)
                 self.notice_update.configure(state='disabled' if self.busy() else 'normal')
             else:
-                # Newer changes on main, before a release has them (as the Linux launcher says); a test
-                # build's on its branch, which Update gets.
+                # A test build's newer changes on its branch, which Update gets
                 count = news['ahead']
                 self.notice_title.configure(text='Newer changes are on ' + self.news_branch)
                 newest = (', the newest: \u201c%s\u201d' % news['changes'][0]) if news['changes'] else ''
-                self.notice_detail.configure(text='%d change%s since this %s (%s, %s)%s. %s' % (
-                    count, '' if count == 1 else 's', 'test build' if self.branch else 'version', self.version,
-                    self.commit[:7], newest, 'Update gets them without a new .exe.' if self.branch else
-                    'They come with the next release.'))
+                self.notice_detail.configure(text='%d change%s since this test build (%s, %s)%s. Update gets them '
+                                             'without a new .exe.' % (count, '' if count == 1 else 's', self.version,
+                                                                      self.commit[:7], newest))
                 self.notice_link = news['page']
                 show_page = news['page'].startswith('https://') or bool(os.environ.get('TTT2_LAUNCHER_GITHUB'))
                 self.notice_update.configure(state='disabled' if self.busy() else 'normal')
