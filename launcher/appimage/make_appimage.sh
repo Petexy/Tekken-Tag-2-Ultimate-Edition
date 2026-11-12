@@ -15,7 +15,8 @@
 #
 # Needs CMake 3.24+, Ninja, Clang, LLD, readelf, objdump, mksquashfs (with
 # zstd), and curl or wget for the first download; rsvg-convert for a PNG
-# .DirIcon (else the SVG).
+# .DirIcon (else the SVG); pkg-config where OpenSSL 3 is a package of its own
+# beside a newer one.
 #
 # The programs are linked with LLD: GNU ld copies the x86 ISA level that the
 # system's startup files are marked with (Scrt1.o) into every program, and
@@ -28,7 +29,8 @@
 # The AppImage uses the system's GTK 4, GLib and C++ runtime (the kit's
 # programs too: a static libstdc++ would be this system's, compiled for its
 # processor). It is checked to need no newer glibc or libstdc++ than Ubuntu
-# 24.04 has, also for the game program the kit links (see below). AppRun
+# 24.04 has, and no library it lacks (OpenSSL 3's, not 4's), also for the game
+# program the kit links (see below). AppRun
 # changes nothing of the environment, as
 # the programs the launcher starts (the compiler, Python, gamescope, Proton,
 # the game) must not load anything of the AppImage.
@@ -107,10 +109,21 @@ fi
 # (TTT2_RPX). The compilers write source paths relative (the runtime's error
 # messages name their files) so that no folder of this computer is in it.
 prefix_maps="-ffile-prefix-map=$repo/= -ffile-prefix-map=$build/="
+# OpenSSL 3, which the players' systems have (libcrypto.so.3): where this
+# system's own is newer (OpenSSL 4: libcrypto.so.4), its OpenSSL 3 package
+# (Arch's openssl-3) is used instead. The libraries are checked below.
+openssl=()
+for pc in /usr/lib/openssl-3/pkgconfig /usr/lib64/openssl-3/pkgconfig; do
+    if [ -f "$pc/libcrypto.pc" ]; then
+        openssl=("-DOPENSSL_INCLUDE_DIR=$(PKG_CONFIG_LIBDIR=$pc pkg-config --variable=includedir libcrypto)"
+            "-DOPENSSL_CRYPTO_LIBRARY=$(PKG_CONFIG_LIBDIR=$pc pkg-config --variable=libdir libcrypto)/libcrypto.so")
+        break
+    fi
+done
 cmake --fresh -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     "-DCMAKE_C_FLAGS=$prefix_maps" "-DCMAKE_CXX_FLAGS=$prefix_maps" -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
-    -DTTT2_LAUNCHER_BUILD_TREE_PATHS=OFF -DTTT2_GENERATED_DIR= -DTTT2_RPX=
+    -DTTT2_LAUNCHER_BUILD_TREE_PATHS=OFF -DTTT2_GENERATED_DIR= -DTTT2_RPX= ${openssl[@]+"${openssl[@]}"}
 grep -qx 'GTK4_FOUND:INTERNAL=1' "$build/CMakeCache.txt" || die "GTK 4.10 or newer (its development files) is needed"
 cmake --build "$build" --target ttt2-launcher ttt2_kit
 
@@ -225,6 +238,29 @@ for program in "$appdir/usr/bin/ttt2-launcher" "$appdir/usr/lib/ttt2/kit/bin/ttt
         if [ -n "$need" ] && [ "$(printf '%s\n' "$need" "${limit##*_}" | sort -V | tail -n 1)" != "${limit##*_}" ]; then
             die "${program##*/} needs ${limit%_*}_$need: the oldest distributions it is for have $limit"
         fi
+    done
+done
+
+# Nor may they, or the game program (kit.ini's libraries, found on the
+# player's PC), need a library those distributions lack: a newer one of this
+# system (0.6.0's kit needed OpenSSL 4's libcrypto.so.4, so Install stopped at
+# once, with code 127, everywhere else).
+known_libraries=(libc.so.6 libm.so.6 ld-linux-x86-64.so.2 libgcc_s.so.1 libstdc++.so.6 libcrypto.so.3 libz.so.1
+    libzstd.so.1 libvulkan.so.1 libSDL3.so.0 libshaderc_shared.so.1 libgtk-4.so.1 libpangocairo-1.0.so.0
+    libpango-1.0.so.0 libharfbuzz.so.0 libgdk_pixbuf-2.0.so.0 libcairo-gobject.so.2 libcairo.so.2
+    libgraphene-1.0.so.0 libgio-2.0.so.0 libgobject-2.0.so.0 libglib-2.0.so.0)
+for program in "$appdir/usr/bin/ttt2-launcher" "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" \
+    "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp" "$appdir/usr/lib/ttt2/kit/native/decimate.so" \
+    "$appdir/usr/lib/ttt2/kit/native/oodle.so" "$appdir/usr/lib/ttt2/kit/kit.ini"; do
+    if [ "${program##*/}" = kit.ini ]; then
+        libraries=$(sed -n 's/^libraries = //p' "$program")
+        [ -n "$libraries" ] || die "kit.ini names no libraries"
+    else
+        libraries=$(readelf -d "$program" | sed -n 's/.*(NEEDED).*\[\(.*\)\]$/\1/p')
+    fi
+    for library in $libraries; do
+        [[ " ${known_libraries[*]} " == *" $library "* ]] ||
+            die "${program##*/} needs $library, which the distributions it is for do not have (OpenSSL 3's is libcrypto.so.3)"
     done
 done
 
