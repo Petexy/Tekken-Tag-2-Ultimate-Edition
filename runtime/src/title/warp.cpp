@@ -1,5 +1,5 @@
 // Tekken 7's warps (Noctis's Warp-Strike, his teleports and escapes): move
-// property 0x82ae (the importer's 0x822A, in extra properties and in end
+// property 0x82ae (the importer's 0x823D, in extra properties and in end
 // lists) makes the fighter vanish or appear. Its value: out << 24 | flash <<
 // 16 | T << 8 | N. Out (1): the fighter fades out over T frames (Tekken 7
 // dithers him away), else in over T frames; with flash 1 and N > 1 his

@@ -34,10 +34,19 @@ class Warps(unittest.TestCase):
         c = types.SimpleNamespace(game='t7', stats=collections.Counter(), flag_props={}, gauge=None, opt_anims={},
                                   defn=types.SimpleNamespace(MOVESET={}))
         self.assertEqual(moveset.Converter.map_prop(c, 0x82ae), moveset.TT_WARP)
-        self.assertEqual(moveset.TT_WARP, 0x822A)
+        self.assertEqual(moveset.TT_WARP, 0x823D)
         self.assertEqual(c.stats['warps (vanishing, appearing)'], 1)
         c.flag_props, c.effects, c.hit_locations = {}, None, {}
         self.assertEqual(moveset.Converter.conv_value(c, 0x82ae, 0x01012121), 0x01012121)
+
+    def test_the_property_is_its_own(self):
+        # the runtime acts on each of the importer's ids once (title/roster.cpp, sub_03AE86A0): no other constant of
+        # the converter's modules may take TT_WARP's id (Clive's continued moves had 0x822A too)
+        from ttt2char.convert import arcs, gauge
+        for module in (moveset, arcs, gauge):
+            for name, value in vars(module).items():
+                if type(value) is int and value == moveset.TT_WARP and (module, name) != (moveset, 'TT_WARP'):
+                    self.fail('%s.%s has TT_WARP\'s id %#x' % (module.__name__, name, value))
 
     def test_the_start_fades_nothing(self):
         # Tekken 7's 0x82b1 (where a warp starts, the aimed effects' aim) becomes TT_WARP with WARP_START: neither out
