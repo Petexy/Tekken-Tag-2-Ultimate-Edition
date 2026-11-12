@@ -627,14 +627,15 @@ AIMED_EFFECT = {'t7': 0x82b0, 't8': None}
 WEAPON_HOLD_PROP = 0x822B
 # Tekken 7's warps (Noctis vanishing and appearing again: his Warp-Strike, teleports, escapes): 0x82ae, its value
 # out << 24 | flash << 16 | fade frames << 8 | flash frames, in extra properties and in end lists, becomes TT_WARP
-# (another id TTT2 ignores and no moveset uses) with the value as it is, which fades the fighter out or in
+# (another id TTT2 ignores and no moveset uses, nor any other property of the importer's: the runtime acts on each id
+# once) with the value as it is, which fades the fighter out or in
 # (runtime/src/title/warp.cpp). Tekken 7 shows the fighter again when he is hit (its game, not the moveset): the
 # donor's moves, the reactions among them, start with WARP_APPEAR (shown at once: appear_when_hit).
 # The definition's WARP_OUT (a pattern of Tekken 7 move names, a value) are moves Tekken 7 starts with the fighter
 # warping out though their rows only warp him in (Noctis's after a guarded Warp-Strike: its clips show him going):
 # they start with that warp out (warp_out_at_start).
 WARP_PROP = {'t7': 0x82ae, 't8': None}
-TT_WARP, WARP_APPEAR = 0x822A, 0
+TT_WARP, WARP_APPEAR = 0x823D, 0
 # Where a warp starts, the aimed effects' aim (Tekken 7's 0x82b1: bone, always 0; frame 2 of the moves Noctis appears
 # with, after his warp out): TT_WARP with WARP_START | the bone, which fades nothing (the runtime records the place)
 WARP_START_PROP = {'t7': 0x82b1, 't8': None}

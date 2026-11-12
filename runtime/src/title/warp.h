@@ -13,7 +13,7 @@ namespace cafe::title::warp {
 // (out kOut vanishes, 0 appears). With kStart << 24 it is Tekken 7's 0x82b1
 // instead: where the warp starts (title/roster.cpp aims an effect from there),
 // no fade (`property` is not called with it).
-constexpr uint32_t kProperty = 0x822A;
+constexpr uint32_t kProperty = 0x823D;
 constexpr uint32_t kOut = 1, kStart = 2;
 void property(uint32_t player, uint32_t value);
 
