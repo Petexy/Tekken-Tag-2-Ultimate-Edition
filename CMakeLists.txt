@@ -31,6 +31,11 @@ if(TTT2_TOOLS_ONLY)
     target_include_directories(windows_zarchive PUBLIC third_party/ZArchive/include)
     target_compile_features(windows_zarchive PUBLIC cxx_std_20)
     target_link_libraries(windows_zarchive PRIVATE libzstd_static)
+    # ZArchive's writer calls malloc and free without <cstdlib>, which newer
+    # libc++ (MSYS2's CLANG64 since November 2026) no longer brings in through
+    # its other headers.
+    set_source_files_properties(third_party/ZArchive/src/zarchivewriter.cpp
+        PROPERTIES COMPILE_OPTIONS "-include;cstdlib")
     if(WIN32)
         add_executable(wua_extract tools/wua_extract_windows.cpp)
         target_link_libraries(wua_extract PRIVATE windows_zarchive)

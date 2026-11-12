@@ -46,6 +46,7 @@ def project_id(which, slot):
 # sized for its own banks)
 RATES = (48000, 32000, 24000)
 EFFECT_RATE = 32000             # the sound effects' (append_effects)
+EFFECT_VOLUME = 7.6             # a Tekken 8 effect tone's own volume (append_effects): what comes out of the mix, -6 dB
 # The title's tables (code/Tekken.rpx): fighters' codes, voice lists and the sound table
 CODES = 0x107C57F4              # 63 x char*: each fighter's code, by select id
 VOICE_LISTS = 0x107D44EC        # 63 x {entries*, count, fighter}; an entry 16 B {0, sound id, 0x4000 | k, u16 mask, 0}
@@ -174,13 +175,13 @@ def _audio(original, clip, channels, to, side=None):
     return wave(list(a), to), to, channels, a.shape[1]
 
 
-def build(clips, donor_banks, code, vlist, slot, effects=()):
+def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False):
     """donor_banks: {'se_Chr': bytes, 'se_Dwi': bytes, 'rm_Dst': bytes, 'rm_Dwi': bytes}; vlist: the donor's voice
     list (voice_list); slot: the fighter's number (its banks' project ids); effects: sound effects (clips, as
     clips') its moves play as item sounds (convert/sounds.py) -> ({file name: bytes}, report lines, win quotes {Tekken 7
     event name: the se_Dwi tone that plays it (moves play win quotes by tone)}, the shouts' tones appended to se_Chr
     (its voice list's extra entries: shouts number len(donor's shouts) on), the effects' tones appended to se_Chr
-    after them (append_effects)).
+    after them (append_effects; plain_effects: its argument)).
     se_Chr follows the voice list; the other banks take clips in turn from one round of each kind (rm_Dwi gets a win
     quote se_Dwi has not)."""
     out, report, wins, extra = {}, [], {}, []
@@ -205,27 +206,45 @@ def build(clips, donor_banks, code, vlist, slot, effects=()):
     effect_tones = []
     if effects:
         bank = Bank(out['se_Chr_%s.nus3bank' % code])
-        effect_tones = append_effects(bank, effects)
+        effect_tones = append_effects(bank, effects, plain_effects)
         out['se_Chr_%s.nus3bank' % code] = bank.write()
         report.append('se_Chr_%s: %d sound effects appended (%d Hz), %d KB' % (
             code, len(effects), EFFECT_RATE, len(out['se_Chr_%s.nus3bank' % code]) // 1024))
     return out, report, wins, extra, effect_tones
 
 
-def append_effects(bank, clips):
+def _effect_suffix(j):
+    """The two characters that end effect j's tone name, the name staying the length of the tone it copies: A0 .. FF,
+    then G0 .. ZZ (Clive's moves play more than 96 sounds)."""
+    if j < 0x60:
+        return '%02X' % (0xA0 + j)
+    digits = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    high, low = divmod(j - 0x60, len(digits))
+    return 'GHIJKLMNOPQRSTUVWXYZ'[high] + digits[low]
+
+
+def append_effects(bank, clips, plain=False):
     """Appends the fighter's sound effects (convert/sounds.py: its moves play them as item sounds) to its se_Chr
-    bank, each a copy of the donor's item sound tone (itm_lar_03; else of a tone with audio) -> their tones."""
-    t = next((i for i in range(len(bank.tones)) if (bank.name(i) or '').startswith('itm_') and bank.has_audio(i)),
-             None)
+    bank, each a copy of the donor's item sound tone (itm_lar_03; else of a tone with audio) -> their tones.
+    plain (Tekken 8's, tekken8/sounds.py): played as they are whoever the donor is: a copy of the first item tone
+    (itm_<donor>_00, the same kind in Lars's and Jun's banks), without the tone's own pitch (Jun's is 200 cents low) and
+    at EFFECT_VOLUME. The mix gives a tone at volume v about v - 13.6 dB (measured in the mixed output)."""
+    t = next((i for i in range(len(bank.tones)) if (bank.name(i) or '').endswith('_00') and
+              (bank.name(i) or '').startswith('itm_') and bank.has_audio(i)), None) if plain else None
+    if t is None:
+        t = next((i for i in range(len(bank.tones)) if (bank.name(i) or '').startswith('itm_') and bank.has_audio(i)),
+                 None)
     if t is None:
         t = next(i for i in range(len(bank.tones)) if bank.name(i) and bank.has_audio(i))
     old, audio = bank.name(t), bank.audio[t]
     _, channels, _ = bank.format(t)
     tones = []
     for j, clip in enumerate(clips):
-        i = bank.append(bank.renamed(t, old[:-2] + '%02X' % (0xA0 + j)), audio=audio)
+        i = bank.append(bank.renamed(t, old[:-2] + _effect_suffix(j)), audio=audio)
         a, rate, ch, n = _audio(audio, clip, channels, EFFECT_RATE)
         bank.replace(i, a, rate, ch, n)
+        if plain:
+            bank.set_mix(i, EFFECT_VOLUME, 0.0)
         tones.append(i)
     return tones
 

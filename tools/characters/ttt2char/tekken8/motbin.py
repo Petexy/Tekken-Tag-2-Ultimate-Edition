@@ -522,7 +522,8 @@ def read(data, fields, code):
         mv['frame_params'] = tuple(FrameParam(*_FRAME_PARAM.unpack_from(d, o + FRAME_PARAM_AT + FRAME_PARAM_SIZE * k))
                                    for k in range(FRAME_PARAMS))
         hb = mv['hitboxes']
-        mv['hitbox'] = bytes((hb[0].loc, hb[0].loc2, hb[1].loc, hb[1].loc2))   # Tekken 7's 4-byte summary
+        # Tekken 7's 4-byte summary: boxes 0 and 1 (the id maps' evidence; the converter's: convert/summons8.py)
+        mv['hitbox'] = bytes((hb[0].loc, hb[0].loc2, hb[1].loc, hb[1].loc2))
         g = mv['owner_id'] + i                                     # Tekken 7's global move id: owner id + index
         mv['move_id_lo'], mv['move_id_hi'] = g & 0xFFFF, g >> 16 & 0xFFFF
         mv['m_5c'] = mv['m_5e'] = mv['m_ac'] = 0

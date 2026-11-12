@@ -35,6 +35,15 @@ def _props(store, path):
     return ex.class_name, props
 
 
+def _worn_scale(store, prefab, base):
+    """The size a rigid item is worn at: its offset slot's scale in the fighter's BaseCharacterItem (1 without one)."""
+    if not prefab.get('BaseCharacterItemRef'):
+        return 1.0
+    slots = _props(store, prefab['BaseCharacterItemRef'])[1].get('ItemOptionalOffsetMap') or {}
+    offset = slots.get(base.get('ItemOffsetSlotName')) or {}
+    return float((offset.get('Scale3D') or {}).get('X', 1.0))
+
+
 def set_path(store, code, which):
     """The CustomizeSet of `which` ('1p', '2p', '1p_v1', 'kimono' ... or a /Game/ path); InputError when the game has
     no such set (the message lists the ones it has)."""
@@ -50,14 +59,17 @@ def set_path(store, code, which):
 def costume(store, code, which='1p', materials=None):
     """A costume's parts and colours -> {'parts': [(tag, skeletal mesh path)], 'merge_order': [tags], 'colours': the
     object material.Materials.effective takes, 'set': the CustomizeSet path, 'static': [(tag, static mesh path)]
-    (rigid socket items, not converted), 'prefabs': [item prefab paths]}. A tag is the item's slot folder (bdf,
-    fac, har, ...; a second item of a slot gets a number). materials: a material.Materials to share its cache."""
+    (rigid socket items: a definition's MESHES naming the tag wears them), 'scales': {their tag: size}, 'prefabs': [item
+    prefab paths]}. A tag is the item's slot folder (bdf, fac, har, ...; a second item of a slot gets a number).
+    materials: a material.Materials to share its cache."""
     cs = set_path(store, code, which)
     cls, props = _props(store, cs)
     if cls != 'CustomizeSet':
         raise InputError('%s is a %s, not a Tekken 8 costume set' % (cs, cls))
-    prefabs = [p for p in (props.get('ItemPrefabSet') or []) + (props.get('ItemPrefabAccSet') or []) if p]
-    items, forced, static = [], {}, []
+    # (a set may name a prefab the game does not ship, which it then leaves out: Miary Zo's 2P earrings)
+    prefabs = [p for p in (props.get('ItemPrefabSet') or []) + (props.get('ItemPrefabAccSet') or [])
+               if p and store.exists(material.package_of(p))]
+    items, forced, static, sizes = [], {}, [], {}
     for ip in prefabs:
         _, prefab = _props(store, ip)
         slot = material.package_of(ip).rsplit('/', 2)[-2]
@@ -70,6 +82,7 @@ def costume(store, code, which='1p', materials=None):
         mesh = (base.get('SourceSkeletalMeshSet') or {}).get('SourceMuscleRigMesh')
         if base.get('MeshType') == STATIC_MESH or (not mesh and base.get('SourceStaticMesh')):
             static.append((slot, material.package_of(base.get('SourceStaticMesh'))))
+            sizes[slot] = _worn_scale(store, prefab, base)
             continue
         if mesh:
             items.append((slot, base.get('SetItemPositionId'), mesh))
@@ -97,7 +110,8 @@ def costume(store, code, which='1p', materials=None):
     if skin is not None:
         colours[material.SHEER] = {bake.SHEER_COLOUR: skin}
     return {'parts': parts, 'merge_order': sorted((t for t, _ in parts), key=rank(MERGE_ORDER)),
-            'colours': colours, 'set': cs, 'static': static, 'prefabs': [material.package_of(p) for p in prefabs]}
+            'colours': colours, 'set': cs, 'static': static, 'scales': sizes,
+            'prefabs': [material.package_of(p) for p in prefabs]}
 
 
 def mesh_materials(store, path):

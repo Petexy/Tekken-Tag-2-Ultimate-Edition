@@ -96,6 +96,13 @@ class FullSound(unittest.TestCase):
         self.assertEqual(G.ini_line(akuma), 'gauge = 1000 500 37 75 112 225')
         self.assertEqual(G.ini_line(akuma, 18), 'gauge = 1000 500 37 75 112 225 18')
 
+    def test_a_gauge_turned_off_is_written_commented_out_under_how_to_turn_it_on(self):
+        d = type('D', (), {'GAUGE': dict(max=300, stock=100, gain=(1, 2, 3, 4), on=False, name='Spark meter')})
+        self.assertEqual(G.ini_line(d), '# Spark meter: off. To turn it on, delete the # at the start of the next line '
+                                        '(put it back to turn it off)\n#gauge = 300 100 1 2 3 4')
+        d.GAUGE['on'] = True
+        self.assertEqual(G.ini_line(d), 'gauge = 300 100 1 2 3 4')
+
     def test_akuma_and_eliza_name_it_and_geese_does_not(self):
         from ttt2char.characters import definition
         self.assertEqual(G.full_sound(definition('akuma')), 'SE_battle_spgauge_full')

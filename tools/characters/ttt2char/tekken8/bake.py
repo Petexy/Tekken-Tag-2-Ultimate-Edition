@@ -55,6 +55,13 @@ Hair, eyebrows, lashes (M_Hair*): no colour texture. The base colour, from the c
     its luma), and the strands are shaded by their depth as Tekken 8 shades them (lerp(TextureAO_Min, TextureAO_Max,
     ADI Map.G)) to the HAIR_STRANDS power, its mean kept (TTT2's black hair varies by ~11 sRGB levels from strand
     to strand, the plain term by half that). Reina: roots 34 34 34 -> ~55 grey, tips 79 65 252 -> ~77 74 151 (sRGB).
+  Bright head hair (bright_hair: Victor Chevalier's white, drawn at HAIR_BRIGHT or above; the dark hairs baked so far,
+    sRGB 40-58, are left as they are): TTT2's hair has a texture's strands painted on solid shapes, sRGB 142 139 135 for
+    Lee with a spread of 11 levels and the same colour under its alpha; Tekken 8's are thin lines on nothing, its
+    strands' value and depth terms running from black to white (his: spread 87, under the alpha black). Dark hair
+    hides that, white hair turns to black-and-white speckle. So the drawn texels' sRGB spread comes down to HAIR_SPREAD
+    round their mean, that mean comes up to HAIR_LEVEL, the undrawn texels take the colour of the drawn ones near them (fill_under: bilinear filtering
+    and the box-filtered mips would darken every strand's edge), and the strands grow by HAIR_THICKEN texels a side (a thin beard's more).
 Eyes (M_CH_Eyes): the Sclera texture x ScleraTint with the IrisColor texture scaled to 1 / UV_Scale of the square in
     its middle (estimate). Inner mouth (M_Ch_Skin_Simple): its BaseColor as it is.
 Cloth shine (specular): TTT2's cloth materials take their shine from their third texture (R = specular strength,
@@ -71,6 +78,18 @@ Cloth shine (specular): TTT2's cloth materials take their shine from their third
     game (Fiji, a mirror match): the strength channel alone at 255 doubles the coat's black (27 -> 50 sRGB, the 95th
     percentile 59 -> 83) with highlights along the folds of its normal map; 0 takes her shorts' highlights away
     (95th percentile 154 -> 85).
+Satin cloth (satin_cloth, satin_colour, layer_colour): a costume material with 'Use 3D Iridescent' (of Reina, Azucena,
+    Miary Zo and Victor Chevalier only his suit, trousers and waistcoat: pale, half metal, near mirror-free) is bright
+    in Tekken 8 by the reflections on its satin IDs (IDnn_AnisoPower near 1): his 1P suit bakes at 90 sRGB and shows 140,
+    his 2P 55 and shows 85, greyer than it bakes. A 2P colour layer draws it in TTT2, and the game takes the layer's
+    shade and palette colour as encoded colours and multiplies them as linear ones, 2 s^2.2 A^2.2 where colours.fit
+    takes 2 s A: at s = 0.5 the layer is LAYER_GAIN darker in linear than the colour it was fitted to (in game his suit
+    75 sRGB under the layer, 130 without it, the same frame). So the palette holds a satin group's colour as
+    SATIN_GAIN x + SATIN_ADD in linear (the add is the neutral reflection, which is why 2P gets more), measured in
+    game against Tekken 8's own pictures of both players; the material's other group, as LAYER_GAIN x, or if it is metal
+    (his tie, lining, pocket square: metallic 0.84-0.95, baked 78, 73, 102, dark in Tekken 8 but for reflections) as
+    SATIN_METAL_COLOUR x. The palette colour rules here: the layer's shade changes the game's result far less than the
+    product suggests (his tie's shades at a third left it as bright, his suit's at x1.46 rose by 13 of 255 sRGB).
 
 Written for this project from the files themselves (no third-party code).
 """
@@ -84,7 +103,8 @@ SKIN_BASES = ('M_CH_skin', 'M_Ch_skin')         # M_CH_skin_V3 (face; arm/body/h
 # not drawn in TTT2: the invisible calculation mesh, the cloth simulation proxy, the eye shadow and tear line films
 LEFT_OUT_BASES = ('M_CalculationMesh', 'M_Eye_Blur_AO', 'M_Add_Tear', 'M_CH_sim_mesh_material')
 LEFT_OUT_NAMES = ('tear', 'tealine', 'cal_mesh', 'sim_mesh', 'eye_ao')
-OVERLAY_NAMES = ('eyebrow', 'eyelash', 'lash', 'brow')     # hair materials drawn as overlays on the face
+OVERLAY_NAMES = ('lash', 'brow', 'eyeblow')     # hair materials drawn as overlays on the face: eyelashes, eyebrows
+                                                # (also spelt eyeblow: Miary Zo's MI_CH_wkz_eyeblow)
 AB_OVERLAY = 12                     # AB_BlendMode default: Unreal's overlay
 IDS_PER_CHANNEL = 4                 # IDs an ID map channel holds at most (16 per material)
 NO_ID_COLOUR = {'r': 0.5, 'g': 0.5, 'b': 0.5}     # IDnn_Color's default in the base materials
@@ -98,12 +118,22 @@ EYE_SIZE = 256                      # eyes are small in TTT2 (its own have 128-2
 # module notes); the strands' shading by depth to the HAIR_STRANDS power (as much as TTT2's own hair textures have)
 HAIR_GAIN, HAIR_LIFT, HAIR_POWER, HAIR_GREY = 0.48, 0.035, 0.85, 0.34
 HAIR_STRANDS = 2.5
+# bright_hair: the sRGB luma of a head hair's drawn texels from which it counts as bright, their spread (std) at most,
+# their mean at least (TTT2's silver haired Lee 142; Tekken 8's pictures of Victor's hair 177), how many texels its
+# strands grow by on each side at the ADI map's size, more up to _MOST while it draws under HAIR_COVER of its texture
+# (his beard's strands, 7% of theirs, showed the face between them)
+HAIR_BRIGHT, HAIR_SPREAD, HAIR_LEVEL = 90 / 255.0, 24 / 255.0, 170 / 255.0
+HAIR_THICKEN, HAIR_THICKEN_MOST, HAIR_COVER = 1, 3, 0.25
+HAIR_LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 # a cloth's shine in TTT2 (specular(); the module notes): strength, reflection, gloss at roughness 0 and its slope;
 # what a satin ID's anisotropic highlight (IDnn_AnisoPower) adds to the strength; the shine texture's size at most
 # (TTT2's own are 128-512)
 SPECULAR, REFLECTION, GLOSS_TOP, GLOSS_SLOPE = 1.0, 0.6, 0.95, 0.3
 SATIN = 0.75
 SPECULAR_SIZE = 256
+# satin_cloth: the AnisoPower from which an ID is satin; its palette colours in a 2P layer, and the others' (module notes)
+SATIN_ID, SATIN_GAIN, SATIN_ADD, LAYER_GAIN = 0.5, 1.6, np.array((0.105, 0.106, 0.13)), 2.33
+SATIN_METAL, SATIN_METAL_COLOUR = 0.7, 0.74    # satin_lift: the other group as metal from what metallic, its palette colour
 ID_MAP_SIZE = 1 << 16               # an ID map is read at its top mip (Tekken 8 cooks one): a smaller mip's averaged
                                     # texels would mix IDs
 DONT_COLOUR_OFF = 4.0               # IDnn_DontColorOP at or above this colours the ID after all (the shader's test)
@@ -317,7 +347,20 @@ def bake_hair(eff, textures):
     rgb, alpha, adi = hair_colour(eff, textures)
     if adi is not None and not any(x in eff['name'].lower() for x in OVERLAY_NAMES):
         rgb = hair_look(rgb, adi, alpha, eff)
+        if is_bright_hair(rgb, alpha, eff):
+            rgb, alpha = bright_hair(rgb, alpha, eff)
     return rgb, alpha
+
+
+def bake_stubble(eff, textures):
+    """A stubble material with a base of its own (Clive's M_CH_okm_fah_1p: strand cards with an OBD map, no ADI map): the
+    OBD map's red is the strands' opacity, its brightest texel the alpha test's full opacity; the colour runs from
+    RootColor to TipColor along it. (The graph is cooked: read from its parameters and the map's look.)"""
+    t, v = eff['textures'], eff['vectors']
+    r = textures.image(t['OBD'])[0][..., 0].astype(np.float32) / 255.0
+    r = r / max(float(r.max()), 1e-3)
+    root, tip = _col(v.get('RootColor', {'r': 0, 'g': 0, 'b': 0})), _col(v.get('TipColor', {'r': 0, 'g': 0, 'b': 0}))
+    return np.clip(root + r[..., None] * (tip - root), 0, 1).astype(np.float32), r
 
 
 def hair_look(rgb, adi, alpha, eff):
@@ -333,6 +376,75 @@ def hair_look(rgb, adi, alpha, eff):
     if drawn.any() and shade[drawn].mean() > 0:
         out = out * (shade / shade[drawn].mean())[..., None]
     return np.clip(out, 0, 1).astype(np.float32)
+
+
+def _hair_clip(eff):
+    return eff['overrides'].get('OpacityMaskClipValue', eff['scalars'].get('AlphaThreshold', 0.5))
+
+
+def is_bright_hair(rgb, alpha, eff):
+    """Whether a head hair's look (linear rgb; alpha or None) counts as bright: the mean sRGB luma of its drawn texels
+    at HAIR_BRIGHT or above."""
+    if alpha is None:
+        return False
+    drawn = alpha >= _hair_clip(eff)
+    return bool(drawn.any()) and float((linear_to_srgb(rgb[drawn]) @ HAIR_LUMA).mean()) >= HAIR_BRIGHT
+
+
+def fill_under(rgb, drawn):
+    """Colours (H, W, 3) with the texels not `drawn` (H, W) taking the colour of the drawn ones nearest them (a pull-push
+    pyramid); the drawn texels stay as they are."""
+    weights, colours = [np.asarray(drawn, np.float32)], [rgb * np.asarray(drawn, np.float32)[..., None]]
+    while min(weights[-1].shape) > 1:
+        w, c = weights[-1], colours[-1]
+        h, x = (w.shape[0] + 1) // 2, (w.shape[1] + 1) // 2
+        at_y, at_x = np.arange(w.shape[0]) // 2, np.arange(w.shape[1]) // 2
+        sw, sc = np.zeros((h, x), np.float32), np.zeros((h, x, 3), np.float32)
+        np.add.at(sw, (at_y[:, None], at_x[None, :]), w)
+        np.add.at(sc, (at_y[:, None], at_x[None, :]), c)
+        weights.append(sw)
+        colours.append(sc)
+    out = colours[-1] / np.maximum(weights[-1], 1e-6)[..., None]
+    for w, c in zip(reversed(weights[:-1]), reversed(colours[:-1])):
+        up = out[np.arange(w.shape[0]) // 2][:, np.arange(w.shape[1]) // 2]
+        out = np.where(w[..., None] > 0, c / np.maximum(w, 1e-6)[..., None], up)
+    return np.where(np.asarray(drawn)[..., None], rgb, out).astype(np.float32)
+
+
+def thicken(alpha, texels):
+    """An alpha map (H, W) with what it draws grown by `texels` on each side (a square maximum filter)."""
+    out = alpha
+    for axis in (0, 1):
+        grown = out
+        for step in range(1, texels + 1):
+            grown = np.maximum(grown, np.maximum(np.roll(out, step, axis), np.roll(out, -step, axis)))
+        out = grown
+    return out
+
+
+def bright_hair(rgb, alpha, eff):
+    """A bright head hair's look and alpha made solid, as TTT2's hair textures are (the module notes)."""
+    drawn = alpha >= _hair_clip(eff)
+    encoded = linear_to_srgb(rgb).astype(np.float32)
+    luma = encoded @ HAIR_LUMA
+    mean, spread = float(luma[drawn].mean()), float(luma[drawn].std())
+    if spread > HAIR_SPREAD:
+        encoded = encoded + ((mean - luma) * (1.0 - HAIR_SPREAD / spread))[..., None]
+    encoded = encoded + max(HAIR_LEVEL - mean, 0.0)
+    out = fill_under(srgb_to_linear(np.clip(encoded, 0, 1)).astype(np.float32), drawn)
+    grown = thicken(alpha, HAIR_THICKEN)
+    for texels in range(HAIR_THICKEN + 1, HAIR_THICKEN_MOST + 1):
+        if (grown >= _hair_clip(eff)).mean() >= HAIR_COVER:
+            break
+        grown = thicken(alpha, texels)
+    return out, grown
+
+
+def thick_hair(rgb, alpha, eff, texels):
+    """A dark head hair (a definition's TEKKEN8['hair_thick']) with its strands grown by `texels` at the ADI map's size, the
+    colour under the new texels its neighbours': Tekken 8 draws thin lines over and over and blends them, an alpha test
+    cuts them to wire with the background between (Clive's hair: a frizz where Tekken 8 has clumps)."""
+    return fill_under(rgb, alpha >= _hair_clip(eff)), thicken(alpha, texels)
 
 
 def bake_eye(eff, textures, size=EYE_SIZE):
@@ -375,9 +487,26 @@ def id_values(eff, textures, name, shape):
     return out
 
 
-def specular(eff, textures, size=SPECULAR_SIZE):
+def dark_metal(rgb, eff, textures, look):
+    """Baked colours (H, W, 3, linear) of a material the definition's TEKKEN8['dark_metal'] names: its grey metal (RMA_A's
+    G) x look[0], its other greys x look[3]. A metal has no colour of its own in Tekken 8: all it shows is what it
+    reflects, a dark room but for its highlights, where TTT2 lights its pale base colour (0.8-0.95) as a white cloth's;
+    TTT2 lights his weapons' mid grey plastics far above Tekken 8's too. Coloured texels (a glowing line, a panel) stay."""
+    if not textures.exists(eff['textures'].get('RMA_A')):
+        return rgb
+    h, w = rgb.shape[:2]
+    metal = textures.image(eff['textures']['RMA_A'], max(h, w))[0][..., 1].astype(np.float32) / 255.0
+    metal = _resize(metal, (h, w))[..., None]
+    top = rgb.max(axis=2, keepdims=True)
+    coloured = np.clip(2.0 * (top - rgb.min(axis=2, keepdims=True)) / np.maximum(top, 1e-4), 0.0, 1.0)
+    factor = look[3] + (look[0] - look[3]) * metal
+    return rgb * (factor + (1.0 - factor) * coloured)
+
+
+def specular(eff, textures, size=SPECULAR_SIZE, dark=None):
     """A costume material's shine as TTT2's cloth materials take it (their third texture; the module notes): (H, W, 4)
-    uint8 RGBA, or None without an RMA map."""
+    uint8 RGBA, or None without an RMA map. dark: dark_metal's look, (metal's colour, strength, reflection, others'
+    colour): its metal's strength (R) and reflection (G) x these."""
     t = eff['textures']
     if not textures.exists(t.get('RMA_A')):
         return None
@@ -388,8 +517,43 @@ def specular(eff, textures, size=SPECULAR_SIZE):
     out = np.zeros(rma.shape[:2] + (4,), np.float32)
     out[..., 0] = (SPECULAR * (1.0 - rough) + SATIN * satin) * (0.5 + 0.5 * ao)
     out[..., 1] = REFLECTION * metal * (1.0 - rough)
+    if dark is not None:
+        out[..., 0] *= 1.0 - metal * (1.0 - dark[1])
+        out[..., 1] *= dark[2]
     out[..., 3] = GLOSS_TOP - GLOSS_SLOPE * rough
     return (np.clip(out, 0, 1) * 255 + 0.5).astype(np.uint8)
+
+
+def satin_cloth(eff, textures, shape):
+    """The texels (H, W) bool of `shape` of a costume material's satin IDs, or None: not a material bright by its
+    reflections (the module notes)."""
+    if not (eff.get('switches') or {}).get('Use 3D Iridescent'):
+        return None
+    satin = id_values(eff, textures, 'AnisoPower', shape)
+    return None if satin is None else satin >= SATIN_ID
+
+
+def satin_lift(eff, textures, shape):
+    """colours.fit's lift for a satin material of `shape`: (group: 0 satin, its colour (encoded), its texels (H, W) bool)
+    -> what a 2P layer's palette holds for it (the module notes)."""
+    def lift(group, rgb, texels):
+        if group == 0:
+            return satin_colour(rgb)
+        metal = np.zeros(shape, np.float32)
+        if textures.exists(eff['textures'].get('RMA_A')):
+            metal = _resize(textures.image(eff['textures']['RMA_A'], max(shape))[0][..., 1].astype(np.float32) / 255.0, shape)
+        return rgb * SATIN_METAL_COLOUR if metal[texels].mean() >= SATIN_METAL else layer_colour(rgb)
+    return lift
+
+
+def satin_colour(rgb):
+    """A satin group's colour (encoded, as colours.fit has it) -> what a 2P layer's palette holds for it."""
+    return np.clip(linear_to_srgb(SATIN_GAIN * srgb_to_linear(rgb) + SATIN_ADD), 0, 1)
+
+
+def layer_colour(rgb, gain=LAYER_GAIN):
+    """The same for the other group of a satin material; gain: a definition's own (TEKKEN8['layer_lift'])."""
+    return np.clip(linear_to_srgb(gain * srgb_to_linear(rgb)), 0, 1)
 
 
 # ------------------------------------------------------------------------------------------------ the API
@@ -410,18 +574,23 @@ def bake_albedo(eff, textures, grey=False):
         if textures.exists(t.get(slot)):
             rgb, a = _texture(textures, t[slot], grey)
             return rgb, None
+    if textures.exists(t.get('OBD')) and 'TipColor' in eff['vectors']:
+        return bake_stubble(eff, textures)
     return None, None
 
 
-def classify(name, base, alpha):
+def classify(name, base, alpha, share=None):
     """What a Tekken 8 material becomes when the definition's MATERIALS does not say: (template kind, normal map?,
     alpha-tested?) or None (left out), from its base material `base` (a name, or the effective() dict) and its name;
-    alpha: its baked alpha (None: opaque; bake_albedo gives one to masked materials only)."""
+    alpha: its baked alpha (None: opaque; bake_albedo gives one to masked materials only); share: its emission share
+    (emission_share; None: not known), at GLOW_SHARE or more on a glowing part's base the 'glow' template's."""
     if isinstance(base, dict):
         base = base['base']
     base, n = base or '', name.lower()
     if base.startswith(LEFT_OUT_BASES) or any(x in n for x in LEFT_OUT_NAMES):
         return None                                   # calculation and cloth proxies, eye shadow, tear line
+    if base.startswith(GLOW_BASES) and share is not None and share >= GLOW_SHARE:
+        return ('glow', False, False)                 # a glowing summon (bake_emissive)
     if base == 'M_CH_Eyes' or n.endswith(('_eye_l', '_eye_r', '_eyes', '_eye')):
         return ('eye', False, False)
     if 'teeth' in n:
@@ -434,3 +603,110 @@ def classify(name, base, alpha):
         return ('overlay', False, True) if any(x in n for x in OVERLAY_NAMES) else ('hair', False, True)
     holes = alpha is not None and float((alpha < 0.5).mean()) > HOLES
     return ('cloth', True, holes)
+
+
+# ------------------------------------------------------------------------------------------------ glowing parts
+# Summoned parts (M_CH_Extra_Parts instances: Miary Zo's staffs, tail, horn and snakes) are lit, masked materials whose
+# look is an HDR emissive over a dark base, bloomed (their Tekken 8 "translucency"). The steady emissive (Transition
+# 1, the shown part: its compiled base-pass pixel shader, the part's own parameters):
+#     E = R(EmissiveMask) ** EmissiveMask_Power x EmissiveColor_A x EmissiveIntensity_A
+#       + G(EmissiveMask) ** EmissiveMask_Power x EmissiveColor_B x EmissiveIntensity_B
+#       + (1 - N.V) ** FresnelPower x Fresnel Color x Fresnel Intensity           ('Use Fresnel')
+#       + FlowEmissiveMap(scrolling) x FlowEmissiveColor x FlowEmissiveIntensity   (the flowing wave)
+#       + OverrideEmissiveColor x OverrideEmissiveIntensity
+# The part is drawn with the definition's 'glow' template (Miary Zo's: the unlit textured core of TTT2's own light
+# spears, cmn_opu_LightSpear), its colour texture the colour on screen: bake_emissive bakes E + the base colour x
+# BaseTintColor x
+# GLOW_AMBIENT (the scene's light on the base) with the view-dependent terms at their means (the Fresnel term's over a
+# cylinder seen side-on, the wave's over its texture), then Tekken 8's tone curve on it: exposure GLOW_EXPOSURE,
+# GLOW_DESATURATION of the way to its luma (Unreal's filmic curve greys bright blue), the ACES fit, gamma 2.2. Fitted
+# on a Tekken 8 screenshot of her right staff (40462 staff pixels: sRGB p10 51 106 169, median 70 149 209, p90 99 199
+# 240): the bake's p10 43 110 169, median 87 179 239 (13 levels off on average; without the desaturation 21). A part
+# whose emission is GLOW_SHARE or more of its look (emission_share: staffs 0.97, tail centre and fur 0.84, horn 0.86)
+# is drawn so (classify: 'glow'); the others keep a lit template.
+GLOW_BASES = ('M_CH_Extra_Parts',)
+GLOW_SHARE = 0.75
+GLOW_AMBIENT = 0.5
+GLOW_EXPOSURE = 0.5
+GLOW_DESATURATION = 0.15
+GLOW_LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)      # (Rec. 709)
+
+
+def uv_set(eff, slot):
+    """The UV set (0 or 1) material eff samples its texture `slot` ('BaseColor', 'EmissiveMask', ...) through: its
+    'Use UV1 for <slot>' switch (M_CH_Extra_Parts: Miary Zo's tail is laid out along its UV1)."""
+    return 1 if (eff.get('switches') or {}).get('Use UV1 for %s' % slot) else 0
+
+
+def fresnel_mean(power, samples=4096):
+    """The screen mean of (1 - N.V) ** power over a cylinder seen side-on (x = sin of the normal's angle to the view,
+    uniform across its width)."""
+    x = (np.arange(samples) + 0.5) / samples
+    return float(((1.0 - np.sqrt(1.0 - x * x)) ** power).mean())
+
+
+def aces(x):
+    """Narkowicz's fit of the ACES filmic curve (as convert/particles.py's lit texels)."""
+    x = np.maximum(x, 0)
+    return np.clip(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), 0, 1)
+
+
+def _emissive_terms(eff, textures):
+    """(base term (H, W, 3), emissive E (H, W, 3)) of a glowing part, linear, at its BaseColor's size (the module
+    notes); (None, None) without a colour texture."""
+    t, s, sw = eff['textures'], eff['scalars'], eff.get('switches') or {}
+    if not textures.exists(t.get('BaseColor')):
+        return None, None
+    base, _ = textures.linear(t['BaseColor'])
+    shape = base.shape[:2]
+    lit = base * _col(eff['vectors'].get('BaseTintColor', {'r': 1, 'g': 1, 'b': 1})) * GLOW_AMBIENT
+    E = np.zeros(shape + (3,), np.float32)
+    if sw.get('Use EmissiveMask', True) and textures.exists(t.get('EmissiveMask')):
+        mask, _ = textures.linear(t['EmissiveMask'])
+        power = float(s.get('EmissiveMask_Power', 1.0))
+        if uv_set(eff, 'EmissiveMask') == uv_set(eff, 'BaseColor'):
+            mask = _resize(mask, shape)
+        else:                                    # (laid out otherwise: its mean)
+            mask = np.broadcast_to(mask.reshape(-1, 3).mean(0), shape + (3,))
+        for ch, ab in ((0, 'A'), (1, 'B')):
+            colour = _col(eff['vectors'].get('EmissiveColor_' + ab, {'r': 0, 'g': 0, 'b': 0}))
+            E = E + np.power(np.clip(mask[..., ch:ch + 1], 0, 1), power) * colour * float(
+                s.get('EmissiveIntensity_' + ab, 0.0))
+    if sw.get('Use Fresnel'):
+        E = E + fresnel_mean(float(s.get('FresnelPower', 1.0))) * _col(
+            eff['vectors'].get('Fresnel Color', {'r': 0, 'g': 0, 'b': 0})) * float(s.get('Fresnel Intensity', 0.0))
+    flow = t.get('FlowEmissiveMap')
+    if flow and textures.exists(flow) and not any(x in flow for x in ('White', 'Black')):
+        wave, _ = textures.linear(flow)
+        E = E + float(wave[..., 0].mean()) * _col(eff['vectors'].get('FlowEmissiveColor', {'r': 0, 'g': 0, 'b': 0})) \
+            * float(s.get('FlowEmissiveIntensity', 0.0))
+    E = E + _col(eff['vectors'].get('OverrideEmissiveColor', {'r': 0, 'g': 0, 'b': 0})) * float(
+        s.get('OverrideEmissiveIntensity', 0.0))
+    return lit.astype(np.float32), E.astype(np.float32)
+
+
+def emission_share(eff, textures):
+    """The share of a glowing part's steady look its emission gives (linear luminance, the base term as
+    bake_emissive takes it), or None: not a glowing part's base, or nothing to bake."""
+    if not (eff.get('base') or '').startswith(GLOW_BASES):
+        return None
+    lit, E = _emissive_terms(eff, textures)
+    if lit is None:
+        return None
+    e, b = float((E * GLOW_LUMA).sum(-1).mean()), float((lit * GLOW_LUMA).sum(-1).mean())
+    return e / (e + b) if e + b > 0 else 0.0
+
+
+def glow_encode(x):
+    """Linear HDR colour -> the display value (0..1) Tekken 8's tone curve gives it (the module notes)."""
+    luma = (x * GLOW_LUMA).sum(-1, keepdims=True)
+    return aces((x * (1 - GLOW_DESATURATION) + luma * GLOW_DESATURATION) * GLOW_EXPOSURE) ** (1 / 2.2)
+
+
+def bake_emissive(eff, textures):
+    """A glowing part's steady look, its colour texture -> (linear rgb whose sRGB encoding is the colour on screen,
+    None) (the module notes), or (None, None) without a colour texture."""
+    lit, E = _emissive_terms(eff, textures)
+    if lit is None:
+        return None, None
+    return srgb_to_linear(glow_encode(lit + E)).astype(np.float32), None

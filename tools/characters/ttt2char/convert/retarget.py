@@ -282,7 +282,10 @@ def body_channels(cal, world, root, displacement=None, yaw=None, root_scale=1.0,
 PREBLEND = 15                      # frames of the game's pre-blend (Jun's and Reina's throws in game: 15)
 HANDOFF_WINDOW = 10                # frames over which the split moves, ending one frame before the pre-blend
 HANDOFF_MATCH = 20.0               # degrees: HARA_ROT1 becomes exactly the next's when KOSHI's world is this close
+KEEP_BODY_FIT = 1.0                # handoff keep_body: 1 + cos of his hips' roll off any lie of the next's (2: none);
+                                   # below it no turn lays him as the next lies (face down to face up): his own facing
 HANDOFF_NEEDED = 10.0              # degrees between the clip's last HARA_ROT1 and the next's that call for a re-split
+FLAT_BLEND = 5                     # frames over which a twist in the hips' frame eases into one about the vertical
 TURN, HARA_CH, CHILD_CHANNELS = 2, 3, (4, 5)      # channels: the turn, HARA_ROT1, its children MUNE1 and KOSHI
 
 
@@ -321,6 +324,35 @@ def slerp(Ra, Rb, s):
     return _matrix(wa[..., None] * qa + wb[..., None] * qb)
 
 
+def _about(axis, angle):
+    """Rotation matrices (..., 3, 3) by `angle` (...) about unit axes (..., 3) (right-handed, column vectors)."""
+    a = np.asarray(axis, np.float64)
+    a = np.broadcast_to(a, np.shape(angle) + (3,)) if a.ndim == 1 else a
+    c, s = np.cos(angle)[..., None, None], np.sin(angle)[..., None, None]
+    X = np.zeros(a.shape[:-1] + (3, 3))
+    X[..., 0, 1], X[..., 0, 2], X[..., 1, 2] = -a[..., 2], a[..., 1], -a[..., 0]
+    X[..., 1, 0], X[..., 2, 0], X[..., 2, 1] = a[..., 2], -a[..., 1], a[..., 0]
+    return np.eye(3) + s * X + (1 - c) * (X @ X)
+
+
+def _axis_and_angle(R, scale=1.0):
+    """Unit axes (..., 3) and angles (radians, in [0, pi]) times `scale` of rotation matrices (..., 3, 3); a half
+    turn's axis from the symmetric part."""
+    R = np.asarray(R, np.float64)
+    angle = np.arccos(np.clip((np.trace(R, axis1=-2, axis2=-1) - 1) / 2, -1.0, 1.0))
+    axis = np.stack([R[..., 2, 1] - R[..., 1, 2], R[..., 0, 2] - R[..., 2, 0], R[..., 1, 0] - R[..., 0, 1]], -1)
+    norm = np.linalg.norm(axis, axis=-1)
+    half = (norm < 1e-6) & (angle > 1e-6)
+    if half.any():
+        S = (R[half] + np.eye(3)) / 2
+        d = np.sqrt(np.clip(np.diagonal(S, axis1=-2, axis2=-1), 0, None))
+        k = np.argmax(d, -1)
+        r = np.arange(len(k))
+        axis[half] = S[r, k] / d[r, k][:, None]
+    axis /= np.maximum(np.linalg.norm(axis, axis=-1, keepdims=True), 1e-300)
+    return axis, angle * scale
+
+
 def _rotations(v, kind):
     return animation.local_rotation(np.asarray(v, np.float64), kind)
 
@@ -344,14 +376,55 @@ def handoff_mismatch(values, kind, nxt, next_kind):
     return float(angle(H, Hn))
 
 
-def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW):
+def twist(values, kind, first, last, yaw, flat=None):
+    """Body channel values (F, nch, 3) of type `kind` with the fighter turned `yaw` (radians) about his hips from frame
+    `first` to `last` (smoothstep; on after it). The game takes the turn's every change within a move into the
+    fighter's facing and poses the body from that (checked in game: Tekken 8's 180 degree MUKI steps, the hand-offs'
+    sweeps), so the turn grows by yaw for his facing and HARA_ROT1 carries the body's turn: without `flat` about the
+    vertical (T^T H as before: the same pose in the turn's frame); with `flat`, the frame by which he lies, in his hips'
+    own frame about their axis that is upright at `flat`, so a spin he has in the air carries on (a turn about the
+    vertical reverses a somersault's; Clive's 1+3), easing from `flat` into the turn about the vertical over
+    FLAT_BLEND frames, which keeps him on the floor. float64; the turn's own steps keep their winding."""
+    v = np.array(values, np.float64)
+    F = len(v)
+    if not 0 < first < last < F or flat is not None and not last <= flat < F:
+        raise ValueError('a twist over frames %d to %d (flat by %s) of a clip of %d' % (first, last, flat, F))
+    s = np.clip((np.arange(F) - first) / float(last - first), 0.0, 1.0)
+    ramp = yaw * s * s * (3.0 - 2.0 * s)
+    tail = slice(first, F)
+    Ry = _rotations(_turn_values(ramp, animation.RAW), animation.RAW)
+    if flat is not None:
+        H0 = _rotations(v[:, HARA_CH], kind)
+        K = H0 @ _rotations(v[:, CHILD_CHANNELS[1]], kind)       # KOSHI's world, the turn aside
+        up = K[flat].T @ np.array([0.0, 1.0, 0.0])               # his hips' axis that is upright at flat
+        Q = K @ _about(up, ramp) @ np.swapaxes(K, -1, -2)       # Q(flat) = Ry(yaw)
+        t = np.clip((np.arange(F) - flat) / float(FLAT_BLEND), 0.0, 1.0)
+        D = np.swapaxes(Q, -1, -2) @ Ry                          # (Q and Ry are half turns: _quat's signs miss)
+        Ry = Q @ _about(*_axis_and_angle(D, t * t * (3.0 - 2.0 * t)))
+    H = Ry[tail] @ _rotations(v[tail, HARA_CH], kind)            # T' = T Ry(ramp): the body drawn Ry H L
+    if kind == animation.COMPRESSED:
+        v[tail, TURN, 2] -= ramp[tail]                          # (the turn's axis-angle: (-pi / 2, 0, -yaw))
+        v[tail, HARA_CH] = animation.axis_angles(H[:, None], v[first - 1, [HARA_CH]])[:, 0]
+    else:
+        v[tail, TURN, 1] += ramp[tail]
+        v[tail, HARA_CH] = _euler(H)
+    return v
+
+
+def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WINDOW, keep_body=False):
     """Body channel values (F, nch, 3) of an animation of type `kind` whose tail is re-split for the hand-off to an
     animation whose frame 0 has values `nxt` (nch', 3) of type `next_kind` (see PREBLEND): over `window` frames ending
-    one frame before the pre-blend the turn goes to the next's and HARA_ROT1 to the next's (or, when the two world
-    poses are further apart than HANDOFF_MATCH, to the rotation that gives KOSHI the next's), MUNE1 and KOSHI taking
-    the difference, so every world rotation and position stays as it was (HARA_ROT1's own frame aside); the frames
-    before the window are unchanged. The returned values are float64; the first frames' rotation values carry on into
-    the changed ones (animation.axis_angles' continuity)."""
+    one frame before the pre-blend the turn goes to the next's and HARA_ROT1's world (T^T H) to the next's (or, when
+    the two world poses are further apart than HANDOFF_MATCH, to the rotation that gives KOSHI the next's), MUNE1 and
+    KOSHI taking the difference, so every world rotation and position stays as it was (HARA_ROT1's own frame aside);
+    the frames before the window are unchanged. The game takes the turn's every change within a move into the
+    fighter's facing and draws the body (H and its children) from that facing (twist), and the facing does not take
+    the turn's jump at the next move: so the sweep turns the body on the ground as far (Tekken 8's throws: 90 to 360
+    degrees) and leaves the facing that much off Tekken 8's. keep_body: the drawn body stays as the clip leaves it and
+    the turn goes to the facing that lays it as the next move's frame 0 lies in its own (KOSHI's yaw), which is not
+    seen: no turn on the ground, and the facing (the get-up's) Tekken 8's own, to within a few degrees; where no turn
+    lays it so (KEEP_BODY_FIT), the clip's own. The returned values are float64; the first frames' rotation values
+    carry on into the changed ones (animation.axis_angles' continuity)."""
     v = np.array(values, np.float64)
     F = len(v)
     if F < 2:
@@ -367,18 +440,28 @@ def handoff(values, kind, nxt, next_kind, preblend=PREBLEND, window=HANDOFF_WIND
     Tn = _rotations(nxt[TURN][None], next_kind)[0]
     Hn = _rotations(nxt[HARA_CH][None], next_kind)[0]
     Rn = Tn.T @ Hn
-    Rk = Wc[5][last] @ _rotations(nxt[5][None], next_kind)[0].T  # KOSHI exactly the next's
-    R_end = Rn if angle(Rk, Rn) <= HANDOFF_MATCH else Rk
+    K5n = _rotations(nxt[5][None], next_kind)[0]
     # the turn's yaw: the clip's (continuous) to the next's (its value: the hemisphere the game samples)
     phi = np.unwrap(np.arctan2(T[:, 0, 2], T[:, 0, 0]))
     phi_n = float(np.arctan2(Tn[0, 2], Tn[0, 0]))
+    if keep_body:                                                 # the yaw that takes the next's KOSHI nearest his
+        N = (T[last] @ Wc[5][last]) @ (Rn @ K5n).T
+        a, b = N[0, 2] - N[2, 0], N[0, 0] + N[2, 2]
+        yaw = np.arctan2(a, b) if np.hypot(a, b) >= KEEP_BODY_FIT else phi[last]
+        phi_n = float(phi[last] + (yaw - phi[last] + np.pi) % (2 * np.pi) - np.pi)
     f = np.arange(F)
     s = np.clip((f - w0) / max(1, w1 - w0), 0.0, 1.0)
     s = s * s * (3 - 2 * s)                                       # smoothstep
     s[f >= w1] = 1.0
     new_phi = (1 - s) * phi + s * phi_n
-    R_new = slerp(R, np.broadcast_to(R_end, R.shape), s)
     T_new = _rotations(_turn_values(new_phi, kind), kind)
+    if keep_body:                                                 # the body (T R, T Wc) in the new facing
+        D = np.swapaxes(T_new, -1, -2) @ T
+        R = D @ R
+        Wc = {c: D @ w for c, w in Wc.items()}
+    Rk = Wc[5][last] @ K5n.T                                      # KOSHI exactly the next's
+    R_end = Rn if angle(Rk, Rn) <= HANDOFF_MATCH else Rk
+    R_new = slerp(R, np.broadcast_to(R_end, R.shape), s)
     H_new = T_new @ R_new
     tail = slice(w0, F)
     out = v.copy()
@@ -405,9 +488,11 @@ def rotation_shift(values):
     without wrapping: shift s steps by 2^s units of pi/32768 (0: 0.0055 degrees) over +-pi 2^s. Retargeted motion is
     smooth floats: at shift 0 the feet and hands stay within 0.13 mm (median of the clips' worst frames; 0.24 p99) of
     the unquantised pose, at the game's usual 4 within 2 mm, with 0.3 mm of frame-to-frame jitter on a planted foot,
-    for 0.74 of the size (Reina's clips). The game stores some of its own so too (Jun's stance)."""
+    for 0.74 of the size (Reina's clips). The game stores some of its own so too (Jun's stance). Values with extra
+    (translation, rotation) pairs after the body channels (descriptors()) count those rotations too."""
     v = np.asarray(values, np.float64)
-    rot = [c for c, d in enumerate(animation.BODY_DESCRIPTORS) if animation.is_rotation(d)]
+    rot = [c for c, d in enumerate(descriptors(v.shape[1] if v.ndim == 3 else len(animation.BODY_DESCRIPTORS)))
+           if animation.is_rotation(d)]
     top = float(np.abs(v[:, rot]).max()) if v.size else 0.0
     shift = 0
     while shift < MAX_SHIFT and np.round(top / (float(animation.ROTATION_UNIT) * (1 << shift))) > 32767:
@@ -420,12 +505,29 @@ def rotation_shift(values):
 RAW_DESCRIPTORS = tuple(animation.ROTATION if animation.is_rotation(d) else d for d in animation.BODY_DESCRIPTORS)
 
 
+# extra bones' channels after the body's: a (translation, rotation) pair per bone, as TTT2's own (Yoshimitsu's katanas)
+# and Tekken 7's weapon animations carry them (ttt2/animation.py)
+PAIR_DESCRIPTORS = (animation.TRANSLATION, animation.ROTATION)
+
+
+def descriptors(nch, kind=animation.COMPRESSED):
+    """The descriptors of a body animation of nch channels: the 23 body channels', then a PAIR_DESCRIPTORS pair per
+    extra bone (nch - 23 even)."""
+    body = animation.BODY_DESCRIPTORS if kind == animation.COMPRESSED else RAW_DESCRIPTORS
+    extra = nch - len(body)
+    if extra < 0 or extra % 2:
+        raise ValueError('a body animation has 23 channels and (translation, rotation) pairs after them, not %d' % nch)
+    return tuple(body) + PAIR_DESCRIPTORS * (extra // 2)
+
+
 def encode(values, kind=animation.COMPRESSED, endian='>'):
-    """A TTT2 body animation (bytes) of body_channels() values: 0x64 (compressed) or 0xC8 (raw)."""
+    """A TTT2 body animation (bytes) of body_channels() values, with extra pairs after them if they have any
+    (descriptors()): 0x64 (compressed) or 0xC8 (raw)."""
+    nch = np.asarray(values).shape[1]
     if kind == animation.COMPRESSED:
-        return animation.encode_compressed(list(animation.BODY_DESCRIPTORS), values, endian,
+        return animation.encode_compressed(list(descriptors(nch)), values, endian,
                                            rotation_shift=rotation_shift(values))
-    return animation.encode_raw(list(RAW_DESCRIPTORS), values, endian)
+    return animation.encode_raw(list(descriptors(nch, kind)), values, endian)
 
 
 # ------------------------------------------------------------------------------------------------ checking

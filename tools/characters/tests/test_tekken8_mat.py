@@ -395,6 +395,16 @@ class Bakes(unittest.TestCase):
         self.assertAlmostEqual(float(bake.ab_blend(a, b, 12)), 0.25)     # overlay, a < 0.5: 2ab
         self.assertAlmostEqual(float(bake.ab_blend(np.float32(0.75), b, 12)), 0.75)   # 1 - 2(1 - a)(1 - b)
 
+    def test_stubble_from_its_opacity_map(self):
+        """A base of its own (no colour map): the opacity map's red, its brightest the alpha test's whole, root to tip."""
+        tex = Textures({'O': (np.array([[[100, 0, 0, 255], [200, 0, 0, 255]]], np.uint8), False)})
+        eff = {'base': 'M_CH_made_up_stubble', 'textures': {'OBD': 'O'}, 'scalars': {}, 'switches': {},
+               'vectors': {'RootColor': col(0.0, 0.0, 0.0), 'TipColor': col(0.5, 0.25, 1.0)}}
+        rgb, alpha = bake.bake_albedo(eff, tex)
+        np.testing.assert_allclose(alpha[0], [0.5, 1.0], atol=1e-6)
+        np.testing.assert_allclose(rgb[0, 0], [0.25, 0.125, 0.5], atol=1e-6)
+        np.testing.assert_allclose(rgb[0, 1], [0.5, 0.25, 1.0], atol=1e-6)
+
     def test_costume_formula(self):
         purple, white = (0.25, 0.13, 0.92), (1.0, 1.0, 1.0)
         tex = Textures({'A': flat(1, 6, GREY, GREY, GREY),
@@ -494,6 +504,11 @@ class Bakes(unittest.TestCase):
         self.assertLess(look[0, 1, 2] / look[0, 1, 0], 9)                           # paler than its base colour
         self.assertEqual(bake.classify(eff['name'], eff, alpha), ('hair', False, True))
         self.assertEqual(bake.classify('MI_CH_zbr_eyelash', eff, alpha), ('overlay', False, True))
+        # Tekken 8's other spelling of eyebrows (Miary Zo's MI_CH_wkz_eyeblow): an overlay with its own colours
+        blow = dict(eff, name='MI_CH_x_eyeblow')
+        self.assertEqual(bake.classify(blow['name'], blow, alpha), ('overlay', False, True))
+        np.testing.assert_allclose(bake.bake_albedo(blow, tex)[0], rgb, atol=1e-6)
+        self.assertEqual(bake.classify('MI_CH_x_har_1p_braid', eff, alpha), ('hair', False, True))
 
     def test_hair_strands(self):
         """The strands' variation (ADI blue: an ID each; value and hue) and shading (ADI green: depth)."""
@@ -508,11 +523,62 @@ class Bakes(unittest.TestCase):
                            'RandomHueVariation': 0.0, 'TextureAO_Min': 0.4, 'TextureAO_Max': 1.0}}
         rgb, _, _ = bake.hair_colour(eff, tex)
         np.testing.assert_allclose(rgb[0, :2, 0], [0.2 * 0.75, 0.2 * 1.25], rtol=1e-5)   # 1 + 0.5 (lerp - 1)
-        look, _ = bake.bake_albedo(eff, tex)
+        with mock.patch.object(bake, 'HAIR_BRIGHT', 2.0):                # (as hair not bright: test_bright_hair)
+            look, _ = bake.bake_albedo(eff, tex)
         self.assertGreater(look[0, 0, 0], look[0, 2, 0])                  # the same ID: deep strands darker
         self.assertAlmostEqual(look[0, 0, 0] / look[0, 2, 0], 2.5 ** bake.HAIR_STRANDS, places=4)
         turned = bake.hue_turn(np.array([[1.0, 0.85, 0.85]]), np.array([2 * np.pi / 3]))
         np.testing.assert_allclose(turned, [[0.85, 1.0, 0.85]], atol=1e-6)   # a third of a turn: red -> green
+
+    def test_bright_hair(self):
+        """White hair with black under its alpha: a narrow spread at HAIR_LEVEL, the colour under the alpha the
+        strands', the strands grown; a thin beard's further. Dark hair does not count."""
+        eff = {'scalars': {'AlphaThreshold': 0.5}, 'overrides': {}}
+        rgb = np.zeros((16, 16, 3), np.float32)
+        alpha = np.zeros((16, 16), np.float32)
+        alpha[:, ::4] = 1.0
+        rgb[:, 0], rgb[:, 4], rgb[:, 8], rgb[:, 12] = 0.0, 1.0, 1.0, 0.1
+        self.assertTrue(bake.is_bright_hair(rgb, alpha, eff))
+        self.assertFalse(bake.is_bright_hair(rgb * 0.01, alpha, eff))
+        self.assertFalse(bake.is_bright_hair(rgb, None, eff))
+        out, grown = bake.bright_hair(rgb, alpha, eff)
+        drawn = bake.linear_to_srgb(out)[alpha >= 0.5][..., 0]
+        self.assertLess(drawn.std(), bake.HAIR_SPREAD * 1.1)
+        self.assertGreaterEqual(drawn.mean(), bake.HAIR_LEVEL - 0.02)
+        self.assertGreater(float(bake.linear_to_srgb(out)[:, 1, 0].min()), 0.3)         # no black under the alpha
+        self.assertEqual(grown[:, 1].min(), 1.0)                                        # a texel more each side
+        self.assertEqual(grown[:, 2].max(), 0.0)                                        # (25% drawn before: 75 after)
+        thin = np.zeros((32, 32), np.float32)
+        thin[:, ::16] = 1.0
+        _, beard = bake.bright_hair(np.ones((32, 32, 3), np.float32), thin, eff)
+        self.assertGreaterEqual((beard >= 0.5).mean(), bake.HAIR_COVER)                 # grown until it covers enough
+
+    def test_satin_colours(self):
+        """'Use 3D Iridescent': its satin IDs, by AnisoPower; the palette's colours for a 2P layer."""
+        tex = Textures({'ID': id_map([(255, 0, 0, 0), (0, 0, 0, 0), (255, 255, 0, 0), (0, 0, 0, 0)])})
+        eff = costume_eff(scalars={'ID01_AnisoPower': 1.0, 'ID05_AnisoPower': 0.3})
+        self.assertIsNone(bake.satin_cloth(eff, tex, (1, 4)))                           # (Reina's satin: no switch)
+        eff['switches'] = {'Use 3D Iridescent': True}
+        self.assertEqual(bake.satin_cloth(eff, tex, (1, 4))[0].tolist(), [True, False, False, False])
+        del eff['textures']['ID_Map']
+        self.assertIsNone(bake.satin_cloth(eff, tex, (1, 4)))
+        grey = np.array([0.35, 0.35, 0.35])
+        dark = np.array([0.15, 0.15, 0.15])
+        self.assertGreater(bake.satin_colour(grey)[0], 1.4 * grey[0])
+        self.assertGreater(bake.satin_colour(dark)[0] / dark[0], bake.satin_colour(grey)[0] / grey[0])   # 2P: more
+        np.testing.assert_allclose(bake.srgb_to_linear(bake.layer_colour(grey)),
+                                   bake.LAYER_GAIN * bake.srgb_to_linear(grey), rtol=1e-5)
+        np.testing.assert_allclose(bake.layer_colour(np.ones(3)), np.ones(3))           # (never past 1)
+        rma = np.zeros((1, 4, 4), np.uint8)
+        rma[0, :, 1] = (0, 0, 255, 255)                                                 # metallic: the last two
+        tex = Textures({'RMA': (rma, False)})
+        eff = costume_eff()
+        eff['textures']['RMA_A'] = 'RMA'
+        lift = bake.satin_lift(eff, tex, (1, 4))
+        matte, metal = np.array([[True, True, False, False]]), np.array([[False, False, True, True]])
+        np.testing.assert_allclose(lift(0, grey, matte), bake.satin_colour(grey))
+        np.testing.assert_allclose(lift(1, grey, matte), bake.layer_colour(grey))
+        np.testing.assert_allclose(lift(1, grey, metal), grey * bake.SATIN_METAL_COLOUR)  # his tie: dark, as in Tekken 8
 
     def test_specular(self):
         """The cloth shine (TTT2's third texture): R = (1 - roughness + SATIN AnisoPower) lerp(1, AO, 0.5),
@@ -568,6 +634,31 @@ class Bakes(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------------------------------- faces
+class SkinGain(unittest.TestCase):
+    def test_near_in_hue(self):
+        """A source with SKIN_NEAR_HUE takes the fighters nearest in brightness and hue; others in brightness alone."""
+        class Source:
+            NO_COLOURS = {}
+
+            def skin_faces(self, sex):
+                return [('a', 'a'), ('b', 'b'), ('c', 'c'), ('d', 'd')]
+        class Near(Source):
+            SKIN_NEAR_HUE = True
+        class Mats:
+            def effective(self, path, none):
+                return path
+        baked = {'a': [.2, .1, .05], 'b': [.2, .1, .05], 'c': [.4, .2, .2], 'd': [.4, .2, .2]}
+        theirs = {'a': [.4, .2, .1], 'b': [.4, .2, .1], 'c': [.8, .4, .8], 'd': [.8, .4, .8]}
+        own = np.array([.2, .1, .1])
+        with mock.patch.object(convert_skin, 'NEAREST', 2), mock.patch.object(convert_skin, 'FEWEST', 2), \
+                mock.patch.object(convert_skin, 'ttt2_face', lambda archives, code: np.array(theirs[code])):
+            bake_face = lambda eff: (np.array(baked[eff]).reshape(1, 1, 3), None)
+            near, _ = convert_skin.gain(Near(), None, 'male', Mats(), bake_face, own)
+            plain, _ = convert_skin.gain(Source(), None, 'male', Mats(), bake_face, own)
+        np.testing.assert_allclose(near, [2, 2, 4])                        # c and d: its hue
+        np.testing.assert_allclose(plain, [2, 2, 2])                       # a and b: its brightness
+
+
 class Faces(unittest.TestCase):
     def test_reference_faces(self):
         women = skin.reference_faces('female')

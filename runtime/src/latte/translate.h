@@ -79,6 +79,11 @@ struct ShaderEnvironment {
     bool multiwrite = false;       // CB_COLOR_CONTROL.MULTIWRITE_ENABLE: export 0 to every target
     TextureKind color_kind[8] = {};
     uint8_t alpha_func = 7;        // SX_ALPHA_TEST_CONTROL function when enabled, 7 (always) otherwise
+    // Not from the registers: the renderer's choice for a draw of a fighter
+    // with a look (gpu/looks.h), its DrawConstants::look: 1 its colours
+    // turned to the look's and its pixels dithered away, 2 only dithered
+    // (passes that write no colours of it: the motion blur's velocities).
+    uint8_t fighter_look = 0;
 
     ShaderEnvironment() {
         for (uint8_t& v : vtx_semantic) v = 0xFF;

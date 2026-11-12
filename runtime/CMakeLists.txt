@@ -38,6 +38,7 @@ add_library(cafe_runtime OBJECT
     ${TTT2_INSTALL_SOURCE}
     src/gpu/command_processor.cpp
     src/gpu/display.cpp
+    src/gpu/looks.cpp
     src/gpu/null_backend.cpp
     src/gpu/overlay.cpp
     src/gpu/replacements.cpp
@@ -75,7 +76,8 @@ add_library(cafe_runtime OBJECT
     src/title/practice.cpp
     src/title/presentation.cpp
     src/title/roster.cpp
-    src/title/solo_ghost.cpp)
+    src/title/solo_ghost.cpp
+    src/title/warp.cpp)
 target_include_directories(cafe_runtime PUBLIC include PRIVATE src)
 target_compile_features(cafe_runtime PUBLIC cxx_std_20)
 find_package(Vulkan REQUIRED)

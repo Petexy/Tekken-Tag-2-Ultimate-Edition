@@ -305,6 +305,15 @@ def _weighted_sampler(r):
     return {'Prob': prob, 'Alias': alias, 'TotalWeight': r.one('f', 4)}
 
 
+def _nanite_override(r):
+    """FMaterialOverrideNanite (a material instance's NaniteOverrideMaterial: Miary Zo's horn), 28 bytes in Tekken 8's
+    files: its soft object path OverrideMaterialRef, then two u32: bEnableOverride and the OverrideMaterial object's
+    package index (the only size with which the rest of a material instance holding one reads to its end)."""
+    ref = r.soft_path()
+    on = bool(r.one('I', 4))
+    return {'OverrideMaterialRef': ref, 'bEnableOverride': on, 'OverrideMaterial': r.reference()}
+
+
 def _rich_curve_key(r):
     v = r.take('<3B6f', 27)
     return dict(zip(('InterpMode', 'TangentMode', 'TangentWeightMode', 'Time', 'Value', 'ArriveTangent',
@@ -336,6 +345,11 @@ NATIVE = {   # structs with a serialiser of their own (TStructOpsTypeTraits With
     'PerQualityLevelInt': _per_quality(_int), 'PerQualityLevelFloat': _per_quality(_float),
     'RichCurveKey': _rich_curve_key, 'SimpleCurveKey': _fields('<2f', ('Time', 'Value')),
     'SkeletalMeshSamplingLODBuiltData': lambda r: {'AreaWeightedTriangleSampler': _weighted_sampler(r)},
+    'SkeletalMeshSamplingRegionBuiltData': lambda r: {'TriangleIndices': r.array(_INT, r.count()),
+                                                       'BoneIndices': r.array(_INT, r.count()),
+                                                       'AreaWeightedSampler': _weighted_sampler(r),
+                                                       'Vertices': r.array(_INT, r.count())},
+    'MaterialOverrideNanite': _nanite_override,
 }
 AS_PROPERTIES = {   # structs whose serialiser only notes a version and leaves the rest to the properties
     'ConstraintInstance',
@@ -346,6 +360,34 @@ NATIVE_ZERO = {'Vector': dict.fromkeys(XYZ, 0.0), 'Vector3f': dict.fromkeys(XYZ,
                'LinearColor': dict.fromkeys(RGBA, 0.0), 'Color': dict.fromkeys(BGRA, 0),
                'Guid': dict.fromkeys('ABCD', 0), 'IntPoint': dict.fromkeys(XYZ[:2], 0),
                'SoftObjectPath': '', 'SoftClassPath': '', 'TopLevelAssetPath': ''}
+
+
+# --- Niagara (Tekken 8's effects: tekken8/niagara.py) ---------------------------------------------------------------
+# A Niagara variable is written by its own code: its FName, then its type (FNiagaraTypeDefinition: ClassStructOrEnum,
+# UnderlyingType, Flags) as unversioned properties; an FNiagaraVariable adds its value bytes (TArray<uint8>), an
+# FNiagaraVariableWithOffset its i32 offset in a parameter store. (Every renderer, script and system of Miary Zo's
+# staff effects reads to its end with these.) A VM external function's binding info is plain properties.
+def _niagara_type(r):
+    return r.properties(r.s.schema('NiagaraTypeDefinition', True), 'NiagaraTypeDefinition')
+
+
+def _niagara_variable(value=False, offset=False):
+    def read(r):
+        out = {'Name': r.fname(), 'Type': _niagara_type(r)}
+        if value:
+            n = r.count()
+            out['VarData'] = bytes(r.take('<%dB' % n, n)) if n else b''
+        if offset:
+            out['Offset'] = r.i32()
+        return out
+    return read
+
+
+NATIVE.update({'NiagaraTypeDefinition': _niagara_type, 'NiagaraVariableBase': _niagara_variable(),
+               'NiagaraVariable': _niagara_variable(value=True),
+               'NiagaraVariableWithOffset': _niagara_variable(offset=True)})
+AS_PROPERTIES.add('VMExternalFunctionBindingInfo')
+# --------------------------------------------------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------------------------------- API

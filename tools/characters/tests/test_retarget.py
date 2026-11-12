@@ -332,6 +332,95 @@ class HandoffTest(Fixture):
         self.assertGreater(before, 80)
         self.assertLess(after, 1e-4)
 
+    def test_keep_body(self):
+        """keep_body: the drawn body (H and its children: the game draws them from the facing the turn books) as the
+        clip leaves it, every frame, and the turn at the end the facing in which it lies as the next's frame 0 lies in
+        its own; without it the turn sweeps to the next's (the fixture's 5.5 rad: the body spun that far). The clip,
+        and one twisted half a turn (body and facing), keep their turn; one whose turn alone was moved (the body
+        drawn as before) gets the clip's back."""
+        v = self.clip()
+        nxt = lying_next(self.sk, v)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        swept = RT.handoff(v, animation.COMPRESSED, nxt, animation.COMPRESSED)
+        self.assertGreater(abs(yaw(swept)[-1] - yaw(v)[-1]), 5.0)
+        moved = v.copy()
+        moved[20:, 2, 2] -= 0.6                         # (the compressed turn: (-pi / 2, 0, -yaw))
+        twisted = RT.twist(v, animation.COMPRESSED, 5, 15, np.pi)
+        for clip, end in ((v, yaw(v)[-1]), (twisted, yaw(v)[-1] + np.pi), (moved, yaw(v)[-1])):
+            out = RT.handoff(clip, animation.COMPRESSED, nxt, animation.COMPRESSED, keep_body=True)
+            W0, P0 = RT.pose(self.sk, clip, root_motion=False)
+            W1, P1 = RT.pose(self.sk, out, root_motion=False)
+            self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)    # (HARA_ROT1's own frame aside)
+            self.assertLess(np.abs(P1 - P0).max(), 1e-4)                        # (mm)
+            self.assertAlmostEqual(float(yaw(out)[-1]), float(end), delta=1e-4)
+            G1, Gn = game_world(self.sk, out)[0][-1], game_world(self.sk, nxt[None])[0][0]
+            self.assertLess(RT.angle(G1[1:22], Gn[1:22]).max(), 1e-3)           # lying as the next, in his facing
+        prone = nxt.copy()                              # the next lying face down: no turn lays him so
+        prone[3] = animation.axis_angle_from_matrix(rot_about((1, 0, 0), -np.pi / 2))
+        out = RT.handoff(moved, animation.COMPRESSED, prone, animation.COMPRESSED, keep_body=True)
+        self.assertAlmostEqual(float(yaw(out)[-1]), float(yaw(moved)[-1]), delta=1e-6)
+        W0, P0 = RT.pose(self.sk, moved, root_motion=False)
+        W1, P1 = RT.pose(self.sk, out, root_motion=False)
+        self.assertLess(RT.angle(W1[:, 1:22], W0[:, 1:22]).max(), 1e-5)
+
+    def test_twist_flat(self):
+        """twist with flat: the body turns in his hips' own frame, about their axis upright at flat, so a somersault
+        keeps its way round (a turn about the vertical, without flat, reverses it); at flat, and from FLAT_BLEND
+        frames after it on, the turn about the vertical; the turn (his facing) as without flat."""
+        F, first, last, flat = 40, 6, 20, 26
+        eye = np.repeat(np.eye(3)[None], F, 0)
+        flip = np.stack([rot_about((1, 0, 0), np.radians(15.0) * f) for f in range(F)])
+        s = np.clip((np.arange(F) - first) / float(last - first), 0, 1)
+        for kind in (animation.RAW, animation.COMPRESSED):
+            r = np.zeros((F, 23, 3))
+            r[:, 2] = RT._turn_values(np.zeros(F), kind)
+            if kind == animation.RAW:
+                r[:, 3], r[:, 4], r[:, 5] = RT._euler(eye), RT._euler(eye), RT._euler(flip)
+            else:
+                r[:, 5] = animation.axis_angles(flip[:, None])[:, 0]
+            K = lambda x: animation.local_rotation(x[:, 3], kind) @ animation.local_rotation(x[:, 5], kind)
+            for yaw in (np.pi, np.pi / 2, -np.pi / 2):
+                t = RT.twist(r, kind, first, last, yaw, flat)
+                old = RT.twist(r, kind, first, last, yaw)
+                K0, K1 = K(r), K(t)
+                Ry = rot_about((0, 1, 0), yaw)
+                b = K0[flat].T @ np.array([0, 1.0, 0])                          # (his hips' upright axis at flat)
+                for f in range(flat + 1):                                       # the turn in his hips' own frame
+                    ramp = yaw * s[f] * s[f] * (3 - 2 * s[f])
+                    self.assertLess(RT.angle(K1[f], K0[f] @ rot_about(b, ramp)), 1e-6)
+                self.assertLess(RT.angle(K1[flat], Ry @ K0[flat]), 1e-6)
+                # (to sqrt(eps): the relative rotation's arccos at a half turn, the channels' Euler at its gimbal pole
+                # and axis-angle at a half turn; 8.5e-7 degrees here, 1.2e-6 on Windows)
+                self.assertLess(RT.angle(K1[flat + RT.FLAT_BLEND:], Ry @ K0[flat + RT.FLAT_BLEND:]).max(), 1e-4)
+                np.testing.assert_allclose(t[:, 2], old[:, 2])
+        t = RT.twist(r, kind, first, last, np.pi, flat)
+        old = RT.twist(r, kind, first, last, np.pi)
+        K0, K1, K2 = K(r), K(t), K(old)
+
+        def spin(Kx):                                   # the frame-to-frame world rotation's axis (sin-scaled)
+            d = Kx[1:] @ np.swapaxes(Kx[:-1], -1, -2)
+            return np.stack([d[:, 2, 1] - d[:, 1, 2], d[:, 0, 2] - d[:, 2, 0], d[:, 1, 0] - d[:, 0, 1]], -1) / 2
+        self.assertGreater(spin(K1)[:flat, 0].min(), 0.2)                        # (sin 15 degrees: 0.26)
+        self.assertLess(spin(K2)[last:, 0].max(), -0.2)
+        with self.assertRaises(ValueError):
+            RT.twist(r, animation.RAW, first, last, np.pi, last - 1)
+
+    def test_twist_raw(self):
+        v = self.clip()
+        raw = RT.handoff(v, animation.COMPRESSED, lying_next(self.sk, v), animation.COMPRESSED)
+        r = np.array(raw)
+        r[:, 2] = RT._turn_values(np.linspace(0, 2, len(v)), animation.RAW)
+        r[:, 3] = RT._euler(animation.local_rotation(raw[:, 3]))
+        for c in RT.CHILD_CHANNELS:
+            r[:, c] = RT._euler(animation.local_rotation(raw[:, c]))
+        t = RT.twist(r, animation.RAW, 4, 20, np.pi)
+        T0, T1 = (animation.local_rotation(x[:, 2], animation.RAW) for x in (r, t))
+        H0, H1 = (animation.local_rotation(x[:, 3], animation.RAW) for x in (r, t))
+        self.assertLess(RT.angle(np.swapaxes(T1, -1, -2) @ H1, np.swapaxes(T0, -1, -2) @ H0).max(), 1e-6)
+        self.assertAlmostEqual(float(RT.angle(T1[-1], T0[-1])), 180.0, delta=1e-4)
+        with self.assertRaises(ValueError):
+            RT.twist(r, animation.RAW, 4, len(r), np.pi)
+
     def test_raw(self):
         v = self.clip()
         nxt = lying_next(self.sk, v)

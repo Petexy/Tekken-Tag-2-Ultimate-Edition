@@ -23,6 +23,12 @@ The model, its materials and the fighter's voice:
     skin.py       the fighters both games have, with faces of their own, for convert/skin.py's skin colour gain
     wwise.py      Wwise sound data (bank version 145): one small bank per event, its audio as loose files
     voice.py      a fighter's voice clips by kind, for convert/voice.py
+    sounds.py     the sound effects a fighter's moves play (weapons, special moves, hits) -> tones of its bank
+Her effects:
+    niagara.py    Niagara systems (NS_*): emitters, renderers, spawn bursts and rates, curves, colours, the bone
+                  followed; the fighter's effect table (DA_CharacterEffect_<CODE>)
+    niagarasim.py  a CPU emitter's scripts run: what it draws, measured (convert/effects8.py, a definition's tune)
+    staticmesh.py cooked static meshes (the effects' mesh particles) with tekken7.staticmesh's interface
 The moveset (the files autodump.py saves):
     windows.py    native Windows Steam discovery and importer-owned Tekken 8 sessions
     autodump.py   the movesets (in tkdata.bin) as the running game's own reader hands them over: Tekken 8 run
@@ -34,6 +40,7 @@ The moveset (the files autodump.py saves):
     anmbin.py     the animation banks: a fighter's own (.anmbin) and the shared one (com.anmbin)
     panm.py       the banks' animations (PANM) -> per-joint local transforms per frame
     anim.py       body animations retargeted onto a TTT2 skeleton, for the converter's motion pack
+    ue5anim.py    UE5 animation assets besides the fighters' clips: a skeleton, a per-track compressed clip
     movelist.py   the command list (.mvl, MVLT) -> a TTT2 command list
 
     from ttt2char.tekken8 import store, uprops

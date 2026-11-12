@@ -214,7 +214,8 @@ class RunStandIn(unittest.TestCase):
         motion = b'MOTION PACK'
         archives = mock.Mock()
         archives.has.return_value = True
-        archives.read_name.side_effect = lambda name: {'hei.xml': b'<hei/>', 'hei.bon': b'bon'}[name]
+        archives.read_name.side_effect = lambda name: {'hei.xml': b'<hei/>', 'hei.bon': b'bon',
+                                                       'hei.nud': b'nud'}[name]
         archives.entry.side_effect = lambda what, row: {('data006', 13): donor_moveset(),
                                                          ('data005', 13): motion}[(what, row)]
         src = mock.Mock(game='tekken8', NAME='Tekken 8')
@@ -309,7 +310,7 @@ class RunOwnVoice(unittest.TestCase):
     def test_run(self):
         archives = mock.Mock()
         archives.has.return_value = True
-        archives.read_name.side_effect = lambda name: {'jun.xml': b'<jun/>', 'jun.bon': b'bon'}[name]
+        archives.read_name.side_effect = lambda name: {'jun.xml': b'<jun/>', 'jun.bon': b'bon', 'jun.nud': b'nud'}[name]
         k = mock.Mock(name='her moveset')
         src = mock.Mock(game='tekken8', NAME='Tekken 8')
         clips = src.clips.return_value
@@ -322,6 +323,10 @@ class RunOwnVoice(unittest.TestCase):
                    mock.patch.object(importer, '_archives', return_value=archives),
                    mock.patch.object(importer, '_rpx', return_value='rpx'),
                    mock.patch.object(importer, 'tekken8_moveset', return_value=((k, {}, []), None)),
+                   mock.patch.object(importer, '_name_moves8', return_value=None),
+                   mock.patch.object(importer.sounds8, 'Effects', return_value=mock.Mock(
+                       names=[], clips=[], left_out=[], skipped=[])),
+                   mock.patch.object(importer.sounds, 'item_count', return_value=0),
                    mock.patch.object(importer.model, 'convert', return_value=(b'nud', b'nut', b'bon', None, None)),
                    mock.patch.object(importer.fx, 'copy_files', return_value=({}, None, None)),
                    mock.patch.object(importer.itemdb, 'effect_names', return_value=[]),
@@ -384,13 +389,133 @@ class Tekken8Model(unittest.TestCase):
         self.assertEqual(reduce.call_args[0][:3], (loaded, 1234, {'fac': 0.3, 'har': 0.7, 'bdf': 1.0}))
         self.assertEqual(repose.call_args[0][:2], (decimated, donor))
 
+    def test_classes_left_out_materials_and_a_second_try(self):
+        """The costume's parts but the face, the hair and the weapons get PART_CLASSES, the hair HAIR_CLASSES; the
+        materials the definition leaves out (MATERIALS None) go before decimating; a second call with the cache
+        decimates the model as loaded again (fill: to the target _fill_target finds), without loading it."""
+        parts = [('fac', 'f'), ('har', 'h'), ('bdf', 'b'), ('wpn0', 'w')]
+        loaded = small_model(parts)
+        loaded['prims'].append(dict(loaded['prims'][0], material='MI_fac_tealine'))
+        src = mock.Mock(game='tekken8')
+        src.costume.return_value = {'parts': parts, 'merge_order': [t for t, _ in parts], 'colours': 'c'}
+        src.load_model.return_value = loaded
+        d = types.SimpleNamespace(TEKKEN8={'costume': '1p'}, MATERIALS={'MI_fac_tealine': None})
+        calls = []
+
+        def reduce(k, target, weights, log, poses=None, classes=None):
+            calls.append((target, [p['material'] for p in k['prims']], classes))
+            return dict(k, prims=k['prims'][:2 + len(calls)], source=np.arange(12))
+        cache = {}
+        with mock.patch.object(decimate, 'decimate', side_effect=reduce), \
+                mock.patch.object(decimate, 'vertex_target', return_value=100), \
+                mock.patch.object(skeleton, 'repose', side_effect=lambda k, donor, log: k):
+            model.tekken8_model(src, d, {}, log=lambda s: None, cache=cache)
+            fill = dict(target=100, total=50, room=10, budget=61 + model.LAYER_SLACK // 2,
+                        counts={'MI_fac': 1, 'MI_har': 1, 'MI_bdf': 1}, layers={'MI_bdf': 1})
+            k, _, _, _ = model.tekken8_model(src, d, {}, log=lambda s: None, cache=cache, fill=fill)
+        src.load_model.assert_called_once()
+        self.assertEqual(calls[0], (100, ['MI_fac', 'MI_har', 'MI_bdf', 'MI_wpn0'],
+                                    {'bdf': model.PART_CLASSES, 'har': model.HAIR_CLASSES}))
+        self.assertEqual(calls[1][0], 110)                                   # (the first try's target + the room)
+        self.assertEqual([p['material'] for p in k['prims']], ['MI_fac', 'MI_har', 'MI_bdf', 'MI_wpn0'])
+
+    def test_definition_part_classes_over_the_defaults(self):
+        """TEKKEN8['part_classes'] replaces only the keys it names (Miary Zo's 'reach')."""
+        seen = []
+
+        def reduce(k, target, weights, log, poses=None, classes=None):
+            seen.append(classes)
+            return dict(k, source=np.arange(12))
+        d = types.SimpleNamespace(TEKKEN8={'part_classes': {'reach': 1.5}})
+        k = small_model([('bdf', 'b')])
+        with mock.patch.object(decimate, 'decimate', side_effect=reduce), \
+                mock.patch.object(skeleton, 'repose', side_effect=lambda k, donor, log: k):
+            model._tekken8_decimated(k, d, {}, lambda s: None, {'bdf': 1.0}, 100, None, None)
+        self.assertEqual(seen[0], {'bdf': dict(model.PART_CLASSES, reach=1.5)})
+        self.assertEqual(model.PART_CLASSES['reach'], 4.0)              # (the defaults as they were)
+
+    def test_definition_face_classes_only_where_asked(self):
+        """TEKKEN8['face_classes'] goes to the face's parts; without it the face has no classes."""
+        seen = []
+
+        def reduce(k, target, weights, log, poses=None, classes=None):
+            seen.append(classes)
+            return dict(k, source=np.arange(12))
+        k = small_model([('fac', 'f'), ('bdf', 'b')])
+        weights = {'fac': 0.3, 'bdf': 1.0}
+        with mock.patch.object(decimate, 'decimate', side_effect=reduce), \
+                mock.patch.object(skeleton, 'repose', side_effect=lambda k, donor, log: k):
+            for spec in ({}, {'face_classes': {'skin_reach': 0.5}}):
+                model._tekken8_decimated(k, types.SimpleNamespace(TEKKEN8=spec), {}, lambda s: None, weights, 100, None,
+                                         None)
+        self.assertEqual(seen[0], {'bdf': model.PART_CLASSES})
+        self.assertEqual(seen[1], {'bdf': model.PART_CLASSES, 'fac': {'skin_reach': 0.5}})
+
+    def test_definition_hair_classes_over_the_defaults(self):
+        """Every hair part gets HAIR_CLASSES; TEKKEN8['hair_classes'] replaces only the keys it names."""
+        seen = []
+
+        def reduce(k, target, weights, log, poses=None, classes=None):
+            seen.append(classes)
+            return dict(k, source=np.arange(12))
+        k = small_model([('har', 'h'), ('har_2p', 'g'), ('bdf', 'b')])
+        weights = {'har': 1.0, 'har_2p': 1.0, 'bdf': 1.0}
+        with mock.patch.object(decimate, 'decimate', side_effect=reduce), \
+                mock.patch.object(skeleton, 'repose', side_effect=lambda k, donor, log: k):
+            for spec in ({}, {'hair_classes': {'strands': 2.0}}):
+                model._tekken8_decimated(k, types.SimpleNamespace(TEKKEN8=spec), {}, lambda s: None, weights, 100, None,
+                                         None)
+        self.assertEqual(seen[0], {'bdf': model.PART_CLASSES, 'har': model.HAIR_CLASSES,
+                                   'har_2p': model.HAIR_CLASSES})
+        self.assertEqual(seen[1], {'bdf': model.PART_CLASSES, 'har': {'strands': 2.0}, 'har_2p': {'strands': 2.0}})
+        self.assertEqual(model.HAIR_CLASSES, {'strands': 5.0})          # (the defaults as they were)
+
+    def test_convert_makes_a_second_try_over_the_budget_again(self):
+        """convert: the first try's measures -> a second try; over the budget too (it would lose a layer) -> a third
+        by its measures, told it is the last; only the last try's log is shown."""
+        fills = []
+        replies = [dict(total=50000, budget=56000, layers={'x': 1}, counts={}, target=40000, room=5900),
+                   dict(total=56400, budget=56000, layers={'x': 1}, counts={}, target=45900, room=-500),
+                   ('nud', 'nut', 'bon', None, None)]
+
+        def made(source, archives, d, slot, log, standing, weapons, cache, fill=None):
+            fills.append(None if fill is None else (fill['target'], fill['last']))
+            log('try %d' % len(fills))
+            return replies[len(fills) - 1]
+        lines = []
+        with mock.patch.object(model, '_convert', side_effect=made), \
+                mock.patch.object(model.sources, 'of', side_effect=lambda s: s):
+            out = model.convert(mock.Mock(), None, None, log=lines.append)
+        self.assertEqual(out[0], 'nud')
+        self.assertEqual(fills, [None, (40000, False), (45900, True)])
+        self.assertEqual([l for l in lines if l.startswith('try')], ['try 3'])
+
+    def test_fill_target(self):
+        """_fill_target: decimated again till the model with its layers (each material's layer the share of its
+        vertices it was) comes within LAYER_SLACK / 2 of the budget."""
+        tried = []
+
+        def decimated(target):                     # (half the new vertices in a material with a layer of 0.5 of it)
+            tried.append(target)
+            extra = target - 30000
+            return {'prims': [dict(material='skin', tris=np.arange(10000 + extra // 2)[:, None]),
+                              dict(material='cloth', tris=np.arange(20000 + extra - extra // 2)[:, None])]}
+        fill = dict(target=30000, total=40000, room=8000, budget=48000 + model.LAYER_SLACK // 2,
+                    counts={'skin': 10000, 'cloth': 20000}, layers={'cloth': 10000})
+        k = model._fill_target(decimated, 38000, fill, lambda s: None)
+        n = sum(len(p['tris']) for p in k['prims'])
+        predicted = 40000 + (n - 30000) + 0.5 * (len(k['prims'][1]['tris']) - 20000)
+        self.assertLessEqual(abs(predicted - 48000), model.LAYER_SLACK // 2)
+        self.assertEqual(tried[0], 38000)
+        self.assertGreater(len(tried), 1)                                    # (38000 was 2000 over by the layers)
+
     def test_explicit_parts_and_weights(self):
         parts = [('fac', 'f'), ('bdu', 'u')]
         src = mock.Mock(game='tekken8')
         src.costume.return_value = {'parts': [], 'merge_order': [], 'colours': 'c'}
         src.load_model.return_value = small_model(parts)
         d = types.SimpleNamespace(TEKKEN8={'parts': parts, 'costume': '1p', 'part_weights': {'bdu': 0.5}})
-        with mock.patch.object(decimate, 'decimate', side_effect=lambda k, t, w, log: k) as reduce, \
+        with mock.patch.object(decimate, 'decimate', side_effect=lambda k, t, w, log, poses=None, classes=None: k) as reduce, \
                 mock.patch.object(skeleton, 'repose', side_effect=lambda k, donor, log: k):
             _, worn, colours, colours_2p = model.tekken8_model(src, d, {}, log=lambda s: None)
         self.assertEqual((worn, colours, colours_2p), (parts, 'c', None))

@@ -31,4 +31,9 @@ void prepare_roster();
 // struct) is, or -1.
 int added_slot(uint32_t player);
 
+// The title's situation set-up (sub_039C2DB0's kind): every kind but the
+// round end after a KO (26, before its replay) puts every added fighter's
+// summoned weapons away, so none stays drawn into the next round.
+void summons_situation(uint32_t kind);
+
 } // namespace cafe::title

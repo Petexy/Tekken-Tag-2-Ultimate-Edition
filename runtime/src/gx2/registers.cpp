@@ -6,8 +6,10 @@
 #include "gx2/internal.h"
 
 #include "cafe/export.h"
+#include "gx2/hooks.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 
 namespace cafe::gx2 {
@@ -58,6 +60,12 @@ void set_rasterizer_clip_control(bool rasterizer, bool z_clip, bool half_z) {
 }
 
 namespace {
+std::atomic<AlphaRefHook> g_alpha_ref_hook{nullptr};
+} // namespace
+
+void set_alpha_ref_hook(AlphaRefHook hook) { g_alpha_ref_hook.store(hook, std::memory_order_relaxed); }
+
+namespace {
 
 uint32_t fixed_12_4(float value) { return static_cast<uint32_t>(value * 8.0f); }
 uint32_t bits(float value) { return std::bit_cast<uint32_t>(value); }
@@ -70,7 +78,8 @@ void GX2InitAlphaTestReg(AlphaTestReg* reg, bool enable, uint32_t func, float re
 void GX2SetAlphaTestReg(AlphaTestReg* reg) {
     ApiLock lock;
     set_context_reg(reg::SX_ALPHA_TEST_CONTROL, reg->sx_alpha_test_control);
-    set_context_reg(reg::SX_ALPHA_REF, reg->sx_alpha_ref);
+    const AlphaRefHook hook = g_alpha_ref_hook.load(std::memory_order_relaxed);
+    set_context_reg(reg::SX_ALPHA_REF, hook != nullptr ? hook(reg->sx_alpha_ref) : uint32_t{reg->sx_alpha_ref});
 }
 void GX2SetAlphaTest(bool enable, uint32_t func, float ref) {
     AlphaTestReg reg;

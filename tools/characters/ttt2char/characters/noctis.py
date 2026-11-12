@@ -9,7 +9,7 @@ NAME = 'Noctis'
 SHORT_NAME = 'NOCTIS'
 TEKKEN7_ID = 44
 TEKKEN7_CODE = 'mrz'
-REVISION = 7
+REVISION = 8
 CODE = 'mrz'
 SEX = 'male'
 
@@ -147,6 +147,16 @@ VERTEX_BUDGET = 56000
 # a hit leads to holds it where it hit until the warp takes it back (moveset.WEAPON_HOLD_PROP; Tekken 7 dismisses it
 # there with particles of its mesh, which are left out); on guard it is gone at once, as in Tekken 7
 WEAPON_HOLD = r'^Mz_(rp01F|rush03C|t_slpF_RP|s_tlk01|WPF2_EX)_HIT$'
+# On guard they warp him behind the opponent: Tekken 7's clips show him going as the move after the guard starts (2
+# frames in the warp's light, 2 fading, gone about 8 before he appears), its moveset only has him appear there; so
+# those moves start with the warp out his whiffed Warp-Strike has (moveset.warp_out_at_start)
+WARP_OUT = (r'^(Mz_(rp01F|rush03C|t_slpF_RP|s_tlk01|WPF_EX)|SPMz_Combo10)_Miss$', 0x01010505)
+# His warps' effects (convert/particles.py EFFECTS options): his weapons glow as he summons, throws and dismisses them
+# (Tekken 7 draws mesh particles of each weapon there: shells of the weapons here), placed at the weapon (the
+# particles of each summon at its own), glassy cyan-white; the streak of light a warp leaves (2,000 dots of light along
+# 5 m in Tekken 7) as the thin wavering filaments its vector fields blow them into; the drift Tekken 7 gives those
+# dots (AccelerationConstant) kept (the streak's dashes crawl with it)
+EFFECTS = {'weapon_flashes': True, 'lines': True, 'constant_acceleration': True}
 # the Rage Art's and the Sword of the Father's weapons (not drawn) hit with the right hand's weapon's tip
 # 0xfc selects the spare point refreshed only during df4,2's second hit.
 HIT_LOCATIONS = {0x67: 0x46, 0x69: 0x46, 0xfc: 71}

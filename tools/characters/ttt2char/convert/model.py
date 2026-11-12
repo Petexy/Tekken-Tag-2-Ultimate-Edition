@@ -13,7 +13,11 @@ Textures are at most 512 texels on a side, with at most 3 mip levels (longer cha
 
 A Tekken 8 fighter's side comes from its source (source.py, tekken8/: the same model dict, effective materials and
 bakes): its costume's meshes have one level of detail of ~78k vertices, reduced to the budget (decimate.py, the
-face's and hair's parts giving up less than the body: PART_WEIGHTS), and are bound in an A-pose, turned to the
+face's and hair's parts giving up less than the body: PART_WEIGHTS; the body's skin and large pieces keeping a share
+of their vertices, its small pieces few: PART_CLASSES; the hair's cards reduced as strands: HAIR_CLASSES; the
+skin's folds at elbows, knees, ... kept for
+skeleton.bend_poses' test poses; the target from what the 2P colour layers, trimmed to the triangles they draw,
+really take: convert decimates a second time when it was far off), and are bound in an A-pose, turned to the
 donor's T-pose first (skeleton.repose: skeleton.build keeps the donor's rotations and moves positions only). Its hair
 is drawn as TTT2 draws hair: TTT2's hair shader reads the template's second texture (ramps from the cards' roots at
 v = 0 along v, the highlights' noise; the same in every TTT2 hair) and Tekken 8 has nothing like it, so the
@@ -24,6 +28,8 @@ budget. Textures that bake alike are one (Reina's eyebrows and lashes).
 import collections
 import copy
 import hashlib
+import re
+import time
 
 import numpy as np
 from PIL import Image
@@ -36,7 +42,8 @@ from ..tekken7.texture import Texture2D
 from ..tekken7.uasset import export_properties, load
 from ..ttt2 import bone, nud, nut
 from ..ttt2.archive import key_of
-from . import chains as hanging, cloth, colours as colours2p, skeleton, skin, strips, tiger, weapons
+from . import chains as hanging, cloth, colours as colours2p, skeleton, skin, strips, summonfade, tiger
+from . import weapons as weapons_mod
 
 GIDX_BASE = 0x10408000          # texture ids above every id the game's own textures use (0x10404fac at most)
 SLOT_GIDX = 0x1000              # each place's added fighter its own range of texture ids (they meet in fights)
@@ -429,14 +436,17 @@ class TextureBank:
         self.first, self.textures, self.by_key = first, [], {}
         self.sources, self.normals = [], set()          # each texture's image; the normal maps' indices
         self.kept = set()                               # the indices of textures fit() halves after all others
+        self.solid = {}                                 # index -> make_texture's solid (image(): bright hair)
 
-    def add(self, key, rgba, fmt):
+    def add(self, key, rgba, fmt, solid=None):
         if key not in self.by_key:
             self.by_key[key] = self.first + len(self.textures)
             if key[0] == 'nrm':
                 self.normals.add(len(self.textures))
+            if solid is not None:
+                self.solid[len(self.textures)] = solid
             self.sources.append(np.asarray(rgba, np.uint8))
-            self.textures.append(nut.make_texture(rgba, self.by_key[key], fmt, mips=MIPS))
+            self.textures.append(nut.make_texture(rgba, self.by_key[key], fmt, mips=MIPS, solid=solid))
         return self.by_key[key]
 
     def keep(self, ids):
@@ -448,43 +458,65 @@ class TextureBank:
         self.sources = [self.sources[i] for i in at]
         self.normals = {j for j, i in enumerate(at) if i in self.normals}
         self.kept = {j for j, i in enumerate(at) if i in self.kept}
+        self.solid = {j: self.solid[i] for j, i in enumerate(at) if i in self.solid}
         self.by_key = {key: new[v] for key, v in self.by_key.items() if v in new}
         return new
 
-    def fit(self, budget):
+    def fit(self, budget, dry=False):
         """Halves the largest textures (a normal map before an image of its size; the kept ones last) until all fit in
-        `budget` bytes -> how many were halved."""
-        def size(i):
-            return sum(len(m) for m in self.textures[i]['mips'])
-        total, halved = sum(size(i) for i in range(len(self.textures))), 0
+        `budget` bytes -> how many were halved; dry: none, only {index: how many times fit would halve it} (each
+        halving takes a quarter of a texture's bytes: its smallest mip level is 16 texels or more)."""
+        sizes = {i: sum(len(m) for m in t['mips']) for i, t in enumerate(self.textures)}
+        sides = {i: (t['w'], t['h']) for i, t in enumerate(self.textures)}
+        total, halved, times = sum(sizes.values()), 0, collections.Counter()
         while total > budget:
-            big = [i for i, t in enumerate(self.textures) if min(t['w'], t['h']) > 64]
+            big = [i for i in sides if min(sides[i]) > 64]
             if not big:
                 break
-            i = max(big, key=lambda i: (i not in self.kept, size(i) * (2 if i in self.normals else 1), i))
-            t, before = self.textures[i], size(i)
-            h, w = self.sources[i].shape[:2]
-            self.sources[i] = (self.sources[i].reshape(h // 2, 2, w // 2, 2, 4).astype(np.float32).mean((1, 3))
-                               + 0.5).astype(np.uint8)
-            self.textures[i] = dict(nut.make_texture(self.sources[i], t['gidx'], t['fmt'], mips=len(t['mips'])),
-                                    **{k: v for k, v in t.items() if k not in ('fmt', 'w', 'h', 'mips', 'gidx')})
-            total += size(i) - before
+            i = max(big, key=lambda i: (i not in self.kept, sizes[i] * (2 if i in self.normals else 1), i))
+            before = sizes[i]
+            if dry:
+                sizes[i] = before // 4
+            else:
+                t = self.textures[i]
+                self.sources[i] = self.halved(i, 1)
+                self.textures[i] = dict(nut.make_texture(self.sources[i], t['gidx'], t['fmt'], mips=len(t['mips']),
+                                                         solid=self.solid.get(i)),
+                                        **{k: v for k, v in t.items() if k not in ('fmt', 'w', 'h', 'mips', 'gidx')})
+                sizes[i] = sum(len(m) for m in self.textures[i]['mips'])
+            sides[i] = (sides[i][0] // 2, sides[i][1] // 2)
+            total += sizes[i] - before
             halved += 1
-        return halved
+            times[i] += 1
+        return dict(times) if dry else halved
+
+    def halved(self, i, times):
+        """Texture i's image (h, w, 4) halved `times` times as fit() halves it (each texel the mean of four)."""
+        out = self.sources[i]
+        for _ in range(times):
+            h, w = out.shape[:2]
+            out = (out.reshape(h // 2, 2, w // 2, 2, 4).astype(np.float32).mean((1, 3)) + 0.5).astype(np.uint8)
+        return out
 
     def constant(self, rgba, fmt, size=32):
         img = np.zeros((size, size, 4), np.uint8)
         img[:] = rgba
         return self.add(('const', tuple(int(x) for x in rgba), fmt), img, fmt)
 
-    def image(self, key, im, fmt, alpha):
+    def image(self, key, im, fmt, alpha, solid=None):
+        """solid: the alpha test's reference of an image with its colours filled in under its alpha (bright hair: bake.
+        fill_under): colour and alpha resized apart (an RGBA resize weighs colours by alpha: black where it is 0), its
+        mips kept opaque (nut.make_texture)."""
         if ('img', key, fmt, alpha) in self.by_key:
             return self.by_key[('img', key, fmt, alpha)]
         im = im.convert('RGBA')
-        a = np.array(im.resize(pow2_size(*im.size), Image.LANCZOS))
+        if solid is None:
+            a = np.array(im.resize(pow2_size(*im.size), Image.LANCZOS))
+        else:
+            a = np.array(Image.merge('RGBA', [c.resize(pow2_size(*im.size), Image.LANCZOS) for c in im.split()]))
         if not alpha:
             a[..., 3] = 255
-        return self.add(('img', key, fmt, alpha), a, fmt)
+        return self.add(('img', key, fmt, alpha), a, fmt, solid=solid)
 
     def normal(self, key, im):
         """A Tekken 7 normal map (R = X, G = Y towards +v) -> TTT2's BC3 layout (A = X, G = Y towards -v)."""
@@ -530,7 +562,10 @@ def load_templates(archives, templates, texture_sources):
     return out
 
 
-ORDER = {'mouth': 0, 'skin': 0, 'cloth': 0, 'colour': 0.5, 'eye': 1, 'hair': 2, 'overlay': 3}   # draw order in a mesh
+# draw order in a mesh ('glow_add': a summon added to the picture, 'glow_blend': one blended over it, 'glow_cut': an
+# unlit alpha-tested one, a lace model's pictures: lace8.py)
+ORDER = {'mouth': 0, 'skin': 0, 'cloth': 0, 'glow': 0, 'glow_cut': 0, 'colour': 0.5, 'eye': 1, 'hair': 2,
+         'overlay': 3, 'lens': 3, 'glow_add': 3, 'glow_blend': 3}
 WRAP_REPEAT = 1                 # a NUD texture's wrap mode that repeats (the templates' 3 clamps)
 HOLES = 0.02                    # cloth whose colour texture is transparent over more than this share has holes (lace)
 
@@ -588,17 +623,65 @@ LAYER_OFFSET = 1.0              # mm: how far the 2P colour layer sits outside t
 # a Tekken 8 part's share of the vertices it gives up to the budget against the body's 1 (decimate.decimate's
 # part_weights; by the tag's first three letters, a definition's TEKKEN8['part_weights'] first): the face's eyes,
 # lips and nose keep their shapes at 0.3, the hair's cards their strands at 0.7 (Reina 77.8k -> 26.9k: body 10.4k,
-# face 8.2k, hair 8.3k)
-PART_WEIGHTS = {'fac': 0.3, 'har': 0.7}
+# face 8.2k, hair 8.3k), a beard's its few at 0.2 (Victor's 4.3k cards as a body part: 2k with holes)
+PART_WEIGHTS = {'fac': 0.3, 'har': 0.7, 'fah': 0.2}
+# the classes of a Tekken 8 costume's other parts (not the face, the hair or the weapons: decimate.decimate's
+# classes; a definition's TEKKEN8['part_classes'] over them): each skin material keeps at least 0.4 of its vertices
+# and each large piece (a bikini top, a sarong, a jacket) 0.25 while anything else can give, each small piece (a
+# bead, a stud, a buckle) 6 + 0.5 per mm of its length. Without them the errors took the smooth skin first (the
+# cheapest to take) and the small pieces' locks held: Miary Zo's skin 10.5k -> 680 vertices (a see-through chest,
+# faceted limbs); Reina's hands 2406 -> 267. A point of a piece lying on the skin or another piece moves by at most
+# 'lying' times its height over it (her straps under the bust and the band's lower edge had sunk into the skin,
+# hidden) and any point of a piece not small by 'reach' mm, of the skin by 'skin_reach' mm (a floor says how many
+# vertices, not where: her bikini top's bounded points had taken its floor and its cups flattened by 14 mm). The face
+# and the hair pay for what the body needs past its floors: Reina's and Azucena's keep what they had at these; a
+# definition whose costume is most of what is seen can hold it closer (Miary Zo's 'reach'), or reduce its wires as
+# whole rings ('tubes': decimate.py's Wires; Miary Zo's necklace)
+PART_CLASSES = {'skin': 0.4, 'big': 0.25, 'small': 0.5, 'lying': 1.0, 'reach': 4.0, 'skin_reach': 1.0}
+# the classes of a Tekken 8 costume's hair (decimate.decimate's; a definition's TEKKEN8['hair_classes'] over them): its
+# cards' strips are reduced as strands (decimate.py's Hair strands), their rows within 5 mm of the bends (centre
+# parting, curved fringe, crown) while anything else can give. Collapsed like any surface, Miary Zo's 440 strips
+# kept 3..23 vertices each (her 38996 -> 5099, 2060 of them tufts hidden at the back): straight planks from root to
+# tip, a fringe lock over her right eye, chords through the skull (the scalp showing at the crown)
+HAIR_CLASSES = {'strands': 5.0}
+HAIR_SOLID_REF = 85             # bright hair's alpha test reference when its material names none (Tekken 8's 1/3)
 
 
-def tekken8_model(source, d, donor, log=print):
+def clear_of_dissolve(ref):
+    """An alpha test reference the converter writes, kept off a dissolving material's (lace8.DISSOLVE_REF, which the
+    runtime raises while that summon fades: title/summon_fade.h): a step under it (Tekken 7's 0.42 -> 107)."""
+    from . import lace8
+    return ref - 1 if ref == lace8.DISSOLVE_REF else ref
+LAYER_MARGIN = 2                # texels round the texels a 2P colour layer draws (its alpha test) whose triangles it
+                                # keeps: its next mip level reaches so far (at fighting distance a texel is about a
+                                # pixel at 1440p, 2 at 720p; a level further down only a thin rim could differ)
+LAYER_SLACK = 200               # vertices: a Tekken 8 model this far under the budget or over it (its layers trimmed:
+                                # convert) is decimated again to fit it
+
+
+def weapon_parts(weapons):
+    """[(tag, mesh path)] of a Tekken 8 fighter's weapon meshes (its WEAPONS' 'mesh', each once, in order): parts
+    'wpn0', 'wpn1', ... of its model (tekken8_model), re-posed and decimated with the costume."""
+    out = []
+    for w in weapons:
+        if w.get('mesh') and w['mesh'] not in [p for _, p in out]:
+            out.append(('wpn%d' % len(out), w['mesh']))
+    return out
+
+
+def tekken8_model(source, d, donor, log=print, weapons=(), cache=None, fill=None):
     """A Tekken 8 fighter's costume (d.TEKKEN8: its 'costume' and 'costume_2p', tekken8.costume's names, or 'parts'
-    and 'merge_order') as the model dict (load_tekken7_model's shape), reduced to the vertex budget (leaving room for
-    the 2P colour layers: decimate.vertex_target) and posed like the donor's skeleton (skeleton.repose) -> (model,
-    parts [(tag, mesh path)], player 1's colours, player 2's or None)."""
+    and 'merge_order') as the model dict (load_tekken7_model's shape), with its weapons' meshes (weapon_parts),
+    reduced to the vertex budget (leaving room for the 2P colour layers: decimate.vertex_target) and posed like the
+    donor's skeleton (skeleton.repose) -> (model, parts [(tag, mesh path)], player 1's colours, player 2's or None).
+    cache: a dict keeping the model as loaded for a second call (convert's), with `fill` (_fill_target)."""
     from . import decimate
+    if cache is not None and 'tekken8' in cache:
+        k, parts, colours, colours_2p, weights, target, poses, source_index = cache['tekken8']
+        return _tekken8_decimated(k, d, donor, log, weights, target, poses, source_index, fill), parts, \
+            colours, colours_2p
     spec = d.TEKKEN8
+    worn = {}
     if spec.get('parts'):
         parts, merge_order = list(spec['parts']), list(spec.get('merge_order') or [t for t, _ in spec['parts']])
         colours = source.costume(d, spec['costume'])['colours'] if spec.get('costume') else None
@@ -606,10 +689,25 @@ def tekken8_model(source, d, donor, log=print):
         costume = source.costume(d, spec.get('costume', '1p'))
         parts, merge_order, colours = list(costume['parts']), list(costume['merge_order']), costume['colours']
         for tag, path in costume.get('static') or []:
-            log('  %s (%s): a rigid item of the costume, left out (Tekken 8\'s are not converted yet)' % (
-                path.split('/')[-1], tag))
+            if tag in d.MESHES:
+                worn[tag] = costume['scales'][tag]
+                parts.append((tag, path))
+                merge_order.append(tag)
+            else:
+                log('  %s (%s): a rigid item of the costume, left out (the definition\'s MESHES do not name it)' % (
+                    path.split('/')[-1], tag))
     colours_2p = source.costume(d, spec['costume_2p'])['colours'] if spec.get('costume_2p') else None
-    k = source.load_model(parts, merge_order, log=log)
+    armed = weapon_parts(weapons)                # (bound to other rigs: re-bound to the costume's as its parts)
+    twice = {tag for tag, path in parts if any(path.lower() == p.lower() for _, p in armed)}
+    parts = [p for p in parts if p[0] not in twice]      # (a costume part that is a weapons' mesh: Victor's ex0)
+    merge_order = [tag for tag in merge_order if tag not in twice]
+    parts, merge_order = parts + armed, merge_order + [tag for tag, _ in armed]
+    k = source.load_model(parts, merge_order, log=log, worn=worn)
+    # the materials the definition leaves out (MATERIALS None: the tear lines, the eyes' shadow shells) go before
+    # decimating: model.py drops them, and the vertices the decimation left them were lost (Miary Zo's 210)
+    left = {name for name, kind in getattr(d, 'MATERIALS', {}).items() if kind is None}
+    if any(p['material'] in left for p in k['prims']):
+        k = dict(k, prims=[p for p in k['prims'] if p['material'] not in left])
     log('  Tekken 8 model: %d bones, %d sections, %d vertices (%s)' % (
         len(k['bones']['names']), len(k['prims']), decimate.count(k),
         ', '.join('%s %d' % (tag, decimate.count({'prims': [p for p in k['prims'] if p['part'] == tag]}))
@@ -617,29 +715,258 @@ def tekken8_model(source, d, donor, log=print):
     own = spec.get('part_weights', {})
     weights = {tag: own.get(tag, PART_WEIGHTS.get(tag[:3], 1.0)) for tag, _ in parts}
     budget = getattr(d, 'VERTEX_BUDGET', VERTEX_BUDGET)
+    from . import snakes8                        # (her snakes' meshes come after: convert/snakes8.py)
+    budget -= snakes8.vertices(d)
+    from . import prefabs8                       # (its summoned creatures' meshes: convert/prefabs8.py)
+    budget -= prefabs8.vertices(d)
     target = decimate.vertex_target(k, budget=budget)
     log('  vertex target %d (the budget %d less room for 2P colour layers; part weights %s)' % (
         target, budget, ', '.join('%s %.1f' % (tag, weights[tag]) for tag, _ in parts)))
-    k = decimate.decimate(k, target, weights, log=log)
-    k = skeleton.repose(k, donor, log=log)
-    return k, parts, colours, colours_2p
+    # a small part the passes would leave a sliver of (each pass takes up to decimate.MOST_REMOVED of every part not
+    # yet stuck, whatever its weight: Miary Zo's horn, 2213 -> 75): decimated alone to its TEKKEN8['part_vertices']
+    # count first, then kept as it is (the vertices it keeps over the sliver come from the parts still free in the
+    # last passes: her face)
+    # bent test poses (elbows, knees, ... turned: skeleton.bend_poses): the decimator keeps the vertices where the
+    # skin folds when they bend (without them a bent elbow or knee is a flat plank from the shoulder or hip)
+    poses = skeleton.bend_poses(k['bones'])
+    sources_of = source
+    source = None
+    for tag, n in sorted((spec.get('part_vertices') or {}).items()):
+        if tag not in weights:
+            continue
+        for _ in range(4):                       # (a first pass also welds the other parts' equal wedges, which
+            size = decimate.count({'prims': [p for p in k['prims'] if p['part'] == tag]})   # count to its target)
+            if size <= n:
+                break
+            k = decimate.decimate(k, decimate.count(k) - (size - int(n)),
+                                  {t: 1.0 if t == tag else 0.0 for t in weights}, log=log, poses=poses)
+            source = k['source'] if source is None else source[k['source']]
+        weights[tag] = 0.0
+    if spec.get('covered'):                      # (the surfaces under a costume's own plates: covered.py)
+        from . import covered
+        paths_, materials_, textures_ = sources_of.material_paths(parts), sources_of.materials(), sources_of.textures()
+
+        def luma(name):
+            rgb, _ = sources_of.bake_albedo(materials_.effective(paths_[name], colours), textures_)
+            return linear_to_srgb(np.clip(rgb, 0, 1)) @ np.array((0.3, 0.6, 0.1), np.float32)
+        k, shown = covered.mark(k, spec['covered'], poses, luma, log=log)
+        if cache is not None:
+            cache['shown'] = shown
+    if spec.get('skin_occlusion') and cache is not None:     # (skin the costume shades: occlusion.py)
+        from . import occlusion
+        cache['occlusion'] = occlusion.mark(k, spec['skin_occlusion'], log=log)
+    if cache is not None:
+        cache['tekken8'] = (k, parts, colours, colours_2p, weights, target, poses, source)
+    return _tekken8_decimated(k, d, donor, log, weights, target, poses, source), parts, colours, colours_2p
 
 
-def convert(source, archives, d, slot=0, log=print, standing=None):
+def _counts(k):
+    """The vertices of each material of model dict k (decimate.count's)."""
+    out = collections.Counter()
+    for p in k['prims']:
+        out[p['material']] += len(np.unique(p['tris']))
+    return out
+
+
+def _fill_target(decimated, target, fill, log):
+    """convert's second try: the decimation of target `target` (decimated(target) -> model dict) whose model with its
+    2P colour layers comes within LAYER_SLACK / 2 of fill['budget'], by the last try's measures (fill: its 'target',
+    'total' (vertices in the end), 'counts' (_counts of its decimated model) and 'layers' (each layered material's
+    trimmed layer vertices)): a material's layer takes the share of its vertices it took then -> the model dict
+    (fill['used']: the target it was decimated to)."""
+    share = {m: n / float(max(fill['counts'].get(m, 0), 1)) for m, n in fill['layers'].items()}
+
+    def total(k):                                # (what the model would end with)
+        now = _counts(k)
+        return fill['total'] + sum((now[m] - fill['counts'].get(m, 0)) * (1.0 + share.get(m, 0.0))
+                                   for m in set(now) | set(fill['counts']))
+    goal = fill['budget'] - LAYER_SLACK // 2
+    seen = [(fill['target'], fill['total'])]
+    for _ in range(3):
+        k = decimated(target)
+        fill['used'] = target
+        got = total(k)
+        log('  vertex target %d: the model ends with about %d vertices of the budget %d (the 2P colour layers '
+            'trimmed)' % (target, got, fill['budget']))
+        if abs(got - goal) <= LAYER_SLACK // 2:
+            break
+        (t0, n0), seen = seen[-1], seen + [(target, got)]
+        slope = (got - n0) / float(target - t0) if target != t0 else 1.0
+        target = int(round(target + (goal - got) / min(max(slope, 1.0), 2.0)))
+    return k
+
+
+def _tekken8_decimated(k, d, donor, log, weights, target, poses, source, fill=None):
+    """tekken8_model's loaded model k decimated to `target` (the costume's parts but the face, the hair and the
+    weapons with PART_CLASSES, the face with the definition's TEKKEN8['face_classes'] if any, the hair with
+    HAIR_CLASSES; with `fill` to the target _fill_target finds) and re-posed; source: its vertices' numbers as loaded,
+    or None when they are k's."""
+    from . import decimate
+    spec = d.TEKKEN8
+    own = dict(PART_CLASSES, **spec['part_classes']) if 'part_classes' in spec else PART_CLASSES
+    classes = {tag: own for tag in weights if tag[:3] not in PART_WEIGHTS and not tag.startswith('wpn')}
+    if 'face_classes' in spec:
+        classes.update((tag, spec['face_classes']) for tag in weights if tag[:3] == 'fac')
+    hair = dict(HAIR_CLASSES, **spec['hair_classes']) if 'hair_classes' in spec else HAIR_CLASSES
+    classes.update((tag, hair) for tag in weights if tag[:3] in ('har', 'fah'))
+
+    def decimated(t):
+        out = decimate.decimate(k, t, weights, log=log, poses=poses, classes=classes)
+        if 'free' in k and out is not k:         # (a definition's TEKKEN8['covered'])
+            from . import covered
+            out = covered.trim(out, k['free'], k.get('under'))
+        return out
+    if fill is None:
+        out = decimated(target)
+    else:
+        out = _fill_target(decimated, fill['target'] + fill['room'], fill, log)
+    if out is k:                                 # (within the target already: k as it is, kept for a second call)
+        out = dict(k, source=source) if source is not None else dict(k)
+    elif source is not None:                     # (the vertices' numbers as loaded: tekken8/cloth.py)
+        out['source'] = source[out['source']]
+    return skeleton.repose(out, donor, log=log)
+
+
+def weapon_bones(weapons):
+    """The extra bones a Tekken 8 fighter's weapons take: a bone and its points each."""
+    return sum(1 + len(w.get('points', {})) for w in weapons)
+
+
+def weapon_point(k, skel, w, where, world, weights):
+    """The model-space position (mm) of a Tekken 8 weapon's point (convert/summons8.py): 'origin' (the weapon
+    bone's), 'tip' (its mesh's vertex farthest from it: Miary Zo's horn), {'along': (bone, bone), 'cm': x} (x cm past
+    the second TTT2 bone on the line from the first), {'offset': (x, y, z)} (mm in the weapon's frame: its Tekken 8
+    joint's, as the fighter's hit boxes give them: Victor's)."""
+    if where == 'origin':
+        return world[:3, 3]
+    if isinstance(where, dict) and 'offset' in where:
+        return world[:3, 3] + world[:3, :3] @ np.asarray(where['offset'], np.float64)
+    if where == 'tip':
+        s0 = k['prims'][0]
+        tris = np.concatenate([p['tris'].reshape(-1) for p in k['prims'] if p['part'] == w['tag']])
+        joints = s0['joints'][tris]
+        mine = np.isin(joints, weights) & (s0['weights'][tris] > 0)
+        pos = s0['pos'][tris[mine.any(1)]]
+        if not len(pos):
+            raise ValueError('weapon %s has no vertices for its tip point' % w['bone'])
+        return pos[np.argmax(np.linalg.norm(pos - world[:3, 3], axis=1))]
+    if isinstance(where, dict) and 'along' in where:
+        hw = bone.world_matrices(skel)
+        names = [n[4:] if n.startswith('cha:') else n for n in skel['names']]
+        a, b = (hw[names.index(x)][:3, 3] for x in where['along'])
+        return b + (b - a) / np.linalg.norm(b - a) * float(where['cm']) * 10.0
+    raise ValueError('weapon %s: a point %r is none Tekken 8 weapons take' % (w['bone'], where))
+
+
+def tekken8_weapons(skel, k, d, weapons, weight_maps, mesh_order, log=print):
+    """A Tekken 8 fighter's weapons (convert/summons8.py) appended to its skeleton: each one's bone at its Tekken 8
+    joint's frame ('joint', default 'bone': weapons.joint_frame of the re-posed model) or, hit-only, at its lead
+    joints' most forward ('lead'), its parent's ('origin' only points), or a root point's bind ('root':
+    summons8.ROOT_BIND); its mesh's vertices (the part of its 'mesh': weapon_parts) skinned to it from its 'weights'
+    joints (default its joint); its points {code: (where, slot)} (weapon_point). -> the skeleton."""
+    from . import summons8
+    tags = dict((p, t) for t, p in weapon_parts(weapons))
+    kidx = {n: i for i, n in enumerate(k['bones']['names'])}
+    drawn = collections.Counter()
+    for n, w in enumerate(weapons):
+        w = dict(w, tag=tags.get(w.get('mesh')))
+        joint = w.get('joint', w['bone'])
+        if w.get('root') is not None:
+            world = np.eye(4)
+            world[:3, 3] = summons8.ROOT_BIND[w['root']]
+        elif w.get('ground'):                    # (the scene's origin a fighter's prefabs play at: convert/prefabs8.py)
+            world = np.eye(4)
+        elif w.get('place') is not None:
+            world = np.eye(4)
+            world[:3, 3] = w['place']
+        elif w.get('lead'):
+            at = [weapons_frame(k, j)[:3, 3] for j in w['lead']]
+            world = np.eye(4)
+            world[:3, 3] = max(at, key=lambda p: p[2])
+        elif joint in kidx:
+            world = weapons_frame(k, joint)
+        else:                                    # (a hit-only weapon at its parent, or its 'at' point there)
+            hw = bone.world_matrices(skel)
+            world = hw[weapons_mod.parent_index(skel, w['parent'])].copy()
+            if w.get('at'):                      # (Miary Zo's snakes' heads: 1.2 m along her forearm at rest)
+                world[:3, 3] = weapon_point(k, skel, w, w['at'], world, [])
+        weights = [kidx[j] for j in w.get('weights', (joint,)) if j in kidx]
+        if w.get('pair') is None and w['tag'] and weights:     # (a still mesh: its own frame, for its fade's ramp)
+            world = summonfade.still_frame(summonfade.part_points(k, w['tag'], weights), world[:3, 3])
+        points = [(code, slot, weapon_point(k, skel, w, where, world, weights))
+                  for code, (where, slot) in sorted(w.get('points', {}).items())]
+        skel, index, number, used = weapons_mod.append_tekken8(skel, w, world, points)
+        if w['tag']:
+            weight_maps[w['tag']][weights] = index
+            if not drawn[w['tag']]:             # (the mesh's parent: its first weapon's)
+                up = skel['names'][skel['parent'][index]]
+                mesh_order[w['tag']] = ('%s_%s' % (d.CODE, w['tag']), up[4:] if up.startswith('cha:') else up,
+                                         100 + int(w['tag'][3:]))
+            drawn[w['tag']] += 1
+        log('  weapon %s: OPT %d under %s (%s%s), hit points OPT %s%s' % (
+            w['bone'], number, w['parent'], 'pair %d' % w['pair'] if w.get('pair') is not None else 'still',
+            ', summon %d' % w['summon'] if w.get('summon') is not None else '', used,
+            ', drawn: %s' % w['tag'] if w['tag'] else ''))
+    for tag in drawn:
+        tris = np.concatenate([p['tris'].reshape(-1) for p in k['prims'] if p['part'] == tag])
+        log('  weapon mesh %s: %d vertices, %d bones' % (tag, len(np.unique(tris)), drawn[tag]))
+    return skel
+
+
+def weapons_frame(k, joint):
+    return weapons_mod.joint_frame(k['bones'], joint)
+
+
+def convert(source, archives, d, slot=0, log=print, standing=None, weapons=None):
+    """_convert. A Tekken 8 fighter's target leaves room for its 2P colour layers by an estimate (vertex_target: as if
+    they took all the vertices of their materials); trimmed to the triangles they draw they take less (Miary Zo: 10k
+    of 16.4k), so when the model ends more than LAYER_SLACK under the budget (or over it) it is made again, its loaded
+    model kept (tekken8_model's cache), decimated to the target whose model with its layers fills the budget by the
+    first try's measures (_fill_target). Those measures miss by a few hundred (what a layer draws changes with the
+    triangles), so a second try over the budget (it would lose a layer: _convert) is made once more by its own
+    measures; only the last try's log is shown."""
+    source = sources.of(source)
+    cache, lines = {}, []
+    t0 = time.time()
+    out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache)
+    tries = 0
+    while isinstance(out, dict):
+        log('  model: %d vertices of the budget %d with the 2P colour layers trimmed to what they draw (%d of them; '
+            'target %d, %.0f s): made again to fill it' % (out['total'], out['budget'], sum(out['layers'].values()),
+                                                             out['target'], time.time() - t0))
+        tries += 1
+        out['last'] = tries == 2
+        lines = []
+        out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache, out)
+    for line in lines:
+        log(line)
+    return out
+
+
+def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None, cache=None, fill=None):
     """source: the fighter's game (source.py; Tekken 7's paks as such too: outfits.py's), d: the character definition,
     slot: its number (pack.place), standing: the fighter's standing pose (cloth.standing; the cloth rests outside its
-    legs there). -> (nud bytes, nut bytes, bon bytes, colours, cloth): colours = None without 2P colour layers
+    legs there), weapons: its weapons (None: the definition's WEAPONS; a Tekken 8 fighter's with its root points:
+    summons8.weapons). -> (nud bytes, nut bytes, bon bytes, colours, cloth): colours = None without 2P colour layers
     (colours.py), else {palette number: (player 1's rgb, player 2's rgb)} (shared.py puts them in the colour grid);
-    cloth = None, else the cloth's spring entries (cloth.springs).
+    cloth = None, else the cloth's spring entries (cloth.springs). cache (convert's: a Tekken 8 fighter's loaded
+    model): a Tekken 8 model more than LAYER_SLACK off the budget returns its measures instead (fill None: the first
+    try), or is decimated to fill it by them (fill: those measures), returning its own when it ends over the budget
+    (unless fill['last']).
     A Tekken 8 fighter (tekken8_model) has none of what only Tekken 7's reading makes: costume items worn with
-    others, socket items, hanging chains, a tiger or weapons; its cloth is the strands its source finds."""
+    others, socket items, hanging chains or a tiger; its cloth is the strands its source finds, its weapons
+    (tekken8_weapons) the meshes of its definition's WEAPONS, made parts of its model, and hit-only points."""
     source = sources.of(source)
     donor = bone.read(archives.read_name(d.DONOR + '.bon'))
+    weapons = list(getattr(d, 'WEAPONS', []) if weapons is None else weapons)
+    armed = []                                   # (Tekken 8: the weapons' meshes, parts of its model)
     if source.game == 'tekken8':
-        k, worn, colours, colours_2p = tekken8_model(source, d, donor, log)
+        k, worn, colours, colours_2p = tekken8_model(source, d, donor, log, weapons, cache, fill)
+        counted = _counts(k)                     # (convert's second try: _fill_target)
+        armed = [tag for tag, _ in weapon_parts(weapons)]
         paks, items, extra, chains = None, [], [], []
         # the strands Tekken 8 simulates (cords, strap ends: tekken8/cloth.py), as cloth.find gives Tekken 7's cloth
-        cloths = source.cloth(k, worn, log) if getattr(d, 'CLOTH', True) else []
+        cloths = source.cloth(k, [p for p in worn if p[0] not in armed], log) if getattr(d, 'CLOTH', True) else []
     else:
         paks = source.paks
         t7 = d.TEKKEN7
@@ -665,10 +992,20 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         # none
         cloths = cloth.find(paks, k, worn, log) if getattr(d, 'CLOTH', True) else []
     if cloths:                                   # (the room the other extra bones leave: weapons up to 4 each)
-        room = cloth.SKELETON - len(donor['names']) - sum(len(bones) for _, bones, _ in chains) - 4 * len(
-            getattr(d, 'WEAPONS', [])) - (len(t7mesh.SkeletalMesh(load(paks, d.TIGER['mesh'])).skeleton['names'])
-                                          if getattr(d, 'TIGER', None) else 0)
-        cloth_chains = cloth.add(k, cloths, room, log)
+        from . import snakes8, prefabs8          # (a definition's own SKELETON_BONES: Miary Zo's, with her snakes')
+        room = getattr(d, 'SKELETON_BONES', cloth.SKELETON) - len(donor['names']) - sum(
+            len(bones) for _, bones, _ in chains) - (
+            4 * len(weapons) if source.game == 'tekken7' else weapon_bones(weapons)) - (
+            len(t7mesh.SkeletalMesh(load(paks, d.TIGER['mesh'])).skeleton['names'])
+            if getattr(d, 'TIGER', None) else 0) - (snakes8.bone_count(d) if source.game == 'tekken8' else 0) - (
+            prefabs8.bone_count(d) if source.game == 'tekken8' else 0)
+        spare = (getattr(d, 'TEKKEN8', {}) or {}).get('cloth_spare') if source.game == 'tekken8' else None
+        if spare and room < cloth.MAX_BONES:     # (weapons take bones the cloth would have: these pieces go first)
+            kept = [c for c in cloths if not re.search(spare, c.get('name', ''))]
+            log('  cloth: %d pieces left out for the weapons\' bones (%s; room for %d)' % (
+                len(cloths) - len(kept), spare, room))
+            cloths = kept
+        cloth_chains = cloth.add(k, cloths, room, log, most=getattr(d, 'CLOTH_BONES', cloth.MAX_BONES))
     else:
         cloth_chains = []
     skel = skeleton.build(k['bones'], donor)
@@ -687,6 +1024,8 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
     cloth_springs = None
     if cloth_chains:                             # ... and the cloth's
         parents = [int(weight_maps[c['part']][c['parent']]) for c in cloth_chains]
+        if (getattr(d, 'TEKKEN8', None) or {}).get('long_cloth'):
+            parents = cloth.long_cloth_parents(cloth_chains, parents, skel['names'], d.TEKKEN8['long_cloth'])
         s0 = k['prims'][0]
         body = np.zeros(len(s0['pos']), bool)
         body[np.concatenate([p['tris'].reshape(-1) for p in k['prims']])] = True
@@ -700,6 +1039,8 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         for c, new in zip(cloth_chains, made):
             for wm in weight_maps.values():
                 wm[c['bones']] = new
+        if (getattr(d, 'TEKKEN8', None) or {}).get('long_cloth'):
+            cloth.long_cloth(cloth_chains, d.TEKKEN8['long_cloth'])
         cloth_springs = cloth.springs(skel, made, cloth_chains, body)
         log('  cloth: %d chains, %d bones (OPT %d..), %d capsules (%s), %d pairs, %d links between chains' % (
             len(made), sum(map(len, made)), cloth.OPT_FIRST, len(cloth_springs['capsules']),
@@ -752,7 +1093,31 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
     for n, (tag, _, _) in enumerate(sockets):
         mesh_order.setdefault(tag, ('%s_%s' % (d.CODE, tag), 'ATAMA_jnt_assist', 50 + n))
     loaded = {}                                  # weapon meshes by path
-    for n, w in enumerate(getattr(d, 'WEAPONS', [])):   # weapons its animations pose: extra bones (weapons.py)
+    from . import prefabs8
+    if source.game == 'tekken8' and prefabs8.spec(d):
+        weapons = prefabs8.placed(source.store, d, weapons, log)
+    if source.game == 'tekken8' and weapons:     # (its own: tekken8_weapons)
+        skel = tekken8_weapons(skel, k, d, weapons, weight_maps, mesh_order, log)
+    # --- a Tekken 8 summoned model with its own skeleton (Miary Zo's snakes: convert/snakes8.py) ---
+    from . import snakes8
+    if source.game == 'tekken8' and snakes8.spec(d):
+        skel, first, snake_prims, snake_parts = snakes8.model(source, d, skel, log)
+        up = skel['names'][skel['parent'][first]]
+        for n, (tag, path) in enumerate(snake_parts):
+            weight_maps[tag] = first + np.arange(snakes8.bone_count(d))
+            parts.append((tag, path))
+            mesh_order[tag] = ('%s_%s' % (d.CODE, tag), up[4:] if up.startswith('cha:') else up, 120 + n)
+        prims += snake_prims
+    # --- end of the summoned model ---
+    if source.game == 'tekken8' and prefabs8.spec(d):         # (its summoned creatures: convert/prefabs8.py)
+        skel, made, made_prims = prefabs8.model(source, d, skel, log)
+        for n, (tag, path, first, count) in enumerate(made):
+            weight_maps[tag] = first + np.arange(count)
+            parts.append((tag, path))
+            up = skel['names'][skel['parent'][first]]
+            mesh_order[tag] = ('%s_%s' % (d.CODE, tag), up[4:] if up.startswith('cha:') else up, 130 + n)
+        prims += made_prims
+    for n, w in enumerate(weapons if source.game == 'tekken7' else []):   # weapons its animations pose: extra bones
         tag = 'weapon%d' % n
         if w.get('mesh'):
             if w['mesh'] not in loaded:
@@ -760,12 +1125,12 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             wk = loaded[w['mesh']]
         else:                                    # a weapon only hitting: its bones are the costume's
             wk = k
-        skel, index, number, points = weapons.append_bones(skel, wk['bones'], w)
+        skel, index, number, points = weapons_mod.append_bones(skel, wk['bones'], w)
         kept = []
         if w.get('mesh') and w.get('draw', True):
             weight_maps[tag] = np.full(len(wk['bones']['names']), index, np.int64)
             own = wk['bones']['names'].index(w['bone'])
-            kept = [dict(q, part=tag) for q in (weapons.triangles(q, own) for q in wk['prims']) if len(q['tris'])]
+            kept = [dict(q, part=tag) for q in (weapons_mod.triangles(q, own) for q in wk['prims']) if len(q['tris'])]
             if kept and shrink and shrink.get('weapons'):    # (a share of its vertices, or as few as its hard
                 one = dict(wk, prims=kept)                    # edges leave: what is left is no warning)
                 kept = decimate.decimate(one, int(decimate.count(one) * shrink['weapons']),
@@ -810,6 +1175,7 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
     bank = TextureBank(GIDX_BASE + SLOT_GIDX * slot)
     built = {}
     shines = {}                     # Tekken 8 cloth -> its shine texture (tekken8.bake.specular) or None
+    bright_hairs = set()            # Tekken 8 hair baked solid (tekken8.bake.bright_hair)
     cutoffs = {}                    # hair material -> Tekken 7's alpha threshold (0..255)
     layers, palettes = {}, {}       # material -> its 2P colour layer (fit, palette numbers); the palette entries
 
@@ -821,13 +1187,58 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
     # gain} lifts them
     gains = dict(getattr(d, 'GAIN', {}))
     grey = set(getattr(d, 'GREY', ()))
+    dark_metal = getattr(d, 'TEKKEN8', {}).get('dark_metal', {}) if source.game == 'tekken8' else {}
+    # a material's metal without dark_metal's colours: (unused, its strength, its reflection, unused) x bake.specular's
+    shine = getattr(d, 'TEKKEN8', {}).get('shine', {}) if source.game == 'tekken8' else {}
+    # the materials given 2P colour layers: every cloth's, or a definition's TEKKEN8['layers']
+    layered = getattr(d, 'TEKKEN8', {}).get('layers') if source.game == 'tekken8' else None
+    # layered materials whose palette makes up for the layer's darkening (bake.layer_colour), by their linear gains: a dark
+    # colour with no satin
+    layer_lift = getattr(d, 'TEKKEN8', {}).get('layer_lift', {}) if source.game == 'tekken8' else {}
+    hair_thick = getattr(d, 'TEKKEN8', {}).get('hair_thick', {}) if source.game == 'tekken8' else {}
+    layer_holes = getattr(d, 'TEKKEN8', {}).get('layer_holes', ()) if source.game == 'tekken8' else ()
+    # (layerfit.py) layers fitted texel by texel, layers whose values go into their holes before sizing, and the bases under
+    # a layer brightened by a linear gain as the layer's lift brightens what it draws (where the layer is out, the base shows)
+    layer_blend = getattr(d, 'TEKKEN8', {}).get('layer_blend', ()) if source.game == 'tekken8' else ()
+    layer_bleed = getattr(d, 'TEKKEN8', {}).get('layer_bleed', ()) if source.game == 'tekken8' else ()
+    base_lift = getattr(d, 'TEKKEN8', {}).get('base_lift', {}) if source.game == 'tekken8' else {}
+    # cloths whose shine's strength (its R) a gain lifts
+    shine_gain = getattr(d, 'TEKKEN8', {}).get('shine_gain', {}) if source.game == 'tekken8' else {}
+    # costume IDs brought to the colours Tekken 8 shows them in (convert/idlook.py)
+    id_look = getattr(d, 'TEKKEN8', {}).get('id_look', {}) if source.game == 'tekken8' else {}
 
     def bake(name, eff):
         """bake_albedo, or for a material the definition's FLAT names (one without a colour texture: Leroy's lenses)
         that colour parameter of it, flat."""
         if name in flat:
             return np.full((32, 32, 3), np.clip(_col(eff['vectors'][flat[name]]), 0, 1), np.float32), None
+        if prefabs8.bakes(d, eff):
+            return prefabs8.bake(d, eff, textures, name)
         return source.bake_albedo(eff, textures, grey=name in grey)
+
+    # --- glowing parts (Tekken 8 summons: tekken8/bake.py bake_emissive), the definition's 'glow' template ---
+    def glow_kind(name, eff, kind):
+        """classify()'s kind, or 'glow' for a part that glows (its emission share: bake.emission_share) when the
+        definition has the 'glow' template (else it stays lit, logged)."""
+        from ..tekken8 import bake as bake8
+        share = bake8.emission_share(eff, textures)
+        glow = bake8.classify(name, eff['base'], None, share) if share is not None else None
+        if not glow or glow[0] != 'glow':
+            return kind
+        if 'glow' not in templates:
+            log('  material %s glows (emission %.0f%%) but the definition has no glow template: lit' % (
+                name, 100 * share))
+            return kind
+        log('  material %s glows (emission %.0f%% of its look): its glow baked into its colour' % (name, 100 * share))
+        return glow
+
+    def glow_bake(eff):
+        from ..tekken8 import bake as bake8
+        return bake8.bake_emissive(eff, textures)
+
+    def glow_two_sided(name):
+        return bool(materials.effective(mat_paths[name], colours)['overrides'].get('TwoSided'))
+    # --- end of glowing parts ---
 
     def kind_of(name):
         """The definition's MATERIALS entry, else classify()."""
@@ -840,6 +1251,12 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             except (KeyError, ValueError):
                 rgb, al = None, None
             kinds[name] = source.classify(name, eff['base'], al) if rgb is not None else None   # nothing to draw
+            if kinds[name] is not None and source.game == 'tekken8':
+                kinds[name] = glow_kind(name, eff, kinds[name])
+            if kinds[name] is not None and prefabs8.bakes(d, eff):
+                kinds[name] = (kinds[name][0], False, kinds[name][2])       # (small textures: no normal map)
+            if kinds[name] is not None and prefabs8.lace_kind(name) in templates:
+                kinds[name] = (prefabs8.lace_kind(name), False, True)       # (a lace model's 'kind': lace8.py)
             log('  material %s (%s): %s' % (name, eff['base'], kinds[name]))
         return kinds[name]
 
@@ -849,9 +1266,30 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
         mat, vtype, slots = templates[kind]
         if name not in built:
             eff = materials.effective(mat_paths[name], colours)
-            rgb, al = bake(name, eff)
+            # (a lace model's pictures, or a summon the definition's prefabs bake, drawn with a 'glow' template as
+            # baked: prefabs8.bake)
+            rgb, al = bake(name, eff) if kind != 'glow' or prefabs8.lace(name) or prefabs8.bakes(d, eff) else glow_bake(eff)
             if rgb is None:
                 raise ValueError('material %s has no colour texture' % name)
+            if name in id_look:                  # (a definition's: IDs at Tekken 8's look)
+                from . import idlook
+                rgb = idlook.apply(rgb, eff, textures, id_look[name])
+            if cache is not None and name in cache.get('shown', ()):    # (a definition's TEKKEN8['covered'])
+                from . import covered
+                rgb = covered.paint(rgb, cache['shown'][name])
+            if cache is not None and name in cache.get('occlusion', ()):    # (a definition's TEKKEN8['skin_occlusion'])
+                from . import occlusion
+                rgb = occlusion.apply(rgb, cache['occlusion'][name])
+            if name in dark_metal:
+                from ..tekken8 import bake as bake8
+                rgb = bake8.dark_metal(rgb, eff, textures, dark_metal[name])
+            if source.game == 'tekken8' and kind == 'hair':
+                from ..tekken8 import bake as bake8
+                if bake8.is_bright_hair(rgb, al, eff):
+                    bright_hairs.add(name)
+                elif name in hair_thick:
+                    rgb, al = bake8.thick_hair(rgb, al, eff, hair_thick[name])
+                    bright_hairs.add(name)
             if kind == 'skin':                   # TTT2's skin colours (skin.py)
                 rgb = skin.hue(skin.gained(rgb, skin_gain), skin_hue)
             elif name in gains or kind in gains:  # (a definition's GAIN)
@@ -859,17 +1297,39 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             built[name] = albedo_image(rgb, al), eff['textures'].get('Normal') if use_normal else None
             if source.game == 'tekken8' and kind == 'cloth':
                 from ..tekken8 import bake as bake8
-                shines[name] = bake8.specular(eff, textures)
+                shines[name] = (prefabs8.shine(d, eff, textures) if prefabs8.bakes(d, eff)
+                                else bake8.specular(eff, textures, dark=dark_metal.get(name) or shine.get(name)))
+                if name in shine_gain and shines[name] is not None:     # (a definition's: a cloth's sheen)
+                    lifted = shines[name].astype(np.float32)
+                    lifted[..., 0] *= shine_gain[name]
+                    shines[name] = (np.clip(lifted, 0, 255) + 0.5).astype(np.uint8)
             if 'AlphaThreshold' in eff['scalars']:
-                cutoffs[name] = int(round(255 * min(max(eff['scalars']['AlphaThreshold'], 0.0), 1.0)))
-            if colours_2p is not None and kind == 'cloth' and 'colour' in templates:
-                rgb2, _ = bake(name, materials.effective(mat_paths[name], colours_2p))
+                cutoffs[name] = clear_of_dissolve(int(round(255 * min(max(eff['scalars']['AlphaThreshold'], 0.0), 1.0))))
+            if colours_2p is not None and kind == 'cloth' and 'colour' in templates and (layered is None or name in layered):
+                eff2 = materials.effective(mat_paths[name], colours_2p)
+                rgb2, _ = bake(name, eff2)
+                if name in dark_metal:
+                    from ..tekken8 import bake as bake8
+                    rgb2 = bake8.dark_metal(rgb2, eff2, textures, dark_metal[name])
                 rgb2 = np.clip(rgb2 * gains.get(name, gains.get(kind, 1.0)), 0, 1)
                 c1 = np.asarray(built[name][0].convert('RGB'), np.float64) / 255.0
                 c2 = np.asarray(albedo_image(rgb2, None).convert('RGB'), np.float64) / 255.0
                 # (Tekken 8's grey-detail costumes: texels two groups miss left out; Tekken 7's fitted as before)
-                f = colours2p.fit(c1, c2, palette,
-                                  max_error=colours2p.MAX_ERROR if source.game == 'tekken8' else None)
+                satin, lift = None, None
+                if source.game == 'tekken8':
+                    from ..tekken8 import bake as bake8
+                    satin = bake8.satin_cloth(eff, textures, c1.shape[:2])
+                    lift = None if satin is None else bake8.satin_lift(eff, textures, satin.shape)
+                    if lift is None and name in layer_lift:   # (a definition's: the layer's own darkening made up for)
+                        lift = lambda group, rgb, texels, g=layer_lift[name]: bake8.layer_colour(rgb, g)
+                if name in layer_blend and satin is None:    # (a definition's: each texel its own blend of the groups)
+                    from . import layerfit
+                    f = layerfit.fit(c1, c2, palette, max_error=colours2p.MAX_ERROR, lift=lift)
+                else:
+                    f = colours2p.fit(c1, c2, palette, max_error=colours2p.MAX_ERROR if source.game == 'tekken8' else None,
+                                      satin=satin, lift=lift)
+                if f is not None and name in base_lift:   # (a definition's: the base as bright as the layer draws)
+                    built[name] = albedo_image(np.clip(rgb * base_lift[name], 0, 1), al), built[name][1]
                 if f is not None:
                     nn = colours2p.FIRST_PALETTE + 2 * len(layers)
                     layers[name] = (f, (nn, nn + 1))
@@ -877,20 +1337,31 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
                         palettes[nn + k] = ([float(x) for x in rgb1], [float(x) for x in rgb2])
         albedo, normal = built[name]
         mat = copy.deepcopy(mat)
+        if (kind == 'glow' or prefabs8.bakes(d, materials.effective(mat_paths[name], colours))) and glow_two_sided(name):
+            mat['cull'] = 0                      # (a two-sided glowing part: the tail's fur cards)
+        elif source.game == 'tekken8' and prefabs8.two_sided(name):
+            mat['cull'] = 0                      # (a summon's sheet whose back layer a remesh left out: convert/remesh8.py)
         if kind == 'hair' and mat['alpha_test'] and name in cutoffs:
             mat['ref'] = cutoffs[name]  # where Tekken 7 cuts its strands (the template's own cut is higher)
-        if kind == 'cloth' and alpha and not mat['alpha_test'] and 'colour_alpha' in templates:
+        if (kind == 'cloth' or prefabs8.lace(name)) and alpha and not mat['alpha_test'] and 'colour_alpha' in templates:
             for key in ('alpha_test', 'alpha_func', 'ref'):    # cloth with holes (lace, frills): alpha-tested
                 mat[key] = templates['colour_alpha'][0][key]
+            if prefabs8.lace_ref(name) is not None:            # (a dissolving lace model's: convert/lace8.py)
+                mat['ref'] = prefabs8.lace_ref(name)
         ids = []
         for i, slot in enumerate(slots):
             if i == 0:
                 image, key = (albedo.transpose(Image.FLIP_TOP_BOTTOM) if turned else albedo), name
                 if source.game == 'tekken8':      # (materials baking alike share one: Reina's eyebrows and lashes)
                     key = ('pixels', image.mode, image.size, hashlib.sha1(image.tobytes()).hexdigest())
-                ids.append(bank.image(key, image, 2 if alpha else 0, alpha))
-                if kind == 'hair' and source.game == 'tekken8':
-                    bank.kept.add(ids[-1] - bank.first)    # (narrow cards: halved, Tekken 8's strands would blur)
+                ids.append(bank.image(key, image, 2 if alpha else 0, alpha,
+                                      solid=cutoffs.get(name, HAIR_SOLID_REF) if name in bright_hairs else None))
+                if source.game == 'tekken8' and (kind == 'hair' or (kind == 'skin' and name.endswith('face_skin'))
+                                                 or prefabs8.lace(name)):
+                    # (halved after all others: the hair's narrow cards, Tekken 8's strands would blur; the face's
+                    # painted eyes, at 256 texels Miary Zo's eyeshadow edge and winged eyeliner went to DXT blocks;
+                    # a lace summon's pictures, its pieces' holes and torn edges, at 256 texels a blur of blocks)
+                    bank.kept.add(ids[-1] - bank.first)
             elif kind == 'hair' and source.game == 'tekken8' and slot['texture'] is not None:
                 # Tekken 8 has nothing like the template's other textures (the hair shader's ramps from the roots
                 # along v and its highlights' noise, the same in TTT2's hair textures): the template's own
@@ -925,11 +1396,18 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
 
         def image(a, mode):
             return np.asarray(Image.fromarray(a, mode).resize(size, Image.LANCZOS))
-        grey = (np.clip(f['shade'], 0, 1) * 255 + 0.5).astype(np.uint8)
-        shade = np.stack([image(grey, 'L')] * 3 + [image((f['alpha'] * 255).astype(np.uint8), 'L')], -1)
+        cut = f['alpha']
+        if name in layer_holes and albedo.mode == 'RGBA':   # (a definition's: the base's holes through the layer as well)
+            cut = cut * (np.asarray(albedo.getchannel('A')) >= 128)
+        shade_f, b_f = f['shade'], f['b']
+        if name in layer_bleed:              # (a definition's: no black mixed in round the holes when sized)
+            from . import layerfit
+            shade_f, b_f = layerfit.bleed(cut > 0.5, shade_f), layerfit.bleed(cut > 0.5, b_f)
+        grey = (np.clip(shade_f, 0, 1) * 255 + 0.5).astype(np.uint8)
+        shade = np.stack([image(grey, 'L')] * 3 + [image((cut * 255).astype(np.uint8), 'L')], -1)
         mask = np.zeros(shade.shape, np.uint8)
         mask[..., 0] = 255
-        mask[..., 2] = image((f['b'] * 255).astype(np.uint8), 'L')
+        mask[..., 2] = image((np.clip(b_f, 0, 1) * 255 + 0.5).astype(np.uint8), 'L')
         mask[..., 3] = 255
         ids = []
         for i, slot in enumerate(slots):
@@ -1069,18 +1547,52 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
             lverts['pos'] = pos + nrm * LAYER_OFFSET
             meshes[prim['part']].append(dict(vtype=vt, uvtype=0x10, pflag=4, tail=bytes(12),
                                              indices=np.array(strip, np.uint16), verts=lverts, materials=[lmat],
-                                             _order=ORDER['colour'], _layer=name))
+                                             _order=ORDER['colour'], _layer=name, _trim=(uv, tris)))
+    # each layer over the triangles it draws (colours.drawn_triangles: its alpha test passes somewhere in them, at
+    # its texture's size once the textures fit their budget, LAYER_MARGIN texels round included): a layer is a copy
+    # of its polygon's vertices, and over a costume whose colours change only in places most of them drew nothing
+    # (Miary Zo: 16.4k layer vertices of her 54.5k, 10.1k of them drawing)
+    halvings = bank.fit(TEXTURE_BUDGET, dry=True)
+    for tag in meshes:
+        kept = []
+        for p in meshes[tag]:
+            if '_trim' in p:
+                uv, tris = p.pop('_trim')
+                mat = p['materials'][0]
+                i = mat['textures'][0]['id'] - bank.first
+                alpha = bank.halved(i, halvings.get(i, 0))[..., 3]
+                drawn = colours2p.drawn_triangles(uv, tris, alpha, mat['ref'], LAYER_MARGIN)
+                if not drawn.any():
+                    continue
+                used, ltris = np.unique(tris[drawn], return_inverse=True)
+                ltris = ltris.reshape(-1, 3)
+                strip = strips.stripify(ltris)
+                if not strips.check(ltris, strip) or len(strip) >= 0x10000:
+                    raise ValueError('could not make triangle strips for the 2P colour layer of %s' % p['_layer'])
+                p['verts'], p['indices'] = p['verts'][used], np.array(strip, np.uint16)
+            kept.append(p)
+        meshes[tag] = kept
+    empty = sorted(set(layers) - {p['_layer'] for polys in meshes.values() for p in polys if p.get('_layer')})
+    for name in empty:
+        layers.pop(name, None)
+    if empty:
+        log('  2P colours: no layer over %s (none of its triangles draws any of it)' % ', '.join(empty))
     total = sum(len(p['verts']) for polys in meshes.values() for p in polys)
     by_size = collections.Counter()
     for polys in meshes.values():
         for p in polys:
             if p.get('_layer'):
                 by_size[p['_layer']] += len(p['verts'])
+    budget = getattr(d, 'VERTEX_BUDGET', VERTEX_BUDGET)
+    if source.game == 'tekken8' and cache is not None and (
+            abs(budget - total) > LAYER_SLACK if fill is None else total > budget and not fill['last']):
+        # (convert: made again, decimated to fill the budget by these measures)
+        return dict(total=total, budget=budget, layers=dict(by_size), counts=counted,
+                    target=fill['used'] if fill else cache['tekken8'][5], room=budget - LAYER_SLACK // 2 - total)
     def used_textures():
         return {t['id'] for polys in meshes.values() for p in polys for m in p['materials'] for t in m['textures']}
 
     plain = []
-    budget = getattr(d, 'VERTEX_BUDGET', VERTEX_BUDGET)
     for name, n in by_size.most_common():
         if total <= budget:
             break
@@ -1125,4 +1637,7 @@ def convert(source, archives, d, slot=0, log=print, standing=None):
     if layers:
         log('  2P colours: layers over %s; palette numbers %s' % (', '.join(sorted(layers)), sorted(palettes)))
     out = palettes if layers else None
+    if source.game == 'tekken8':                 # (the game's record order: convert/recordorder.py)
+        from . import recordorder
+        skel, model = recordorder.write(skel, model, log)
     return nud.write(model), nut.write(bank.textures), bone.write(skel), out, cloth_springs

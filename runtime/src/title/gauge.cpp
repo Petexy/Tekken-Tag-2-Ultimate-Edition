@@ -38,6 +38,14 @@
 // shows Normal; EXLight's Start runs as a stock fills, EXFocus's as the
 // gauge is spent. A slot's bar is moved along its mask by how full it is
 // (0x1404c1b90: 154 pixels a stock).
+//
+// A Tekken 8 fighter's (Clive's) is an arc under the life bar with the level
+// in its middle (`style ring`; the importer's convert/gauge8.py bakes its
+// widget's pictures and level-up animations): wedges of the arc (one for each
+// step: one level shows at a time, all of it at the last), the grey-white
+// layer at the value, the pink one over it following it over 8 frames on a
+// rise, at once on a fall (its widget's blueprint). The place is the importer's
+// too, on the TV image with the title's HUD at full size.
 
 #include "title/gauge.h"
 
@@ -45,6 +53,7 @@
 #include "title/framedata.h"
 #include "title/image.h"
 #include "title/roster.h"
+#include "title/warp.h"
 
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
@@ -248,6 +257,7 @@ struct Bar {
 struct Side {
     std::map<std::string, Clip> clips;
     Bar bars[kMaxSlots];
+    float place[2] = {};  // a ring's middle on the TV image (the title's HUD at its full size)
     // The panel at rest (its clips' last frames, not the effects; their
     // visible texels): across its frame (its bars and base clips), up and
     // down all it shows.
@@ -256,6 +266,7 @@ struct Side {
 struct Hud {
     Side sides[2];
     bool power = false;    // Geese's power gauge (else Akuma's / Eliza's slots)
+    bool ring = false;     // a Tekken 8 fighter's arc (draw_ring)
     Rgba image;            // gauge.nut's picture
     uint32_t atlas_y = 0;  // where it is in the HUD layer's atlas
 };
@@ -294,6 +305,9 @@ struct Player {
     std::map<std::string, Play> plays; // the clips', by name
     int32_t max_timer = 0;     // Geese's MAX mode: frames left
     int32_t heard = -1;        // the value the full sound saw last (-1: none yet)
+    // a ring's pink layer: on its way from `pink_from` to the value (rate 0 to 1), or at it
+    int32_t pink_from = 0;
+    float pink_rate = 1;
 };
 std::map<uint32_t, Player> g_players; // by fighter
 
@@ -375,6 +389,7 @@ std::optional<Hud> read_hud(const fs::path& directory) {
             std::string style;
             s >> style;
             hud.power = style == "power";
+            hud.ring = style == "ring";
             continue;
         }
         if (kind == "q") {
@@ -384,7 +399,9 @@ std::optional<Hud> read_hud(const fs::path& directory) {
         }
         if (!(s >> side_name)) continue;
         Side& side = hud.sides[side_name == "R"];
-        if (kind == "bar" || kind == "mask") {
+        if (kind == "place") {
+            s >> side.place[0] >> side.place[1];
+        } else if (kind == "bar" || kind == "mask") {
             int k;
             if (!(s >> k) || k < 0 || k >= kMaxSlots) continue;
             Bar& bar = side.bars[k];
@@ -403,6 +420,7 @@ std::optional<Hud> read_hud(const fs::path& directory) {
             if (s >> clip >> n && n < side.clips[clip].frames.size()) frame = &side.clips[clip].frames[n];
         }
     }
+    if (hud.ring) return hud; // (its place is given)
     for (Side& side : hud.sides) { // the panel's extent at rest
         float box[4] = {1e9f, 1e9f, -1e9f, -1e9f}, frame[2] = {1e9f, -1e9f};
         const auto take = [&](const Picture& p, bool in_frame) {
@@ -616,6 +634,76 @@ void plays_power(const Side& side, const Config& config, Player& p) {
         }
     }
     p.full = count, p.max_shown = max_on;
+}
+
+// A Tekken 8 fighter's arc, as its widget's blueprint: a value's wedges are what
+// is over its last whole level (all of them at the most).
+void draw_ring(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& config, Player& p, int s) {
+    const Side& side = hud.sides[s];
+    const auto frames_of = [&](const char* name) -> const std::vector<std::vector<Picture>>& {
+        static const std::vector<std::vector<Picture>> none;
+        const auto it = side.clips.find(name);
+        return it == side.clips.end() ? none : it->second.frames;
+    };
+    const int32_t stock = std::max(1, config.stock), value = p.value;
+    const int levels = config.max / stock, level = std::min(value / stock, levels);
+    const auto digit = [&](int l) { return "digit" + std::to_string(std::min(l + 1, 5)); };
+    const auto play_all = [&](const std::string& name, bool to_end) {
+        const auto& frames = frames_of(name.c_str());
+        Play& play = p.plays[name];
+        const int last = std::max<int>(0, static_cast<int>(frames.size()) - 1);
+        play.frame = to_end ? last : 0, play.last = last, play.next_first = -1, play.hidden = false;
+    };
+    if (p.shown < 0) { // a new fighter or match: as the gauge is
+        play_all(digit(level), true);
+        play_all("up", true), play_all("upmax", true);
+        p.full = level, p.pink_rate = 1;
+    } else if (value != p.shown) {
+        p.pink_from = p.shown;
+        p.pink_rate = value > p.shown ? 0 : 1;
+    }
+    if (level != p.full) { // a level up plays in; down, at rest
+        play_all(digit(level), level < p.full);
+        if (level > p.full) play_all(level == levels ? "upmax" : "up", false);
+        p.full = level;
+    }
+    p.shown = value;
+    // The pink layer: Lerp(previous, value, sin(rate * 90 degrees)), rate + 1/8 a frame.
+    float pink = static_cast<float>(value);
+    if (p.pink_rate < 1) {
+        pink = p.pink_from + (value - p.pink_from) * std::sin(p.pink_rate * 1.5707963f);
+        p.pink_rate += 1.0f / 8.0f;
+    }
+    const auto steps_of = [&](float v, size_t steps) {
+        if (v >= config.max) return steps;
+        return static_cast<size_t>(std::fmod(v, static_cast<float>(stock)) / stock * steps + 0.5f);
+    };
+    const auto& fill = frames_of("fill");
+    const auto& white = frames_of("white");
+    const auto& head = frames_of("head");
+    const auto wedges = [&](const std::vector<std::vector<Picture>>& frames, size_t from, size_t to) {
+        for (size_t k = from; k < std::min(to, frames.size()); ++k)
+            for (const Picture& q : frames[k]) add_quad(out, hud, q);
+    };
+    const size_t pink_steps = steps_of(pink, fill.size());
+    for (const char* name : {"base"}) add_clip(out, hud, side, name, p.plays[name]);
+    wedges(white, pink_steps, steps_of(static_cast<float>(value), white.size()));
+    wedges(fill, 0, pink_steps);
+    if (pink_steps < head.size()) wedges(head, pink_steps, pink_steps + 1);
+    if (value >= config.max) { // the last level's blink
+        const auto& blink = frames_of("blink");
+        if (!blink.empty()) {
+            Play& play = p.plays["blink"];
+            play.frame = (play.frame + 1) % static_cast<int>(blink.size());
+            play.last = play.frame, play.next_first = -1, play.hidden = false;
+            add_clip(out, hud, side, "blink", play);
+        }
+    }
+    add_clip(out, hud, side, "up", p.plays["up"]);
+    add_clip(out, hud, side, "upmax", p.plays["upmax"]);
+    add_clip(out, hud, side, digit(level).c_str(), p.plays[digit(level)]);
+    for (auto& [name, play] : p.plays)
+        if (name != "blink") play.step();
 }
 
 void draw(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& config, Player& p, int s) {
@@ -869,6 +957,11 @@ void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], 
     for (int s = 0; s < 2; ++s) {
         if (!who[s] || !who[s]->hud) continue;
         const Side& side = who[s]->hud->sides[s];
+        if (who[s]->hud->ring) { // (with the title's HUD: its middle where the option's size takes it)
+            g_shift = hud_x(side.place[0]) / kScale, g_lift = -hud_y(side.place[1], scale) / kScale;
+            draw_ring(quads, *who[s]->hud, who[s]->config, player(fighters[s], slots[s]), s);
+            continue;
+        }
         const bool framed = side.right > side.left;
         // Under its life bar, above the title's texts.
         const float under_bar = !framed ? 0
@@ -917,5 +1010,7 @@ PPC_FUNC(sub_0414FA10) {
 PPC_FUNC(sub_039C2DB0_orig);
 PPC_FUNC(sub_039C2DB0) {
     cafe::title::gauge::situation(ctx.r[3]);
+    cafe::title::summons_situation(ctx.r[3]);
+    cafe::title::warp::situation(); // (title/warp.cpp)
     sub_039C2DB0_orig(ctx, base);
 }

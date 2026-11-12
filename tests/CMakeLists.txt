@@ -176,3 +176,17 @@ target_include_directories(noctis_assault_test PRIVATE ${CMAKE_SOURCE_DIR}/runti
 target_compile_features(noctis_assault_test PRIVATE cxx_std_20)
 target_compile_options(noctis_assault_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME noctis_assault_test COMMAND noctis_assault_test)
+
+# Meshes the motion blur leaves out (title/unblurred.h); a made-up NUD.
+add_executable(unblurred_test unblurred_test.cpp)
+target_include_directories(unblurred_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(unblurred_test PRIVATE cxx_std_20)
+target_compile_options(unblurred_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME unblurred_test COMMAND unblurred_test)
+
+# Fades of a Tekken 8 fighter's summoned weapons (title/summon_fade.h); made-up values.
+add_executable(summon_fade_test summon_fade_test.cpp)
+target_include_directories(summon_fade_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(summon_fade_test PRIVATE cxx_std_20)
+target_compile_options(summon_fade_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME summon_fade_test COMMAND summon_fade_test)

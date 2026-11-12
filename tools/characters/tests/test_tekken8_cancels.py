@@ -1,6 +1,7 @@
 """Unit tests of the cancel and requirement rules of a Tekken 8 fighter's conversion (convert/moveset.py): the latches
 (LATCHES: Tekken 8's per-move variables 1..4 = TTT2's 313..316 / 0x8096..), the contact test 43, the throw-break
-state (460 / 461), and the donor rows the fighter's own list answers (OWN_INPUT), on made-up tables.
+state (460 / 461), the donor rows the fighter's own list answers (OWN_INPUT) and a group row's count (count_groups),
+on made-up tables.
 
     python3 -m pytest -q tools/characters/tests/test_tekken8_cancels.py
 """
@@ -175,6 +176,19 @@ class OwnInput(unittest.TestCase):
         self.c.game = 't7'
         out = self.merged([row(0x200, 0x40000001, 4)], [row(0x200, 0x40000001, 1)])
         self.assertEqual([r['move_id'] for r in out], [1, 4])
+
+
+class GroupCounts(unittest.TestCase):
+    def test_a_group_row_counts_its_converted_group(self):
+        # TTT2 reads start_frame rows of a group (not up to its end): the source's 5 of a group left with 2 read on
+        # into the next group's rows; a group of 3 and one of none
+        row = lambda d, mv, st=1: dict(direction=d, button=0, move_id=mv, win_start=0, win_end=0, start_frame=st)
+        T = {'group_cancels': [row(0x40, 7), row(0x10, 8), row(M.GROUP_END, 0, 0),
+                               row(0x20, 9), row(0x20, 9), row(0x20, 9), row(M.GROUP_END, 0, 0), row(M.GROUP_END, 0, 0)],
+             'cancels': [row(M.GROUP, 0, 5), row(M.GROUP, 3, 3), row(M.GROUP, 7, 2), row(0x40, 4, 9),
+                         row(M.LIST_END, 0x8001, 0)]}
+        self.assertEqual(moveset.count_groups(T), 2)
+        self.assertEqual([r['start_frame'] for r in T['cancels']], [2, 3, 0, 9, 0])
 
 
 if __name__ == '__main__':

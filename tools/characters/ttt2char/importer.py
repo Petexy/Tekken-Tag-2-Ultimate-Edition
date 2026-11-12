@@ -18,11 +18,13 @@ import types
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
-    moveset, outfits, particles, sounds, tagsystem, tiger, voice, weapons
+    moveset, outfits, particles, prefabs8, snakes8, sounds, summons8, tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
+from .tekken8 import sounds as sounds8
 from .tekken7.autodump import FILES, unread
 from .tekken7.pak import EncryptedError, Paks, pak_names
 from .ttt2 import bone, motbin, title_folder
+from .convert import gauge8, summonfade
 from .ttt2.archive import Archives, key_of
 from .ttt2.rpx import Rpx
 
@@ -245,6 +247,8 @@ def spring_file(archives, d, bon, cloth_springs):
         template = cloth.template(archives)
         mop = cloth.spring_file(mop or donor_mop or chains.empty_spring_file(template), template, cloth_springs)
     still = [n for n in skel['opt'] if n >= weapons.OPT_FIRST]
+    if not getattr(d, 'TIGER', None):             # (a Tekken 8 summoned model's bones: convert/snakes8.py)
+        still = snakes8.spring_numbers(d, skel) + prefabs8.spring_numbers(d, skel) + still
     if still:                                     # weapons: still extra bones (Devil Jin's wing entry, flag 8)
         template = archives.read_name(tiger.SPRING_TEMPLATE[0] + '.mop')
         mop = chains.spring_file(mop or donor_mop or chains.empty_spring_file(template), template, still,
@@ -277,6 +281,12 @@ def _source(d, tekken7, tekken8, files):
         return folder, lambda: sources.open_tekken8(folder)
     paks_dir = tekken7_paks(tekken7)
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
+
+
+def _donor_effects(d, donor_xml):
+    """The donor's effect files the pack gets (its generic moves fire them): none when the definition says
+    DONOR_EFFECTS = False. The database goes on naming them, as the game's own name files that do not exist."""
+    return itemdb.effect_names(donor_xml) if getattr(d, 'DONOR_EFFECTS', True) else []
 
 
 def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, make_outfits):
@@ -315,11 +325,15 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     step('model: %s (place %d)' % (d.NAME, slot))
     own_moveset = tkmvst.read(own) if own is not None else None
     standing = cloth.standing(own_moveset) if own_moveset is not None and game_of(d) == 'tekken7' else None
+    # (Tekken 8: its weapons and the points its moves hit from: convert/summons8.py)
+    weapons8 = summons8.weapons(d, saved8[0]) if saved8 is not None else None
+    if saved8 is not None and prefabs8.spec(d):   # (a bank's clips move some of its summons: convert/prefabs8.py)
+        prefabs8.use_bank(source.store, saved8[1]['anmbin'])
     nud, nut, bon, palettes, cloth_springs = model.convert(source, archives, d, slot,
                                                            log=lambda s: log('         ' + s.strip()),
-                                                           standing=standing)
+                                                           standing=standing, weapons=weapons8)
     donor_xml = archives.read_name(d.DONOR + '.xml')
-    effect_files, _, _ = fx.copy_files(archives, d.DONOR, itemdb.effect_names(donor_xml), {},
+    effect_files, _, _ = fx.copy_files(archives, d.DONOR, _donor_effects(d, donor_xml), {},
                                        log=lambda s: log('         ' + s))
     part3, opt_anims = None, {}
     if getattr(d, 'TIGER', None):
@@ -341,6 +355,14 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                  extra=[s for s in (gauge.full_sound(d),) if s],
                                  actions=lambda m, mv: idmaps.cancel_reqs(m, mv['cancel']))
         effects.base = sounds.item_count(rpx, d.DONOR)
+    named8 = None
+    if saved8 is not None:                  # (the sounds taken are those of the moves it converts, by their names)
+        step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
+        named8 = _name_moves8(archives, d, saved8[0], lambda s: log('         ' + s))
+        dropped8 = moveset.drop_moves(d)
+        effects = sounds8.Effects(source.store, d.TEKKEN8_CODE, saved8[0], lambda i: not dropped8.search(
+            saved8[0].move_name(i) or moveset.UNNAMED + str(i)))
+        effects.base = sounds.item_count(rpx, d.DONOR)
     try:
         clips = source.clips(d)
         if saved8 is not None:              # (Tekken 8: the lines her own moves say, shouts after hers)
@@ -349,7 +371,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
         banks, lines, wins, voice_extra, sound_extra = voice.build(
             clips, {w: archives.raw(key_of('%s_%s.nus3bank' % (w, d.DONOR))) for w in ('se_Chr', 'se_Dwi', 'rm_Dst',
                                                                                      'rm_Dwi')}, d.CODE, vlist, slot,
-            effects.clips if effects else ())
+            effects.clips if effects else (), saved8 is not None)
     except KeyError as error:
         raise InputError('%s has no %s voice files (%s): is it the Wii U game\'s folder?' % (game, d.DONOR, error))
     merged, chr_tones = voice.merge(banks.pop('se_Chr_%s.nus3bank' % d.CODE), banks.pop('se_Dwi_%s.nus3bank' % d.CODE))
@@ -359,6 +381,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     if effects:
         lines.append('sound effects (its moves\' and projectiles\' item sounds %d on): %s'
                      % (effects.base, ', '.join(effects.names)))
+        for what, why in sorted({(str(w), y) for w, y in getattr(effects, 'left_out', ())}):
+            lines.append('sound effect left out: %s (%s)' % (what, why))
+        for what, why in getattr(effects, 'skipped', ()):
+            lines.append('WARNING: sound effect not read: %s (%s)' % (what, why))
     for line in lines:
         log('         ' + line)
 
@@ -377,7 +403,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                                                             donor_xml, effect_files, wins, vlist,
                                                                             voice_extra, bon, log, step,
                                                                             clips.move_voices(voice.voice_values(
-                                                                                clips, vlist)))
+                                                                                clips, vlist)), slot=slot,
+                                                                            named=named8, effects=effects)
     else:
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
@@ -385,8 +412,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                                                     effects)
 
     lids = face.tekken7_lids(tkmvst.face_animations(own_moveset)) if own_moveset is not None else None
+    # (a Tekken 8 fighter: no face animations of its own to measure; its eyes' closing turn measured on the meshes)
+    meshes = (nud, archives.read_name(d.DONOR + '.nud')) if game_of(d) == 'tekken8' else None
     moves, motions, changed, lid_scales = face.retarget(moves, motions, bone.read(bon),
-                                                        bone.read(archives.read_name(d.DONOR + '.bon')), lids)
+                                                        bone.read(archives.read_name(d.DONOR + '.bon')), lids, meshes)
     if changed:
         log('         face animations moved with its face joints: %d%s' % (changed, ''.join(
             ', %s turned x%.2f' % (name.replace('_Joint', ''), sc) for name, sc in sorted(lid_scales.items()))))
@@ -397,7 +426,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     contents.update(shared.source_files(source, d, clips))      # (so that shared/ is made again without its game)
     if gauge.of(d):
         step('gauge: %s\'s gauge and its HUD from %s' % (d.NAME, source.NAME))
-        contents.update(gauge.hud_files(source.paks, d, log=lambda s: log('         ' + s)))
+        if game_of(d) == 'tekken7':              # (its HUD movie)
+            contents.update(gauge.hud_files(source.paks, d, log=lambda s: log('         ' + s)))
+        else:                                    # (its HUD widget)
+            contents.update(gauge8.hud_files(source.store, d, log=lambda s: log('         ' + s)))
     contents.update(effect_files)
     if mvl is not None:
         contents['.mvl'] = mvl
@@ -416,7 +448,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     gauge_sound = effects.number(gauge.full_sound(d)) if effects and gauge.full_sound(d) else None
     target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra, sound_extra=sound_extra,
                         gauge_sound=gauge_sound,
-                        weapons=weapons.of_skeleton(bone.read(bon), getattr(d, 'WEAPONS', ())), outfits=outfit_codes)
+                        weapons=weapons.of_skeleton(bone.read(bon), getattr(d, 'WEAPONS', ())) if weapons8 is None
+                        else prefabs8.with_fades(d, prefabs8.with_channels(weapons8, summonfade.ramps(  # (Tekken 8:
+                            bone.read(bon), nud, weapons.of_skeleton(bone.read(bon), weapons8)))),  # how its summons fade)
+                        outfits=outfit_codes)
     step('wrote %s' % target)
 
     if make_shared:
@@ -449,8 +484,9 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     c.opt_anims, c.part3 = opt_anims, part3
     c.effects = effects
     c.run()
-    copies = c.split_effects(particles.emitting_frames(paks, d.TEKKEN7_CODE, c.effect_ids),
-                             set(c.projectile_effects) | set(itemdb.effect_ids(donor_xml)))
+    used = set(c.projectile_effects) | set(itemdb.effect_ids(donor_xml))
+    copies = c.split_effects(particles.emitting_frames(paks, d.TEKKEN7_CODE, c.effect_ids), used)
+    at_weapons = c.weapon_effects(copies, used)
     moves, motions = c.write()
     for line in c.summary():
         log('         ' + line)
@@ -459,7 +495,10 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     own_files, own_effects = particles.convert_fighter(
         paks, archives, d.TEKKEN7_CODE, c.effect_ids | {particles.HIT_EFFECT},
         model.GIDX_BASE + model.SLOT_GIDX * slot + particles.FIRST_ID, c.projectile_effects,
-        log=lambda s: log('         ' + s), copies=copies)
+        log=lambda s: log('         ' + s), copies=copies,
+        staying={i for i in c.effect_ids if copies.get(i, (i, None))[0] in c.aimed_effects},
+        at_weapons=at_weapons, options=getattr(d, 'EFFECTS', {}),
+        weapons={w['summon']: w for w in getattr(d, 'WEAPONS', []) if w.get('summon') is not None})
     xml = itemdb.body_only(donor_xml, {i: [(name, None) for name in names] for i, names in own_effects.items()})
     effect_files = fx.still_named(effect_files, itemdb.effect_files_named(xml))    # the donor's not replaced
     effect_files.update(own_files)
@@ -489,28 +528,42 @@ def _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon):
     c.tag_states = tag_states
     if getattr(d, 'HANDS', None) is not None:              # the TTT2 row whose hands its moveset takes
         c.hands_reference = (motbin.read(archives.entry('data006', d.HANDS)), archives.entry('data005', d.HANDS))
-    c.hit_locations = dict(getattr(d, 'HIT_LOCATIONS', {}))     # Tekken 7 hit locations TTT2 numbers otherwise
-    c.hit_locations.update(weapons.points_of(bone.read(bon)['names']))         # ... and its weapons' points
+    c.hit_locations = _hit_locations(d, bon)
+
+
+def _hit_locations(d, bon):
+    """The definition's hit locations TTT2 numbers otherwise, and its weapons' points (skeleton bon's)."""
+    out = dict(getattr(d, 'HIT_LOCATIONS', {}))
+    out.update(weapons.points_of(bone.read(bon)['names']))
+    return out
+
+
+def _name_moves8(archives, d, k, log):
+    """Names the moves of Tekken 8 moveset k -> TTT2's movesets (the names' source)."""
+    from .tekken8 import movenames
+    ttt2_movesets = movenames.ttt2_movesets(archives)
+    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
+    movenames.name_moves(k, ttt2_movesets, log=log)
+    return ttt2_movesets
 
 
 def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, effect_files, wins, vlist, voice_extra,
-                               bon, log, step, voices8=None):
+                               bon, log, step, voices8=None, slot=None, named=None, effects=None):
     """The fighter's own Tekken 8 moveset converted (saved: tekken8_moveset's), with its command list -> (moveset
     bytes, motion pack bytes, item database, effect files, command list or None). Its moves are named from TTT2's
     movesets, the id maps come from those and the other Tekken 8 fighters saved with it (their moves named alike),
     its body animations are retargeted onto the skeleton the model step built (bon), TTT2's own where an older
     shared clip was made from one. Tekken 8's effects are not converted: the donor's stay (as with a stand-in).
     voices8: the TTT2 voice of each of its moves' Tekken 8 voices (tekken8/voice.py's move_voices on the banks the
-    voice step built)."""
-    from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, voice as voice8
+    voice step built). named: TTT2's movesets, once its moves are named (_name_moves8). effects: its sound effects
+    (tekken8/sounds.py)."""
+    from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, panm, voice as voice8
+    from .convert import disks8, effects8, trails8
     k, files, references = saved
 
     def sub(s):
         log('         ' + s)
-    step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
-    ttt2_movesets = movenames.ttt2_movesets(archives)
-    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
-    movenames.name_moves(k, ttt2_movesets, log=sub)
+    ttt2_movesets = named if named is not None else _name_moves8(archives, d, k, sub)
     dictionary = movenames.harvest(ttt2_movesets)[0]
     others = []
     for code, motbin_path, fields_path in references:
@@ -534,19 +587,53 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         k.attach_banks(motbin8.read_bank(files['anmbin']), motbin8.read_bank(files['common']))
         banks = anmbin.Banks(own_bank, common_bank, k.character_id)
         common = archives.entry('data004', 0)
-        animations = anim.Animations(banks, anim.Converter(anim.load_skeleton(source.store, d.TEKKEN8_CODE),
-                                                           bone.read(bon)),
+        hit_locations = _hit_locations(d, bon)       # (its summons, hit box summaries, root points: summons8.py)
+        roots = summons8.prepare(k, d, log=sub, place=lambda x: moveset.hit_location('t8', x, hit_locations,
+                                                                                      hitboxes))
+        plan = snakes8.prepare(k, d, log=sub)       # (a summoned model's clips: convert/snakes8.py)
+        prefab_plan = prefabs8.prepare(k, d, log=sub)   # (its summoned creatures: convert/prefabs8.py)
+        converter = anim.Converter(anim.load_skeleton(source.store, d.TEKKEN8_CODE), bone.read(bon),
+                                   weapons=summons8.weapons(d, k), hands=True)
+        if prefab_plan:
+            converter.scene = prefabs8.HoldClips(own_bank)
+        snakes = snakes8.Snakes(source.store, d, converter.cal.offsets[snakes8.weapon(d)['parent']], log=sub) \
+            if plan is not None else None
+        animations = anim.Animations(banks, converter,
                                      anim.originals(k, banks, ttt2_movesets, common,
-                                                    lambda row: archives.entry('data005', row), d.DONOR_ROW))
+                                                    lambda row: archives.entry('data005', row), d.DONOR_ROW),
+                                     roots=roots, snakes=snakes.pairs(plan) if snakes else None,
+                                     ground=prefab_plan.keys if prefab_plan else None,
+                                     held=prefab_plan.held if prefab_plan else None,
+                                     shifts=prefabs8.scene_cuts(k, d, lambda key: converter.pose(panm.Animation(
+                                         banks.blob(anmbin.BODY, key)))[2], log=sub) if prefab_plan else None,
+                                     twists=prefabs8.twists(k, d, log=sub) if prefab_plan else None)
         c = moveset.Converter(k, None, ttt2_movesets[d.DONOR_ROW], archives.entry('data005', d.DONOR_ROW),
                               ttt2_movesets[13], common, (req, prop, reactions, hitboxes), usage, place['row'], d)
         c.animations = animations
+        if converter.hands:
+            c.hands8 = anim.HandClips(banks, converter.hands)
         # (the win poses play the quote of their tone: the fighter's lines are its win moves', zbr_w01's
         # Play_zbr_win_01)
         _options(c, archives, d, {voice8.pose_move(n) or n: tone for n, tone in wins.items()}, vlist, voice_extra,
                  tag_states, bon)
         c.voices8 = voices8 or {}           # her moves' Tekken 8 voices -> the TTT2 voices of the same lines
+        c.effects = effects                 # her moves' sound effects (tekken8/sounds.py)
+        if snakes:                          # (their clips in part 3 of the motion pack, started as a tiger's)
+            c.part3, c.opt_anims = snakes.part3(plan, bone.read(bon))
+        if prefab_plan:                     # (likewise)
+            c.part3, c.opt_anims = prefab_plan.part3(source.store, d, bone.read(bon), log=sub)
+        spec8 = effects8.parts(d) if slot is not None else {}       # (her effects: convert/effects8.py)
+        c.effects8 = {i: part for i, (part, _) in spec8.items()}
+        if spec8 and getattr(d, 'TEKKEN8_TRAILS', False):          # (the weapons' trails: convert/trails8.py)
+            c.trail_sampler = trails8.Sampler(source.store, d, k, banks, converter, bone.read(bon))
+            if getattr(d, 'TEKKEN8_DISKS', None):                   # (its big slash arcs: convert/disks8.py)
+                c.disk_sampler = disks8.Sampler(c.trail_sampler, d.TEKKEN8_DISKS)
+                c.effect_conditions = d.TEKKEN8_DISKS.get('conditions', {})
         c.run()
+        systems8 = effects8.systems_of(source.store, d.TEKKEN8_CODE, c.effect_ids, log=sub) if spec8 else {}
+        copies8 = c.split_effects(effects8.emitting_frames(systems8, c.effects8_stopped),
+                                  set(itemdb.effect_ids(donor_xml))) if spec8 else {}
+        trails = c.assign_trails(set(itemdb.effect_ids(donor_xml))) if getattr(d, 'TEKKEN8_TRAILS', False) else {}
         moves, motions = c.write()
     finally:
         own_bank.close()
@@ -561,14 +648,26 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
             % len(c.projectile_effects))
     electric = None
     if c.electric_moves:                # Tekken 8 electrics: Kazuya's lightning, a copy of his TTT2 effect file
-        effect_files, electric, _ = fx.copy_files(archives, d.DONOR, itemdb.effect_names(donor_xml),
+        effect_files, electric, _ = fx.copy_files(archives, d.DONOR, _donor_effects(d, donor_xml),
                                                   {moveset.ELECTRIC_EFFECT: [(moveset.ELECTRIC_LOOK, None)]})
         sub('electrics with Kazuya\'s lightning (%s, effect id %d): %s'
             % (moveset.ELECTRIC_LOOK, moveset.ELECTRIC_EFFECT, ', '.join(c.electric_moves)))
         if not electric:
             sub('WARNING: the game has no %s: the electrics show no lightning' % moveset.ELECTRIC_LOOK)
-    xml = itemdb.body_only(donor_xml, electric)
+    own8 = {}
+    if systems8 or trails:              # the Tekken 8 effects the definition attaches (convert/effects8.py), its trails
+        step('effects: the Tekken 8 effects %s\'s moves spawn' % d.NAME)
+        files8, own8 = effects8.convert_fighter(source.store, archives, systems8, spec8,
+                                                model.GIDX_BASE + model.SLOT_GIDX * slot + particles.FIRST_ID,
+                                                copies8, log=sub, stopped=c.effects8_stopped,
+                                                tune=getattr(d, 'TEKKEN8_EFFECT_TUNE', None), trails=trails,
+                                                spec_code=getattr(d, 'TEKKEN8_CODE', None))
+    named = dict(electric or {})
+    named.update({i: [(name, None) for name in names] for i, names in own8.items()})
+    xml = itemdb.body_only(donor_xml, named or None)
     effect_files = fx.still_named(effect_files, itemdb.effect_files_named(xml))
+    if own8:
+        effect_files.update(files8)
 
     step('command list')
     mvl = None

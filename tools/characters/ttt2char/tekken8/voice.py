@@ -233,38 +233,22 @@ def sound_data(store, code, skipped=None):
     return out
 
 
-def played(k):
-    """The voices [(bank, number)] the moves of Tekken 8 moveset k play (its sound properties of banks VOICE_BANK
-    and CATEGORY_BANK), each once, in the order of the moves it reaches from its alias slots through cancels, group
-    cancels, transitions and the reactions of its hits; not from its round-start move (alias slot 0: TTT2 plays the
-    donor's), the only way to its story scenes. A line said against one fighter only (moveset.VERSUS8) or a kind's
-    by a low chance (CHANCE8) is not: the converter leaves them out."""
+def reached(k):
+    """The moves of Tekken 8 moveset k in the order it reaches them from its alias slots through cancels, group cancels,
+    transitions and the reactions of its hits; not from its round-start move (alias slot 0: TTT2 plays the donor's),
+    the only way to its story scenes."""
     from ..convert import idmaps as M
-    from ..convert.moveset import CHANCE8, VERSUS8
     from ..movesets import REACTION_MOVE_FIELDS
     moves = k.tables['moves']
-    seen, out, groups = {k.resolve_alias(0x8000 + ROUND_START)}, [], {}
+    seen, groups = {k.resolve_alias(0x8000 + ROUND_START)}, {}
     todo = collections.deque(k.resolve_alias(0x8000 + s) for s in range(len(k.aliases)) if s != ROUND_START)
     while todo:
         i = todo.popleft()
         if i is None or not 0 <= i < len(moves) or i in seen:
             continue
         seen.add(i)
+        yield i
         mv = moves[i]
-        rows = []
-        for table, field, end in (('extra_move_properties', 'extraprops', lambda x: x['id'] == 0 and x['frame'] == 0),
-                                  ('move_begin_props', 'begin_props', lambda x: x['id'] == LIST_END),
-                                  ('move_end_props', 'end_props', lambda x: x['id'] == LIST_END)):
-            if mv.get(field) is not None:
-                rows += [x for _, x in k.iter_list(table, mv[field], end)]
-        for x in rows:
-            voice = (x['value'] & 0xFF, x.get('value3', 0) & 0xFFFFFF)
-            if x['id'] not in SOUND_PROPERTIES or voice[0] not in (VOICE_BANK, CATEGORY_BANK) or voice in out:
-                continue
-            if x.get('req') and [c for c, _ in M.reqs(k, x['req'])] == [VERSUS8[0]] or \
-                    voice[0] == CATEGORY_BANK and x.get('value2', 0) < CHANCE8:
-                continue
-            out.append(voice)
         todo.append(k.resolve_alias(mv['transition']) if mv.get('transition') is not None else None)
         for field in ('cancel', 'cancel2', 'cancel3', 'cancel4'):
             for c in M.cancels(k, mv.get(field)):
@@ -279,6 +263,35 @@ def played(k):
             if r is not None and r < len(k.tables['reactions']):
                 todo += [k.resolve_alias(k.tables['reactions'][r][f]) for f in REACTION_MOVE_FIELDS
                          if k.tables['reactions'][r].get(f) is not None]
+
+
+def property_rows(k, mv):
+    """Move mv's rows of its extra, begin and end property lists."""
+    rows = []
+    for table, field, end in (('extra_move_properties', 'extraprops', lambda x: x['id'] == 0 and x['frame'] == 0),
+                              ('move_begin_props', 'begin_props', lambda x: x['id'] == LIST_END),
+                              ('move_end_props', 'end_props', lambda x: x['id'] == LIST_END)):
+        if mv.get(field) is not None:
+            rows += [x for _, x in k.iter_list(table, mv[field], end)]
+    return rows
+
+
+def played(k):
+    """The voices [(bank, number)] the moves of Tekken 8 moveset k play (its sound properties of banks VOICE_BANK
+    and CATEGORY_BANK), each once, in the order of the moves it reaches (reached). A line said against one fighter only
+    (moveset.VERSUS8) or a kind's by a low chance (CHANCE8) is not: the converter leaves them out."""
+    from ..convert import idmaps as M
+    from ..convert.moveset import CHANCE8, VERSUS8
+    out = []
+    for i in reached(k):
+        for x in property_rows(k, k.tables['moves'][i]):
+            voice = (x['value'] & 0xFF, x.get('value3', 0) & 0xFFFFFF)
+            if x['id'] not in SOUND_PROPERTIES or voice[0] not in (VOICE_BANK, CATEGORY_BANK) or voice in out:
+                continue
+            if x.get('req') and [c for c, _ in M.reqs(k, x['req'])] == [VERSUS8[0]] or \
+                    voice[0] == CATEGORY_BANK and x.get('value2', 0) < CHANCE8:
+                continue
+            out.append(voice)
     return out
 
 

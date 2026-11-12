@@ -116,6 +116,15 @@ class Bank:
         self.source.append(self.source[share] if share is not None else ('appended', len(self.tones) - 1))
         return len(self.tones) - 1
 
+    def set_mix(self, i, volume, pitch):
+        """Tone i's own volume (dB, the title's mix adds to it) and pitch (cents), the values after its PACK place."""
+        t = self.tones[i]
+        o = self._fields(t)
+        if o is None:
+            raise ValueError('tone %d has no audio' % i)
+        struct.pack_into('<f', t, o + 16, volume)
+        struct.pack_into('<f', t, o + 24, pitch)
+
     def renamed(self, i, name):
         """Tone i's entry with another name of the same length."""
         t = bytearray(self.tones[i])

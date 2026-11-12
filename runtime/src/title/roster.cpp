@@ -3,20 +3,26 @@
 #include "title/eliza_assist.h"
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
+#include "title/summon_fade.h"
+#include "title/unblurred.h"
+#include "gpu/still_draws.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
+#include "title/warp.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
 #include "cafe/runtime.h"
 #include "cafe/sysmem.h"
 #include "cafe/vfs.h"
+#include "gx2/hooks.h"
 #include "title/archive.h"
 
 #include <zlib.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <charconv>
 #include <cmath>
@@ -50,6 +56,7 @@ struct Traces {
     bool eliza_assist = std::getenv("TTT2_TRACE_ELIZA_ASSIST") != nullptr;
     bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
     bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
+    bool effect_marks = std::getenv("TTT2_TRACE_EFFECT_MARKS") != nullptr; // effects that stay, effects at weapons
 };
 const Traces& traces() {
     static const Traces read;
@@ -235,7 +242,9 @@ std::optional<uint32_t> tone_index(const std::vector<uint8_t>& bank, const std::
 // OPT 800 + k (k < 20: posed by the animations' extra pair k; from 20 still),
 // that bone's parent (a bone index), its hit points (OPT 850 + n, each
 // hitting as the held item's point slot s) and, for a weapon the fighter
-// summons (Noctis's), the number of its summon (shown only while summoned).
+// summons (Noctis's), the number of its summon (shown only while summoned)
+// and how it is scaled while that summon fades in or out (Tekken 8's: the
+// importer's summonfade.py; see the fades below).
 struct WeaponPoint {
     uint32_t number = 0, slot = 0;
 };
@@ -243,7 +252,16 @@ struct Weapon {
     uint32_t pair = 0, parent = 0;
     std::vector<WeaponPoint> points;
     int32_t summon = -1; // -1: always shown
+    uint32_t ramp = 0;   // the local's rows (bits 0..2) a fade scales; bit 3: under a ramped weapon (S L S^-1);
+                         // bit 4: dissolves instead (summon_fade.h)
+    uint32_t channels = UINT32_MAX; // the extra channels posing it, by pair (default: its own number's pair); for a bone
+                                    // numbered below 800 because bones under it must have higher numbers (the game makes
+                                    // inverse binds in number order: a parent numbered after its child gives it zeros)
+    uint32_t anchored = 0; // 1: held in the world where each move's first frame puts it (Tekken 8's prefabs' ground:
+                           // see anchor_weapon); 2: a hit point that goes where the held ground takes the scene (its
+                           // place from the ground as the clip has it, under the ground as held: see pose_weapons)
 };
+constexpr uint32_t kHeldInWorld = 1, kFollowsGround = 2;
 
 // The added fighters, by number k (their slots).
 struct Outfit {
@@ -262,7 +280,9 @@ struct Added {
     uint32_t code_string = 0;       // the code as a guest string
     fs::path pack;
     std::vector<Weapon> weapons;
+    uint64_t rest_summons = 0;      // the summons out when no move says otherwise (bit n: summon n)
     std::vector<Outfit> outfits;
+    std::vector<std::string> unblurred; // meshes TTT2's motion blur leaves out (title/unblurred.h)
 };
 std::vector<Added> g_added;
 std::map<uint32_t, int> g_outfit_ids;
@@ -397,8 +417,10 @@ struct Pack {
     std::vector<uint32_t> voice_extra; // its bank's shouts past the donor's (appended to the voice list)
     std::vector<uint32_t> sound_extra; // its bank's sound effects (appended to the item sounds)
     std::vector<Weapon> weapons;       // character.ini weapons: k:parent:points[:summon] (see pose_weapons)
+    uint64_t rest_summons = 0;         // character.ini rest_summons: the summons out when no move says otherwise
     std::vector<std::string> outfits;  // optional complete body sets, in chooser order
     std::optional<gauge::Config> gauge; // a Tekken 7 2D fighter's gauge (title/gauge.h)
+    std::vector<std::string> unblurred; // character.ini unblurred: meshes the motion blur leaves out (title/unblurred.h)
 };
 
 fs::path packs_directory() {
@@ -462,7 +484,15 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         } else if (key == "sound_extra") {
             std::istringstream tones(value);
             for (uint32_t tone; tones >> tone;) pack.sound_extra.push_back(tone);
-        } else if (key == "weapons") { // k:parent:points[:summon], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
+        } else if (key == "unblurred") { // mesh names, e.g. clv_pts clv_pmi
+            std::istringstream names(value);
+            for (std::string name; names >> name;) pack.unblurred.push_back(name);
+        } else if (key == "rest_summons") { // summon numbers, e.g. 2 3 4 8 9
+            std::istringstream numbers(value);
+            for (uint32_t n; numbers >> n;) {
+                if (n < 64) pack.rest_summons |= uint64_t{1} << n;
+            }
+        } else if (key == "weapons") { // k:parent:points[:summon[:ramp[:channels[:anchored]]]], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
             std::istringstream items(value);
             for (std::string item; items >> item;) {
                 std::vector<std::string> fields;
@@ -483,6 +513,11 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                     weapon.points.push_back(point);
                 }
                 if (fields.size() > 3 && !fields[3].empty()) weapon.summon = std::atoi(fields[3].c_str());
+                if (fields.size() > 4) weapon.ramp = static_cast<uint32_t>(std::strtoul(fields[4].c_str(), nullptr, 10)) & 31;
+                weapon.channels = fields.size() > 5 && !fields[5].empty()
+                                      ? static_cast<uint32_t>(std::strtoul(fields[5].c_str(), nullptr, 10))
+                                      : weapon.pair;
+                weapon.anchored = fields.size() > 6 ? static_cast<uint32_t>(std::strtoul(fields[6].c_str(), nullptr, 10)) : 0;
                 pack.weapons.push_back(weapon);
             }
         }
@@ -1266,6 +1301,10 @@ constexpr uint32_t kPlayerSelectId = 84, kPlayerAnimator = 7944;
 // The added fighter (its slot) a fighter is, or -1.
 int added_slot(uint32_t player) { return player ? slot_of_id(load(player + kPlayerSelectId)) : -1; }
 
+// The polygons TTT2's motion blur leaves out: at start-up, and anew at each situation (below: title/unblurred.h).
+void install_unblurred();
+void unblurred_situation();
+
 namespace {
 constexpr uint32_t kAnimatorSet = 8, kAnimatorValue = 12, kAnimatorFrame = 16;
 constexpr uint32_t kPart3 = 0x4000;         // an animator's value: an animation of part 3 (index below)
@@ -1313,7 +1352,13 @@ void store_local(uint32_t record, const float t[3], const float r[3], const floa
 
 } // namespace
 
+// GX2SetAlphaTestReg's reference (its float's bits; the gx2 hook prepare_roster sets): for a dissolving summon's
+// material (its pack's alpha test at summon_fade::kDissolveRef) the reference its fade has reached, every other one as
+// it is.
+uint32_t dissolve_alpha_ref(uint32_t ref);
+
 void prepare_roster() {
+    gx2::set_alpha_ref_hook(&dissolve_alpha_ref);
     const fs::path directory = packs_directory();
     std::error_code ec;
     if (!fs::is_directory(directory, ec)) return;
@@ -1418,6 +1463,8 @@ void prepare_roster() {
         added.code = pack.code;
         added.pack = pack.directory;
         added.weapons = pack.weapons;
+        added.rest_summons = pack.rest_summons;
+        added.unblurred = pack.unblurred;
         for (size_t i = 0; i < pack.outfits.size(); ++i) {
             const auto& code = pack.outfits[i];
             if (fighter_id(code) || std::any_of(g_added.begin(), g_added.end(), [&](const Added& a) {
@@ -1473,6 +1520,7 @@ void prepare_roster() {
     add_shared(directory / "shared");
     patch_sounds();
     place_cells();
+    install_unblurred();
     if (traces().roster && !std::getenv("TTT2_INPUT_SCRIPT")) {
         std::map<uint32_t, std::string> names;
         for (const auto& fighter : g_added) {
@@ -3328,15 +3376,42 @@ constexpr uint32_t kFirstWeaponBone = 800, kStillWeapons = 20, kFirstWeaponPoint
 constexpr uint32_t kModelExtraSampled = 13216, kModelExtraCount = 13220, kModelExtra = 13984, kModelExtraMax = 64;
 constexpr uint32_t kPlayerItemPoints = 3416, kSkeletonRecords = 32, kRecordSize = 144, kRecordWorld = 64;
 constexpr uint32_t kSummonProp = 0x822E, kDismissProp = 0x822F, kDismissAll = 16, kHoldProp = 0x822B;
+constexpr uint32_t kPlayerMoveset = 136, kPlayerMovesetInUse = 272; // its own moveset; the one its move is from
+constexpr uint32_t kRoundEndAfterKo = 26; // the situation kind before a KO's replay (title/gauge.cpp)
 constexpr float kThrown = 400.0f; // mm from the parent bone: a weapon thrown, not held
 constexpr int kHoldFrames = 120;   // a held weapon let go after these frames whatever comes
 constexpr float kHeldReach = 1500.0f; // mm: a weapon always in hand (no summon) ignores a pair farther out (the
                                       // channels of another animation's use: Tekken 7's spin reactions, 20 m paths)
 struct WeaponBone {
     std::array<uint32_t, 16> bind{}, last{};
+    std::array<uint32_t, 16> posed{}; // the local its pair gave it last while shown (a fade-out holds it)
+    bool has_posed = false;
 };
 std::map<uint32_t, WeaponBone> g_weapon_bones; // record -> its bind, the local written last
 std::map<uint32_t, uint64_t> g_summoned; // player -> its summoned weapons (bit n: summon n)
+// Fades of Tekken 8 summons (title/summon_fade.h): only the drawing fades; g_summoned (the points, the slots)
+// changes at once, as before.
+std::map<uint32_t, summon_fade::Fades> g_fades; // player -> by summon number
+// Dissolving summons (summon_fade.h kRampDissolve): each model's at its last posing, numbered by the posings (one
+// posed within the last kDissolveLive counts: four fighters a frame), and the reference the drawing takes (its bits;
+// 0: as the material has it). gone: this model's posings left in which its summon, gone, is kept hidden.
+struct Dissolving {
+    uint64_t posing = 0;
+    bool drawn = false;
+    float share = 1.0f;
+    int gone = 0;
+};
+constexpr uint64_t kDissolveLive = 8;
+std::map<uint32_t, Dissolving> g_dissolving; // model -> its dissolving summon
+uint64_t g_posings = 0;
+std::atomic<uint32_t> g_dissolve_ref{0};
+
+// A summoned weapon's place this frame, for the effects at it (its particles: level effects, kWeaponMark): its
+// bone's world rows and origin, shown or not (a weapon not shown is posed at its hand: summoned or dismissed there).
+struct WeaponFrame {
+    float rows[3][3], origin[3];
+};
+std::map<std::pair<uint32_t, int32_t>, WeaponFrame> g_weapon_frames; // (player, summon) -> its frame
 struct PosedWeapons {
     uint32_t player = 0;
     const std::vector<Weapon>* weapons = nullptr;
@@ -3392,19 +3467,39 @@ float value(uint32_t v) {
     return f;
 }
 
+// The summons the player's fighter has out with nothing else going on (Victor's scabbard at his hip, his knife and
+// karambit in his hands, his gun at his thigh: Tekken 8 keeps them through hits and throws, whose moves are the
+// attacker's and say nothing of them). 0: nothing out (every other fighter).
+uint64_t rest_summons(uint32_t player) {
+    const int slot = slot_of_id(load(player + kPlayerSelectId));
+    return slot >= 0 ? g_added[slot].rest_summons : 0;
+}
+
+// Every summoned weapon of the player put away at once, thrown ones let go (the dismissal of all); its rest state
+// stays out.
+void put_away_summons(uint32_t player) {
+    g_summoned[player] = rest_summons(player);
+    g_fades.erase(player);
+    g_weapon_holds[player].held.clear();
+}
+
 void summon_property(uint32_t player, uint32_t id, uint32_t n) {
     if (id == kHoldProp) {
         g_weapon_holds[player].requested = true;
         return;
     }
     uint64_t& summoned = g_summoned[player];
+    const summon_fade::Value v = summon_fade::split(n); // (0 frames in Tekken 7 fighters' values)
+    n = v.n;
+    const bool was = n < 64 && (summoned >> n & 1) != 0;
     if (id == kSummonProp && n < 64) {
         summoned |= uint64_t{1} << n;
+        summon_fade::start(g_fades[player], n, v.frames, true, was);
     } else if (id == kDismissProp && n == kDismissAll) {
-        summoned = 0;
-        g_weapon_holds[player].held.clear();
+        put_away_summons(player);
     } else if (id == kDismissProp && n < 64) {
         summoned &= ~(uint64_t{1} << n);
+        summon_fade::start(g_fades[player], n, v.frames, false, was);
     }
 }
 
@@ -3459,8 +3554,127 @@ bool hold_weapon(uint32_t player, size_t w, bool summoned, uint32_t parent, std:
     return true;
 }
 
+// A weapon anchored in the world (Tekken 8's prefabs' ground, convert/prefabs8.py: the scene's origin, where the
+// fighter stood as the move began; the summons' clips are made from it). Its channels place it in the fighter's frame
+// as the clip has him travel: the origin minus the clip's travel so far. The title moves him by less where the
+// opponent stops him (it holds fighters apart that Tekken 8 lets overlap), and that origin went back with him: the
+// phoenix, Shiva and Titan's fist a metre or two behind him, Titan's punch never reaching the opponent. So it is held
+// in the world where the move's first frame with its channels put it (Tekken 8 spawns the scene there), until another
+// move (or the same one again) starts; a branch that goes on with the clip (a move entered past its first frames, as
+// 1+2's on a hit) keeps it; without channels (a clip without the pair, a summon fading out after its move) it stays
+// there. parent: as hold_weapon's; channels: whether the clip has the pair this frame.
+//
+// Drawn exactly where it is held: the model's update makes the worlds of the records past the skeleton's own (weapons,
+// the prefabs' bones, in record order: each after its parent's) before this hook, from the locals set the frame before
+// and their parents' worlds now. A local set here is so drawn a frame later, with a parent's world it can only
+// extrapolate (and the title moves the fighter after the update, up to 0.1 m a frame): everything held under it shook
+// by the error (2-20 mm a frame, single frames 0.1 m), enough for the title's motion blur to smear the summons. So the
+// worlds of it and of all under it made this frame are moved to where the local set the frame before meant them: that
+// local times the parent it was made for, not times the parent's world now. record: its record. The parent a local is
+// made for here (the hit points at the update's end are made with the parent's world then) is the record's world
+// extrapolated, or under record 0 (the skeleton's root; base: the model's base matrix, +16, this frame's already) that
+// record's local (made later in the update: its world is that local times the base) turned on as it turned since the
+// frame before, times the base.
+struct WeaponAnchor {
+    uint32_t move = 0, frame = 0;
+    bool placed = false, current = false, has_parent = false; // current: placed in this move (or the one it goes on from)
+    bool has_base = false, has_root = false, meant = false;    // meant: the local set the frame before was made for `made`
+    Matrix world{}, parent{}, base{}, root{}, made{};          // base: the model's the frame before; root: record 0's local then
+};
+constexpr uint32_t kModelBase = 16, kRecordSkeleton = 128, kRecordNumbers = 132, kRecordParent = 136;
+constexpr uint32_t kMostRecords = 1024;
+constexpr float kRootTurnMost = 0.94f; // cos 20 degrees: a root that turned more from one frame to the next is not extrapolated
+std::map<uint32_t, std::map<size_t, WeaponAnchor>> g_weapon_anchors; // by player, weapon index
+constexpr uint32_t kAnchorMove = 280, kAnchorFrame = 212; // player: its move, the move's frame
+
+// The worlds of a record and of all under it, times c (on the right).
+void move_worlds(uint32_t record, const Matrix& c) {
+    const uint32_t skeleton = load(record + kRecordSkeleton), first = load(record + kRecordNumbers) >> 16;
+    std::vector<uint32_t> under{record};
+    for (uint32_t i = 0; i < kMostRecords; ++i) {
+        const uint32_t r = record + kRecordSize * i;
+        if (i != 0) {
+            if (load(r + kRecordSkeleton) != skeleton || load(r + kRecordNumbers) >> 16 != first + i) break;
+            if (std::find(under.begin(), under.end(), load(r + kRecordParent)) == under.end()) continue;
+            under.push_back(r);
+        }
+        Matrix m;
+        for (int k = 0; k < 16; ++k) m[k] = loadf(r + kRecordWorld + 4 * k);
+        m = multiply(m, c);
+        for (int k = 0; k < 16; ++k) storef(r + kRecordWorld + 4 * k, m[k]);
+    }
+}
+
+bool anchor_weapon(uint32_t player, size_t w, uint32_t parent, uint32_t base, uint32_t record, bool channels,
+                   std::array<uint32_t, 16>& local) {
+    WeaponAnchor& a = g_weapon_anchors[player][w];
+    Matrix p, l, b;
+    for (int i = 0; i < 16; ++i) {
+        p[i] = loadf(parent + 4 * i);
+        l[i] = value(local[i]);
+        b[i] = base != 0 ? loadf(base + 4 * i) : 0.0f;
+    }
+    p[3] = p[7] = p[11] = 0.0f;
+    p[15] = 1.0f;
+    b[3] = b[7] = b[11] = 0.0f;
+    b[15] = 1.0f;
+    if (a.meant && record != 0) move_worlds(record, multiply(rigid_inverse(p), a.made));
+    a.meant = false;
+    Matrix now = a.has_parent ? multiply(p, multiply(rigid_inverse(a.parent), p)) : p; // (extrapolated)
+    a.parent = p;
+    a.has_parent = true;
+    if (base != 0) {
+        if (a.has_base) { // the root's local the frame before (p: its world then), turned on as it turned then
+            const Matrix root = multiply(p, rigid_inverse(a.base));
+            Matrix turned = root;
+            if (a.has_root) {
+                const Matrix step = multiply(rigid_inverse(a.root), root);
+                if ((step[0] + step[5] + step[10] - 1.0f) / 2.0f >= kRootTurnMost) turned = multiply(root, step);
+            }
+            now = multiply(turned, b);
+            a.root = root;
+            a.has_root = true;
+        }
+        a.base = b;
+        a.has_base = true;
+    }
+    const uint32_t move = load(player + kAnchorMove), frame = load(player + kAnchorFrame);
+    if (frame < a.frame || (move != a.move && frame <= 2)) a.current = false; // (a move began, not a branch going on)
+    a.move = move;
+    a.frame = frame;
+    if (channels && !a.current) {
+        a.world = multiply(l, now);
+        a.placed = a.current = a.meant = true; // (its clip's local, drawn next frame where it is held from)
+        a.made = now;
+        return false;
+    }
+    if (!a.placed) return false;
+    const Matrix there = multiply(a.world, rigid_inverse(now));
+    for (int i = 0; i < 16; ++i) local[i] = bits(there[i]);
+    a.meant = true;
+    a.made = now;
+    return true;
+}
+
 void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t player, const std::vector<Weapon>& weapons) {
     if (weapons.empty()) return;
+    ++g_posings;
+    // (another model with a dissolving summon drawn: this one's scales as before)
+    bool dissolve_alone = true;
+    for (const auto& [other, d] : g_dissolving) {
+        if (other != model && d.drawn && d.posing + kDissolveLive > g_posings) dissolve_alone = false;
+    }
+    Dissolving dissolving;
+    bool has_dissolving = false;
+    // Hit or thrown: a standing hit plays the attacker's reaction, a throw its victim moves, from the attacker's
+    // moveset (+272, the one in use; +136 its own), so none of its own moves' dismissals runs: its summons go away
+    // as Tekken 7 and Tekken 8 put them away when the fighter is hit.
+    const uint64_t rest = rest_summons(player);
+    const bool foreign = load(player + kPlayerMovesetInUse) != load(player + kPlayerMoveset);
+    if (rest != 0) g_summoned.try_emplace(player, rest); // (before its first move's rows)
+    if (const auto it = g_summoned.find(player); it != g_summoned.end() && it->second != rest && foreign) {
+        put_away_summons(player);
+    }
     std::vector<uint32_t> extra; // the current frame's extra channels, 4 words each
     if (load(model + kModelExtraSampled) != 0) {
         const uint32_t channels = std::min(load(model + kModelExtraCount), kModelExtraMax);
@@ -3469,7 +3683,36 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     const uint32_t skeleton = guest_call(ctx, base, sub_04E1A4C8, {player});
     const uint32_t records = skeleton ? load(skeleton + kSkeletonRecords) : 0;
     std::vector<std::array<uint32_t, 16>> locals(weapons.size()); // the points' (this frame's, not collapsed)
+    // The held ground's move this frame (local as the clip has it -> as held: Lg^-1 La), for the hit points that follow
+    // it (anchored 2, after the ground and the summons under it in the list, under the same parent) while a summon
+    // under it is drawn: Tekken 8's boxes at the ground origin and the summons' paths are the scene's, which the ground
+    // holds where the move began; without it the title's stop short of the clip's travel takes them back with him,
+    // where the summon is not drawn. With none drawn they are his own (a blade's path: d/f+2), and go with him.
+    struct {
+        bool valid = false, summon = false;
+        uint32_t parent = 0, ground = 0; // ground: the held one's record
+        Matrix shift{};
+    } follow;
+    const auto under = [](uint32_t r, uint32_t top) { // (a record below another)
+        for (int depth = 0; r != 0 && depth < 64; ++depth) {
+            r = load(r + kRecordParent);
+            if (r == top) return true;
+        }
+        return false;
+    };
+    const auto to_matrix = [](const std::array<uint32_t, 16>& a) {
+        Matrix m;
+        for (int i = 0; i < 16; ++i) m[i] = value(a[i]);
+        return m;
+    };
+    const auto to_bits = [](const Matrix& m) {
+        std::array<uint32_t, 16> a;
+        for (int i = 0; i < 16; ++i) a[i] = bits(m[i]);
+        return a;
+    };
     std::vector<bool> shown(weapons.size(), false);
+    if (const auto it = g_fades.find(player); it != g_fades.end()) summon_fade::step(it->second);
+    const auto fades = g_fades.find(player);
     for (size_t w = 0; w < weapons.size(); ++w) {
         const Weapon& weapon = weapons[w];
         ctx.r[3] = load(model + kModelBones);
@@ -3483,11 +3726,13 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
         WeaponBone& bone = it->second;
         if (fresh || (now != bone.last && now != bone.bind)) bone = WeaponBone{now}; // a new model's record
         std::array<uint32_t, 16> local = bone.bind;
-        const uint32_t* t =
-            weapon.pair < kStillWeapons && 8 * weapon.pair + 8 <= extra.size() ? &extra[8 * weapon.pair] : nullptr;
+        const uint32_t* t = weapon.channels < kStillWeapons && 8 * weapon.channels + 8 <= extra.size()
+                                ? &extra[8 * weapon.channels]
+                                : nullptr;
         if (t != nullptr && weapon.summon < 0 && std::hypot(value(t[0]), value(t[1]), value(t[2])) > kHeldReach) {
             t = nullptr;
         }
+        if (rest != 0 && foreign) t = nullptr; // (out through a reaction: another's clip, its channels mean nothing here)
         if (t != nullptr) {
             const float x = value(t[4]), y = value(t[5]), z = value(t[6]), w = value(t[7]);
             const float m[3][3] = {{1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)},
@@ -3500,15 +3745,50 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
             }
             local[15] = bits(1.0f);
         }
+        if (weapon.anchored == kFollowsGround && t != nullptr && follow.valid && follow.summon &&
+            follow.parent == weapon.parent) {
+            local = to_bits(multiply(to_matrix(local), follow.shift)); // (its place from the ground, under the held one)
+        }
+        const Matrix unanchored = to_matrix(local);
+        const bool held_there = weapon.anchored == kHeldInWorld && records != 0 &&
+                                anchor_weapon(player, w, records + kRecordSize * weapon.parent + kRecordWorld,
+                                              weapon.parent == 0 ? model + kModelBase : 0, record, t != nullptr, local);
+        if (held_there && t != nullptr) { // (its clip goes on: a scene from where it is held)
+            follow = {true, false, weapon.parent, record, multiply(rigid_inverse(unanchored), to_matrix(local))};
+        }
         shown[w] = summoned(weapon, player);
         if (records != 0) {
             shown[w] = hold_weapon(player, w, shown[w], records + kRecordSize * weapon.parent + kRecordWorld, local);
         }
         locals[w] = local;
-        if (!shown[w]) {
+        // a fading summon (the fades above): drawn scaled; dismissed, drawn until its fade ends where its pair had it
+        bool drawn = shown[w];
+        float scale = 1.0f;
+        if (fades != g_fades.end() && weapon.summon >= 0 && weapon.summon < 64 && fades->second[weapon.summon].running()) {
+            const summon_fade::Fade& fade = fades->second[weapon.summon];
+            scale = fade.scale();
+            if (!fade.in && !drawn && (weapon.ramp & summon_fade::kRampRows)) { // (one with no ramp goes at once, as before)
+                drawn = true;
+                if (t == nullptr && bone.has_posed && !held_there) local = bone.posed; // (the next move's clip has not its pair)
+            }
+        }
+        if (shown[w] && t != nullptr) {
+            bone.posed = local;
+            bone.has_posed = true;
+        }
+        const bool dissolves = (weapon.ramp & summon_fade::kRampDissolve) != 0;
+        if (dissolves) {
+            has_dissolving = true;
+            dissolving.drawn = dissolving.drawn || drawn;
+            if (drawn) dissolving.share = std::min(dissolving.share, scale);
+        }
+        if (drawn && weapon.summon >= 0 && follow.valid && under(record, follow.ground)) follow.summon = true;
+        if (!drawn) {
             for (int row = 0; row < 3; ++row) {
                 for (int col = 0; col < 3; ++col) local[4 * row + col] = bits(0.0f);
             }
+        } else if (scale < 1.0f && (weapon.ramp & summon_fade::kRampRows) && !(dissolves && dissolve_alone)) {
+            summon_fade::ramp_local(local, weapon.ramp, std::max(scale, 1e-3f));
         }
         if (local != now) {
             for (uint32_t i = 0; i < 16; ++i) store(record + 4 * i, local[i]);
@@ -3517,6 +3797,42 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
     }
     if (const auto hold = g_weapon_holds.find(player); hold != g_weapon_holds.end()) hold->second.requested = false;
     g_posed_weapons[model] = {player, &weapons, std::move(locals), std::move(shown)};
+    if (has_dissolving) {
+        // (its summon gone this posing: hidden for kDissolveGoneFrames more, not drawn whole from its last pose)
+        if (const auto prev = g_dissolving.find(model);
+            !dissolving.drawn && prev != g_dissolving.end() && prev->second.posing + kDissolveLive > g_posings) {
+            dissolving.gone = prev->second.drawn ? summon_fade::kDissolveGoneFrames : std::max(prev->second.gone - 1, 0);
+        }
+        dissolving.posing = g_posings;
+        g_dissolving[model] = dissolving;
+    }
+    // the reference: the one model with its dissolving summon drawn, its fade's share (none drawn and one just gone:
+    // above every alpha)
+    const Dissolving* one = nullptr;
+    int drawn = 0, gone = 0;
+    for (auto it = g_dissolving.begin(); it != g_dissolving.end();) {
+        if (it->second.posing + kDissolveLive <= g_posings) {
+            it = g_dissolving.erase(it); // (a model gone)
+            continue;
+        }
+        if (it->second.drawn) {
+            one = &it->second;
+            ++drawn;
+        } else if (it->second.gone > 0) {
+            ++gone;
+        }
+        ++it;
+    }
+    uint32_t ref = 0;
+    if (drawn == 1 && one->share < 1.0f) {
+        ref = bits(summon_fade::dissolve_ref(one->share));
+    } else if (drawn == 0 && gone > 0) {
+        ref = bits(summon_fade::kDissolveGone);
+    }
+    if (g_dissolve_ref.exchange(ref) != ref && traces().roster) {
+        std::fprintf(stderr, "ttt2: roster: dissolve reference %.3f (%d drawn, %d gone)\n", ref ? value(ref) : -1.0f, drawn,
+                     gone);
+    }
 }
 
 // The points of the weapons a model's update posed, as it ends (its world matrices made: see above).
@@ -3533,12 +3849,9 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
     if (records == 0) return;
     // the points: position = p L R + t R + T (rows: L the local axes, R the parent's world axes; p the point's
     // local translation); the summoned weapons' first, then a slot none of them wrote from the first weapon with it
-    uint32_t written = 0;
-    auto write_points = [&](size_t w, bool only_unwritten) {
-        const Weapon& weapon = weapons[w];
+    auto frame_of = [&](size_t w, float axes[3][3], float origin[3]) {
         const std::array<uint32_t, 16>& local = locals[w];
-        const uint32_t parent = records + kRecordSize * weapon.parent + kRecordWorld;
-        float axes[3][3], origin[3];
+        const uint32_t parent = records + kRecordSize * weapons[w].parent + kRecordWorld;
         for (int c = 0; c < 3; ++c) {
             origin[c] = loadf(parent + 48 + 4 * c);
             for (int row = 0; row < 3; ++row) {
@@ -3547,6 +3860,17 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
                 origin[c] += value(local[12 + row]) * loadf(parent + 16 * row + 4 * c);
             }
         }
+    };
+    for (size_t w = 0; w < weapons.size(); ++w) {
+        if (weapons[w].summon < 0) continue;
+        WeaponFrame& frame = g_weapon_frames[{player, weapons[w].summon}];
+        frame_of(w, frame.rows, frame.origin);
+    }
+    uint32_t written = 0;
+    auto write_points = [&](size_t w, bool only_unwritten) {
+        const Weapon& weapon = weapons[w];
+        float axes[3][3], origin[3];
+        frame_of(w, axes, origin);
         for (const WeaponPoint& point : weapon.points) {
             if (point.slot >= kWeaponPoints || (only_unwritten && (written >> point.slot & 1))) continue;
             ctx.r[3] = load(model + kModelBones);
@@ -3609,6 +3933,88 @@ void weapon_points(PPCContext& ctx, uint8_t* base, uint32_t model) {
 
 } // namespace
 
+uint32_t cafe::title::dissolve_alpha_ref(uint32_t ref) {
+    const uint32_t now = g_dissolve_ref.load(std::memory_order_relaxed);
+    if (now == 0 || !summon_fade::is_dissolve_ref(std::bit_cast<float>(ref))) return ref;
+    static std::atomic<bool> told{false};
+    if (traces().roster && !told.exchange(true)) {
+        std::fprintf(stderr, "ttt2: roster: a dissolving material drawn at %.3f\n", value(now));
+    }
+    return now;
+}
+
+// A round's (a match's, Practice's) set-up: the summoned weapons a fighter had out when the round before ended (a
+// KO in the middle of a move that showed one) would stand drawn into the next until a move of its own dismissed
+// them, since neither its stance nor the donor's moves do; the KO's replay (after 26) still shows them.
+void cafe::title::summons_situation(uint32_t kind) {
+    unblurred_situation();
+    if (kind == kRoundEndAfterKo) return;
+    for (auto& [player, summoned] : g_summoned) {
+        if (summoned != rest_summons(player)) put_away_summons(player);
+    }
+}
+
+
+// ------------------------------------------------------------------ unblurred meshes
+// An added fighter's meshes that TTT2's motion blur leaves out (title/unblurred.h), registered with the renderer
+// (gpu/still_draws.h). The blur's velocity pass is the draws of vertex shader kVelocityProgram (the renderer's
+// program hash), which read the polygon's stream-out record of this frame from vertex buffer 1 and last frame's
+// from 2.
+namespace {
+constexpr uint64_t kVelocityProgram = 0xbad849ba2f9e0241ull;
+constexpr uint32_t kVelocityCurrent = 1, kVelocityPrevious = 2;
+unblurred::Polygons g_unblurred;      // (made at start-up, before they are registered; read-only after)
+gpu::StillDraws g_still;              // (likewise)
+unblurred::Remembered g_remembered;   // (the renderer's thread only)
+std::atomic<uint32_t> g_unblurred_generation{0};
+
+const uint8_t* guest_bytes(uint32_t address, uint32_t bytes) {
+    return guest_memory_committed(address, bytes) ? guest_pointer(address) : nullptr;
+}
+
+bool unblurred_draw(uint32_t index_address, uint32_t count) {
+    return g_remembered.find(g_unblurred, guest_bytes, index_address, count,
+                             g_unblurred_generation.load(std::memory_order_relaxed));
+}
+} // namespace
+
+// At start-up: the listed meshes' polygons of each pack's model (and its outfits'); only when there are any is the
+// renderer given them.
+void cafe::title::install_unblurred() {
+    if (const char* off = std::getenv("TTT2_NO_MOTION_BLUR"); off && *off && *off != '0') { // (tests: every polygon still)
+        g_still.vertex_program = kVelocityProgram;
+        g_still.current = kVelocityCurrent;
+        g_still.previous = kVelocityPrevious;
+        g_still.counts.assign(1 << 12, ~uint64_t{0}); // (index counts below 262144)
+        g_still.still = [](uint32_t, uint32_t) { return true; };
+        g_still.all = true;                                       // (and no velocity drawn: the camera's motion too)
+        gpu::set_still_draws(&g_still);
+        std::fprintf(stderr, "ttt2: TTT2_NO_MOTION_BLUR: motion blur off\n");
+        return;
+    }
+    for (const Added& a : g_added) {
+        if (!a.active || a.unblurred.empty()) continue;
+        std::vector<std::string> codes{a.code};
+        for (const Outfit& outfit : a.outfits) codes.push_back(outfit.code);
+        for (const std::string& code : codes) {
+            std::ifstream in(a.pack / (code + ".nud"), std::ios::binary);
+            const std::vector<uint8_t> nud(std::istreambuf_iterator<char>(in), {});
+            const size_t found = g_unblurred.add(nud, a.unblurred);
+            std::fprintf(stderr, "ttt2: %s: %zu polygons of %zu meshes drawn without motion blur\n", code.c_str(), found,
+                         a.unblurred.size());
+        }
+    }
+    if (g_unblurred.empty()) return;
+    g_still.vertex_program = kVelocityProgram;
+    g_still.current = kVelocityCurrent;
+    g_still.previous = kVelocityPrevious;
+    g_still.counts = g_unblurred.count_bits();
+    g_still.still = unblurred_draw;
+    gpu::set_still_draws(&g_still);
+}
+
+// A situation's set-up (a match's, a round's): the models may have moved, so the draws are compared anew.
+void cafe::title::unblurred_situation() { g_unblurred_generation.fetch_add(1, std::memory_order_relaxed); }
 
 // A fighter's model, every frame (the per-fighter posing of extra bones among
 // the rest): then the added fighter's extra bones take the frame of its
@@ -3657,16 +4063,65 @@ PPC_FUNC(sub_069D8B30) {
     ctx.lr = lr;
 }
 
+// A fighter vanished in a warp (title/warp.cpp) is not drawn: the title
+// draws a model from its bones' local transforms as its update leaves them
+// (the hit test, the effects and the camera take the world matrices the
+// update makes from them), so their axes are collapsed as the update ends,
+// the model drawn as a point, and put back as its next update starts, before
+// the animation and the posing above write them (a still extra bone's local,
+// which neither writes, would stay collapsed).
+namespace {
+constexpr uint32_t kBoneCount = 24, kLocalAxes = 12; // the bone container's; the words of a local's rows 0-2
+struct CollapsedBones {
+    uint32_t records = 0;
+    std::vector<uint32_t> axes; // kLocalAxes words a bone
+};
+std::map<uint32_t, CollapsedBones> g_collapsed; // by model
+
+void collapse_bones(uint32_t model) {
+    const uint32_t bones = load(model + kModelBones);
+    if (bones == 0) return;
+    CollapsedBones& c = g_collapsed[model];
+    c.records = load(bones + kSkeletonRecords);
+    c.axes.resize(kLocalAxes * load(bones + kBoneCount));
+    for (uint32_t k = 0; k < c.axes.size(); ++k) {
+        const uint32_t at = c.records + kRecordSize * (k / kLocalAxes) + 4 * (k % kLocalAxes);
+        c.axes[k] = load(at);
+        store(at, 0u);
+    }
+}
+
+void restore_bones(uint32_t model) {
+    const auto it = g_collapsed.find(model);
+    if (it == g_collapsed.end()) return;
+    const CollapsedBones& c = it->second;
+    const uint32_t bones = load(model + kModelBones);
+    if (bones != 0 && load(bones + kSkeletonRecords) == c.records &&
+        kLocalAxes * load(bones + kBoneCount) == c.axes.size()) { // (still the same bones)
+        for (uint32_t k = 0; k < c.axes.size(); ++k)
+            store(c.records + kRecordSize * (k / kLocalAxes) + 4 * (k % kLocalAxes), c.axes[k]);
+    }
+    g_collapsed.erase(it);
+}
+} // namespace
+
 // A model's update (it samples the animation, poses the bones through
 // sub_069D8B30 above, then makes their world matrices): then the added
-// fighter's weapon points, from those matrices.
+// fighter's weapon points, from those matrices, and its bones collapsed
+// while it is vanished.
 PPC_FUNC(sub_069DF470_orig);
 PPC_FUNC(sub_069DF470) {
     const uint32_t model = ctx.r[3];
+    if (!g_collapsed.empty()) restore_bones(model);
     sub_069DF470_orig(ctx, base);
-    if (g_posed_weapons.empty()) return;
+    if (g_posed_weapons.empty() && !warp::warping()) return;
     const uint32_t r3 = ctx.r[3], lr = ctx.lr;
     weapon_points(ctx, base, model);
+    if (warp::warping()) {
+        ctx.r[3] = model;
+        cafe_ppc_lookup(load(load(model + kModelInterface) + 68))(ctx, base);
+        if (warp::vanished(ctx.r[3])) collapse_bones(model);
+    }
     ctx.r[3] = r3;
     ctx.lr = lr;
 }
@@ -3728,6 +4183,18 @@ void set_frame(uint32_t player, int32_t frame) { // as sub_04336854 @0x43371ac
     store(player + kPlayerFrameFixed, static_cast<uint32_t>(frame) << 12);
     storef(player + kPlayerFrameF, static_cast<float>(frame));
     storef(player + kPlayerFrameF2, static_cast<float>(frame));
+}
+
+// Continued moves: Tekken 8 moves that go on from a frame of their clip where
+// the move before left it (its 0x8339; the importer's 0x822A at frame 0x8001,
+// value the frame): Clive's Burning Rain landing is the slam's clip from frame
+// 30, its hit 3 frames in. TTT2 goes on from the cancel's frame only into a
+// move of the same animation, and the slam's baked copies have their own; this
+// starts the move at the frame, as TTT2's own landing goes to ground_fall.
+constexpr uint32_t kContinueProp = 0x822A;
+
+void continue_move(uint32_t player, uint32_t frame) {
+    if (static_cast<int32_t>(load(player + kPlayerFrame)) < static_cast<int32_t>(frame)) set_frame(player, frame);
 }
 
 // Whether the move throws a projectile after frame `frame`.
@@ -3895,6 +4362,9 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
         store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
 }
 
+void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player); // (level effects, below)
+uint32_t g_property_player = 0; // the player whose move property runs (level effects, below: an effect's owner)
+
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
@@ -3906,9 +4376,16 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     if ((id == kArcProp || id == kArcBakedProp || id == kArcAirMoveProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         arc_property(player, id, load(ctx.r[4] + 4));
+    if (id == kContinueProp && ctx.r[5] == 0 && slot_of_id(load(player + kPlayerSelectId)) >= 0)
+        continue_move(player, load(ctx.r[4] + 4));
     if ((id == kSummonProp || id == kDismissProp || id == kHoldProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         summon_property(player, id, load(ctx.r[4] + 4));
+    if (id == warp::kProperty && ctx.r[5] == 0 && slot_of_id(load(player + kPlayerSelectId)) >= 0) {
+        const uint32_t value = load(ctx.r[4] + 4), flag = value >> 24 & 0xFF;
+        if (flag == warp::kOut || flag == warp::kStart) record_warp_start(ctx, base, player);
+        if (flag != warp::kStart) warp::property(player, value);
+    }
     const bool trace_special = traces().special_cancels && (id == 0x8093 || id == 0x80a5) && ctx.r[5] == 0;
     const uint32_t trace_value = trace_special ? load(ctx.r[4] + 4) : 0;
     const uint32_t trace_frame = trace_special ? load(player + kPlayerFrame) : 0;
@@ -3920,7 +4397,10 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     // without sub_03AE1704. A hit-grab's takes the scale of the airborne hit it continues (sub_03AE1704 above).
     const int32_t throw_points = (id == 0x8058 || id == 0x8059) && pass == 0 && added_slot(player) >= 0
                                  ? static_cast<int16_t>(load(ctx.r[4] + 4)) : 0;
+    const uint32_t property_player = g_property_player;
+    g_property_player = player;
     sub_03AE86A0_orig(ctx, base);
+    g_property_player = property_player;
     if (throw_points > 0 && load(player + 0x4a4) == uint32_t(throw_points) && load8(player + 0x487) == id - 0x8057)
         if (const uint32_t percent = hit_grab_percent(player))
             store(player + 0x4a4, static_cast<uint32_t>(damage::scale_hit(throw_points, percent)));
@@ -4421,9 +4901,45 @@ PPC_FUNC(sub_08BF4D44) {
 // Tekken 7 places some emitters from the floor's height rather than the bone's
 // (ground smoke, a low wave): the converter puts them in a second file of the
 // effect, which kFloorMark marks; its height is the floor's under the fighter.
+//
+// An effect's first placements come from the move property spawning it,
+// before the placement callback's: the effect object's slot (+720) is still
+// player 1's first member, so they are for that property's player
+// (effect_player). The particles its emitters spawn there keep that frame's
+// directions (their place follows a local emitter): the frame is the level
+// facing of its own fighter, the last one his bones gave while he is vanished
+// (collapsed bones give none: a frame of zeros there laid the first strands
+// of his streak along the world's z, in front of him when he faced -z,
+// through the opponent and beyond).
+//
+// Tekken 7 spawns an aimed effect (Noctis's warps' streak of light) where the
+// fighter is at that moment and leaves it there: kStayMark keeps the place the
+// placement callback (sub_06BE756C) gives it first (the library places a new
+// effect at 0 0 0 before that: it is at his hips meanwhile) and its first
+// frame. Tekken 7 aims it along the warp, from where it started (his hips as he
+// vanishes or, later, where the move he appears with records them:
+// warp::kStart, Tekken 7's 0x82b1; record_warp_start) to its place; when that
+// way is more than ~25 degrees off his facing (cosine 0.9) and not near
+// straight up, along his facing (the level frame) as before (its handler
+// 0x14071ca19); a warp without a start of its own keeps the facing
+// (title/warp.cpp). One left in his facing frame (past a guard, a whiff) goes
+// with him and is seen only while it lies behind him and short of the
+// opponent (following_place): the moves he appears with there carry him on
+// after he appears. The library draws an effect at its place (+944, which the
+// world matrix it builds takes for its translation), turned by the matrix's
+// rows: a streak whose matrix alone went with him stayed where it started.
+// A summoned weapon's particles (Noctis's sword glowing as he
+// summons, throws and dismisses it) are at that weapon, in its bone's frame:
+// kWeaponMark | the summon number, with the weapon's place the weapons' update
+// keeps (g_weapon_frames); the frame's rows are the bone's y, z and x, so that
+// the converter's Tekken 7 axes (x ahead, y right, z up, as TTT2's left, up and
+// ahead) are the Tekken 7 bone's (the weapon bone's y is the reverse of that
+// one's: weapons.py), its fighter the effect's (effect_player).
 constexpr uint32_t kLevelMark = 0x54374658, kLevelMarkAt = 700;       // "T7FX"
 constexpr uint32_t kProjectileMark = 0x50524F4A, kProjectileMarkAt = 704; // "PROJ"
 constexpr uint32_t kFloorMark = 0x464C4F52, kFloorMarkAt = 708;           // "FLOR"
+constexpr uint32_t kStayMark = 0x53544159, kStayMarkAt = 712;             // "STAY"
+constexpr uint32_t kWeaponMark = 0x57504E00, kWeaponMarkAt = 716;         // "WPN" + the summon
 constexpr uint32_t kEffectFile = 932, kEffectPlayer = 720;      // effect object: its loaded file, its slot
 constexpr uint32_t kRigBones = 32, kBoneLocal = 0, kBoneWorld = 64; // sub_04E1A518's model: its bone records
 constexpr float kOutOfSight = -100000.0f;
@@ -4479,11 +4995,161 @@ float effect_pitch(PPCContext& ctx, uint8_t* base, uint32_t effect) {
     return e.pitch;
 }
 
+struct StayingEffect {
+    uint32_t file;
+    bool framed;
+    float place[3];
+    uint32_t matrix[16];
+    bool follows = false; // not aimed along a warp: behind its fighter as he goes on (following_place)
+    bool gone = false;    // ... and out of sight for good: it no longer lay behind him, short of the opponent
+    int failing = 0;      // ... frames in a row it has not lain so
+    float at[3] = {};     // ... where it is this frame
+};
+std::map<uint32_t, StayingEffect> g_staying; // effect object -> where it stays (kStayMark)
+std::set<uint32_t> g_traced_marks;            // effects at weapons traced (TTT2_TRACE_EFFECT_MARKS)
+std::map<uint32_t, uint32_t> g_effect_owners; // effect object -> the player whose move property set it up
+std::map<uint32_t, std::array<float, 2>> g_facings; // a fighter's hips -> his last level facing (x, z)
+int g_placing = 0;          // sub_06BE756C running (its depth)
+int32_t g_placing_slot = -1; // ... for this player slot (sub_06BE6CFC's first argument)
+
 // sub_08BE5650(effect, file, ...): the library sets an effect object up for a new effect (objects are reused).
 PPC_FUNC(sub_08BE5650_orig);
 PPC_FUNC(sub_08BE5650) {
-    if (g_active) g_projectile_looks.erase(ctx.r[3]), g_effect_pitches.erase(ctx.r[3]);
+    if (g_active) {
+        g_projectile_looks.erase(ctx.r[3]), g_effect_pitches.erase(ctx.r[3]), g_staying.erase(ctx.r[3]);
+        g_traced_marks.erase(ctx.r[3]);
+        if (g_property_player) g_effect_owners[ctx.r[3]] = g_property_player;
+        else g_effect_owners.erase(ctx.r[3]);
+        if (traces().effect_marks && ctx.r[4] && load(ctx.r[4] + kStayMarkAt) == kStayMark)
+            std::fprintf(stderr, "ttt2: effect %08X set up to stay (file %08X, player %08X)\n", ctx.r[3], ctx.r[4],
+                         g_property_player);
+    }
     sub_08BE5650_orig(ctx, base);
+}
+
+PPC_FUNC(sub_06BE756C_orig);
+PPC_FUNC(sub_06BE756C) {
+    if (!g_active) return sub_06BE756C_orig(ctx, base);
+    const int32_t before = g_placing_slot;
+    ++g_placing, g_placing_slot = -1;
+    sub_06BE756C_orig(ctx, base);
+    --g_placing, g_placing_slot = before;
+}
+
+// sub_06BE6CFC(slot, bone, out): the bone's place for the placement callback.
+PPC_FUNC(sub_06BE6CFC_orig);
+PPC_FUNC(sub_06BE6CFC) {
+    if (g_active && g_placing > 0) g_placing_slot = static_cast<int32_t>(ctx.r[3]);
+    sub_06BE6CFC_orig(ctx, base);
+}
+
+// The player slot an effect is placed for: the placement callback's, else the effect object's.
+uint32_t effect_slot(uint32_t effect) {
+    return g_placing > 0 && g_placing_slot >= 0 && g_placing_slot < 4 ? static_cast<uint32_t>(g_placing_slot)
+                                                                      : load(effect + kEffectPlayer);
+}
+
+// The player an effect is placed for. A new effect's first placements come before the placement callback's (the
+// effect object's slot is player 1's first member until then): they are for the player whose move property set it
+// up (sub_03AE86A0 spawning it), so that player 2's effects start in his frame too.
+uint32_t effect_player(PPCContext& ctx, uint8_t* base, uint32_t effect) {
+    if (g_placing <= 0 || g_placing_slot < 0 || g_placing_slot >= 4) {
+        if (const auto it = g_effect_owners.find(effect); it != g_effect_owners.end()) return it->second;
+    }
+    return guest_call(ctx, base, sub_05C5EF74, {effect_slot(effect)});
+}
+
+PPC_FUNC(sub_04E1A518); // a player's model
+
+// The hips' bone record of the fighter an effect belongs to (effect_player), or 0.
+uint32_t effect_hips(PPCContext& ctx, uint8_t* base, uint32_t effect) {
+    const uint32_t player = effect_player(ctx, base, effect);
+    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
+    return model ? load(model + kRigBones) : 0;
+}
+
+// The place of a summoned weapon an effect is at (kWeaponMark): its rows (the bone's y, z, x) and origin. -> false
+// for other effects or when the weapon is not known.
+bool weapon_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint32_t file, float rows[3][3], float origin[3]) {
+    const uint32_t mark = load(file + kWeaponMarkAt);
+    if ((mark & 0xFFFFFF00u) != kWeaponMark) return false;
+    const uint32_t player = effect_player(ctx, base, effect);
+    const auto it = g_weapon_frames.find({player, static_cast<int32_t>(mark & 0xFF)});
+    if (traces().effect_marks && g_traced_marks.insert(effect).second)
+        std::fprintf(stderr, "ttt2: effect %08X at weapon %u of slot %u (%08X): %s\n", effect, mark & 0xFF,
+                     effect_slot(effect), player, it == g_weapon_frames.end() ? "not known" : "placed");
+    if (it == g_weapon_frames.end()) return false;
+    for (int i = 0; i < 3; ++i) {
+        origin[i] = it->second.origin[i];
+        for (int c = 0; c < 3; ++c) rows[i][c] = it->second.rows[(i + 1) % 3][c];
+    }
+    return true;
+}
+
+// A staying effect not aimed along a warp (its frame his level facing as it started: the guarded or whiffed
+// Warp-Strike's streak, from far behind him to 20 cm before his hips) goes with its fighter, at his hips' x/z and the
+// height it started at, its frame kept: his move carries him 1.3-2.4 m on after he appears, back off a guard at a
+// wall, sideways along it, past an opponent getting up, and a streak left where he appeared reached into the
+// opponent. It is seen in a frame it lies behind him and short of the opponent: his facing within 60 degrees of its
+// ahead (kTurned) and the opponent's hips kClear or more ahead of his along it; kGone frames in a row not, and it is
+// out of sight for good (its strands keep the frame they were spawned in). One frame alone does not end it: a reading
+// of the opponent's hips can be off for a frame (once 0.6 m behind him, the opponent standing 1.1 m ahead).
+constexpr float kClear = 500.0f, kTurned = 0.5f;
+constexpr int kGone = 2;
+void following_place(PPCContext& ctx, uint8_t* base, uint32_t effect, StayingEffect& stay) {
+    const uint32_t player = effect_player(ctx, base, effect);
+    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
+    const uint32_t hips = model ? load(model + kRigBones) : 0;
+    if (!hips) return; // (where it was)
+    const float x = loadf(hips + kBoneWorld + 48), z = loadf(hips + kBoneWorld + 56);
+    float ax, az;
+    std::memcpy(&ax, &stay.matrix[8], 4), std::memcpy(&az, &stay.matrix[10], 4);
+    const float n = std::sqrt(ax * ax + az * az);
+    float facing = 1.0f, along = kClear;
+    if (n > 1e-3f) {
+        ax /= n, az /= n;
+        if (const auto kept = g_facings.find(hips); kept != g_facings.end())
+            facing = kept->second[0] * ax + kept->second[1] * az;
+        const uint32_t opponent = load(player + kPlayerOpponent);
+        const uint32_t its = opponent ? guest_call(ctx, base, sub_04E1A518, {opponent}) : 0;
+        if (const uint32_t its_hips = its ? load(its + kRigBones) : 0)
+            along = (loadf(its_hips + kBoneWorld + 48) - x) * ax + (loadf(its_hips + kBoneWorld + 56) - z) * az;
+    }
+    const bool seen = facing >= kTurned && along >= kClear;
+    stay.failing = seen ? 0 : stay.failing + 1;
+    if (!stay.gone && stay.failing >= kGone) {
+        stay.gone = true;
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: effect %08X out of sight: facing %.2f along it, the opponent %.0f mm ahead "
+                         "(player %08X, hips at %.0f %.0f)\n", effect, facing, along, player, x, z);
+    }
+    stay.at[0] = x, stay.at[1] = seen && !stay.gone ? stay.place[1] : kOutOfSight, stay.at[2] = z;
+}
+
+// A staying effect's place (kStayMark): the one the placement callback gave it first (its fighter's hips before
+// that), or the one following_place gives it. -> false for other effects.
+bool staying_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint32_t file, float place[3]) {
+    if (load(file + kStayMarkAt) != kStayMark) return false;
+    const auto it = g_staying.find(effect);
+    if (it != g_staying.end() && it->second.file == file && it->second.follows) {
+        following_place(ctx, base, effect, it->second);
+        std::copy(it->second.at, it->second.at + 3, place);
+        return true;
+    }
+    if (it == g_staying.end() || it->second.file != file) {
+        if (g_placing <= 0 || g_placing_slot < 0) { // (not its bone's place yet)
+            if (const uint32_t hips = effect_hips(ctx, base, effect))
+                for (int i = 0; i < 3; ++i) place[i] = loadf(hips + kBoneWorld + 48 + 4 * i);
+            return true;
+        }
+        g_staying.insert_or_assign(effect, StayingEffect{file, false, {place[0], place[1], place[2]}, {}});
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: effect %08X stays at %.0f %.0f %.0f (slot %u)\n", effect, place[0], place[1],
+                         place[2], effect_slot(effect));
+        return true;
+    }
+    std::copy(it->second.place, it->second.place + 3, place);
+    return true;
 }
 
 PPC_FUNC(sub_041CE354_orig);
@@ -4536,13 +5202,46 @@ bool projectile_look_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint
     return true;
 }
 
-PPC_FUNC(sub_04E1A518); // a player's model
+void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player) {
+    const uint32_t model = guest_call(ctx, base, sub_04E1A518, {player});
+    if (const uint32_t hips = model ? load(model + kRigBones) : 0) {
+        float place[3];
+        for (int i = 0; i < 3; ++i) place[i] = loadf(hips + kBoneWorld + 48 + 4 * i);
+        warp::start(player, place);
+        if (traces().effect_marks)
+            std::fprintf(stderr, "ttt2: warp of %08X starts at %.0f %.0f %.0f\n", player, place[0], place[1], place[2]);
+    }
+}
 
-// The hips' bone record of the fighter an effect belongs to (its slot's player), or 0.
-uint32_t effect_hips(PPCContext& ctx, uint8_t* base, uint32_t effect) {
-    const uint32_t player = guest_call(ctx, base, sub_05C5EF74, {load(effect + kEffectPlayer)});
-    const uint32_t model = player ? guest_call(ctx, base, sub_04E1A518, {player}) : 0;
-    return model ? load(model + kRigBones) : 0;
+// An aimed effect's frame (kStayMark) as it starts: rows (left, up, ahead) with ahead along its player's warp from
+// where it started to `place`, unless that is more than ~25 degrees off the level frame's ahead (not near straight
+// up): then the level frame as it is. -> whether it is aimed along the warp.
+bool aim_along_warp(PPCContext& ctx, uint8_t* base, uint32_t effect, const float place[3], uint32_t level) {
+    float start[3], d[3], n = 0;
+    if (!warp::take_start(effect_player(ctx, base, effect), start)) return false;
+    for (int i = 0; i < 3; ++i) d[i] = place[i] - start[i], n += d[i] * d[i];
+    if ((n = std::sqrt(n)) < 1.0f) return false;
+    for (float& x : d) x /= n;
+    float facing = 0;
+    for (int i = 0; i < 3; ++i) facing += d[i] * loadf(level + 32 + 4 * i);
+    const bool along = d[1] >= 0.9f || facing >= 0.9f;
+    if (traces().effect_marks)
+        std::fprintf(stderr, "ttt2: effect %08X aimed from %.0f %.0f %.0f: way %.2f %.2f %.2f, %.0f mm, facing %.2f %.2f "
+                     "%.2f (%s)\n", effect, start[0], start[1], start[2], d[0], d[1], d[2], n, loadf(level + 32),
+                     loadf(level + 36), loadf(level + 40), along ? "along the warp" : "along the facing, behind him");
+    if (!along) return false;
+    float left[3] = {d[2], 0, -d[0]}; // up x ahead, level
+    const float l = std::sqrt(left[0] * left[0] + left[2] * left[2]);
+    if (l < 1e-3f) return false;
+    left[0] /= l, left[2] /= l;
+    const float up[3] = {d[1] * left[2] - d[2] * left[1], d[2] * left[0] - d[0] * left[2],
+                         d[0] * left[1] - d[1] * left[0]}; // ahead x left
+    for (int i = 0; i < 3; ++i) {
+        storef(level + 4 * i, left[i]);
+        storef(level + 16 + 4 * i, up[i]);
+        storef(level + 32 + 4 * i, d[i]);
+    }
+    return true;
 }
 
 // A floor part's place (kFloorMark): its height that of the floor under the fighter (the player's +72: 7000 mm
@@ -4567,13 +5266,25 @@ PPC_FUNC(sub_08BE5688) {
     if (g_active) {
         if (const uint32_t file = level_file(ctx.r[3])) {
             float place[3] = {float(ctx.f[1].ps0), float(ctx.f[2].ps0), float(ctx.f[3].ps0)};
+            float rows[3][3];
+            const bool at_weapon = weapon_place(ctx, base, ctx.r[3], file, rows, place);
             const bool rides = projectile_look_place(ctx, base, ctx.r[3], file, place);
-            if (floor_place(ctx, base, ctx.r[3], file, place) || rides) {
+            const bool stays = staying_place(ctx, base, ctx.r[3], file, place);
+            if (floor_place(ctx, base, ctx.r[3], file, place) || rides || stays || at_weapon) {
                 for (int i = 0; i < 3; ++i) ctx.f[1 + i].ps0 = place[i];
             }
         }
     }
     sub_08BE5688_orig(ctx, base);
+}
+
+// Hands the library an effect's place again this frame (sub_08BE5688); the caller's registers are kept.
+void replace_effect(PPCContext& ctx, uint8_t* base, uint32_t effect, const float place[3]) {
+    const PPCContext saved = ctx;
+    ctx.r[3] = effect;
+    for (int i = 0; i < 3; ++i) ctx.f[1 + i] = {place[i], place[i]};
+    sub_08BE5688_orig(ctx, base);
+    ctx = saved;
 }
 
 PPC_FUNC(sub_08BE56E4_orig);
@@ -4594,8 +5305,9 @@ PPC_FUNC(sub_08BE56E4) {
                     for (int j = 0; j < 3; ++j) ahead[j] += l * loadf(hips + kBoneWorld + 16 * k + 4 * j);
                 }
                 const float n = std::sqrt(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
-                if (n > 1e-3f) {
-                    const float x = ahead[0] / n, z = ahead[2] / n;
+                if (n > 1e-3f) g_facings[hips] = {ahead[0] / n, ahead[2] / n};
+                if (const auto kept = g_facings.find(hips); kept != g_facings.end()) {
+                    const float x = kept->second[0], z = kept->second[1];
                     const float rows[12] = {z, 0, -x, 0, 0, 1, 0, 0, x, 0, z, 0}; // left = up x ahead, up, ahead
                     for (int i = 0; i < 12; ++i) storef(level + 4 * i, rows[i]);
                     levelled = true;
@@ -4651,6 +5363,37 @@ PPC_FUNC(sub_08BE56E4) {
             }
             for (int i = 0; i < 3; ++i) storef(level + 48 + 4 * i, place[i]);
             storef(level + 60, 1.0f);
+            // A summoned weapon's particles: in its bone's frame, at it.
+            float rows[3][3], origin[3];
+            if (weapon_place(ctx, base, effect, file, rows, origin)) {
+                for (int i = 0; i < 3; ++i) {
+                    for (int c = 0; c < 3; ++c) storef(level + 16 * i + 4 * c, rows[i][c]);
+                    storef(level + 48 + 4 * i, origin[i]);
+                }
+            }
+            // An aimed effect: where it was, as it was, when it started; one not aimed along a warp goes with its
+            // fighter in that frame (following_place, also its place: sub_08BE5688, from the frame it is framed
+            // in, whose place went out before its frame was known). Before the callback places it: at his hips.
+            if (load(file + kStayMarkAt) == kStayMark) {
+                const auto it = g_staying.find(effect);
+                if (it != g_staying.end() && it->second.file == file) {
+                    StayingEffect& stay = it->second;
+                    if (!stay.framed) {
+                        stay.follows = !aim_along_warp(ctx, base, effect, stay.place, level);
+                        for (int i = 0; i < 16; ++i) stay.matrix[i] = load(level + 4 * i);
+                        std::copy(stay.place, stay.place + 3, stay.at);
+                        stay.framed = true;
+                        if (stay.follows) {
+                            following_place(ctx, base, effect, stay);
+                            replace_effect(ctx, base, effect, stay.at);
+                        }
+                    }
+                    if (stay.follows) std::memcpy(&stay.matrix[12], stay.at, 12);
+                    for (int i = 0; i < 16; ++i) store(level + 4 * i, stay.matrix[i]);
+                } else if (const uint32_t hips = effect_hips(ctx, base, effect)) { // (not placed yet: at his hips)
+                    for (int i = 0; i < 3; ++i) store(level + 48 + 4 * i, load(hips + kBoneWorld + 48 + 4 * i));
+                }
+            }
             ctx.r[4] = level;
         }
     }

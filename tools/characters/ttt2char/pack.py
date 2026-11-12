@@ -62,7 +62,7 @@ FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
 SOURCE = 'source'               # a pack's copy of what shared/ takes from its game
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
-REVISION = 7                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
+REVISION = 8                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
                                 # 2: tag combos; Reina's throws, bounds and icon; 3: face animations and eyelids;
                                 # 5: main sync; 6: the definitions' bounds alone, Tekken 7's after the Bound Mod:
                                 # screws, tornados and slams no longer bound; 7: hit reactions that keep what they
@@ -70,7 +70,8 @@ REVISION = 7                    # what packs made before lack, for every fighter
                                 # launches and stun falls; Tekken 7's hit points past the limbs and in the trunk,
                                 # Negan's 0x72; Tekken 7's contact tests and moveset variables, Starburst and the
                                 # cane, the opponent's move by its own id; the Tag Assault's incoming partner
-                                # attacks with its own d/f+1, a string's continued bound move can Tag Assault)
+                                # attacks with its own d/f+1, a string's continued bound move can Tag Assault;
+                                # 8: a group cancel row counts its own group's rows, not the source's)
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24), then (ROW_CELLS) a new top row
@@ -275,11 +276,19 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
     """voice_extra: the se_Chr tones of the shouts past the donor's (the port appends them to the voice list);
     sound_extra: the se_Chr tones of its sound effects (the port appends them to its item sounds: convert/sounds.py);
     gauge_sound: the item sound its gauge plays as it fills up (convert/gauge.py);
-    weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them):
-    k:parent:points[:summon], a point `n` hitting as slot n, else `n>slot`."""
-    def item(k, parent, points, summon):
+    weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them), or with
+    a ramp (convert/summonfade.ramps: how a fading summon is scaled):
+    k:parent:points[:summon[:ramp[:channels[:anchored]]]], a point `n` hitting as slot n, else `n>slot`; channels: the
+    pair posing a bone numbered below 800 (empty: its own), anchored 1: held in the world from each move's first frame,
+    2: a hit point following the held one (convert/prefabs8.with_channels); the definition's REST_SUMMONS (the summons out when no move says otherwise,
+    through hits and throws too: roster.cpp) as rest_summons; the definition's UNBLURRED (mesh names the port's motion blur
+    leaves out: title/unblurred.h) as unblurred."""
+    def item(k, parent, points, summon, ramp=0, channels=None, anchored=0):
         return '%d:%d:%s' % (k, parent, ','.join('%d' % n if n == slot else '%d>%d' % (n, slot) for n, slot in points)) \
-            + (':%d' % summon if summon is not None else '')
+            + (':%d' % summon if summon is not None else (':' if ramp or channels is not None or anchored else '')) \
+            + (':%d' % ramp if ramp or channels is not None or anchored else '') \
+            + (':%d' % channels if channels is not None else (':' if anchored else '')) \
+            + (':%d' % anchored if anchored else '')
     return ('# %s, from %s (made on this machine from the player\'s own copy)\n'
             'format = %d\ncode = %s\ndonor = %s\nsex = %s\nslot = %d\nchr_tones = %d\nrevision = %d\n'
             % (d.NAME.split(' (')[0], GAMES[game_of(d)], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones,
@@ -288,6 +297,10 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
             + ('voice_extra = %s\n' % ' '.join(map(str, voice_extra)) if voice_extra else '')
             + ('sound_extra = %s\n' % ' '.join(map(str, sound_extra)) if sound_extra else '')
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
+            + ('rest_summons = %s\n' % ' '.join(map(str, d.REST_SUMMONS))
+               if isinstance(getattr(d, 'REST_SUMMONS', None), tuple) else '')
+            + ('unblurred = %s\n' % ' '.join(d.UNBLURRED)
+               if isinstance(getattr(d, 'UNBLURRED', None), tuple) and d.UNBLURRED else '')
             + ('outfits = %s\n' % ' '.join(outfits) if outfits else '')
             + (gauge.ini_line(d, gauge_sound) + '\n' if gauge.ini_line(d) else ''))
 

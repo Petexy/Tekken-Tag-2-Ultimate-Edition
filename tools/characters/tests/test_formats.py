@@ -75,6 +75,20 @@ class Textures(unittest.TestCase):
             self.assertLess(np.abs(rgb - img[..., :3].astype(int)).mean(), 4, 'format %d' % fmt)
 
 
+    def test_solid_alpha(self):
+        """solid: a blended strand's alpha steepened about the test's reference: the same texels pass it."""
+        img = np.zeros((8, 8, 4), np.uint8)
+        img[..., :3] = 200
+        img[:, ::2, 3] = (100, 70, 100, 70)[0]
+        img[:, 1::2, 3] = 70
+        t = nut.make_texture(img, 1, 2, mips=2, solid=85)
+        a = np.asarray(nut.decode(t))[..., 3].astype(int)
+        self.assertGreater(a[0, 0], 130)                                 # 85 + (100 - 85) x 4
+        self.assertLess(a[0, 1], 85)                                     # still fails the test
+        plain = np.asarray(nut.decode(nut.make_texture(img, 1, 2, mips=2)))[..., 3].astype(int)
+        self.assertLess(plain[0, 0], 110)
+
+
 class Skeleton(unittest.TestCase):
     def test_round_trip(self):
         n = 3
@@ -310,6 +324,44 @@ class Colours(unittest.TestCase):
         self.assertEqual(f['alpha'][9].sum(), 0)
         self.assertTrue((f['alpha'][:9] == 1).all())
         self.assertLess(worst_1p(f).max(), 1 / 255)
+
+    def test_fit_satin(self):
+        """The groups are the satin texels and the others, whatever their colours; the palette holds the lifted colours,
+        the shades stay those of the colours as they are."""
+        c1, c2 = np.zeros((8, 8, 3)), np.zeros((8, 8, 3))
+        c1[:4], c2[:4] = (0.4, 0.4, 0.4), (0.2, 0.2, 0.3)
+        c1[4:], c2[4:] = (0.42, 0.4, 0.4), (0.2, 0.22, 0.3)        # (k-means would not split these)
+        satin = np.zeros((8, 8), bool)
+        satin[:4] = True
+        seen = []
+
+        def lift(group, rgb, texels):
+            seen.append((group, int(texels.sum())))
+            return rgb * (2 if group == 0 else 0.5)
+
+        grid = np.zeros((32, 64, 3, 3), '>f4').tobytes()
+        plain = colours.fit(c1, c2, colours.Palette(grid, []), satin=satin)
+        f = colours.fit(c1, c2, colours.Palette(grid, []), satin=satin, lift=lift)
+        self.assertTrue((f['b'][:4] == 0).all() and (f['b'][4:] == 1).all())
+        self.assertEqual(seen, [(0, 32), (0, 32), (1, 32), (1, 32)])
+        np.testing.assert_allclose(f['groups'][0][1], np.array(plain['groups'][0][1]) * 2)
+        np.testing.assert_allclose(f['groups'][1][3], np.array(plain['groups'][1][3]) * 0.5)
+        np.testing.assert_array_equal(f['shade'], plain['shade'])
+
+    def test_drawn_triangles(self):
+        """Two triangles side by side over a mask drawn in a band of the left one: the right one draws nothing; with a
+        margin reaching it, both; UVs past 1 repeat the texture; a triangle smaller than a texel finds its texel."""
+        mask = np.zeros((64, 64), np.uint8)
+        mask[:, 20:28] = 255                                    # texels x 20..27 drawn
+        uv = np.array([[0, 0], [0.5, 0], [0, 1], [0.5, 1], [1.0, 0]], np.float64)
+        left, right = [0, 1, 2], [1, 4, 3]                       # (texels x 0..32 / x 32..64)
+        self.assertEqual(colours.drawn_triangles(uv, [left, right], mask, 150).tolist(), [True, False])
+        self.assertEqual(colours.drawn_triangles(uv, [left, right], mask, 150, margin=6).tolist(), [True, True])
+        self.assertEqual(colours.drawn_triangles(uv + [1.0, 0], [left, right], mask, 150).tolist(), [True, False])
+        tiny = np.array([[0.375, 0.5], [0.3751, 0.5], [0.375, 0.5001], [0.7, 0.5], [0.7001, 0.5], [0.7, 0.5001]])
+        self.assertEqual(colours.drawn_triangles(tiny, [[0, 1, 2], [3, 4, 5]], mask, 150).tolist(), [True, False])
+        self.assertFalse(colours.drawn_triangles(uv, [left, right], mask // 2, 150).any())   # (under the ref)
+        self.assertEqual(colours.drawn_triangles(uv, np.zeros((0, 3), np.int64), mask, 150).tolist(), [])
 
 
 class Lettering(unittest.TestCase):
@@ -590,6 +642,21 @@ class Materials(unittest.TestCase):
         self.assertEqual([t['gidx'] for t in bank.textures], [bank.first, bank.first + 1])
         self.assertEqual(bank.normals, {0})
         self.assertEqual(len(bank.sources), 2)
+
+    def test_texture_budget_dry_run(self):
+        """fit(dry=True) halves nothing and says what fit() would; halved() is the image fit() leaves."""
+        from ttt2char.convert.model import TextureBank
+        bank = TextureBank()
+        rng = np.random.default_rng(1)
+        for i, side in enumerate((256, 128, 128)):
+            bank.add(('img', i, 2, True), rng.integers(0, 256, (side, side, 4), dtype=np.uint8), 2)
+        size = sum(len(m) for t in bank.textures for m in t['mips'])
+        dry = bank.fit(size // 3, dry=True)
+        self.assertEqual([t['w'] for t in bank.textures], [256, 128, 128])
+        expect = [bank.halved(i, dry.get(i, 0)) for i in range(3)]
+        self.assertEqual(bank.fit(size // 3), sum(dry.values()))
+        self.assertTrue(all((bank.sources[i] == expect[i]).all() for i in range(3)))
+        self.assertEqual(bank.textures[0]['w'], 256 >> dry.get(0, 0))
 
 
 class Cells(unittest.TestCase):

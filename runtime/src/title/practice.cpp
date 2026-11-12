@@ -23,6 +23,7 @@
 
 #include "title/framedata.h"
 #include "title/gauge.h"
+#include "title/warp.h"
 
 #include "cafe/input.h"
 #include "cafe/ppc_ops.h"
@@ -556,7 +557,8 @@ PPC_FUNC(sub_05FBB480); // the camera (r3) as at a round's start (r4 = 0)
 PPC_FUNC(sub_05FBC0A4); // the camera (r3) of a side (r4 = 2: 2P; f1 = 1, r5 = 1)
 
 // The fighters' frame (not while the pause menu is open): the chord can
-// happen, and the frame data panels follow the fighters.
+// happen, the gauges and the warps (title/warp.cpp) run on, and the frame
+// data panels follow the fighters.
 PPC_FUNC(sub_03ADB118_orig);
 bool g_fighters_ran = false; // in the battle frame that ran last
 
@@ -569,6 +571,7 @@ PPC_FUNC(sub_03ADB118) {
     update_texts(base, in_practice);
     const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
     title::gauge::fighters_frame(ctx, base, fighters, in_practice);
+    title::warp::fighters_frame(base);
     if (in_practice) title::framedata::fighters_frame(base, fighters);
 }
 

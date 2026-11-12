@@ -511,7 +511,8 @@ class Window:
                                                                                                         pady=(px(2), 0))
         if why and why != self.can_import():
             self.note(card, 'warning', why, WARN)
-        update = [f['name'] for f in base if f['update'] and self.addable(f)] if not why else []
+        # (The DLC's too, as the Linux launcher's: their list may be closed.)
+        update = [f['name'] for f in fighters if f['update'] and self.addable(f)] if not why else []
         if update:
             b = L.button(card, 'Update All' if len(update) > 1 else 'Update', lambda: self.start('import', update))
             b.configure(state='disabled' if busy else 'normal')

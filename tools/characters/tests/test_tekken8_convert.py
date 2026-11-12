@@ -1,7 +1,7 @@
 """Unit tests of the converter's Tekken 8 path (convert/moveset.py: classify8, the Tekken 8-only requirements, split
-sound values, extra properties with their own requirement lists, the animation provider, unnamed moves) and of the id
-maps' Tekken 8 parts (convert/idmaps.py: the wide alignment, near_anchors, Chained / Combined), on made-up tables (no
-game files needed).
+sound values, extra properties with their own requirement lists, the animation provider, unnamed moves; rebuild_hubs'
+generic moves taking the fighter's active frames, Tekken 7's too) and of the id maps' Tekken 8 parts
+(convert/idmaps.py: the wide alignment, near_anchors, Chained / Combined), on made-up tables (no game files needed).
 
     python3 -m pytest -q tools/characters/tests/test_tekken8_convert.py
 """
@@ -285,9 +285,11 @@ class Animations(unittest.TestCase):
         self.assertEqual(a['values'].shape, (6, 3, 3))
         self.assertTrue(np.allclose(a['values'][:, 1, 1], 4) and np.allclose(a['values'][:, 0, 0], 0))
 
-    def handoff_converter(self, rows):
-        """A converter with one converted clip (new_anims[0], 0x4001: HARA_ROT1 upright, ending turned) and the donor
-        pack's one animation (0x4000): a down move's start, HARA_ROT1 lying, the same world pose."""
+    def handoff_converter(self, rows, twisted=False, keep_body=False):
+        """A converter with one converted clip (new_anims[0], 0x4001: HARA_ROT1 upright, ending turned; twisted: half a
+        turn over frames 5-15, retarget.twist) and the donor pack's one animation (0x4000): a down move's start,
+        HARA_ROT1 lying, the same world pose as the untwisted clip's end. keep_body: the definition's MOVESET
+        'keep_body_handoffs'."""
         from test_retarget import lying_next, smooth_values
         from ttt2char.convert import retarget
         v = smooth_values(40)
@@ -298,8 +300,13 @@ class Animations(unittest.TestCase):
         empty = b'MOTA\0\1\0\0' + struct.pack('>III', 0x14, 0, 0)
         down = retarget.encode(np.repeat(nxt[None], 2, 0))
         c = converter(Source8())
+        if keep_body:
+            c.defn.MOVESET = dict(c.defn.MOVESET, keep_body_handoffs=True)
         c.donor_pack = motion.build_pack([motion.extend_mota(empty, [down])] + [b''] * 5)
-        c.pack0_count, c.new_anims, c.converted8, c.aliases = 1, [retarget.encode(v)], {0}, []
+        clip = retarget.twist(v, animation.COMPRESSED, 5, 15, np.pi) if twisted else v
+        c.pack0_count, c.new_anims, c.converted8, c.aliases = 1, [retarget.encode(clip)], {0}, []
+        c.twisted8 = {0} if twisted else set()
+        self.clip_in = animation.decode(c.new_anims[0])['values']
         c.T['moves'] = [dict(anim=a, transition=t) for a, t in rows]
         c.handoffs8()
         return c, animation.decode(down)['values'][0]
@@ -314,6 +321,27 @@ class Animations(unittest.TestCase):
         self.assertLess(retarget.handoff_mismatch(out, animation.COMPRESSED, down, animation.COMPRESSED), 0.1)
         self.assertLess(retarget.angle(animation.local_rotation(out[-1, 2]), animation.local_rotation(down[2])), 0.1)
         self.assertEqual(c.stats['hand-offs: converted clips re-split for the next move\'s HARA_ROT1'], 1)
+
+    def test_handoff_twisted(self):
+        """A twisted clip (prefabs8 TWISTS) keeps his body in the hand-off and the facing it lies in (retarget.handoff
+        keep_body): its own turn, half a turn on from the untwisted clip's (no sweep), and HARA_ROT1's world (T^T H)
+        the down move's."""
+        from ttt2char.convert import retarget
+        c, down = self.handoff_converter([(0x4001, 1), (0x4000, 1)], twisted=True)
+        out = animation.decode(c.new_anims[0])['values']
+        rot = lambda x: animation.local_rotation(np.asarray(x, np.float64)[None])[0]
+        self.assertLess(float(retarget.angle(rot(out[-1, 2]).T @ rot(out[-1, 3]), rot(down[2]).T @ rot(down[3]))), 0.5)
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        self.assertLess(abs(yaw(out)[-1] - yaw(self.clip_in)[-1]), 0.01)          # (no sweep: as it stood)
+        self.assertEqual(c.stats['hand-offs: kept the body, the facing to match'], 1)
+
+    def test_handoff_keep_body(self):
+        """MOVESET 'keep_body_handoffs': every converted clip keeps his body in the hand-off (no sweep of the turn)."""
+        c, down = self.handoff_converter([(0x4001, 1), (0x4000, 1)], keep_body=True)
+        out = animation.decode(c.new_anims[0])['values']
+        yaw = lambda x: np.unwrap(np.arctan2(*np.moveaxis(animation.local_rotation(x[:, 2])[:, 0, [2, 0]], -1, 0)))
+        self.assertLess(abs(yaw(out)[-1] - yaw(self.clip_in)[-1]), 0.01)
+        self.assertEqual(c.stats['hand-offs: kept the body, the facing to match'], 1)
 
     def test_handoff_copy(self):
         """A clip played by a move handing off to a down move and by one handing off upright: a copy for the first."""
@@ -423,6 +451,73 @@ class SpecialCancels(unittest.TestCase):
         c.kn, c.newidx = {'Zbr_lp00': 0}, {0: 0}
         specialcancels.restore_unbuffered_normal_strings(c)              # (returns: Tekken 8 has no such buffer)
         self.assertFalse(c.stats)
+
+
+class GenericHubs(unittest.TestCase):
+    """rebuild_hubs (Tekken 7 and Tekken 8 alike): a generic move keeps the donor's row (its frames) and takes the
+    fighter's list; where that list tests the move's own contact before the donor's row is active, the row takes the
+    fighter's frames."""
+
+    def source(self, game, frames, window):
+        """The fighter's moveset of `game`: generic Thr_B (active `frames`) going on to its own toss in `window`."""
+        if game == 't8':
+            k = Source8({0: 'Thr_B', 1: 'Zbr_toss'}, [(0, 'own'), (1, 'own')])
+            k.tables['moves'][0].update(cancel=0, first_active=frames[0], last_active=frames[1])
+            k.tables['moves'][1].update(cancel=None)
+            k.tables['cancels'] = [dict(direction=0, button=0, move_id=1, req=0, win_start=window[0],
+                                        win_end=window[1], start_frame=window[0]),
+                                   dict(direction=M.LIST_END, button=0, move_id=0, req=0, win_start=39,
+                                        win_end=32767, start_frame=39)]
+            return k, 'Zbr_toss'
+        t = Tables()
+        t.move('Thr_B', cancel=t.cancels(dict(move_id=1, req=t.req((3, 1600)), win_start=window[0],
+                                              win_end=window[1], start_frame=window[0]), t.end(39)),
+               first_active=frames[0], last_active=frames[1])
+        t.move('Qz_toss')
+        k = moveset_of(t, 't7')
+        k.character_id = 28
+        return k, 'Qz_toss'
+
+    def hub(self, frames, donor_frames, test, window, game='t8'):
+        """Generic Thr_B (`game`'s active frames) whose list goes on to the fighter's toss on contact test `test` (a
+        TTT2 requirement) in `window`; the donor's Thr_B is active donor_frames. -> (row, stats)."""
+        k, toss = self.source(game, frames, window)
+        d = Tables()
+        d.move('Thr_B', cancel=d.cancels(d.end(40)), first_active=donor_frames[0], last_active=donor_frames[1])
+        d = moveset_of(d)
+        c = converter(k)
+        c.game, c.end = game, M.END_REQ[game]
+        c.d, c.cls, c.newidx, c.dn, c.ttt2_only_generic = d, ['G', 'K'], {1: 1}, {'Thr_B': 0}, set()
+        c.kn = {'Thr_B': 0, toss: 1}
+        c.T = {'moves': [dict(r) for r in d.tables['moves']], 'cancels': [], 'requirements': []}
+        req = len(c.T['requirements'])
+        c.T['requirements'] += [dict(condition=test, param=1600), dict(condition=moveset.TT_END, param=0)]
+        rows = [dict(direction=0, button=0, move_id=1, req=req, win_start=window[0], win_end=window[1],
+                     start_frame=window[0]), dict(direction=M.LIST_END, button=0, move_id=0, req=None)]
+        c.conv_cancel_list = lambda i: [dict(r) for r in rows]
+        c.merge_donor_extras = lambda cl, dc: cl
+        c.rebuild_hubs()
+        return c.T['moves'][0], c.stats
+
+    def test_contact_before_the_donors_frames(self):
+        """A generic throw whose donor row is active later than the fighter's own frames: the donor's grab at 14,
+        the fighter's rows into the throws (3: connected from the front) at 12 (Tekken 8), at 11 against 12
+        (Tekken 7)."""
+        for game, frames, donor_frames in (('t8', (12, 12), (14, 14)), ('t7', (11, 11), (12, 12))):
+            row, stats = self.hub(frames, donor_frames, 3, frames, game)
+            self.assertEqual((row['first_active'], row['last_active'], row['cancel']), frames + (0,), game)
+            self.assertEqual(stats['hub moves taking the fighter\'s active frames (its contact tests)'], 1, game)
+
+    def test_what_keeps_the_donors_frames(self):
+        for game, frames, test, window in (('t8', (12, 12), 3, (12, 20)),       # (the window still sees the grab)
+                                           ('t7', (12, 12), 3, (12, 20)),
+                                           ('t8', (12, 12), 0x8001, (12, 12)),  # (not a contact test)
+                                           ('t8', (14, 14), 3, (12, 12)),       # (the same frames)
+                                           ('t7', (14, 14), 3, (12, 12)),
+                                           ('t8', (16, 16), 46, (12, 12))):     # (not the fighter's frames either)
+            row, stats = self.hub(frames, (14, 14), test, window, game)
+            self.assertEqual((row['first_active'], row['last_active']), (14, 14), (game, frames, test, window))
+            self.assertEqual(stats['hub moves rebuilt'], 1)
 
 
 if __name__ == '__main__':

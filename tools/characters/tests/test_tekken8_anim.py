@@ -472,6 +472,30 @@ class ConverterTest(unittest.TestCase):
         b = self.cv.channels(panm.Animation(self.fighter.clip(self.values, leg_offset=(3.0, 0, 0))))[0]
         np.testing.assert_allclose(a, b, atol=1e-9)
 
+    def test_twist(self):
+        """A twist (prefabs8 TWISTS) turns the turn on smoothly over its frames and HARA_ROT1 back as far about the
+        vertical: the pose in the turn's frame stays, the body the game poses from the facing turns about his hips."""
+        clip = panm.Animation(self.fighter.clip(self.values))
+        a = self.cv.channels(clip)[0]
+        b = self.cv.channels(clip, twist=(6, 16, np.pi))[0]
+        np.testing.assert_array_equal(np.delete(b, [2, 3], 1), np.delete(a, [2, 3], 1))   # the turn and HARA_ROT1
+        d = a[:, 2, 2] - b[:, 2, 2]
+        np.testing.assert_allclose(d[:7], 0.0, atol=1e-12)
+        np.testing.assert_allclose(d[16:], np.pi)
+        self.assertTrue((np.diff(d) > -1e-12).all())
+        np.testing.assert_array_equal(b[:7, 3], a[:7, 3])
+        sk = self.cv.cal.dst
+        W0, P0 = TR.game_world(sk, a)
+        W1, P1 = TR.game_world(sk, b)
+        self.assertLess(RT.angle(W1, W0).max(), 1e-5)
+        np.testing.assert_allclose(P1, P0, atol=1e-6)
+        rot = lambda v: animation.local_rotation(np.asarray(v, np.float64))
+        Ry = animation.local_rotation(RT._turn_values(d, animation.RAW), animation.RAW)
+        self.assertLess(RT.angle(rot(b[:, 3]), Ry @ rot(a[:, 3])).max(), 1e-5)   # (H' = Ry H: T'^T H' = T^T H)
+        self.assertGreater(RT.angle(rot(b[-1, 3]), rot(a[-1, 3])), 179.9)
+        with self.assertRaises(ValueError):
+            self.cv.channels(clip, twist=(6, 24, np.pi))
+
     def test_older_clips_in_ttt2_units(self):
         out, info = self.cv.channels(panm.Animation(self.fighter.clip(self.values, legacy=True)))
         self.assertAlmostEqual(info['leg'], T8.LEGACY_LEG)

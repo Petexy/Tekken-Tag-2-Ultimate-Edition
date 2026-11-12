@@ -534,6 +534,7 @@ void Renderer::swap() {
     }
     update_shadows();
     evict_unused();
+    look_vertices_.clear();
     ++frame_number_;
     ++frames_;
     const double t = now_seconds();
