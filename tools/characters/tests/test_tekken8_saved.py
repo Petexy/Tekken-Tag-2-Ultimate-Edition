@@ -82,17 +82,20 @@ class KnownBuild(unittest.TestCase):
     def test_the_helpers_functions(self):
         with open(os.path.join(HERE, '..', 't8helper', 't8helper.c'), encoding='utf-8') as f:
             c = f.read()
-        found = {name: (int(address, 16), int(n), int(h, 16)) for name, address, n, h in re.findall(
-            r'static const struct Function (\w+) = \{(0x[0-9a-fA-F]+)ull, (\d+), (0x[0-9a-fA-F]+)ull\};', c)}
-        self.assertEqual(tuple(found[name] for name in ('ALLOCATE', 'REQUEST_FILE', 'PROTECT_FIELDS', 'READ_FIELD')),
-                         dump8.HELPER_FUNCTIONS)
+        table = c[c.index('static const struct Build BUILDS[] = {'):]
+        table = table[:table.index('\n};\n')]
+        function = r'\{(0x[0-9a-fA-F]+)ull, (\d+), (0x[0-9a-fA-F]+)ull\},\s*'
+        rows = re.findall(r'\{"(\d+)",\s*' + function * 4, table)
+        self.assertEqual(len(rows), table.count('{"'))                         # (every build read)
+        self.assertEqual({row[0]: tuple((int(a, 16), int(n), int(h, 16)) for a, n, h in zip(*[iter(row[1:])] * 3))
+                          for row in rows}, dump8.HELPER_BUILDS)
         self.assertIn('#define PREFERRED_BASE 0x%xull' % dump8.PREFERRED_BASE, c)
         self.assertIn('"error %s\\n"' % dump8.REFUSED, c)
 
     def test_exe_read_as_the_helper_checks_the_game(self):
         code = {dump8.PREFERRED_BASE + 0x1010: bytes(range(16)), dump8.PREFERRED_BASE + 0x2000: b'\x48\x89' * 8}
         table = tuple((address, 16, fnv1a(data)) for address, data in code.items())
-        with tempfile.TemporaryDirectory() as game, mock.patch.object(dump8, 'HELPER_FUNCTIONS', table):
+        with tempfile.TemporaryDirectory() as game, mock.patch.object(dump8, 'HELPER_BUILDS', {'1': table}):
             path = os.path.join(game, dump8.EXE)
             self.assertFalse(dump8.known_build(game))                           # (no exe)
             write(path, exe(code))
@@ -103,9 +106,24 @@ class KnownBuild(unittest.TestCase):
             self.assertFalse(dump8.known_build(game))                           # (cut off)
             write(path, b'ZM' + exe(code)[2:])
             self.assertFalse(dump8.known_build(game))
-            with mock.patch.object(dump8, 'HELPER_FUNCTIONS', table + ((dump8.PREFERRED_BASE + 0x9000, 16, 0),)):
+            with mock.patch.object(dump8, 'HELPER_BUILDS', {'1': table + ((dump8.PREFERRED_BASE + 0x9000, 16, 0),)}):
                 write(path, exe(code))
                 self.assertFalse(dump8.known_build(game))                       # (outside the sections)
+
+    def test_any_known_build(self):
+        old = {dump8.PREFERRED_BASE + 0x1010: bytes(range(16)), dump8.PREFERRED_BASE + 0x2000: b'\x48\x89' * 8}
+        new = {dump8.PREFERRED_BASE + 0x1030: bytes(range(16)), dump8.PREFERRED_BASE + 0x2040: b'\x48\x89' * 8}
+        builds = {build: tuple((address, 16, fnv1a(data)) for address, data in code.items())
+                  for build, code in (('1', old), ('2', new))}
+        with tempfile.TemporaryDirectory() as game, mock.patch.object(dump8, 'HELPER_BUILDS', builds):
+            path = os.path.join(game, dump8.EXE)
+            for code in (old, new):
+                write(path, exe(code))
+                self.assertTrue(dump8.known_build(game))
+            # (one build's first function and the other's second: neither build)
+            write(path, exe({dump8.PREFERRED_BASE + 0x1010: bytes(range(16)),
+                             dump8.PREFERRED_BASE + 0x2040: b'\x48\x89' * 8}))
+            self.assertFalse(dump8.known_build(game))
 
 
 # ---------------------------------------------------------------- dumps that fail, updates
