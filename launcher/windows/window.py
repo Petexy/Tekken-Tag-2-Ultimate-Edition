@@ -994,8 +994,9 @@ class Window:
             detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
+            # (not .get(action, default): the default is evaluated, and TASK_TITLES has no import or remove)
             title = {'import': 'Could not add ' + shown, 'remove': 'Could not remove ' + shown,
-                     'launcher': 'Update failed', 'files': 'Update failed'}.get(action, TASK_TITLES[action] + ' failed')
+                     'launcher': 'Update failed', 'files': 'Update failed'}.get(action) or TASK_TITLES[action] + ' failed'
             detail = task['error'] or 'See Details, or Open Log to send it for help.'
         self.task_title.configure(text=title, fg=TEXT if ok or code == 130 else BAD)
         self.task_detail.configure(text=detail)

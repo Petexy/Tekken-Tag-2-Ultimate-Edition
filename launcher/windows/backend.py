@@ -252,7 +252,11 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
                 from ttt2char.tekken8 import autodump as t8
                 game = t8.find_tekken8()
                 ids = [d.TEKKEN8_ID for d in t8_fighters]
-                t8.dump(ids, references=[fid for fid in t8.ROSTER if fid not in ids])
+                try:
+                    t8.dump(ids, references=[fid for fid in t8.ROSTER if fid not in ids])
+                except t8.DumpError as error:
+                    print('@error ' + str(error), flush=True)        # (the task panel says why)
+                    raise
                 version = t8.game_version(game.game, game.library)
                 for d in t8_fighters:
                     if not t8.whole(t8.saved_files(d.TEKKEN8_CODE, t8.MOVESETS, version)):

@@ -196,19 +196,20 @@ MOVESET = {
     'keep_body_handoffs': True,
     # his round-start move (the donor's is kept: its mode checks are Tekken 8's)
     # and his Rage Art (no cancel leads to it here: Tekken 8's entry rows test rage, 159)
-    'drop_moves': r'^Lon_Direct$|^#20(6[0-6])$',
+    'drop_moves': r'^Lon_Direct$|^(key:875956be|key:7adbf355|key:2bca6e46|key:f1fa629e|key:15d42305|key:a3221b14|'
+                  r'key:27100d18)$',
     # the donor's round-start list keeps its targets except its own moves
     'direct': [(r'^La_sKAM00_$', 'move', ['Lon_sKAM00_']),                      # Lars's stance -> his
                (r'^(la|mk)_s', 'anim', ['lon_s%02d' % k for k in range(3)]),    # intros
                (r'^la_w', 'anim', ['lon_w%02d' % k for k in range(3)])],        # win poses
     # TTT2 bounds (Tekken 8 has none, and his tornados do not become any): an air hit slams the opponent into the
     # floor once per juggle (convert/move_overrides.py). Iai Stance 1,2,2's last hit (Clarent), Perfumer 1+2
-    # (Hengroen), f+1+2 Durandal and u+1+2 Caliburnus. (Moves no name is known for are '#<index>': indices of the
-    # game build the names were read from.)
+    # (Hengroen), f+1+2 Durandal and u+1+2 Caliburnus. (Moves no name is known for are named by their key,
+    # 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
     'bounds': {
-        '#1667': True,         # IAI 1,2,2, last hit
-        '#1709': True,         # PRF 1+2
-        '#1758': True,         # f+1+2
+        'key:33a027e9': True,         # IAI 1,2,2, last hit
+        'key:67eea5f1': True,         # PRF 1+2
+        'key:583f7ecf': True,         # f+1+2
         'Lon_8WP': True,       # u+1+2
     },
 }

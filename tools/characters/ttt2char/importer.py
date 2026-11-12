@@ -539,11 +539,13 @@ def _hit_locations(d, bon):
 
 
 def _name_moves8(archives, d, k, log):
-    """Names the moves of Tekken 8 moveset k -> TTT2's movesets (the names' source)."""
+    """Names the moves of Tekken 8 moveset k, and the definition's moves named by their key as k's
+    (moveset.resolve_keys) -> TTT2's movesets (the names' source)."""
     from .tekken8 import movenames
     ttt2_movesets = movenames.ttt2_movesets(archives)
     movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
     movenames.name_moves(k, ttt2_movesets, log=log)
+    moveset.resolve_keys(d, k)
     return ttt2_movesets
 
 
