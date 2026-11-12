@@ -221,11 +221,76 @@ class Helper(unittest.TestCase):
 
 
 class Owned(unittest.TestCase):
+    def setUp(self):
+        # (Tekken 7 is installed, Tekken 8 not unless a test says so: this PC's games are never asked)
+        patch = mock.patch.object(source, 'find_tekken8', return_value=None)
+        self.tekken8 = patch.start()
+        self.addCleanup(patch.stop)
+        patch = mock.patch.object(launcher, 'tekken7', return_value={'found': True})
+        self.tekken7 = patch.start()
+        self.addCleanup(patch.stop)
+
     def test_steam_not_running(self):
         with mock.patch.object(autodump, 'steam_running', return_value=False), \
                 mock.patch.object(autodump, 'owned_dlc') as asked:
             self.assertIn('Steam is not running', launcher.owned()['error'])
             asked.assert_not_called()
+
+    def test_tekken8_dlc_asked_through_tekken8(self):
+        # Miary Zo and Clive (Tekken 8's DLC) as Tekken 8 tells, beside Tekken 7's; Victor is no DLC fighter
+        self.tekken8.return_value = '/l/TEKKEN 8'
+        with mock.patch.object(autodump, 'unowned', return_value={}), \
+                mock.patch.object(dump8, 'unowned', return_value={36: 'its DLC is not owned'}) as asked8:
+            answer = launcher.owned()
+        self.assertEqual(sorted(asked8.call_args[0][0]), [36, 40])
+        self.assertEqual((answer['owned']['miary_zo'], answer['owned']['clive']), (True, False))
+        self.assertTrue(answer['owned']['negan'])
+        self.assertNotIn('victor', answer['owned'])
+        self.assertNotIn('errors', answer)
+
+    def test_one_game_not_asked(self):
+        # Tekken 7 cannot be asked, Tekken 8 can: its fighters, and why Tekken 7's are not there
+        self.tekken8.return_value = '/l/TEKKEN 8'
+        running = autodump.DumpError('Tekken 7 is running: close it first')
+        with mock.patch.object(autodump, 'unowned', side_effect=running), \
+                mock.patch.object(dump8, 'unowned', return_value={}):
+            answer = launcher.owned()
+        self.assertEqual(answer, {'owned': {'miary_zo': True, 'clive': True},
+                                  'errors': {'tekken7': 'Tekken 7 is running: close it first'}})
+        with mock.patch.object(autodump, 'unowned', side_effect=running), \
+                mock.patch.object(dump8, 'unowned', side_effect=OSError('no helper')):
+            self.assertEqual(launcher.owned(), {'error': 'Tekken 7 is running: close it first',
+                                                'errors': {'tekken7': 'Tekken 7 is running: close it first',
+                                                           'tekken8': 'the helper failed: OSError: no helper'}})
+
+    def test_tekken7_not_installed_is_not_asked(self):
+        # Tekken 8 alone: its answer, or its own why
+        self.tekken7.return_value = {'found': False}
+        self.tekken8.return_value = '/l/TEKKEN 8'
+        with mock.patch.object(autodump, 'unowned') as asked7, mock.patch.object(dump8, 'unowned', return_value={}):
+            self.assertEqual(launcher.owned(), {'owned': {'miary_zo': True, 'clive': True}})
+        asked7.assert_not_called()
+        with mock.patch.object(dump8, 'unowned', side_effect=dump8.DumpError('Tekken 8 is running: close it first')):
+            self.assertEqual(launcher.owned(), {'error': 'Tekken 8 is running: close it first'})
+
+    def test_stdout_is_the_answer_alone(self):
+        # (the Windows sessions print where their logs are: the launchers read stdout whole)
+        def asking():
+            print('Tekken 8 session logs: C:\\run')
+            return {'owned': {'clive': True}}
+        out = io.StringIO()
+        with mock.patch.object(launcher, 'owned', side_effect=asking), mock.patch.object(signals, 'stop_on_signals'), \
+                mock.patch.object(sys, 'argv', ['launcher.py', 'owned']), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
+            launcher.main()
+        self.assertEqual(json.loads(out.getvalue()), {'owned': {'clive': True}})
+
+    def test_tekken8_not_installed_is_not_asked(self):
+        with mock.patch.object(autodump, 'unowned', return_value={}), mock.patch.object(dump8, 'unowned') as asked8:
+            answer = launcher.owned()
+        asked8.assert_not_called()
+        self.assertNotIn('clive', answer['owned'])
+        self.assertNotIn('errors', answer)
 
     def test_dlc_fighters_only(self):
         answer = {app: app == autodump.DLC[50] for app in autodump.DLC.values()}          # Negan's DLC only
@@ -300,6 +365,27 @@ class Progress(unittest.TestCase):
                                  '@stand-in reina Steam is not running: start it, then try again', '@step shared',
                                  '@done'])
         self.assertEqual(shared.call_args[0][0], None)              # (no Tekken 7 needed)
+
+    def test_unowned_tekken8_dlc_skipped(self):
+        # Tekken 8 says Clive's DLC is not owned: he is skipped, not added with a stand-in; Reina is added
+        def imported(name, tekken7, movesets, game, out, make_shared=True, tekken8=None, **kw):
+            return pack.write(out, importer.definition(name), {'.nud': b'nud'}, 0)
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(importer, 'tekken8_folder', return_value='/games/TEKKEN 8'), \
+                mock.patch.object(import_character, 'tekken8_ready', return_value={'clive': dump8.NOT_OWNED}), \
+                mock.patch.object(importer, 'run', side_effect=imported) as run, \
+                mock.patch.object(importer, 'make_shared'):
+            code, lines = self.main(['reina', 'clive', '--game', 'g', '--out', d, '--progress'])
+            self.assertEqual(code, 0)
+            self.assertEqual(lines[:3], ['@skipped clive its DLC is not owned', '@step fighter reina 1 1',
+                                         '@added reina'])
+            self.assertEqual([c.args[0] for c in run.call_args_list], ['reina'])
+            with mock.patch.object(importer, 'tekken8_folder', return_value='/games/TEKKEN 8'), \
+                    mock.patch.object(import_character, 'tekken8_ready', return_value={'clive': dump8.NOT_OWNED}):
+                code, lines = self.main(['clive', '--game', 'g', '--out', d, '--progress'])
+            self.assertEqual((code, lines), (1, ['@skipped clive its DLC is not owned',
+                                                 '@error none of the fighters asked for is owned']))
 
     def test_unowned_dlc_skipped(self):
         with tempfile.TemporaryDirectory() as d, \

@@ -738,6 +738,9 @@ def owned_dlc(t8, helper_exe, run):
         s.close()
 
 
+NOT_OWNED = 'its DLC is not owned'
+
+
 def unowned(fighters, cache=None):
     """{roster id: reason} of the fighters (roster ids) whose DLC the player's Steam account does not own, as Steam
     tells the game (Steam must be running). Base-game fighters are always owned."""
@@ -748,7 +751,7 @@ def unowned(fighters, cache=None):
         raise DumpError('Steam is not running: start it, then try again (it tells which fighters you own)')
     cache = cache or CACHE
     owned = owned_dlc(find_tekken8(), build_helper(cache), os.path.join(cache, 'run'))
-    return {fid: 'its DLC is not owned' for fid in dlc if not owned.get(DLC[fid], False)}
+    return {fid: NOT_OWNED for fid in dlc if not owned.get(DLC[fid], False)}
 
 
 def _remove(folder, names):
@@ -887,7 +890,7 @@ def dump(fighters, out=None, log=print, cache=None, references=(), force=False):
         owned = owned_dlc(t8, helper_exe, run)
         for fid, _ in todo:
             if fid in DLC and not owned.get(DLC[fid], False):
-                skipped[fid] = 'its DLC is not owned'
+                skipped[fid] = NOT_OWNED
         todo = [(fid, motbin_only) for fid, motbin_only in todo if fid not in skipped]
         common = common and any(fid not in skipped for fid in whole)
         if not todo and not common:

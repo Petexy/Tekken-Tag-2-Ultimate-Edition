@@ -143,6 +143,7 @@ private:
     void ask_remove_all(const std::string& game);
     bool addable(const Fighter& fighter) const;
     std::string not_addable_why(const Fighter& fighter) const; // (a fighter addable() refuses, owned)
+    std::string unknown_owned_why(const Fighter& fighter) const; // (a DLC fighter whose ownership is not known)
     // Why removing that character cannot work now (a game gone that those
     // left need), empty when it can.
     std::string removable(const Fighter& fighter) const;
@@ -333,6 +334,7 @@ private:
     std::map<std::string, bool> owned_;   // its last answer: this time's, or the one kept from before
     bool owned_answer_ = false;           // owned_ holds one
     std::string owned_error_;             // why asking failed
+    std::map<std::string, std::string> owned_errors_; // this time's: each game Steam could not be asked through, why
     bool dlc_expanded_ = false;
     std::map<std::string, bool> outfits_; // the outfit checkboxes clicked, by character
     std::string remove_all_game_; // the game whose Remove All is being asked

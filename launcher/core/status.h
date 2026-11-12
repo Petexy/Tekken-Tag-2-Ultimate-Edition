@@ -101,13 +101,18 @@ struct ImporterStatus {
 
 std::optional<ImporterStatus> parse_status(std::string_view json, std::string* error = nullptr);
 
-// launcher.py owned: the DLC fighters' ownership, or why it is not known.
+// launcher.py owned: the DLC fighters' ownership, or why it is not known
+// (errors: each game Steam could not be asked through, and why; its fighters
+// are left out of owned; with error too when both games were asked).
 struct Ownership {
     std::map<std::string, bool> owned;
+    std::map<std::string, std::string> errors;
     std::string error;
 };
 
 Ownership parse_owned(std::string_view json);
+// {"owned": {...}} of `owned` (the names are definitions' module names).
+std::string ownership_json(const std::map<std::string, bool>& owned);
 
 // launcher.py main: what the repository's main branch has that the launcher's
 // build lacks (GitHub's comparison of the build's commit with main), so that

@@ -250,6 +250,14 @@ def add(args, fighters, progress):
     if tekken8_fighters:
         movesets8 = os.path.expanduser(args.tekken8_movesets) if args.tekken8_movesets else None
         unsaved8 = tekken8_ready(tekken8_fighters, movesets8, progress)
+        # (as Tekken 7's: a fighter whose DLC Steam says is not owned is skipped, not added with a stand-in)
+        from ttt2char.tekken8 import autodump as dump8
+        for fighter in [f for f in tekken8_fighters if unsaved8.get(f) == dump8.NOT_OWNED]:
+            print('Skipped %s: %s.' % (importer.definition(fighter).NAME, dump8.NOT_OWNED))
+            progress('skipped', fighter, dump8.NOT_OWNED)
+            tekken8_fighters.remove(fighter)
+        if not fighters and not tekken8_fighters:
+            progress.fail('none of the fighters asked for is owned')
     fighters += tekken8_fighters
     unshared = [f for f in fighters if importer.definition(f).CODE not in shown]
     for n, fighter in enumerate(fighters):
@@ -444,7 +452,8 @@ def tekken8_ready(fighters, movesets, progress):
     tekken8/autodump.py's MOVESETS). Nothing is started for a build of the game the helper does not know. A fighter
     whose moveset cannot be saved is imported all the same: with a moveset saved before (another version's: a dump
     that fails leaves it), else with its stand-in (importer.run warns, and its pack says so: the launcher offers to
-    update it once its own moveset can be had). -> {fighter: why its moveset was not saved now} (for --progress)."""
+    update it once its own moveset can be had); one whose DLC is not owned (why: autodump.NOT_OWNED) is skipped by the
+    caller. -> {fighter: why its moveset was not saved now} (for --progress)."""
     from ttt2char import importer
     from ttt2char.tekken8 import autodump as dump8
     wanted = [f for f in fighters if importer.converts_tekken8(importer.definition(f))]

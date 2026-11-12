@@ -1,7 +1,8 @@
 // The characters' section (see launcher.h): Tekken 7, Tekken 8 and Steam as
 // the importer finds them, what is missing to import, each game's characters
-// (Tekken 7's DLC characters with whether the player owns them; a Tekken 8
-// character added with a stand-in's moves, and why), and adding and removing
+// (DLC characters with whether the player owns them, as Steam tells through
+// their game; a Tekken 8 character added with a stand-in's moves, and why),
+// and adding and removing
 // them through import_character.py. Neither game needs the other: what all
 // added characters share is made again from the copy of their pictures and
 // name call each pack keeps; a pack an older version made, without it, is
@@ -153,11 +154,11 @@ Launcher::MovesBlock Launcher::moves_block() const {
 
 bool Launcher::addable(const Fighter& f) const {
     // (A moveset not saved yet is saved from its game, which needs Steam; a
-    // DLC fighter's import asks Steam whether the DLC is owned, every time.
-    // An older importer's pack is replaced, also one to update, a newer
-    // one's never.)
+    // Tekken 7 DLC fighter's import asks Steam whether the DLC is owned, every
+    // time, a Tekken 8 one's as its moves are saved. An older importer's pack
+    // is replaced, also one to update, a newer one's never.)
     if ((f.added() && !f.update && !outfits_changed(f)) || f.newer || owns(f) != true || !status_) return false;
-    if (f.dlc != 0) return status_->steam_running;
+    if (f.dlc != 0 && !f.of(kTekken8)) return status_->steam_running;
     if (f.of(kTekken8)) {
         // Their moves not saved yet are saved first, with Tekken 8 running
         // hidden. When it cannot save them (a version of the game its helper
@@ -174,7 +175,7 @@ bool Launcher::addable(const Fighter& f) const {
 }
 
 std::string Launcher::not_addable_why(const Fighter& f) const {
-    if (f.dlc != 0) return "Start Steam: it checks that you own their DLC";
+    if (f.dlc != 0 && !f.of(kTekken8)) return "Start Steam: it checks that you own their DLC";
     if (!f.of(kTekken8)) return "Start Steam: Tekken 7 needs it to save their moves";
     switch (moves_block()) {
     case MovesBlock::kBuild: return kUnknownBuild;
@@ -182,6 +183,17 @@ std::string Launcher::not_addable_why(const Fighter& f) const {
     case MovesBlock::kTools: return "Install what is missing above: it saves their moves";
     default: return "Start Steam: Tekken 8 needs it to save their moves";
     }
+}
+
+std::string Launcher::unknown_owned_why(const Fighter& f) const {
+    const char* game = f.of(kTekken8) ? kTekken8 : kTekken7;
+    if (status_ && !status_->steam_running) return "Start Steam: it tells which DLC you own";
+    if (const auto failed = owned_errors_.find(game); failed != owned_errors_.end()) {
+        return "Steam could not be asked through " + std::string(game_name(game)) + " (" + failed->second +
+               "): Refresh asks it again";
+    }
+    if (owned_state_ == Owned::kFailed) return "Steam could not tell which DLC you own (" + owned_error_ + ")";
+    return "Which " + std::string(game_name(game)) + " DLC you own is not known yet";
 }
 
 std::string Launcher::removable(const Fighter& f) const {
@@ -396,8 +408,7 @@ GtkWidget* Launcher::fighter_row(const Fighter& f, bool usable) {
         gtk_widget_set_sensitive(button, usable && !task_ && addable(f));
         // (When adding is impossible for another reason, the card says why above.)
         const std::string why = !usable      ? ""
-                                : !owned     ? (f.of(kTekken8) ? "Which Tekken 8 DLC you own is not known yet"
-                                                               : "Start Steam: it tells which DLC you own")
+                                : !owned     ? unknown_owned_why(f)
                                 : addable(f) ? ""
                                              : not_addable_why(f);
         if (!why.empty()) gtk_widget_set_tooltip_text(button, why.c_str());
@@ -830,7 +841,9 @@ void Launcher::game_section(GtkWidget* card, const std::string& game) {
         gtk_widget_set_valign(update_all, GTK_ALIGN_CENTER);
         gtk_widget_set_sensitive(update_all, usable && !task_ && !names.empty());
         if (usable && names.empty()) {
-            const std::string why = tekken8 ? not_addable_why(*updates[0]) : "Start Steam: Tekken 7 needs it";
+            const std::string why = !tekken8                       ? "Start Steam: Tekken 7 needs it"
+                                    : !owns(*updates[0]).has_value() ? unknown_owned_why(*updates[0])
+                                                                     : not_addable_why(*updates[0]);
             gtk_widget_set_tooltip_text(update_all, why.c_str());
         }
         if (tekken8) clicked(update_all, [](Launcher* self) { self->start_import(self->to_update(kTekken8)); });
@@ -842,8 +855,8 @@ void Launcher::game_section(GtkWidget* card, const std::string& game) {
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_NONE);
     gtk_widget_add_css_class(list, "fighter-list");
     for (const Fighter& f : s.fighters) {
-        // (Tekken 7's DLC characters in their own list below; Tekken 8's,
-        // whose ownership is not asked yet, with the others.)
+        // (Tekken 7's DLC characters in their own list below; Tekken 8's, whose
+        // ownership is asked through Tekken 8, with the others.)
         if (f.of(game) && (tekken8 || f.dlc == 0)) gtk_list_box_append(GTK_LIST_BOX(list), fighter_row(f, usable));
     }
     gtk_box_append(GTK_BOX(card), list);
@@ -852,22 +865,25 @@ void Launcher::game_section(GtkWidget* card, const std::string& game) {
 
 void Launcher::dlc_section(GtkWidget* card, bool usable) {
     const ImporterStatus& s = *status_;
-    int dlc_count = 0, owned_count = 0, dlc_outdated = 0, dlc_update = 0;
+    int dlc_count = 0, owned_count = 0, known_count = 0, dlc_outdated = 0, dlc_update = 0;
     for (const Fighter& f : s.fighters) {
         if (!f.of(kTekken7) || f.dlc == 0) continue;
         ++dlc_count;
         owned_count += owns(f) == true;
+        known_count += owns(f).has_value();
         dlc_outdated += f.outdated && owns(f) != false;
         dlc_update += f.update && owns(f) != false;
     }
     if (dlc_count == 0) return;
+    // (Steam's answer for Tekken 7's DLC: one with only Tekken 8's fighters
+    // says nothing of them.)
+    const bool known = known_count > 0;
 
     // The DLC's, in a list that opens.
     GtkWidget* title = ui::box(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_box_append(GTK_BOX(title), ui::label("DLC characters", "heading", false));
     const std::string summary =
-        owned_answer_ ? std::to_string(owned_count) + " of " + std::to_string(dlc_count) + " owned"
-                      : std::to_string(dlc_count);
+        known ? std::to_string(owned_count) + " of " + std::to_string(dlc_count) + " owned" : std::to_string(dlc_count);
     gtk_box_append(GTK_BOX(title), ui::label(summary, "pill neutral", false));
     if (dlc_outdated > 0) {
         gtk_box_append(GTK_BOX(title), ui::label(std::to_string(dlc_outdated) + " to add again", "pill warn", false));
@@ -896,18 +912,21 @@ void Launcher::dlc_section(GtkWidget* card, bool usable) {
         GtkWidget* spinner = gtk_spinner_new();
         gtk_spinner_start(GTK_SPINNER(spinner));
         gtk_box_append(GTK_BOX(note), spinner);
-        gtk_box_append(GTK_BOX(note), ui::label(owned_answer_ ? "Asking Steam again which DLC you own (last time: " +
-                                                                    owns_text + ")…"
-                                                              : "Asking Steam which DLC you own…",
+        gtk_box_append(GTK_BOX(note), ui::label(known ? "Asking Steam again which DLC you own (last time: " +
+                                                            owns_text + ")…"
+                                                      : "Asking Steam which DLC you own…",
                                                 "small dim"));
-    } else if (owned_state_ == Owned::kKnown) {
-        note = ui::label("Your Steam account owns " + owns_text + ": only those can be added.", "small dim");
-    } else if (owned_state_ == Owned::kFailed) {
-        note = ui::label(owned_answer_ ? "Steam could not be asked again (" + owned_error_ +
-                                             "). It said last time that your account owns " + owns_text + "."
-                                       : "Which DLC you own is not known: " + owned_error_,
+    } else if ((owned_state_ == Owned::kFailed || owned_errors_.count(kTekken7)) && s.tekken7_usable()) {
+        // (Asking failed, or Tekken 8 answered and Tekken 7 could not be asked.)
+        const auto failed = owned_errors_.find(kTekken7);
+        const std::string& why = failed != owned_errors_.end() ? failed->second : owned_error_;
+        note = ui::label(known ? "Steam could not be asked again (" + why +
+                                     "). It said last time that your account owns " + owns_text + "."
+                               : "Which DLC you own is not known: " + why,
                          "small error-text");
-    } else if (owned_answer_) {
+    } else if (owned_state_ == Owned::kKnown && known) {
+        note = ui::label("Your Steam account owns " + owns_text + ": only those can be added.", "small dim");
+    } else if (known) {
         note = ui::label(s.steam_running ? "Your Steam account owned " + owns_text + " last time Steam was asked."
                                          : "Your Steam account owned " + owns_text +
                                                " last time Steam was asked. Start Steam to add them: it checks again.",
