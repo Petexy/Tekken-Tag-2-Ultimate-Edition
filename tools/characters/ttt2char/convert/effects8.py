@@ -323,7 +323,9 @@ class Measured:
     """What a CPU emitter's scripts do to its particles: life (mean, half) seconds; times over the life; colour
     [(r, g, b)], alpha [a], scale [(x, y, z)] (a mesh's) or size [(w, h)] (a sprite's, cm); path [(x, y, z)] cm (the
     mean place), start_half, speed_half (cm, cm/s: the random spread), scale_half (a factor's); pre: a fixed turn
-    (roll, pitch, yaw), turn_half: random turn (turns, per axis), spin, spin_half (turns per second, per axis)."""
+    (roll, pitch, yaw), turn_half: random turn (turns, per axis), spin, spin_half (turns per second, per axis);
+    dynamic [x]: its material's dynamic parameter (the first; None without: a dissolve's threshold, say), and
+    dynamic_frames: the same at every frame of the run (a cut's steps: Converter._cut)."""
 
     def __init__(self, run):
         h = run.history
@@ -336,6 +338,9 @@ class Measured:
         fade = np.clip(np.asarray(h['Color']), 0.0, None) if 'Color' in h else None
         self.colour = [tuple(float(x) for x in fade[f, :, :3].mean(0)) for f in at] if fade is not None else None
         self.alpha = [float(fade[f, :, 3].mean()) for f in at] if fade is not None else None
+        dyn = np.asarray(h['DynamicMaterialParameter']) if 'DynamicMaterialParameter' in h else None
+        self.dynamic = [float(dyn[f, :, 0].mean()) for f in at] if dyn is not None else None   # (its first value)
+        self.dynamic_frames = [float(x) for x in dyn[:, :, 0].mean(1)] if dyn is not None else None  # (every frame)
         self.scale = self.size = None
         self.scale_half = 0.0
         if 'Scale' in h:
@@ -409,7 +414,10 @@ def tuned(name, roles):
     dim (a factor on its light on the screen: dimmed), wh (its size as a sprite, cm: the GPU's numbers are out of
     reach), fade (its alpha falls from the start to the end of its life: Tekken 8 gives it none), drop (left out),
     palette (a GPU emitter's colour, out of the scripts' reach: else its system's measured_palette), paint (a GPU
-    emitter's colour even when it has colours of its own: cascade; white crystal bits drawn violet)."""
+    emitter's colour even when it has colours of its own: cascade; white crystal bits drawn violet), solid (a mesh
+    drawn with a character material, M_EF_CH_ITM*: as a solid object in its own colours, SOLID), dissolve (its
+    material's dynamic parameter is a dissolve's threshold: its opacity over the life is that parameter, 1 and over
+    whole, 0 and under gone)."""
     for pattern, values in roles:
         if re.search(pattern, name, re.I):
             return values
@@ -425,17 +433,20 @@ def dimmed(emitter, factor):
 
 
 def measured_cascade(e, r, m, sm=None, floor=False, alpha=1.0, once=False, offset=(0.0, 0.0, 0.0), mat=None,
-                     sprite=False, over=None, drift=None, share=1.0):
+                     sprite=False, over=None, drift=None, share=1.0, mesh_key=None):
     """The Cascade emitter of a CPU emitter from what its scripts do (m: Measured). mat: the material as drawn
     (Materials.describe's key); offset: added to its place (cm: the system's muzzle, say); sprite: its mesh drawn
     as a camera-facing sprite of the mesh's size; over: a definition's corrections (tuned); drift: a velocity of
-    its particles (cm/s, one of Measured.drifts); share: its part of the spawn counts."""
+    its particles (cm/s, one of Measured.drifts); share: its part of the spawn counts; mesh_key: the mesh as the
+    converter reads it (a solid one's: SOLID_MESH + its path)."""
     over = over or {}
     alpha *= over.get('alpha', 1.0)
     offset = [a + b for a, b in zip(offset, over.get('at') or (0.0, 0.0, 0.0))]
     mesh, _ = (r.meshes[0] if r.kind == 'mesh' and r.meshes else (None, r.material))
     if sprite:
         mesh = None
+    if mesh is not None and mesh_key:
+        mesh = mesh_key
     duration = float(e.loop or 1.0)
     looping = (e.rate > 0 or e.per_unit) and not (once and e.loop)
     rate = (e.rate if e.rate > 0 else (30.0 if e.per_unit else 0.0)) * share
@@ -470,9 +481,13 @@ def measured_cascade(e, r, m, sm=None, floor=False, alpha=1.0, once=False, offse
         mods.append(Module('SizeMultiplyLife', {}, {'LifeMultiplier': keyed(
             t, [(a / w, b / h, a / w) for a, b in size])}))
     rgb = m.colour or [(1.0, 1.0, 1.0)] * len(t)
+    if over.get('solid'):                   # (its own colours: the particle colour is the material's business)
+        rgb = [(1.0, 1.0, 1.0)] * len(t)
     tint = over.get('colour') or (1.0, 1.0, 1.0)
     rgb = [tuple(a * b for a, b in zip(c, tint)) for c in rgb]
     fade = [1.0 - x for x in t] if over.get('fade') else m.alpha or [1.0] * len(t)
+    if over.get('dissolve') and m.dynamic:  # (dissolved away as its threshold falls through 1 .. 0)
+        fade = [a * min(1.0, max(0.0, d)) for a, d in zip(fade, m.dynamic)]
     mods.append(Module('Color', {}, {'StartColor': ranged(list(rgb[0]), dim=3), 'StartAlpha': ranged(alpha)}))
     mods.append(Module('ColorOverLife', {}, {'ColorOverLife': keyed(t, rgb),
                                              'AlphaOverLife': keyed(t, [[a * alpha] for a in fade])}))
@@ -494,6 +509,54 @@ def measured_cascade(e, r, m, sm=None, floor=False, alpha=1.0, once=False, offse
     if floor:
         mods.append(Module('FloorHeight'))
     return Emitter(e.name, {}, mods)
+
+
+# A definition's TEKKEN8_EFFECT_TUNE 'pitched' ({effect id: degrees}): the runtime turns an effect spawned on the frame
+# a projectile is thrown whole to the projectile's path, pitched about its left (title/roster.cpp effect_pitch: made
+# for Tekken 7's flash on a throwing hand); a Tekken 8 effect spawned with a projectile that rises (Azazel's crystal
+# pillar: straight up, 90 degrees) would lie on its back up in the air. Its emitters are converted turned back
+# (counter_pitch) so that the runtime's turn stands them where Tekken 8 has them.
+TURNED_DISTS = {'LocationDirect': (('Location', 'vector'),), 'Location': (('StartLocation', 'vector'),),
+                'Velocity': (('StartVelocity', 'vector'),), 'TypeDataMesh': (('RollPitchYawRange', 'rotator'),),
+                'MeshRotation': (('StartRotation', 'vector'),), 'MeshRotationRate': (('StartRotationRate', 'vector'),)}
+
+
+def counter_pitch(degrees):
+    """The turn (3 x 3, Cascade axes: X ahead, Y right, Z up; v' = T v) undoing the runtime's pitch by `degrees`
+    (its ahead to ahead cos + up sin, its up to up cos - ahead sin)."""
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def rotator_of(m):
+    """(roll, pitch, yaw) degrees whose particles.frotation(pitch, yaw, roll) is m (row vectors: v' = v @ m)."""
+    pitch = math.degrees(math.asin(max(-1.0, min(1.0, float(m[0][2])))))
+    if abs(math.cos(math.radians(pitch))) > 1e-6:
+        return (math.degrees(math.atan2(-m[1][2], m[2][2])), pitch, math.degrees(math.atan2(m[0][1], m[0][0])))
+    return (0.0, pitch, math.degrees(math.atan2(-m[1][0], m[1][1])))       # (straight up or down: roll in the yaw)
+
+
+def turned(em, turn):
+    """Emitter em (Module stand-ins) turned whole by `turn` (counter_pitch): its places, spreads and speeds, its
+    mesh's turn and its random turn and spin (a spread's box turned to the box around it). A mesh turned by a yaw of
+    180 degrees (particles.Converter._rotation's case) is not one: none of Azazel's pillar is."""
+    spread = np.abs(turn)
+    for mod in em.modules:
+        for name, kind in TURNED_DISTS.get(mod.cls, ()):
+            d = mod.dists.get(name) if isinstance(getattr(mod, 'dists', None), dict) else None
+            if d is None:
+                continue
+            samples = []
+            for t, lo, hi in d.samples:
+                lo, hi = np.asarray(lo, np.float64), np.asarray(hi, np.float64)
+                mid, half = (lo + hi) / 2.0, spread @ ((hi - lo) / 2.0)
+                if kind == 'rotator':           # (roll, pitch, yaw): the mesh's own turn, then this one
+                    mid = np.asarray(rotator_of(P.frotation(mid[1], mid[2], mid[0]) @ turn.T))
+                else:
+                    mid = turn @ mid
+                samples.append((t, [float(x) for x in mid - half], [float(x) for x in mid + half]))
+            mod.dists[name] = Distribution(samples, d.dim)
+    return em
 
 
 def measured_palette(system):
@@ -524,6 +587,8 @@ class Materials:
     TEXTURES = {'BaseTex': 'BaseTexture', 'MaskTex': 'MaskTexture'}
     VECTORS = {'BaseTexTile': 'BaseTexTilling'}
     # measured (a definition's TEKKEN8_EFFECT_TUNE): what a material draws, with no plain white texture posing as one
+    SOLID = '#solid'                                  # a material's key, drawn as a solid object (Converter._solid)
+    CUT = '#cut:'                                     # a material's key + a cut's step (its CUT_TEXTURE key's end)
     WHITE_TEXTURE = re.compile(r'white', re.I)        # T_EF__COL_white8, T_white_01_hn, T_EF_COL_White_01
     NOT_DRAWN = re.compile(r'^VAT_pos|^TexPos|Yugami|Distortion|Distition', re.I)
     DRAWN_NAMES = {'EmissiveColorTexture': 'BaseTexture', 'AlphaMaskTexture': 'MaskTexture', 'Mask Texture': 'BaseTexture'}
@@ -560,6 +625,13 @@ class Materials:
             return self._done[path]
         if path.endswith(self.ADDITIVE):
             out = dict(self.describe(path[:-len(self.ADDITIVE)]), blend='BLEND_Additive')
+            self._done[path] = out
+            return out
+        if path.endswith(self.SOLID) or self.CUT in path:   # (its colours as the fighter's model bakes them, or a
+            own, step = path.split(self.CUT, 1) if self.CUT in path else (path[:-len(self.SOLID)], None)   # cut's step)
+            out = {'name': own.rsplit('.', 1)[-1], 'base': self.m.effective(own)['base'],
+                   'textures': {'BaseTexture': CUT_TEXTURE + step if step else SOLID_TEXTURE + own}, 'scalars': {},
+                   'vectors': {}, 'switches': {}, 'blend': 'BLEND_Translucent', 'two_sided': False, 'alpha': 1.0}
             self._done[path] = out
             return out
         eff = self.m.effective(path)
@@ -638,6 +710,16 @@ def hot_texels(img, peak, peak_alpha, additive):
 
 BLACK_TEXEL = 8.0                   # below this every channel of a block texture's colours rounds to 0
 GENERATED_SIDE = 128
+# Solid objects (a definition's role 'solid'): a mesh Tekken 8's effect draws with a character material (Azazel's
+# crystal pillar: M_EF_CH_ITM_id4_got, masked, lit, its colour texture's alpha 1). Read as an effect material, its
+# brightness became its opacity (about a fifth: a faint violet ghost). Drawn instead in the colours the fighter's
+# model bakes for that family (tekken8/bake.bake_albedo: his body's crystals' own), opaque, and, effect models being
+# unlit in TTT2, lit by a light from above baked into the vertex colours.
+SOLID_TEXTURE = 'solid:'            # a texture key: the albedo of the material path after it
+SOLID_MESH = 'solid:'               # a mesh key: the mesh of the path after it, lit (ShadedMesh)
+SOLID_SIDE = 256                    # (its texture's largest side: a model 2 m tall)
+SOLID_LIGHT = (0.35, 0.25, 0.9)     # the light's direction (the mesh's axes: X ahead, Y right, Z up)
+SOLID_AMBIENT, SOLID_DIFFUSE = 0.45, 0.65
 CLIP_SOFTNESS = 3.0                 # a masked material's noise over its cut: to full opacity within a third
 CLIP_SIDE = 256                     # ... baked this large (its thin lines)
 
@@ -672,11 +754,40 @@ class Textures(P.Textures):
         super().__init__(None, first)
         self.store = store
         self.hot = hot
+        self._solid = {}                # material path -> its albedo (linear RGBA: alpha the material's, else 1)
+        self.cuts = {}                  # CUT_TEXTURE key -> a cut's step (RGBA 0..1 as drawn: Converter._cut)
+        self._materials = None
+
+    def albedo(self, path):
+        """A solid material's colours as the fighter's model bakes them (bake.bake_albedo), linear RGBA."""
+        if path not in self._solid:
+            from ..tekken8 import bake as bake8
+            if self._materials is None:
+                self._materials = (material8.Materials(self.store), material8.Textures(self.store))
+            rgb, a = bake8.bake_albedo(self._materials[0].effective(path), self._materials[1])
+            if rgb is None:
+                raise ValueError('material %s has no colour to bake' % path)
+            a = np.ones(rgb.shape[:2], np.float32) if a is None else np.asarray(a, np.float32)
+            self._solid[path] = np.dstack([rgb, a]).astype(np.float32)
+        return self._solid[path]
 
     def lit(self, src, peak, peak_alpha, additive):
         q = lambda x: round(math.log2(max(x, 1.0 / 64)) * 4) / 4                   # (particles.Textures.lit's steps)
         p = tuple(2.0 ** q(x) if x > 1.0 / 128 else 0.0 for x in peak)
         pa = 2.0 ** q(peak_alpha)
+        if str(src.key[0]).startswith(SOLID_TEXTURE):     # (a solid's own colours, opaque: not an emitter's light)
+            key = ('solid8', src.key[0], p)
+            if key not in self._by_key:
+                img = self.albedo(src.key[0][len(SOLID_TEXTURE):])
+                rgb = np.clip(img[..., :3] * np.minimum(1.0, np.asarray(p, np.float32)), 0.0, 1.0) ** (1.0 / P.GAMMA)
+                self.bake(key, np.round(np.dstack([rgb, img[..., 3]]) * 255.0), SOLID_SIDE)
+            return self._by_key[key]
+        if str(src.key[0]).startswith(CUT_TEXTURE):       # (a cut's step: as made, at its own size)
+            key = ('cut8', src.key[0])
+            if key not in self._by_key:
+                img = self.cuts[src.key[0]]
+                self.bake(key, np.round(np.clip(img, 0.0, 1.0) * 255.0), max(img.shape[:2]))
+            return self._by_key[key]
         key = ('lit8hot' if self.hot else 'lit8', src.key, p, pa, additive)
         if key not in self._by_key:
             bake = hot_texels if self.hot else lit_texels
@@ -693,6 +804,10 @@ class Textures(P.Textures):
     def linear_image(self, path):
         if path.startswith('gen:'):
             return generated_mask(path[4:])
+        if path.startswith(SOLID_TEXTURE):
+            return self.albedo(path[len(SOLID_TEXTURE):])
+        if path.startswith(CUT_TEXTURE):
+            return self.cuts[path]
         if path.startswith('clip:'):                # a masked material's noise, cut at its clip value
             _, cut, source = path.split(':', 2)
             t = texture8.Texture2D(self.store, material8.package_of(source))
@@ -724,6 +839,298 @@ class TwoSidedMesh:
         return [(m, np.concatenate([t, t[:, ::-1]])) for m, t in self.sm.triangles()]
 
 
+class ShadedMesh:
+    """A static mesh drawn as a solid object (SOLID): its vertex colours the light falling on it (SOLID_LIGHT, an
+    ambient share), its shape kept: TTT2's effect models are unlit and multiply their texture by the vertex colour."""
+
+    def __init__(self, sm):
+        self.sm = sm
+        light = np.asarray(SOLID_LIGHT, np.float32) / np.linalg.norm(SOLID_LIGHT)
+        shade = SOLID_AMBIENT + SOLID_DIFFUSE * np.clip(np.asarray(sm.normals, np.float32) @ light, 0.0, None)
+        grey = np.round(np.clip(shade, 0.0, 1.0) * 255.0).astype(np.uint8)
+        self.colors = np.stack([grey, grey, grey, np.full_like(grey, 255)], 1)
+
+    def __getattr__(self, name):
+        return getattr(self.sm, name)
+
+
+# ------------------------------------------------------------------------------------------------ the cut (role 'cut')
+# A solid mesh whose character material is masked by a dissolve (Azazel's crystal pillar: MI_EF_Crw_Cpillar03 over
+# M_EF_CH_ITM_id4_got, BLEND_Masked, OpacityMaskClipValue 1/3): Tekken 8 eats it away through its DissolveTex (a
+# noise over a vertical gradient, bright at the top of its UV set, sampled as linear: sRGB) in a UV set of the mesh,
+# tiled DissolveTexU / V, as the particle's dynamic parameter falls, a thin front Edge wide glowing in the material's
+# EdgeCol (HDR violet, 300 in blue) along the cut. With the threshold k = 1 + clip - dynamic a texel of order s (the
+# noise; the role's 'first': 'light' turns it round) is gone when s <= k, glows when k < s <= k + Edge and is crystal
+# above: the dark end of the noise goes first (the pillar's foot, its tip last).
+# TTT2's effect models honour no alpha test (an alpha ramped along the pillar in its texture, with the NUD material's
+# test on, drew a soft ramp) and play no texture animation (a 2 x 2 sheet drew whole, its frames did nothing), so the
+# cut is a row of steps: the whole pillar (its 'solid' look) until the frame the cut starts, then a copy of it each
+# frame of the cut with that frame's cut in its own texture (alpha 1 kept, 0 cut away), each copy seen in its frames
+# only (its alpha track; TTT2 keys whole frames), none once nothing is left. The steps' textures lie in the mesh's
+# unique UV set (unique_layout: the pillar's third), the crystal's colours sampled through its own first UV set and
+# lit by the light ShadedMesh gives the whole one (the steps' vertex colours white) so the first step is the whole
+# pillar but for its glow; the order through the dissolve's UV set. Tekken 8's bloom spreads the thin hot front: the
+# glow is at least CUT_BLOOM texels wide and fades out over the cut-away side within CUT_BLOOM texels (CUT_HALO).
+CUT_TEXTURE = 'cut:'                # a texture key: 'cut:<bake>:<step>' (Converter._cut's number: Textures.cuts)
+CUT_MESH = 'cut:'                   # a mesh key: 'cut:<layout>:<path>' (CutMesh: that UV set in slot 0, white)
+CUT_SIDE = 256                      # a step's texture side (as SOLID_SIDE: the pillar 1.7 m tall)
+CUT_LAYOUT_SIDE = 256               # (the raster that finds a unique layout ...)
+CUT_OVERLAP = 0.02                  # (... at most this share of its covered texels covered twice)
+CUT_PAD = 4                         # texels of colour and order spread round each island (filtering, mips)
+CUT_STEPS = 16                      # at most this many steps (a longer cut: steps of several frames)
+CUT_BLOOM = 1.5                     # the glow's least width (texels of the step's texture)
+CUT_HALO = 0.5                      # the glow's opacity at the cut on the cut-away side, to 0 within CUT_BLOOM texels
+
+
+def raster(uv, tris, side):
+    """Each texel centre of a side x side layout: the triangle covering it (-1: none; the last drawn where two do)
+    and its barycentric weights (side, side, 3)."""
+    tri = np.full((side, side), -1, np.int32)
+    bary = np.zeros((side, side, 3), np.float32)
+    p = np.asarray(uv, np.float64) * side
+    for n, (i, j, k) in enumerate(np.asarray(tris)):
+        a, b, c = p[i], p[j], p[k]
+        den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(den) < 1e-12:
+            continue
+        x0 = max(0, int(math.floor(min(a[0], b[0], c[0]))) - 1)
+        x1 = min(side - 1, int(math.ceil(max(a[0], b[0], c[0]))))
+        y0 = max(0, int(math.floor(min(a[1], b[1], c[1]))) - 1)
+        y1 = min(side - 1, int(math.ceil(max(a[1], b[1], c[1]))))
+        if x1 < x0 or y1 < y0:
+            continue
+        gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        w0 = ((b[1] - c[1]) * (gx - c[0]) + (c[0] - b[0]) * (gy - c[1])) / den
+        w1 = ((c[1] - a[1]) * (gx - c[0]) + (a[0] - c[0]) * (gy - c[1])) / den
+        w2 = 1.0 - w0 - w1
+        inside = (w0 >= -1e-9) & (w1 >= -1e-9) & (w2 >= -1e-9)
+        if not inside.any():
+            continue
+        tri[y0:y1 + 1, x0:x1 + 1][inside] = n
+        bary[y0:y1 + 1, x0:x1 + 1][inside] = np.stack([w0, w1, w2], -1)[inside]
+    return tri, bary
+
+
+def overlap(uv, tris, side=CUT_LAYOUT_SIDE):
+    """The share of a layout's covered texel centres that more than one triangle covers."""
+    count = np.zeros((side, side), np.int32)
+    p = np.asarray(uv, np.float64) * side
+    for i, j, k in np.asarray(tris):
+        a, b, c = p[i], p[j], p[k]
+        den = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(den) < 1e-12:
+            continue
+        x0, x1 = max(0, int(math.floor(min(a[0], b[0], c[0])))), min(side - 1, int(math.ceil(max(a[0], b[0], c[0]))))
+        y0, y1 = max(0, int(math.floor(min(a[1], b[1], c[1])))), min(side - 1, int(math.ceil(max(a[1], b[1], c[1]))))
+        if x1 < x0 or y1 < y0:
+            continue
+        gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        w0 = ((b[1] - c[1]) * (gx - c[0]) + (c[0] - b[0]) * (gy - c[1])) / den
+        w1 = ((c[1] - a[1]) * (gx - c[0]) + (a[0] - c[0]) * (gy - c[1])) / den
+        count[y0:y1 + 1, x0:x1 + 1] += (w0 > 1e-9) & (w1 > 1e-9) & (1.0 - w0 - w1 > 1e-9)
+    covered = int((count > 0).sum())
+    return float((count > 1).sum()) / covered if covered else 1.0
+
+
+def unique_layout(sm, side=CUT_LAYOUT_SIDE, most=CUT_OVERLAP):
+    """The UV set of a static mesh that lays every triangle on texels of its own (the least overlapped one, at most
+    `most` of its covered texels covered twice; inside 0..1), or None."""
+    tris = np.concatenate([t for _, t in sm.triangles()])
+    best = None
+    for k in range(sm.uvs.shape[1]):
+        uv = sm.uvs[:, k, :]
+        if uv.min() < 0.0 or uv.max() > 1.0:
+            continue
+        share = overlap(uv, tris, side)
+        if share <= most and (best is None or share < best[1]):
+            best = (k, share)
+    return None if best is None else best[0]
+
+
+def spread(values, covered, texels=CUT_PAD):
+    """values (H, W) or (H, W, C) with the uncovered texels within `texels` of a covered one given the mean of their
+    covered neighbours, ring by ring (the colours and order round each island: bilinear filtering and mips read
+    them) -> (values, the texels that have one)."""
+    out = np.array(values, np.float32, copy=True)
+    have = np.array(covered, bool, copy=True)
+    flat = out.reshape(out.shape[0], out.shape[1], -1)
+    for _ in range(texels):
+        total = np.zeros_like(flat)
+        count = np.zeros(have.shape, np.float32)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+            src = np.roll(np.roll(have, dy, 0), dx, 1)
+            vals = np.roll(np.roll(flat, dy, 0), dx, 1)
+            if dy == 1:
+                src[0, :] = False
+            elif dy == -1:
+                src[-1, :] = False
+            if dx == 1:
+                src[:, 0] = False
+            elif dx == -1:
+                src[:, -1] = False
+            total += vals * src[..., None]
+            count += src
+        grow = ~have & (count > 0)
+        flat[grow] = total[grow] / count[grow][:, None]
+        have |= grow
+    return out, have
+
+
+def grown(mask, texels):
+    """mask (H, W) grown by `texels` texels each way (its 8 neighbours a ring; no wrap)."""
+    out = np.array(mask, bool, copy=True)
+    for _ in range(max(0, texels)):
+        g = out.copy()
+        g[1:] |= out[:-1]
+        g[:-1] |= out[1:]
+        g[:, 1:] |= g[:, :-1].copy()
+        g[:, :-1] |= g[:, 1:].copy()
+        out = g
+    return out
+
+
+def sample(img, uv):
+    """Bilinear samples of img (H, W, C) at uv (..., 2) (u right, v down, texel centres at (i + 0.5) / size;
+    repeated)."""
+    h, w = img.shape[:2]
+    x = np.asarray(uv[..., 0], np.float64) * w - 0.5
+    y = np.asarray(uv[..., 1], np.float64) * h - 0.5
+    x0, y0 = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64)
+    fx, fy = (x - x0)[..., None], (y - y0)[..., None]
+    xa, xb, ya, yb = x0 % w, (x0 + 1) % w, y0 % h, (y0 + 1) % h
+    top = img[ya, xa] * (1.0 - fx) + img[ya, xb] * fx
+    bottom = img[yb, xa] * (1.0 - fx) + img[yb, xb] * fx
+    return (top * (1.0 - fy) + bottom * fy).astype(np.float32)
+
+
+def srgb_to_linear(x):
+    """The sRGB curve, decoded (a texture Tekken 8 samples as sRGB: the dissolve's noise)."""
+    x = np.asarray(x, np.float32)
+    return np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
+def cut_timeline(dynamic, clip, edge, life, most=CUT_STEPS):
+    """The steps of a cut from its dynamic parameter per frame of the particle's life (frames 0 .. life - 1): None
+    when nothing is ever cut, else (first: the frame the cut starts, [(from, to, k)]: a step shown from frame `from`
+    up to `to` (not included) with its threshold k, end: the frame nothing is left, or the life). At most `most`
+    steps: a longer cut shows each for several frames."""
+    k = [1.0 + clip - float(d) for d in dynamic[:life]]
+    if not k:
+        return None
+    k += [k[-1]] * (life - len(k))      # (a history shorter than the life: its last value held)
+    cut = [f for f, x in enumerate(k) if x + edge > 0.0]
+    if not cut:
+        return None
+    first = cut[0]
+    end = next((f for f in range(first, len(k)) if k[f] >= 1.0), life)
+    if end <= first:
+        return None
+    frames = list(range(first, end))
+    if len(frames) > most:
+        frames = sorted({frames[int(round(i * (len(frames) - 1) / (most - 1)))] for i in range(most)})
+    ends = frames[1:] + [end]
+    return first, [(f, t, k[f]) for f, t in zip(frames, ends)], end
+
+
+def lit_shade(normals, light=SOLID_LIGHT):
+    """ShadedMesh's light per vertex (0..1, rounded as its vertex colours are)."""
+    light = np.asarray(light, np.float32) / np.linalg.norm(light)
+    shade = SOLID_AMBIENT + SOLID_DIFFUSE * np.clip(np.asarray(normals, np.float32) @ light, 0.0, None)
+    return np.round(np.clip(shade, 0.0, 1.0) * 255.0) / 255.0
+
+
+def cut_bake(sm, layout, albedo, noise, dissolve_uv, tiling=(1.0, 1.0), side=CUT_SIDE):
+    """A mesh in its unique layout as a cut's steps draw it: (rgb (side, side, 3): the whole solid's colours as drawn,
+    its albedo sRGB-encoded through UV set 0 times ShadedMesh's light; order (side, side): the dissolve's noise
+    (linear) through UV set `dissolve_uv` x tiling; covered: the texels that have them (the islands and CUT_PAD
+    round them); scale: texels of the layout per unit of order across the cut (its gradient, for CUT_BLOOM))."""
+    tris = np.concatenate([t for _, t in sm.triangles()])
+    tri, bary = raster(sm.uvs[:, layout, :], tris, side)
+    inside = tri >= 0
+    corners = tris[np.maximum(tri, 0)]                                  # (side, side, 3) vertex ids
+
+    def at(values):
+        v = np.asarray(values, np.float32).reshape(len(values), -1)
+        return (v[corners] * bary[..., None]).sum(2)
+
+    encoded = np.clip(np.asarray(albedo, np.float32)[..., :3], 0.0, 1.0) ** (1.0 / P.GAMMA)
+    rgb = sample(encoded, at(sm.uvs[:, 0, :])) * at(lit_shade(sm.normals)[:, None])
+    order = sample(np.asarray(noise, np.float32)[..., None], at(sm.uvs[:, dissolve_uv, :]) *
+                   np.asarray(tiling, np.float32))[..., 0]
+    rgb[~inside] = 0.0
+    order[~inside] = 0.0
+    rgb, covered = spread(rgb, inside)
+    order, _ = spread(order, inside)
+    gy, gx = np.gradient(np.where(covered, order, 0.0))
+    grad = np.hypot(gx, gy)
+    grad = np.where(covered & np.roll(covered, 1, 0) & np.roll(covered, -1, 0) & np.roll(covered, 1, 1) &
+                    np.roll(covered, -1, 1), grad, 0.0)
+    return rgb, order, covered, grad
+
+
+def cut_texels(rgb, order, covered, grad, k, edge, band, halo, bloom=CUT_BLOOM, glow=CUT_HALO):
+    """One step's texture (H, W, 4 floats 0..1, display-encoded): crystal where order > k + the glow's width (Edge,
+    at least `bloom` texels across), on the glow the band's colour at the cut turning to the halo's across it (a wide
+    flat stretch of noise glows violet, not white), alpha 1 on both; cut away (order <= k) the halo's colour, its alpha
+    `glow` at the cut falling to 0 within `bloom` texels of it (measured by the order's gradient: none where the noise
+    is flat, so nothing cut away stays as a film) and only next to crystal still kept, else 0."""
+    width = np.maximum(edge, bloom * grad)
+    keep = covered & (order > k)
+    lit = keep & (order <= k + width)
+    reach = bloom * grad                                # (the halo: `bloom` texels of order past the cut, ...)
+    near = covered & ~keep & (reach > 0.0) & (order > k - reach) & \
+        grown(keep, int(math.ceil(bloom)))              # (... next to crystal: not round a bump just cut away)
+    out = np.zeros(order.shape + (4,), np.float32)
+    out[..., :3] = halo
+    out[keep, :3] = rgb[keep]
+    across = np.clip((order[lit] - k) / np.maximum(width[lit], 1e-6), 0.0, 1.0)[:, None]
+    out[lit, :3] = np.asarray(band, np.float32) * (1.0 - across) + np.asarray(halo, np.float32) * across
+    out[keep, 3] = 1.0
+    out[near, 3] = glow * np.clip(1.0 - (k - order[near]) / reach[near], 0.0, 1.0)
+    return out
+
+
+def window_keys(start, stop, life):
+    """An alpha track 1 over frames start .. stop - 1 only (TTT2 keys whole frames, linear between)."""
+    keys = [[0, 0.0]] if start > 0 else []
+    if start > 1:
+        keys.append([start - 1, 0.0])
+    keys.append([start, 1.0])
+    if stop - 1 > start:
+        keys.append([stop - 1, 1.0])
+    keys.append([stop, 0.0])
+    if life > stop:
+        keys.append([life, 0.0])
+    return keys
+
+
+def ended_keys(keys, end):
+    """An alpha track (frame keys) as it is, then 0 from frame `end` on (the whole solid hidden as the cut starts)."""
+    keys = [list(x) for x in keys]
+    if not keys or end <= 0:
+        return [[0, 0.0]]
+    value = lambda f: float(np.interp(f, [x[0] for x in keys], [x[1] for x in keys]))
+    head = [x for x in keys if x[0] < end - 1]
+    if len(head) > P.CURVE_KEYS - 3:
+        head = P._keys(head, P.CURVE_KEYS - 3)
+    last = max(x[0] for x in keys)
+    return head + [[end - 1, value(end - 1)], [end, 0.0]] + ([[last, 0.0]] if last > end else [])
+
+
+class CutMesh:
+    """A static mesh as a cut's steps draw it (CUT_MESH): its UV set `layout` in slot 0 (a unique layout, the steps'
+    textures laid in it), vertex colours none (white: the light is in the steps' textures), the rest its own."""
+
+    def __init__(self, sm, layout):
+        self.sm = sm
+        self.layout = layout
+        self.uvs = np.ascontiguousarray(sm.uvs[:, layout:layout + 1, :])
+        self.colors = None
+
+    def __getattr__(self, name):
+        return getattr(self.sm, name)
+
+
 class Converter(P.Converter):
     """Converts a fighter's Tekken 8 Niagara systems (textures and meshes shared by its effects)."""
 
@@ -733,7 +1140,13 @@ class Converter(P.Converter):
         self.materials = Materials(store)
         self.textures = Textures(store, first_texture_id)
         self.tune = {}                  # a definition's TEKKEN8_EFFECT_TUNE (convert_fighter)
+        self.turn = None                # the system's counter_pitch while system8 converts one the tune names
         self.stats.update({'left out (ribbons, lights)': 0, 'left out (a flat box)': 0})
+
+    def emitter(self, em, cap_frames=None):
+        if self.turn is not None:       # (TEKKEN8_EFFECT_TUNE 'pitched': turned back from the runtime's pitch)
+            em = turned(em, self.turn)
+        return super().emitter(em, cap_frames)
 
     def set_tune(self, tune):
         """A definition's TEKKEN8_EFFECT_TUNE: 'measured' turns on the measured look (measure, Materials._drawn,
@@ -777,6 +1190,29 @@ class Converter(P.Converter):
         hot = over.get('add') or \
             peak_brightness(m, power, rgb) * (1.0 if m is not None else GPU_BRIGHTNESS) > HOT_BRIGHTNESS
         key = mat + Materials.ADDITIVE if hot and desc['blend'] != 'BLEND_Additive' else mat
+        if over.get('solid') and mesh is not None and m is not None and not sprite:   # (SOLID: its own colours, lit)
+            drifts = m.drifts if max(m.speed_half) > 1.0 else [None]
+            cut = self._cut(mesh[0], sm, mat, over['cut'], m) if over.get('cut') else None
+            made = []
+            for drift in drifts:
+                whole = self.emitter(measured_cascade(e, r, m, sm, floor, 1.0, once, offset or (0.0, 0.0, 0.0),
+                                                      mat + Materials.SOLID, False, over, drift, 1.0 / len(drifts),
+                                                      mesh_key=SOLID_MESH + mesh[0]), cap_frames)
+                if cut is not None:         # (hidden as the cut starts: its steps go on from there)
+                    for done in whole:
+                        track = done[0]['spawner']['tracks'][P.alo.ALPHA_TRACK]
+                        P.alo._set_keys(track, ended_keys(track['keys'], cut['first']))
+                made += whole
+                for start, stop, texture in (cut or {}).get('steps', ()):
+                    step = self.emitter(measured_cascade(e, r, m, sm, floor, 1.0, once, offset or (0.0, 0.0, 0.0),
+                                                         mat + Materials.CUT + texture[len(CUT_TEXTURE):], False,
+                                                         dict(over, dissolve=False), drift, 1.0 / len(drifts),
+                                                         mesh_key=cut['mesh']), cap_frames)
+                    for done in step:
+                        P.alo._set_keys(done[0]['spawner']['tracks'][P.alo.ALPHA_TRACK],
+                                        window_keys(start, stop, cut['life']))
+                    made += step
+            return made
         if m is None:
             em = cascade(e, r, over.get('palette') or colour, None if sprite else sm, floor, alpha, once, roles,
                          fade_alpha=True, offset=offset, mat_key=key)
@@ -792,7 +1228,66 @@ class Converter(P.Converter):
                 dimmed(done[0], over['dim'])
         return made
 
+    def _cut(self, path, sm, mat, spec, m):
+        """A solid's cut (role 'cut': {'uv': the dissolve's UV set (its material graph's), 'first': 'dark' (Tekken
+        8's: the noise's dark end first) or 'light'}) -> {'first': the frame its whole look hides, 'steps': [(from,
+        to, the step's texture key)], 'mesh': the steps' mesh key, 'life': frames}, or None (no dynamic parameter, no
+        unique layout, no dissolve texture, nothing cut in its life). The material's DissolveTex, DissolveTexU / V,
+        Edge, EdgeCol and clip value (OpacityMaskClipValue) are read from it."""
+        if not getattr(m, 'dynamic_frames', None):
+            return None
+        life = max(1, int(round(m.life[0] * P.FPS)))
+        done = self.__dict__.setdefault('_cuts', {})      # (one bake for every look that spawns the same solid)
+        key = (path, mat, int(spec.get('uv', 0)), spec.get('first'), life,
+               tuple(round(x, 5) for x in m.dynamic_frames[:life]))
+        if key not in done:
+            done[key] = self._cut_steps(path, sm, mat, spec, m, life, len(done))
+        return done[key]
+
+    def _cut_steps(self, path, sm, mat, spec, m, life, number):
+        eff = self.materials.m.effective(mat)
+        dissolve = eff['textures'].get('DissolveTex')
+        layout = unique_layout(sm)
+        if not dissolve or layout is None or not 0 <= int(spec.get('uv', 0)) < sm.uvs.shape[1]:
+            self.log('effects: %s: no cut (%s)' % (mat.rsplit('.', 1)[-1], 'no DissolveTex' if not dissolve else
+                                                   'no unique UV set' if layout is None else 'no such UV set'))
+            return None
+        sc = eff['scalars']
+        clip = float(eff['overrides'].get('OpacityMaskClipValue') or sc.get('AlphaThreshold') or 0.0)
+        edge = float(sc.get('Edge') or 0.0)
+        plan = cut_timeline(m.dynamic_frames, clip, edge, life)
+        if plan is None:
+            return None
+        first, steps, _ = plan
+        t = texture8.Texture2D(self.store, material8.package_of(dissolve))
+        noise = t.decode(TEXTURE_MIP).astype(np.float32)[..., 0] / 255.0
+        noise = srgb_to_linear(noise) if t.srgb else noise
+        if spec.get('first') == 'light':
+            noise = 1.0 - noise
+        tiling = (float(sc.get('DissolveTexU') or 1.0), float(sc.get('DissolveTexV') or 1.0))
+        rgb, order, covered, grad = cut_bake(sm, layout, self.textures.albedo(mat), noise, int(spec.get('uv', 0)),
+                                             tiling)
+        col = eff['vectors'].get('EdgeCol') or {'r': 1.0, 'g': 1.0, 'b': 1.0}
+        col = np.ones((1, 1, 4), np.float32), [float(col[c]) for c in 'rgb']
+        band = hot_texels(col[0], col[1], 1.0, False)[0, 0, :3]       # (white hot, violet: its bloom's core)
+        halo = lit_texels(col[0], col[1], 1.0, False)[0, 0, :3]       # (its hue: the bloom round it)
+        out = []
+        for n, (start, stop, k) in enumerate(steps):
+            key = CUT_TEXTURE + '%d:%d' % (number, n)
+            self.textures.cuts[key] = cut_texels(rgb, order, covered, grad, k, edge, band, halo)
+            out.append((start, stop, key))
+        self.log('effects: %s cut in %d steps, frames %d..%d (UV set %d laid out in %d)'
+                 % (mat.rsplit('.', 1)[-1], len(out), first, steps[-1][1] - 1, int(spec.get('uv', 0)), layout))
+        return {'first': first, 'steps': out, 'mesh': CUT_MESH + '%d:%s' % (layout, path), 'life': life}
+
     def _static_mesh(self, path):
+        if path not in self._meshes and path.startswith(SOLID_MESH):    # (a solid's: lit, ShadedMesh)
+            own = self._static_mesh(path[len(SOLID_MESH):])
+            self._meshes[path] = ShadedMesh(own) if own is not None else None
+        if path not in self._meshes and path.startswith(CUT_MESH):      # (a cut's steps': CutMesh)
+            layout, own = path[len(CUT_MESH):].split(':', 1)
+            own = self._static_mesh(own)
+            self._meshes[path] = CutMesh(own, int(layout)) if own is not None else None
         if path not in self._meshes:
             try:
                 self._meshes[path] = staticmesh8.StaticMesh(self.store, path)
@@ -808,6 +1303,14 @@ class Converter(P.Converter):
         its emitters in the floor's file when `floor`; cap_frames: the frames it may emit for (the stop); once: its
         spawn rates emit for one loop (cascade); source: its Tekken 8 id (the tune's per id values); at: a place (cm:
         ahead, right, up) its emitters are moved to (a projectile's look: convert_fighter's looks)."""
+        pitch = (self.tune.get('pitched') or {}).get(source)
+        self.turn = counter_pitch(pitch) if pitch else None
+        try:
+            return self._system8(system, floor, cap_frames, once, source, at)
+        finally:
+            self.turn = None
+
+    def _system8(self, system, floor, cap_frames, once, source, at):
         docs = self._docs()
         doc = docs[1] if floor else docs[0]
         colour = palette(system)
@@ -815,6 +1318,8 @@ class Converter(P.Converter):
         offset = (self.tune.get('offset') or {}).get(source)
         if measured:
             colour = measured_palette(system) or colour
+            if at is not None:              # (a projectile's look at its spawn: the measured emitters' place too)
+                offset = tuple(a + b for a, b in zip(offset or (0.0, 0.0, 0.0), at))
         for e in system.emitters:
             if not e.enabled or (self.tune.get('skip') and re.search(self.tune['skip'], e.name)):
                 continue

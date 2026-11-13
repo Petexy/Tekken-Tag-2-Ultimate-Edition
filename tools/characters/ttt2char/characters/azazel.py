@@ -137,7 +137,13 @@ MOVESET = {
     # for (moves no name is known for are named by their key, 'key:<+0x00>': it stays when an update of Tekken 8 adds
     # moves, their index does not)
     # and his story intro (warping in: its rows test Tekken 8's story mode only)
-    'drop_moves': r'^(key:9599cd3e|key:2f8961ea)$',
+    # and the All Direction Attack (Tekken 8's 4 from his stance, walks, steps and turns: a charge whose 16 waves
+    # are a ball of 10 m round his feet), which Tekken 6 has nowhere: his 4 is then Tekken 6's, the kick his rows
+    # have after it (key:97b10010: f+4, b+4 and 4 as Tekken 6's stance has them, the same frames, damage, level and
+    # clip as Tekken 6's move 357)
+    'drop_moves': r'^(key:9599cd3e|key:2f8961ea|key:291ef025|key:34482114|key:220ab289|key:ac5d15b8|key:a42d777c|'
+                  r'key:b13675f8|key:3bf2a77c|key:65fe47f6|key:746cccf3|key:eb40b767|key:b370c60c|key:da2cd72a|'
+                  r'key:cb390305|key:3e5ffb98|key:54ccddfe|key:c4ba50e4)$',
     # his three throws (1+3, 2+4, f,f+1+2) have TTT2's generic throw names, which would make them the donor's moves
     # (Lars's grab animation on his giant body: the grab 1.8 to 2.7 m up, over a man's head): they stay his own, with
     # his clips, Tekken 8's hit boxes (his left claw, frames 14 to 17) and his lists
@@ -146,6 +152,22 @@ MOVESET = {
     # whiff) means the pillar hit no one (convert/moveset.py PROJECTILE_WHIFF; TTT2's whiff test sees the move's own
     # lines only, which never touch)
     'projectile_whiffs': r'^key:c353a395$',
+    # b+1 grabs only on a hit, as Jinpachi's Jn_ganmen in TTT2 (the same move: a high grab of the face). Tekken 8's
+    # grab half takes whoever is in front of him within 5 m at frame 13, guard or not, from its own rows (no hit test:
+    # sDm_heaven, or sGrd_heaven guarding). Here its hit (his claw, out and still from frame 13 to 17; Tekken 8's own
+    # active frames are 15 to 17) starts it only when it connects, not blocked (counter hits too), always entering it
+    # at frame 13 (the claw has not moved since: no jump), where its rows take the victim (sDm_heaven, 8 damage, +4);
+    # blocked, it is f+1's high guard (sGrd_hM00, Jinpachi's too: -23) and he plays the clip out (55 frames)
+    # empty-handed; crouching ducks it, as any high (convert/move_overrides.py hit_grab). The hit deals nothing
+    'hit_grabs': {'key:34fcd66e': {'grab': 'key:657bbe2c', 'guard_as': 'key:6ecebd8e'}},
+    'active_frames': {'key:34fcd66e': (13, 17)},
+    'damage': {'key:34fcd66e': 0},
+    # his tail's attacks hit along his tail as it is drawn (its spring chain swings its own way, not as Tekken 8's
+    # tail): from his hips to its middle and from there to its tip (WEAPONS' points 0xF0 and 25), not from Tekken 8's
+    # boxes (d/b+3, d/b+3,3: a line off his hips in the Hip joint's frame, 2 m under the floor 3 m out; 3: the tail
+    # tip's path, which TTT2's tail does not take, and his feet)
+    'hitboxes': {key: (3, 0xF0, 0xF0, 25) for key in ('key:f8d22c42', 'key:90f6fb65',       # d/b+3, d/b+3,3
+                                                      'key:9d2081c8', 'key:4381350a', 'key:23a68343')},     # 3
     # in his throws the game moves both bodies by his skeleton's scale (1.8) on the floor and by about 1.19 in height
     # (1.196 with Bob, 1.192 with Kuma, 1.120 with Xiaoyu: measured): the man flew 1.8 times as far from his claw as
     # Tekken 8 has him and 0.7 m too high, and he sank 0.8 m into the floor. His victims' ground paths are divided by
@@ -192,25 +214,20 @@ MOVESET = {
     },
 }
 
-# Two of his attacks hit from his ground origin with a size TTT2's two lines cannot have (Tekken 8 hit boxes with a
-# radius): the All Direction Attack's 16 waves (4: a ball of 10 m round his feet, one frame each, 6 frames apart) and the
-# crystal prison's ground shock (d/f+3+4: a disc of 4 m, 1 m high, 2.1 m ahead of him, frames 80 to 90). Each is thrown
-# as a TTT2 projectile instead (convert/moveset.py thrown_rows): a cylinder that stays where it is spawned (speed 0),
-# for the frames Tekken 8's box is active (spawned the frame before: a projectile shows the frame after its row), with
-# the move's own hit level and hit condition; offsets from his hips (mm: forward, up; 'floor': up from the floor under
-# him), its height half the cylinder's
-_WAVES = {'key:291ef025': 200, 'key:34482114': 206, 'key:220ab289': 212, 'key:ac5d15b8': 218, 'key:a42d777c': 224,
-          'key:b13675f8': 230, 'key:3bf2a77c': 236, 'key:65fe47f6': 242, 'key:746cccf3': 248, 'key:eb40b767': 254,
-          'key:b370c60c': 260, 'key:da2cd72a': 266, 'key:cb390305': 272, 'key:3e5ffb98': 278, 'key:54ccddfe': 284,
-          'key:c4ba50e4': 290}
-# A wave that hits ends the attack (its list's on-hit row into the stance: convert/moveset.py THROWN_FIRST)
-THROWN = {key: dict(frame=f - 1, forward=0, up=0, speed=0, frames=1, radius=10000, height=10000, ends_on_hit=True)
-          for key, f in _WAVES.items()}
-THROWN['key:477c5f91'] = dict(frame=79, forward=2100, up=500, floor=True, speed=0, frames=11, radius=4000, height=500)
+# His crystal prison's ground shock (d/f+3+4: a disc of 4 m, 1 m high, 2.1 m ahead of him, frames 80 to 90) hits from
+# his ground origin with a size TTT2's two lines cannot have (a Tekken 8 hit box with a radius): it is thrown as a TTT2
+# projectile instead (convert/moveset.py thrown_rows): a cylinder that stays where it is spawned (speed 0), for the
+# frames Tekken 8's box is active (spawned the frame before: a projectile shows the frame after its row), with the
+# move's own hit level and hit condition; offsets from his hips (mm: forward, up; 'floor': up from the floor under him),
+# its height half the cylinder's
+THROWN = {'key:477c5f91': dict(frame=79, forward=2100, up=500, floor=True, speed=0, frames=11, radius=4000, height=500)}
 
-# his tail's sweeps (d/b+3,3: key:f8d22c42 and key:90f6fb65) hit from his hips to a point 2.5 m off them in the frame of
-# Tekken 8's Hip joint, which his tail hangs from (convert/summons8.py JOINT POINTS); TTT2 had the hips alone
-HIT_JOINTS = {3: ('Hip', 3)}
+# his tail as TTT2 draws it (its spring chain: TEKKEN8 bone_chains, whose joints Tekken 8's PHY_Hip__a001..a008 are named
+# as cloth 90's links, cloth90_0_0..7: tekken8/cloth.py): hit-only points at the chain's last link (the tip, Tekken 8's
+# tail tip hit code 25) and its fifth (its middle, a code of ours), the game's own spring bones, which the runtime reads
+# where the game posed them (title/roster.cpp weapon_points); his tail's attacks hit from them (MOVESET hitboxes)
+WEAPONS = [{'bone': 'tail_tip', 'parent': 'cloth90_0_7', 'points': {25: ('origin', 0)}},
+           {'bone': 'tail_mid', 'parent': 'cloth90_0_4', 'points': {0xF0: ('origin', 1)}}]
 
 # his Tekken 8 effects converted (convert/effects8.py): effect id -> TTT2 body part (0 his hips, 5 his head, 13 his left
 # hand; 'floor': placed from the floor under it): 10 the beam's charge at his mouth (1+2), 20 the small vortex (d/b+2,1),
@@ -222,10 +239,16 @@ TEKKEN8_EFFECTS = {10: 5, 20: 13, 21: (0, 'floor'), 22: (0, 'floor'), 23: (0, 'f
 # vortices' wind planes as opaque purple sheets at his feet); animated meshes (VAT_) left out (a still pose of one is
 # a blob). 'offset' (cm: ahead, right, up in the frame the effect is spawned in): the crystal prison's emitters 2 m
 # ahead of where it is spawned (their SystemLocation modules: 200), on the man it holds; the vertical vortex is spawned
-# while he rears up (its frame turned: 150 'ahead' drew its rings 1.5 m higher, 150 'up' behind him), so its rings go
-# ahead as -150 'up' (its hits 1 and 2 m ahead; drawn round him without)
+# with a projectile that rises, so its frame is turned (the runtime's pitch, below: 150 'ahead' drew its rings 1.5 m
+# higher, 150 'up' behind him; Tekken 8's own offsets want that standing frame), so its rings go ahead as -150 'up'
+# (its hits 1 and 2 m ahead; drawn round him without). 'pitched' (degrees): the crystal pillar's
+# look is spawned on the frame its projectile is thrown, and that projectile rises straight up (its row: forward 0, up
+# 250 a frame); the runtime turns such an effect whole to the projectile's path (title/roster.cpp effect_pitch, 90
+# degrees in game: its pillars lay on their backs 2 to 4.5 m up, pointing behind him), so the look is converted turned
+# back by 90 degrees and stands on the floor where the pillar hits (the vertical vortex's frame above is the same turn:
+# its b+3+4 / d/b+3+4 projectile rises too)
 TEKKEN8_EFFECT_TUNE = {'measured': True, 'skip_materials': r'^.*VAT_',
-                       'offset': {23: (200.0, 0.0, 0.0), 21: (0.0, 0.0, -150.0)},
+                       'offset': {23: (200.0, 0.0, 0.0), 21: (0.0, 0.0, -150.0)}, 'pitched': {30: 90.0},
                        # the prison's darkened floor and the All Direction Attack charge's dark ground (dark discs:
                        # a dark band across the stage, a black column facing the camera) left out, and the prison's
                        # dark swirl (4 m wide, 2.25 m up: edge on to the camera, an opaque dark band across the stage
@@ -233,19 +256,31 @@ TEKKEN8_EFFECT_TUNE = {'measured': True, 'skip_materials': r'^.*VAT_',
                        # and dimmer and its rings (4 m, white, added up) dimmer: the screen white for 12 frames (the
                        # rest of its flash violet); the large vortex's crystal bits (GPU
                        # emitters drawn white, their mesh scale growing to 75: opaque white polygons up to 1.5 m)
-                       # violet as the small vortex's and a tenth of the size
+                       # violet as the small vortex's and a tenth of the size. His crystal pillar (30: the look of
+                       # the pillars of 1 and d+3+4, a projectile's) and the crystal bits round its foot are meshes
+                       # Tekken 8 draws with a character's crystal material (lit, opaque): solid, in his crystals'
+                       # own colours (read as an effect material, a faint violet ghost); the pillar is eaten away
+                       # as Tekken 8's is ('cut': its material's dissolve noise, in the mesh's second UV set (its
+                       # graph's: that set's v runs along the pillar, 0.1 at its tip to 0.9 at its foot, correlation
+                       # with height -0.94), cut frame by frame from 42 to 53 of its 60 with a glowing violet edge,
+                       # the noise's dark end first: from its foot up; 'first': 'light' would start at its tip); the
+                       # bits pop as their life ends (their threshold stays at 1 and over: Tekken 8 cuts nothing of
+                       # them)
                        'system_roles': {23: ((r'^DarkFloor$', {'drop': True}),
                                              (r'^Center_glow02$', {'dim': 0.02, 'size': 0.4}),
                                              (r'^Swirl_Aura001$', {'drop': True}),
                                              (r'^Ring(_Aura)?$', {'dim': 0.3})),
                                         31: ((r'^Shitaji$', {'drop': True}),),
-                                        22: ((r'^BitA$', {'paint': (0.45, 0.15, 1.0), 'scale': 0.1}),)}}
+                                        22: ((r'^BitA$', {'paint': (0.45, 0.15, 1.0), 'scale': 0.1}),),
+                                        30: ((r'^CrystalPillar$', {'solid': True, 'dissolve': True,
+                                                                   'cut': {'uv': 1, 'first': 'dark'}}),
+                                             (r'^(Bit_Collision|BitB|BitC)$', {'solid': True, 'dissolve': True}))}}
 
 # ------------------------------------------------------------------------------------------------ command list
 # his command list in Practice (convert/movelist_rows.py). Tekken 8 has none of his (no .mvl, no texts), so what it shows
 # and the names are ours: a move by its name key and the name we give it (a plain string: a title line). Each input
-# and demo is walked out of his converted moveset's rows, so they follow his moveset (4 is what his rows make it: the
-# All Direction Attack). Not in it: moves his stance has no input for (4 from a side step, f+3 while running), and
+# and demo is walked out of his converted moveset's rows, so they follow his moveset (4 is what his rows make it: his
+# Tekken 6 kick). Not in it: moves his stance has no input for (4 from a side step, f+3 while running), and
 # u/f+1+2 from further away (another move on the same input; the list's demos stand 2 m apart). His warp (u+3+4) is
 # four moves picked by the distance to the opponent as Tekken 8 picks them (within 3.5 m, from 4 m, from 6.5 m, and
 # plain u+3+4 between 3.5 and 4 m): each further one is an entry of its own whose demo stands that far apart
@@ -255,7 +290,7 @@ COMMANDS = [
     ('key:5d8555de', 'Talon'),                      # 2
     ('key:6368546c', 'Talon Combo'),                # 2,2
     ('key:9d2081c8', 'Triple Lash'),                # 3 (three hits)
-    ('key:291ef025', 'All Direction Attack'),       # 4
+    ('key:97b10010', 'Thrust Kick'),                # 4 (f+4, b+4: his Tekken 6 4)
     ('key:756bd583', 'Beam'),                       # 1+2
     ('key:6ecebd8e', 'Snap Claw'),                  # f+1
     ('key:0d526f6e', 'Snap Claw Slam'),             # f+1,2

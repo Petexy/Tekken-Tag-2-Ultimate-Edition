@@ -39,3 +39,22 @@ record what his port needed, for later fighters.
   meshes copied with it (TEKKEN8 `beam_look`).
 * Tekken 8 effect systems can draw wrong in TTT2 (flat opaque planes, mesh scales growing to 75, dark discs seen
   edge-on): judge every effect move whole from full-size frames and tune per definition (TEKKEN8_EFFECT_TUNE).
+
+## Polish: pillars, tail, b+1 and 4
+
+* His crystal pillars (1, d+3+4) were invisible for three reasons: measured effects ignored a projectile look's `at`
+  position (they sat inside his body); an effect mesh with a character material (`M_EF_CH_ITM*`) read as an effect
+  material turns brightness into opacity (a faint ghost: role `solid`, opaque in the body-crystal colours with baked
+  light); and the runtime turns any effect spawned on the frame a projectile is thrown to that projectile's path
+  (roster.cpp effect_pitch), so a straight-up projectile laid the pillar on its back in the air
+  (TEKKEN8_EFFECT_TUNE `'pitched'` converts the look counter-turned).
+* A Tekken 8 effect that seems to shatter at its end is usually its material's dissolve: a noise texture in one of the
+  mesh's UV sets, `Edge` and `EdgeCol` for a glowing band, driven by the emitter's dynamic parameter (threshold
+  1 + clip - dynamic). TTT2's effect models cannot cut (they ignore the alpha test and texture frames), so role `cut`
+  bakes the cut as one copy of the mesh per frame, each with its own cut texture and one frame of alpha.
+* Tail attacks hit from WEAPONS points on the tail's own spring bones (tip and middle), so they land where the drawn
+  tail touches; a hit joint at the hips makes a line under the floor.
+* Grabs that should take only a hit or counter hit (b+1, as Jinpachi's): move_overrides `hit_grab` gates the grab half
+  on requirement 46 and gives the guard a normal block reaction.
+* His 4 rows went to the All Direction Attack (a boss charge) before the mid kick his Tekken 6 4 is; dropping the
+  charge's rows makes 4 that kick from Tekken 8 data alone.

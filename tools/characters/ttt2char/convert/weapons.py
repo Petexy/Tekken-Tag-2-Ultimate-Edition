@@ -41,6 +41,7 @@ import numpy as np
 
 from ..ttt2 import bone
 
+CLOTH_FIRST = 400                   # cloth links (convert/cloth.py OPT_FIRST): a point may hang under one
 OPT_FIRST = 800                     # the weapon bone posed by the animations' extra pair k: cha:OPT(800 + k)_..
 STILL_FIRST = 820                   # weapons no animation poses: cha:OPT820_.. on
 POINT_FIRST = 850                   # the hit points: cha:OPT850_.. on, hitting as TTT2's locations 70 on
@@ -233,7 +234,8 @@ def append_tekken8(skel, weapon, world, points=()):
     append_bones numbers it, and its points [(code, slot, position (3,) mm)] after it (the slot given: several
     weapons' points share one). -> (skeleton, the weapon bone's index, its number, the point numbers used)."""
     parent = parent_index(skel, weapon['parent'])
-    if skel['names'][parent].startswith('cha:OPT') and points:
+    up = {i: n for n, i in _numbers(skel).items()}.get(parent)
+    if up is not None and not CLOTH_FIRST <= up < OPT_FIRST and points:   # (a cloth link's records the game poses)
         raise ValueError('an item carried in another (%s) has no points of its own' % weapon['bone'])
     hw = bone.world_matrices(skel)
     number = number_of(skel, weapon)
