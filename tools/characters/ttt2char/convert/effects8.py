@@ -256,7 +256,7 @@ def cascade(e, r, colour, sm=None, floor=False, alpha=1.0, once=False, roles=(),
     grow = size_curve(e, mesh is not None and plane is None)
     if grow is not None:
         mods.append(Module('SizeMultiplyLife', {}, {'LifeMultiplier': over_life(grow, 3)}))
-    rgb = brightest(e.colours) or colour
+    rgb = ro.get('paint') or brightest(e.colours) or colour
     bright = cpu.get('brightness', GPU_BRIGHTNESS if e.gpu else 1.0)
     mods.append(Module('Color', {}, {'StartColor': ranged([x * bright for x in rgb], dim=3),
                                      'StartAlpha': ranged(alpha)}))
@@ -408,7 +408,8 @@ def tuned(name, roles):
     add (drawn additively whatever its brightness: Tekken 8's dim glows light the picture, they do not darken it),
     dim (a factor on its light on the screen: dimmed), wh (its size as a sprite, cm: the GPU's numbers are out of
     reach), fade (its alpha falls from the start to the end of its life: Tekken 8 gives it none), drop (left out),
-    palette (a GPU emitter's colour, out of the scripts' reach: else its system's measured_palette)."""
+    palette (a GPU emitter's colour, out of the scripts' reach: else its system's measured_palette), paint (a GPU
+    emitter's colour even when it has colours of its own: cascade; white crystal bits drawn violet)."""
     for pattern, values in roles:
         if re.search(pattern, name, re.I):
             return values
@@ -802,10 +803,11 @@ class Converter(P.Converter):
                 self._meshes[path] = None
         return self._meshes[path]
 
-    def system8(self, system, floor=False, cap_frames=None, once=False, source=None):
+    def system8(self, system, floor=False, cap_frames=None, once=False, source=None, at=None):
         """-> {file name suffix: ALO bytes} (particles.Converter._write) of a Niagara system (niagara.System), all
         its emitters in the floor's file when `floor`; cap_frames: the frames it may emit for (the stop); once: its
-        spawn rates emit for one loop (cascade); source: its Tekken 8 id (the tune's per id values)."""
+        spawn rates emit for one loop (cascade); source: its Tekken 8 id (the tune's per id values); at: a place (cm:
+        ahead, right, up) its emitters are moved to (a projectile's look: convert_fighter's looks)."""
         docs = self._docs()
         doc = docs[1] if floor else docs[0]
         colour = palette(system)
@@ -838,8 +840,8 @@ class Converter(P.Converter):
                         made = self._measured(e, r, mesh, sm, mat, floor, once, colour, offset, cap_frames, roles)
                     else:
                         alpha = self.materials.describe(mat)['alpha'] if mat else 1.0
-                        made = self.emitter(cascade(e, r, colour, sm, floor, alpha, once, self.tune.get('roles', ())),
-                                            cap_frames)
+                        made = self.emitter(cascade(e, r, colour, sm, floor, alpha, once, self.tune.get('roles', ()),
+                                                    offset=at), cap_frames)
                 except P.Invisible:
                     continue
                 except (KeyError, ValueError, ZeroDivisionError, NotImplementedError, struct.error) as error:
@@ -901,12 +903,14 @@ def systems_of(store, code, ids, log=None):
 
 
 def convert_fighter(store, archives, systems, spec, first_texture_id, copies=None, log=None, stopped=None, tune=None,
-                    trails=None, spec_code=None):
+                    trails=None, spec_code=None, looks=None):
     """The effects a fighter's moves spawn: systems {Tekken 8 id: niagara.System} (systems_of), spec {id: (part,
     floor)} (parts), copies {id: (Tekken 8 id, frames it may emit for)} (moveset.Converter.split_effects), stopped:
     the ids moves stop (looped), tune: the definition's TEKKEN8_EFFECT_TUNE ({'skip': emitter names left out,
     'skip_materials': renderers' materials left out, 'roles':
-    its role()s}), trails: the weapon trails {id: trail} (moveset.Converter.assign_trails, trails8.py) -> (pack files
+    its role()s}), trails: the weapon trails {id: trail} (moveset.Converter.assign_trails, trails8.py), looks: the
+    projectiles' looks {id: (Tekken 8 id, (forward, up, side) mm)} (moveset.Converter.projectile_look; systems has
+    their Tekken 8 ids too): each from the floor at that place ahead of his hips, emitting once -> (pack files
     {'alo/...': bytes}, {id: [effect names]})."""
     log = log or (lambda s: None)
     conv = Converter(store, archives, first_texture_id, log=log)
@@ -921,6 +925,19 @@ def convert_fighter(store, archives, systems, spec, first_texture_id, copies=Non
                                 once=not looped(source, stopped), source=source)
         except (KeyError, ValueError) as error:
             log('effects: id %d (%s) left out: %s' % (i, system.name, error))
+            continue
+        for suffix, data in sorted(made.items()):
+            name = EFFECT_NAME % i + suffix
+            names.setdefault(i, []).append(name)
+            files['alo/%s.alo' % name] = data
+    for i, (source, (ahead, up, side)) in sorted((looks or {}).items()):
+        system = systems.get(source)
+        if system is None:
+            continue
+        try:
+            made = conv.system8(system, floor=True, once=True, source=source, at=(ahead / 10.0, side / 10.0, up / 10.0))
+        except (KeyError, ValueError) as error:
+            log('effects: projectile look %d (%s) left out: %s' % (i, system.name, error))
             continue
         for suffix, data in sorted(made.items()):
             name = EFFECT_NAME % i + suffix

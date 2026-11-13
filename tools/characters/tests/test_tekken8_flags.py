@@ -269,6 +269,24 @@ class Contact(unittest.TestCase):
         i = self.cancels(row(2, self.k.req((51, 0), (777, 0))), row(1, self.k.req((0, 0))))
         self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [((1, 32767), 1, [(0, 0)])])
 
+    def test_projectile_whiff(self):
+        """A projectile_whiffs move's list (Azazel's d+3+4: `[(48)] 25-40 -> 4 pillars, 40-40 -> 3`): the whiff test is
+        the hit latch still 0, decided at the window's end, the latch set on the hit's frame first; another list's 48
+        stays the id maps' (PROJECTILE_WHIFF)."""
+        rows = (dict(row(2, self.k.req((48, 0)), win=(25, 40)), start_frame=40),
+                dict(row(1, self.k.req((0, 0)), win=(40, 40)), start_frame=40))
+        self.c = flagged(converter(self.k, req={0: 0, 48: 51}), {})
+        i = self.cancels(*rows)
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [((25, 40), 2, [(51, 0)]), ((40, 40), 1, [(0, 0)])])
+        j = self.cancels(*rows)
+        self.c.proj_whiffs = frozenset({j})
+        out = self.c.conv_cancel_list(j)
+        self.assertEqual(self.shown(out), [((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]),
+                                           ((40, 40), 2, [(316, 0)]), ((40, 40), 1, [(0, 0)])])
+        self.assertEqual([r['start_frame'] for r in out[1:3]], [40, 40])
+        self.assertEqual(self.c.stats['Tekken 8 whiff tests of projectile moves -> "the move hit" latch still 0'], 1)
+        self.assertFalse(self.c.whiff_list)
+
 
 if __name__ == '__main__':
     unittest.main()

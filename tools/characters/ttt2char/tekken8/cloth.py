@@ -88,6 +88,11 @@ LYING = 20.0                    # mm: a strand whose vertices are this near the 
 STRAND_FLOWING = np.radians(50.0)   # a strand tilted more than this from straight down was modelled flowing: it
                                 # hangs (rig's FLOWING for Tekken 7's cloth: 30; a hood's strings lean 44 degrees on
                                 # the chest as modelled, the hem's cords stand out 58-60)
+DRAWN_FREE = 10.0               # cm: an island of a drawn simulation mesh half of whose particles may move less is held
+                                # up to this, its loose ends swinging (pieces drawn_sims: Azazel's chest bandage, half
+                                # within 6 cm, hung whole as cloth it tore; his loose strips: half 26 to 56 cm)
+DRAWN_LINKS = 5                 # links of a chain of a drawn simulation mesh's wide piece at most (pieces drawn_sims:
+                                # Azazel's bandage strips, up to 2.9 m: at TTT2's 150 mm, 13 pieces took 127 bones)
 HOLD_STEP = 0.5                 # cm: cloth on an arm is held on it up to a max distance raised by this till all that
                                 # swings off it is strands (Azucena's sleeves: 13 cm, the cuffs; their fringes swing)
 SWING = 0.5                     # a strand swings when it may move at least this share of its length (a boot's 6 cm
@@ -553,7 +558,7 @@ def _own_reach(points, held, on, triangles):
     return float(g[np.isfinite(g)].max()) if np.isfinite(g).any() else 0.0
 
 
-def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
+def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print, drawn_sims=None):
     """The pieces of a part's simulated cloth that swing (find() with particles()' solver data): per simulation
     mesh, per island of its particles, the hold level (_hold), then each free piece (_components) that
     * is narrow (_spread across it at most NARROW: a cord, a fringe strip, a strap end), reaches STRAND_REACH, may
@@ -569,7 +574,12 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
     not (_hanging: Reina's strap ends); elsewhere hung if modelled tilted more than STRAND_FLOWING. A wide one has
     Tekken 7's, and hangs from the thigh its vertices are skinned to ('leg_parent'). A piece that reaches its shortest
     chain only through other pieces' triangles makes none: left. The hair's (HAIR_PARTS) are 'hair' with HAIR_SPRING
-    entries."""
+    entries.
+    drawn_sims (a definition's TEKKEN8['drawn_cloth']): a pattern of simulation mesh names whose particles are a
+    drawn section's own vertices (no proxy: Azazel's bandages); those vertices follow it too (else only the
+    vertices catwalk()'s 'driven' gives do, none for such a mesh: it stays skinned, as modelled), it is held only
+    where Tekken 8 pins it, on an arm too (free strips 1.5 m long, not sleeves: no hold raised by HOLD_STEP), an
+    island mostly held (a wrap) up to DRAWN_FREE, and its wide pieces' chains have DRAWN_LINKS links."""
     if not solver:
         return []
     pos = k['prims'][0]['pos']
@@ -592,8 +602,12 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
         points, distance = posed[sim], d['max_distance']
         base = sections[d['section']].base_vertex
         mesh = data['meshes'].get(sim, '?').rsplit('|', 1)[-1]
+        itself = bool(drawn_sims and re.search(drawn_sims, mesh) and not sections[d['section']].cloth_mapping)
         if local is not None:
             driven = _driven(data, sections, sim, local)
+            if itself:                                               # (its own drawn vertices)
+                inside = (local >= base) & (local < base + len(d['of']))
+                driven[inside] |= d['of'][local[inside] - base] >= 0
             candidates = drawn[driven]
             nearest = cloth_chains._nearest(_bind_points(geo, local[driven]), own_bind)[0] if len(candidates) \
                 else np.zeros(0, np.int64)
@@ -611,10 +625,14 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
             members = island == i
             if distance[members].max() <= cloth_chains.PINNED:
                 continue
-            arm = _on_arm(k, info, geo, base + d['vertex'][members])
-            hold, piece, held = _hold(points, distance, members, adjacency, arm)
-            if hold > cloth_chains.PINNED:
-                holds.append(hold)
+            arm = not itself and _on_arm(k, info, geo, base + d['vertex'][members])
+            if itself and np.median(distance[members]) < DRAWN_FREE:      # (a wrap on the body: its loose ends)
+                held = members & (distance <= DRAWN_FREE)
+                hold, piece = DRAWN_FREE, _components(members & ~held, adjacency)
+            else:
+                hold, piece, held = _hold(points, distance, members, adjacency, arm)
+                if hold > cloth_chains.PINNED:
+                    holds.append(hold)
             found = []                                               # [(piece, what it hangs from, hold level)]
             for j in range(piece.max() + 1):
                 on = piece == j
@@ -675,6 +693,8 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
                             c['down'], c['flowing'] = _hanging(k, info, geo, base + d['vertex'][ring],
                                                                points[ring].mean(0))
                             how = ' (from an arm: laid along it)'
+                elif itself:                                         # (a drawn strip metres long: few links)
+                    c['link'] = max(cloth_chains.LINK, reach / DRAWN_LINKS)
                 if tag in HAIR_PARTS:                                # (hair: its own entries, no capsules)
                     c.update(hair=True, spring=HAIR_SPRING)
                     how += ' (hair)'
@@ -698,7 +718,7 @@ def pieces(k, tag, info, geo, data, solver, drawn, local, used, log=print):
     return out
 
 
-def find(k, parts, log=print):
+def find(k, parts, log=print, drawn_sims=None):
     """The cloth of the costume's parts Tekken 8 simulates and that swings, as convert/cloth.find gives Tekken 7's:
     [{'part', 'asset' (Strand), 'vertices' (the drawn vertices in k's streams), 'name', and for rig 'link', 'reach',
     'down', 'flowing' (strands)}]: pieces() of the simulation meshes whose particles the solver data gives
@@ -723,7 +743,7 @@ def find(k, parts, log=print):
         drawn = np.unique(np.concatenate([p['tris'].reshape(-1) for p in k['prims'] if p['part'] == tag]))
         local = original[drawn] - first[tag] if original is not None else None
         solver = particles(m, data, geo)
-        out += pieces(k, tag, info, geo, data, solver, drawn, local, used, log)
+        out += pieces(k, tag, info, geo, data, solver, drawn, local, used, log, drawn_sims)
         left, number = [], 0
         for si, moved in sorted(data['moved'].items()):
             s = sections[si]
@@ -776,3 +796,139 @@ def find(k, parts, log=print):
         if left:
             log('  %s: left skinned: %s' % (tag, '; '.join(left)))
     return out
+
+
+# ------------------------------------------------------------------------------------------------ dynamic bones
+# Some costumes swing chains of their own joints with Tekken 8's dynamic bones (BaseItem PhoenixDynamicBoneBinariesItem
+# -> DYB_CH_<code>_<part>, 'PDYB' data naming each joint with its angle limits and a ground plane it lies on): Azazel's
+# tail, PHY_Hip__a001..008 from his hips back along the floor, 4.3 m. Their skin weights are the costume's own: the
+# chain's joints become extra bones with spring entries (convert/cloth.py, as the cloth's chains), resting where the
+# costume is modelled (TTT2's springs swing about the bind) and touching no capsule. A definition names them
+# (TEKKEN8['bone_chains']: [{'root': the first joint, 'spring': its entries (convert/cloth.py springs)}]); without it
+# such joints stay as they were (their weights go to their parent's bone, rigid). TTT2 has no floor for them: a chain
+# with a 'floor' (mm) rests as Tekken 8's lies in the fighter's stance (lay_on_floor): its links bent down from where
+# they are modelled, each at most FLOOR_BEND more than the one before (the DYB's down limit), till they lie that high.
+CHAIN_JOINT = re.compile(r'^(.*?)(\d+)$')
+FLOOR_BEND = np.radians(20.0)
+CHAIN_CLOTH = 90                # the joints are named as the cloth's bones (convert/cloth.py NAME: cloth, chain,
+                                # link; springs() numbers them by it), as cloth number CHAIN_CLOTH + the chain's
+
+
+def bone_chains(k, specs, log=print):
+    """The definition's dynamic-bone chains of model k (tekken8_model's: merged bones, bind frames in TTT2 space) as
+    convert/cloth.rig's chains: [{'part', 'bones' (k's bone indices, root first), 'neighbours', 'parent', 'spring',
+    'hair', 'vertices' (the vertices mostly skinned to them)}]. Each joint's bind frame becomes one with X along its
+    link (the last link's for the last joint), Y the world's up across it, so that the spring's limits about Y swing
+    it sideways and about Z up (+) and down (-); positions stay. Changes k's bind matrices in place."""
+    names, parents = list(k['bones']['names']), list(k['bones']['parents'])
+    world = k['bones']['world']
+    s0 = k['prims'][0]
+    out = []
+    for n, spec in enumerate(specs):
+        root = spec['root']
+        if root not in names:
+            raise ValueError('the costume has no joint %s for a dynamic-bone chain' % root)
+        stem = CHAIN_JOINT.match(root).group(1)
+        chain = [names.index(root)]
+        while True:
+            kids = [j for j, p in enumerate(parents) if p == chain[-1] and CHAIN_JOINT.match(names[j])
+                    and CHAIN_JOINT.match(names[j]).group(1) == stem]
+            if not kids:
+                break
+            chain.append(kids[0])
+        if len(chain) < 2:
+            raise ValueError('the dynamic-bone chain %s has one joint' % root)
+        at = [world[b][:3, 3].copy() for b in chain]
+        for i, b in enumerate(chain):
+            x = at[i + 1] - at[i] if i + 1 < len(chain) else at[i] - at[i - 1]
+            m = np.eye(4)
+            m[:3, :3] = cloth_chains._frame(x, np.array([0.0, 1.0, 0.0]))
+            m[:3, 3] = at[i]
+            world[b] = m
+        held = (np.isin(s0['joints'], chain) * s0['weights']).sum(1)
+        vertices = np.nonzero(held > 0.5)[0]
+        part = collections_part(k, vertices)
+        out.append(dict(part=part, bones=chain, neighbours=set(), parent=parents[chain[0]], name=root,
+                        spring=spec['spring'], hair=True, vertices=vertices, floor=spec.get('floor')))
+        length = sum(float(np.linalg.norm(at[i + 1] - at[i])) for i in range(len(at) - 1))
+        log('  %s: a chain of %d joints Tekken 8 swings (dynamic bones), %.0f mm, from %s; %d vertices on it' % (
+            root, len(chain), length, names[parents[chain[0]]].split('@')[0], len(vertices)))
+        k['bones']['names'] = list(k['bones']['names'])      # (its own list: a second try's model shares the first's)
+        for j, b in enumerate(chain):
+            k['bones']['names'][b] = cloth_chains.NAME % (CHAIN_CLOTH + n, 0, j)
+    return out
+
+
+def collections_part(k, vertices):
+    """The part most of the vertices' primitives belong to (k's prims share one vertex array)."""
+    count = {}
+    want = set(int(v) for v in vertices)
+    for p in k['prims']:
+        hit = len(want.intersection(np.unique(p['tris']).tolist()))
+        count[p['part']] = count.get(p['part'], 0) + hit
+    return max(count, key=count.get)
+
+
+def stance(store, d, moveset, files):
+    """A function: the fighter's TTT2 skeleton (skeleton.build's, its chains not yet added) -> its world matrices in
+    the first frame of its stance (alias 1's clip, converted as its moves' are, tekken8/anim.py; its root where the
+    game plays it: the root channel times the skeleton's scale), for lay_on_floor. moveset: its Tekken 8 moveset,
+    files: its saved files (importer tekken8_moveset)."""
+    from . import anim, anmbin, panm
+    banks = anmbin.Banks(anmbin.Bank(files['anmbin']), anmbin.Bank(files['common']), moveset.character_id)
+    key = banks.anim_key(moveset.tables['moves'][moveset.resolve_alias(0x8001)]['anim'] & ~0xC000)
+    clip = panm.Animation(banks.blob(anmbin.BODY, key))
+    rig = anim.load_skeleton(store, d.TEKKEN8_CODE)
+
+    def posed(skel):
+        conv = anim.Converter(rig, skel)
+        values = np.array(conv.channels(clip)[0][0], np.float64)
+        values[:2] *= skel['scale']
+        return cloth_chains.pose(skel, (values, conv.kind))
+    return posed
+
+
+def lay_on_floor(k, chains, skel, parents, posed):
+    """The chains with a 'floor' (bone_chains) bent to rest on the floor in the stance (posed: stance()'s matrices of
+    skel, the skeleton without the chains; parents: each chain's parent in it): in the stance at rest on its parent, each
+    link keeps its heading and tilts down as far as reaches `floor` mm above the floor, at most FLOOR_BEND more than
+    the link before it; one modelled below that rises to it. Changes k's bind matrices and vertex streams in place.
+    -> [(chain root, [joint heights in the stance, mm])], vertices moved."""
+    from ..convert import chains as hanging
+    from ..ttt2 import bone
+    names = list(k['bones']['names'])
+    world = k['bones']['world']
+    before = world.copy()
+    bind = bone.world_matrices(skel)
+    laid = []
+    for chain, parent in zip(chains, parents):
+        floor = chain.get('floor')
+        if floor is None:
+            continue
+        to_pose = posed[parent] @ np.linalg.inv(bind[parent])        # (at rest on its parent)
+        frames = [to_pose @ before[b] for b in chain['bones']]
+        tilt = None                                                  # (the link before's, rad: + up)
+        for j in range(1, len(frames)):
+            pivot = frames[j - 1][:3, 3].copy()
+            link = frames[j][:3, 3] - pivot
+            length = float(np.linalg.norm(link))
+            flat = np.array([link[0], 0.0, link[2]])
+            if np.linalg.norm(flat) < 1e-6:
+                flat = np.array([frames[j - 1][0, 2], 0.0, frames[j - 1][2, 2]])
+            flat = flat / np.linalg.norm(flat)
+            now = float(np.arcsin(np.clip(link[1] / length, -1.0, 1.0)))
+            reach = -float(np.arcsin(np.clip((pivot[1] - floor) / length, -1.0, 1.0)))   # (its end on the floor)
+            want = max(reach, min(now, (now if tilt is None else tilt) - FLOOR_BEND))
+            if now < reach:
+                want = reach
+            tilt = want
+            r = hanging.turn(link / length, flat * np.cos(want) + np.array([0.0, 1.0, 0.0]) * np.sin(want))
+            for f in frames[j - 1:]:                                 # (the link's bone turns, and all below it)
+                f[:3, :3] = r @ f[:3, :3]
+                f[:3, 3] = pivot + r @ (f[:3, 3] - pivot)
+        back = np.linalg.inv(to_pose)
+        for b, f in zip(chain['bones'], frames):
+            world[b] = back @ f
+        laid.append((chain.get('name', names[chain['bones'][0]]), [float(f[1, 3]) for f in frames]))
+    changed = [b for chain in chains if chain.get('floor') is not None for b in chain['bones']]
+    return laid, hanging.follow(k, before, changed) if changed else 0

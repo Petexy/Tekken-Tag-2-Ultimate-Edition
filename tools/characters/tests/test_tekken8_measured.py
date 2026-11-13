@@ -86,6 +86,25 @@ class Tune(unittest.TestCase):
             E8.cascade, P._power = old, old_power
         self.assertEqual(seen, [(1.0, 1.0, 1.0), (0.3, 1.0, 0.4), (1.0, 1.0, 1.0)])    # (else the system's colour)
 
+    def test_paint_wins_over_a_gpu_emitters_own_colours(self):
+        e = types.SimpleNamespace(name='BitA', gpu=True, colours={'c': [(0.0, 1.0, 1.0, 1.0)]}, rate=0.0,
+                                  per_unit=False, loop=1.0, bursts=[(0.0, 4)], local=False)
+        r = types.SimpleNamespace(kind='sprite', meshes=[], material='/Game/M.M', sub_images=(1, 1))
+        old = (E8.brightest, E8.size_curve, E8.alpha_curve)
+        E8.brightest = lambda colours: (1.0, 1.0, 1.0) if colours else None
+        E8.size_curve = E8.alpha_curve = lambda *a: None
+        try:
+            def start(roles):
+                em = E8.cascade(e, r, (0.2, 0.2, 0.2), roles=roles)
+                mod = next(m for m in em.modules if m.cls == 'Color')
+                return mod.dist('StartColor', 3).samples
+            own, painted = start(()), start((('^BitA$', {'paint': (0.45, 0.15, 1.0)}),))
+        finally:
+            E8.brightest, E8.size_curve, E8.alpha_curve = old
+        b = E8.GPU_BRIGHTNESS
+        self.assertEqual(own, E8.ranged([b, b, b], dim=3).samples)              # its own colour (white)
+        self.assertEqual(painted, E8.ranged([0.45 * b, 0.15 * b, 1.0 * b], dim=3).samples)
+
     def test_no_donor_effects_is_the_definitions_choice(self):
         from ttt2char import importer
         self.assertEqual(importer._donor_effects(types.SimpleNamespace(DONOR_EFFECTS=False), b''), [])

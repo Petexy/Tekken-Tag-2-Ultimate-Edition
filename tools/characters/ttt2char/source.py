@@ -132,11 +132,11 @@ class Tekken8Source:
         return model.load_model(self.store, parts, merge_order, log=log, worn=worn)
 
     @staticmethod
-    def cloth(k, parts, log=print):
+    def cloth(k, parts, log=print, drawn_sims=None):
         """The strands of the costume Tekken 8 simulates (tekken8/cloth.py), as convert/cloth.find gives Tekken 7's
-        cloth: k the model as model.tekken8_model makes it, parts [(tag, path)]."""
+        cloth: k the model as model.tekken8_model makes it, parts [(tag, path)], drawn_sims: tekken8/cloth.pieces'."""
         from .tekken8 import cloth
-        return cloth.find(k, parts, log=log)
+        return cloth.find(k, parts, log=log, drawn_sims=drawn_sims)
 
     def mesh(self, path):
         from .tekken8 import mesh, model

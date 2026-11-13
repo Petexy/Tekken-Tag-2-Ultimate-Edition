@@ -282,7 +282,11 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
     pair posing a bone numbered below 800 (empty: its own), anchored 1: held in the world from each move's first frame,
     2: a hit point following the held one (convert/prefabs8.with_channels); the definition's REST_SUMMONS (the summons out when no move says otherwise,
     through hits and throws too: roster.cpp) as rest_summons; the definition's UNBLURRED (mesh names the port's motion blur
-    leaves out: title/unblurred.h) as unblurred."""
+    leaves out: title/unblurred.h) as unblurred; the definition's CAMERA (a giant's height in mm from his feet, his body's
+    lowest point, to his top, horns included, that the port's fight camera keeps in the picture: title/fight_camera.cpp)
+    as camera; the definition's BODY (a giant's size, times a man's, his skeleton's scale: his hurt and push spheres grow
+    by it and a man-sized fighter counts him that much bigger in the distance between them, as in the title's Mushroom
+    Battle: title/giant_body.cpp) as body."""
     def item(k, parent, points, summon, ramp=0, channels=None, anchored=0):
         return '%d:%d:%s' % (k, parent, ','.join('%d' % n if n == slot else '%d>%d' % (n, slot) for n, slot in points)) \
             + (':%d' % summon if summon is not None else (':' if ramp or channels is not None or anchored else '')) \
@@ -301,6 +305,8 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
                if isinstance(getattr(d, 'REST_SUMMONS', None), tuple) else '')
             + ('unblurred = %s\n' % ' '.join(d.UNBLURRED)
                if isinstance(getattr(d, 'UNBLURRED', None), tuple) and d.UNBLURRED else '')
+            + ('camera = %d\n' % d.CAMERA if type(getattr(d, 'CAMERA', None)) is int and d.CAMERA > 0 else '')
+            + ('body = %g\n' % d.BODY if type(getattr(d, 'BODY', None)) in (int, float) and 1 < d.BODY <= 4 else '')
             + ('outfits = %s\n' % ' '.join(outfits) if outfits else '')
             + (gauge.ini_line(d, gauge_sound) + '\n' if gauge.ini_line(d) else ''))
 
