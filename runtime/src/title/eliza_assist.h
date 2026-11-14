@@ -41,6 +41,19 @@ inline bool continuation(std::string_view name) {
 }
 // Native 041CE0B0 consumes a positive countdown; 1 schedules its next tick.
 inline constexpr uint32_t kRetryExpiryNextFrame = 1;
+// TTT2 marks the fighter whose bound started the Tag Assault: the property
+// 0x8256 (only in the starter's ...DA twins) runs sub_04E19DE4(player, 1),
+// which sets player+7820 on that fighter only (+7816, "in a Tag Assault", goes
+// on both; nothing is set when +7816 is already 1); the assault's end,
+// sub_04E19DE4(player, 0), clears both on both. The native expiry
+// (sub_04E187B8) belongs to the partner who came in: it hands the pad back to
+// the starter and sends the caller out after its move. So only that partner
+// may hold a session. The starter has the pad back after the expiry while
+// +7816 is still set; a session of its own would end by running the expiry on
+// the starter, a tag out nobody pressed (issues #32, #96).
+inline bool holds_sessions(bool supported_fighter, bool started_assault) {
+    return supported_fighter && !started_assault;
+}
 // Installed input-only captures use 0x2800 and write the special buffer.
 // Ordinary finite string inputs use 0x182/0x183. Neither automatic hit
 // transitions nor a move's neutral-recovery row extend control.

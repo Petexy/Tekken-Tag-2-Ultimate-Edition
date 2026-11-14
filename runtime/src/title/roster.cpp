@@ -4517,12 +4517,15 @@ eliza_assist::InputWindow special_assist_window(uint32_t player) {
     return result;
 }
 std::map<uint32_t, uint32_t> g_special_assist_returns;
+// player+7820: this fighter's bound started the current Tag Assault (see
+// eliza_assist::holds_sessions).
+constexpr uint32_t kPlayerAssaultStarter = 0x1e8c;
 bool special_assist_sequence(uint32_t player) {
     static std::map<uint32_t, eliza_assist::Session> sequences;
     if (!player) return false;
     const int slot = slot_of_id(load(player + kPlayerSelectId));
-    const bool supported = slot >= 0 &&
-        eliza_assist::supported(g_added[slot].code);
+    const bool supported = slot >= 0 && eliza_assist::holds_sessions(
+        eliza_assist::supported(g_added[slot].code), load(player + kPlayerAssaultStarter) != 0);
     if (!supported) {
         sequences.erase(player);
         return false;
@@ -4601,9 +4604,11 @@ void trace_eliza_move(uint32_t player) {
 } // namespace
 
 PPC_FUNC(sub_04E187B8_orig);
+void trace_assist_lifetime(const char* operation, uint32_t player, bool deferred);
 // A deferred native return is a request, not a new timeout. Complete it at
 // selection boundary, before either fighter decodes another human input.
 // A committed finisher keeps animating on the native inactive assist route.
+// Never on the fighter that started the Tag Assault: the expiry would tag it out.
 void finish_special_assist(PPCContext& ctx, uint8_t* base, uint32_t player) {
     if (!player) return;
     const uint32_t pair[] = {player, load(player + 0xac)};
@@ -4615,7 +4620,8 @@ void finish_special_assist(PPCContext& ctx, uint8_t* base, uint32_t player) {
         const uint32_t partner = it->second;
         g_special_assist_returns.erase(it);
         if (load(assist + 0xac) != partner || load(assist + 0x1e88) != 1 ||
-            !load(assist + 0x1e80)) continue;
+            !load(assist + 0x1e80) || load(assist + kPlayerAssaultStarter)) continue;
+        trace_assist_lifetime("return", assist, false);
         store(assist + 0x7b8, 0);
         store(assist + 0x7c0, UINT32_MAX);
         store(assist + 0x7c4, 0);
