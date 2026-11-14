@@ -1,7 +1,8 @@
 """A Tekken 8 reaction of an opponent on its feet keeps a TTT2 move only when it floats and comes to rest as Tekken
-8's does, else Tekken 8's own is converted; a TTT2 move guarding from other frames is copied with Tekken 8's guard rows
-(convert/moveset.py FLOAT8, GUARD_FROM8, Converter.target(reaction=True)). Air rows, downed and wall slots, other
-targets and Tekken 7 keep what they had. Synthetic movesets only."""
+8's does (exactly when TTT2 has an airborne move of its name, else within FLOAT8_NEAR frames), else Tekken 8's own is
+converted; a TTT2 move guarding from other frames is copied with Tekken 8's guard rows (convert/moveset.py FLOAT8,
+GUARD_FROM8, Converter.target(reaction=True)). Air rows, downed and wall slots, other targets and Tekken 7 keep what
+they had. Synthetic movesets only."""
 import collections
 import copy
 import os
@@ -128,6 +129,26 @@ class Tekken8ReactionMatch(unittest.TestCase):
         c = converter()
         self.assertEqual(c.target(2, reaction=True), 2)     # 1-52 face up: TTT2's sDw_UP_01_ itself
         self.assertEqual(c.queue, [])
+
+    def test_a_launch_near_ttt2s_keeps_it_without_a_ttt2_name(self):
+        c = converter()
+        k, n = c.k, len(c.d.tables['moves'])
+        # launches landing face up whose remap is sDw_UP_01_ (1-52, face up): 1-48 as Reina's EWGF #296 (TTT2 has no
+        # airborne move of that name), the same frames under a name TTT2 has, 1-47 (5 frames shorter) and 2-52
+        new = []
+        for name, (a, b, f) in (('#296', (1, 48, 47)), ('ym_y01mixL', (1, 48, 47)), ('#297', (1, 47, 46)),
+                                ('#298', (2, 52, 51))):
+            k.namebuf += name.encode() + b'\0'
+            k.tables['moves'].append(dict(k.tables['moves'][2], name=len(k.namebuf) - len(name) - 1,
+                                          airborne_start=a, airborne_end=b, ground_fall=f))
+            new.append(len(k.tables['moves']) - 1)
+            c.react_remap[name] = 'sDw_UP_01_'
+        hit_rows(k, [((), dict(zip(('default', 'ch', 'crouch', 'crouch_ch'), new)))])
+        c.cls += ['N'] * len(new) + ['K']
+        c.ttt2_floats8 = {'ym_y01mixL', 'sDw_UP_01_', 'dw_He_shoryu'}
+        self.assertEqual([c.target(i, reaction=True) for i in new], [2, n, n + 1, n + 2])
+        self.assertEqual(c.queue, new[1:])
+        self.assertEqual(c.target(1, reaction=True), n + 3)     # (1-30 face down: converted, as without the names)
 
     def test_air_down_and_mixed_reactions_keep_ttt2s(self):
         c = converter()

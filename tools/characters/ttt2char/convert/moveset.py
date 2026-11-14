@@ -797,11 +797,15 @@ REST_STEPS = 12                   # transitions followed at most
 # 1-30, landing face down; TTT2's own dw_He_shoryu of 22 movesets has those very frames, Lars and Jun none) became
 # sDw_UP_01_ (1-52, face up) in Clive's d+1+2, Miary's b+1,4 and Victor's 1,2,1; Clive's ws2 #374 (1-77) and Victor's
 # d/b+3 #383 (1-83) became 33- and 48-frame launches, which his combos after ws2 can no longer reach. So the remap of
-# such a reaction is refused when TTT2's move has another float (FLOAT8, its airborne start, end and ground fall,
-# exactly: the same frames, the same animation, idmaps.frame_signatures) or comes to rest otherwise (Converter.lands8:
-# standing, crouching, lying face up or face down), and Tekken 8's own is converted (a reaction TTT2 has by name
-# plays TTT2's animation: tekken8.anim.originals). TTT2's air, bound, floor and wall reactions are not touched: juggles
-# need them (a version converting Tekken 8's air reactions broke juggles).
+# such a reaction is refused when TTT2's move has another float (FLOAT8, its airborne start, end and ground fall) or
+# comes to rest otherwise (Converter.lands8: standing, crouching, lying face up or face down), and Tekken 8's own is
+# converted. The float is compared exactly for a reaction TTT2 has an airborne move of that name for (Converter.
+# ttt2_floats8: the same frames, the same animation, idmaps.frame_signatures; converted, it plays TTT2's own clip,
+# tekken8.anim.originals): Victor's IAI 1+2 ym_y01mixL (1-35) is not the remap's ym_y01L (1-38). For one TTT2 has no
+# name of, the TTT2 launch stays within FLOAT8_NEAR frames of its end and fall: its juggles, bounds and tag combos are
+# TTT2's own, where Tekken 8's converted one would change their timing (Reina's EWGF #296, 1-48, keeps sDw_UP_01_,
+# 1-52, as since her port: EWGF > f+4, a bound of her list, hits at its frame 49-50). TTT2's air, bound, floor
+# and wall reactions are not touched: juggles need them (a version converting Tekken 8's air reactions broke juggles).
 # The frame a staggered opponent may guard from (GUARD_FROM8, TTT2's TT_GUARD_FROM: value 1 at that frame; without it,
 # when the reaction ends) is the other half: Tekken 8 times its strings to it. Clive's jab reaction on a normal hit,
 # #1529, lets the victim guard from 24 (a cancel row back into the stance that sets it: 1,2's 2 at reaction frame 21-22
@@ -810,6 +814,7 @@ REST_STEPS = 12                   # transitions followed at most
 # sDm_KAO00L never, so her 3,1,2 was guaranteed. A reaction whose TTT2 move (its own name's too) guards from other
 # frames takes a copy of that move with Tekken 8's guard rows (Converter.guard_copy8: TTT2's animation and lists).
 FLOAT8 = ('airborne_start', 'airborne_end', 'ground_fall')
+FLOAT8_NEAR = 4                   # frames a TTT2 launch may float longer or shorter (no TTT2 name)
 LYING = re.compile(r'^dw(?:DWN|KAM)_\d\d([UD])')       # the lying states a fall ends in: face up (U) or down (D)
 GUARD_FROM8, TT_GUARD_FROM = 0x81ec, 0x80ea
 # the reaction slots of an opponent on its feet (the downed, wall-slumped and guard slots are left as they were)
@@ -975,6 +980,7 @@ class Converter:
     _hands = None                       # hand_map's map
     _throw_victims = None               # throw_victims' set
     _standing8 = None                   # standing8's set
+    ttt2_floats8 = ()                   # names of TTT2's moves that leave the ground (other_float8), by the importer
     guard_copies8 = None                # {Tekken 8 reaction: (its guard copy, the donor's move, guard rows)}
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
@@ -1408,11 +1414,14 @@ class Converter:
         return None
 
     def other_float8(self, mid, j):
-        """The Tekken 8 reaction mid and the donor's move j float on other frames (FLOAT8) or come to rest otherwise
-        (lands8; unknown counts as the same)."""
+        """The Tekken 8 reaction mid and the donor's move j float on other frames (FLOAT8: exactly when TTT2 has an
+        airborne move of mid's name, ttt2_floats8; else the same start, the end and fall within FLOAT8_NEAR) or come
+        to rest otherwise (lands8; unknown counts as the same)."""
         a, b = self.k.tables['moves'][mid], self.d.tables['moves'][j]
         la, lb = self.lands8(self.k, mid, self.name), self.lands8(self.d, j, self.d.move_name)
-        return any(a[f] != b[f] for f in FLOAT8) or (la is not None and lb is not None and la != lb)
+        near = 0 if self.name(mid) in self.ttt2_floats8 else FLOAT8_NEAR
+        return a[FLOAT8[0]] != b[FLOAT8[0]] or any(abs(a[f] - b[f]) > near for f in FLOAT8[1:]) or (
+            la is not None and lb is not None and la != lb)
 
     @staticmethod
     def extra_rows(m, i):
