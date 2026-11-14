@@ -189,4 +189,13 @@ int main() {
     assert(!noctis.update_window(true,true,false,1,1,43,true,false));
     assert(!noctis.update_window(true,false,true,1,1,43,true,false));
 
+    // Only the partner who came in for the Tag Assault holds a session; the
+    // fighter whose bound started it (player+7820) has the pad back after the
+    // native expiry and must never run that expiry on itself (#32, #96).
+    using cafe::title::eliza_assist::holds_sessions;
+    assert(holds_sessions(supported("mry"), false));  // Geese came in
+    assert(!holds_sessions(supported("mry"), true));  // Geese started it
+    assert(!holds_sessions(supported("elz"), true) && !holds_sessions(supported("rei"), true) &&
+           !holds_sessions(supported("mrz"), true));
+    assert(!holds_sessions(supported("mrx"), false)); // Akuma: no sessions at all
 }
