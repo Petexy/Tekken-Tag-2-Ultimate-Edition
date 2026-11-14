@@ -972,7 +972,8 @@ class Converter:
     flag8_count = None                  # the flag variables' countdown requirement lists (flag8_block)
     hit_latch = None                    # the latch keeping "the move hit" in the cancel list being converted (HIT_HELD)
     _prop_latches = None                # {cancel list: latches its moves' properties use} (hit_latch_of)
-    _hit_sets = None                    # {latch: the requirement list [(46), (set latch, 1)]} (hit_row)
+    _hit_sets = None                    # {(latch, value): the requirement list [(46), (set latch, 1)] or [(49),
+                                        # (latch == 0), (set latch, 2)]} (hit_row)
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
     hands_reference = None              # the definition's HANDS row: (its motbin, its motion pack), by the importer
     hands8 = None                       # tekken8.anim.HandClips of a Tekken 8 fighter, by the importer
