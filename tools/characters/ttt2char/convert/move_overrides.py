@@ -118,6 +118,8 @@ def apply(c):
     for name, (first, last) in c.defn.MOVESET.get('active_frames', {}).items():
         move = c.T['moves'][c.dn[name] if name in c.dn else c.newidx[c.kn[name]]]     # (a generic move: the donor's row)
         move['first_active'], move['last_active'] = first, last
+    for name, spec in c.defn.MOVESET.get('hit_grabs', {}).items():
+        hit_grab(c, name, spec)
     for name, reaction in c.defn.MOVESET.get('downed_reactions', {}).items():
         downed_reaction(c, name, reaction)
     for name, template in c.defn.MOVESET.get('air_reactions', {}).items():
@@ -194,6 +196,44 @@ def apply(c):
     for name in c.defn.MOVESET.get('direct_buffered_strings', ()):
         direct_buffered_string(c, name)
     normalize_buffered_strings(c)
+
+
+GUARDS = ('block', 'crouch_block', 'pb_block')      # a reaction list's guard half: the two guard moves, the pushback
+
+
+def hit_grab(c, name, spec):
+    """A grab of the definition's MOVESET['hit_grabs'] made one that only a hit starts, as TTT2's own: Jinpachi's
+    Jn_ganmen (a high, active at 15, its row into the hold Jn_ganmen2_n at 15 testing 46: the attack connected, not
+    blocked). Attack `name`'s automatic row into its grab half spec['grab'] (a Tekken 8 grab whose own rows force whoever is
+    in front into its reaction, guard or not) tests 46 too, in spec['window'] (frames: default the
+    attack's active ones and the one after, as the hit is seen), entering the grab half at spec['start_frame']
+    (default: the row's own start frame, or the window's first frame if that is later: a hold whose clip goes on from
+    the attack's enters it where a hit can first land, never at a frame before, so its rows at that frame still run);
+    its hit conditions' guard half (GUARDS: the hold on guard as well) is that of spec['guard_as']'s last hit
+    condition, a plain attack's; the rest (the hold's reaction on hit and counter hit, damage, the row's target)
+    stays."""
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    grab = c.newidx[c.kn[spec['grab']]]
+    first, last = spec.get('window', (move['first_active'], move['last_active'] + 1))
+    rows = [dict(r) for r in TS.cancels(c.T, move['cancel'])]
+    into = [r for r in rows if r['move_id'] == grab and TS.is_automatic(r)]
+    if len(into) != 1 or TS.has(c.T, into[0]['req'], CONTACT[0]) or not 0 < first <= last:
+        raise ValueError('no single automatic row into its grab half without a hit test: ' + name)
+    kept = [(a, b) for a, b in TS.reqs(c.T, into[0]['req']) if a != 0]
+    into[0].update(req=TS.write(c.T, 'requirements', [dict(condition=a, param=b) for a, b in kept + [(CONTACT[0], 0)]]
+                                + [dict(condition=TS.TT_END, param=0)]),
+                   win_start=first, win_end=last,
+                   start_frame=spec.get('start_frame', max(into[0]['start_frame'], first)))
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    ref = c.T['moves'][c.newidx[c.kn[spec['guard_as']]]]
+    guard = c.T['reactions'][TS.hits(c.T, ref['hit_condition'])[-1]['reactions']]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    for hit in hits:
+        row = dict(c.T['reactions'][hit['reactions']])
+        row.update((field, guard[field]) for field in GUARDS)
+        hit['reactions'] = c.add('reactions', row)
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['grabs that only a hit starts (hit_grabs)'] += 1
 
 
 def direct_buffered_string(c, name):

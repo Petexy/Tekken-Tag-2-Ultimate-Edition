@@ -69,6 +69,8 @@ add_library(cafe_runtime OBJECT
     src/gx2/state.cpp
     src/gx2/surface.cpp
     src/gx2/texture.cpp
+    src/title/fight_camera.cpp
+    src/title/giant_body.cpp
     src/title/framedata.cpp
     src/title/gauge.cpp
     src/title/input_delay.cpp

@@ -1170,11 +1170,17 @@ def cut_out(img):
 
 def costume_previews(source, archives, rpx, d, slot):
     """The chooser's container for the fighter: one picture, its costume (NTP3 bytes), or None. source: its
-    picture source (or Tekken 7's paks)."""
+    picture source (or Tekken 7's paks). The definition's ART 'costume' is the picture's path, or (path, (x0, y0, x1,
+    y1)): the part of it (pixels) the fighter is cut from (a wide artwork: Azazel has no picture standing)."""
     path = d.ART.get('costume') if hasattr(d, 'ART') else None
+    path, box = path if isinstance(path, tuple) else (path, None)
     if not path:
         return None
-    fighter = cut_out(picture_source(source).picture(path))
+    picture = picture_source(source).picture(path)
+    if box is not None:
+        x0, y0, x1, y1 = box
+        picture = picture[y0:y1, x0:x1]
+    fighter = cut_out(picture)
     if fighter is None:
         return None
     textures = []

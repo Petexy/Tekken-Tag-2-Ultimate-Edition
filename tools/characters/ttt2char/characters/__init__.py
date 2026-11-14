@@ -8,7 +8,8 @@ import importlib
 from .. import InputError
 
 CHARACTERS = ('kazumi', 'chloe', 'eliza', 'claudio', 'akuma', 'gigas', 'josie', 'katarina', 'master_raven', 'shaheen',
-              'fahkumram', 'leroy', 'lidia', 'kunimitsu2', 'negan', 'geese', 'noctis', 'reina', 'azucena', 'miary_zo', 'victor', 'clive')
+              'fahkumram', 'leroy', 'lidia', 'kunimitsu2', 'negan', 'geese', 'noctis', 'reina', 'azucena', 'miary_zo', 'victor', 'clive',
+              'azazel')
 GAMES = {'tekken7': 'Tekken 7', 'tekken8': 'Tekken 8'}       # (the players' names of the games)
 
 
