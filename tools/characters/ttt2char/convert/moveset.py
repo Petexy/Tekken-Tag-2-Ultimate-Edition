@@ -271,6 +271,27 @@ REQ_FALSE['t7'][45] = 'a contact neither hit nor block'
 # lists beside its throw-break state (`[(461), (133)]`: unequal lists give no evidence): 1+2 throws (Jun's Cnage,
 # Azucena's u/f+1+2) were unbreakable
 REQ_OVERRIDE['t8'][133] = 131
+# Tekken 8's 59 (build 26155785: case 0x14187c468) is TTT2's 56 (sub_0404FF30's case at 0x040540CC): the reaction slot
+# the opponent's last hit took == param, a word both games' reaction choosers write with the same numbers (TTT2
+# sub_041559E0 at (opponent + 288) + 284, Tekken 8 0x1418e50f0 at (opponent + 0x3f0) + 0x244: 10 / 11 the counter-hit
+# reaction standing / crouching, 12 / 13 the plain one, 14 on the sides and the back). Clive's 2,2 and Miary Zo's 1,2
+# give their second hit its counter-hit reaction (no guard frame, so the string's next hit combos) on `[(59, 10)]` and
+# `[(59, 11)]`. The id maps have no row for it (no TTT2 moveset tests 56), so those entries were left out: after a
+# counter hit the second hit took the plain reaction, which lets the opponent guard from frame 10 (2,2,1 on CH)
+REQ_OVERRIDE['t8'][59] = 56
+# Facing: both games keep, per player and frame, where the other fighter is from the way he faces as a quadrant (0 in
+# front, 1 / 3 the sides, 2 behind; TTT2 sub_039C0F40, Tekken 8 0x141857f9c alike): +1120 (Tekken 8 +0xed0) from his
+# rotation, +1124 (+0xed4) from his body's direction (+192: properties 0x810a / 0x810b turn it round or tie it to the
+# rotation). Tekken 8's 509 tests the opponent's +0xed4 against a set (case 0x14187cd4f: parameter bit 1 admits 0, 2
+# admits 1, 8 admits 3, 4 admits 2): `[(130), (509, 11)]`, a counter hit on an opponent not turned away, starts every
+# Tekken 8 fighter's counter-hit sound rows and Victor's d/b+4 counter-hit throw (1011 rows of the 40 saved movesets,
+# all (509, 11)). No id map has it, so those rows were left out. TTT2 tests the opponent's +1120 alone (93..96: == 0,
+# 1, 3, 2), as its own counter-hit and on-hit grabs do (King's Kg_p01 `[(2), (128), (93), (63)] -> Kg_p01E`; the id
+# maps pair Tekken 8's 92, the opponent's +0xed4 == 0, with that 93): a cancel row with 509 becomes one row per
+# quadrant of its set (or_variants), parameter 0; in any other list it is false
+OPP_FACING_SET = {'t7': None, 't8': 509}
+OPP_FACING_BITS = ((1, 0), (2, 1), (8, 3), (4, 2))  # the set's parameter bit -> the quadrant it admits
+OPP_FACING = {0: 93, 1: 94, 3: 95, 2: 96}           # TTT2: the opponent's +1120 == quadrant
 # Distance tests: Tekken 8's and TTT2's 3..22 and 27..34 share one routine in each game (Tekken 8 0x141875b41, TTT2
 # 0x04050B28: the opponent in zone <id> within `param`), 23..26 have their own in both alike; Tekken 8's 491 / 493 are
 # zones 3 / 7 with the zone's angle in param2 (0x141875bde), which TTT2's 3 / 7 take from their own table. The low
@@ -418,9 +439,16 @@ WALL_ANGLE = 90
 # In game, with 51 as 46, u+4 hit on frame 16 and never went on. A cancel list testing them (HIT_HELD, the hit
 # alternative of REQ_OR) gets a latch none of its rows and moves use (the last first; latches are cleared as a move
 # starts): its first row, an action on the hit's frame, sets it to 1 [(46), (set latch, 1)], and the tests are the
-# latch's (== 1). In a group list (shared by moves) and in other lists they stay 46
+# latch's (== 1). In a group list (shared by moves) and in other lists they stay 46. TTT2's 49 (the opponent's +1152
+# bit 0x20000000, which a blocked hit sets: sub_0404FF30 at 0x04053FF0) is gone as soon as the opponent's guard
+# reaction starts (in game: set on the frame after the block, clear on the next), so 49's block alternative was false
+# where Tekken 8's contact holds on: Miary Zo's f,f+2,2 (blocked on frame 15, `[(49)] 16-16 -> Wkz_66RPRP`) never
+# came out after a block. A list that tests it gets a second action row, setting the latch to 2 on a block unless the
+# move hit already [(49), (latch == 0), (set latch, 2)] (Tekken 8's 51 stays set), and the block alternative tests 2
 HIT_HELD = {'t7': (), 't8': (51, 49)}
 HIT_NOW = 46                                         # TTT2: the move's attack hit on this frame
+BLOCK_NOW = 49                                       # TTT2: the opponent blocked it (until his guard reaction starts)
+HELD = {HIT_NOW: 1, BLOCK_NOW: 2}                    # the latch's value for each
 # Electrics (the Mishimas' Electric Wind God Fist and its like). TTT2's own (Kazuya's Kz_shoryu_S; Heihachi's, Jin's
 # and Devil Jin's alike) carry: 0x8192 = 1 from the start (ELECTRIC_PROP: player +928 bit 0x2000, the electric spark
 # of sub_03AE2254), the common spark sound at frame 2 (0x82f9 0x0100002b: se_Btl_Battle's RES_BANK_SPK_L01, the same
@@ -1559,16 +1587,18 @@ class Converter:
             return None
         return free[0]
 
-    def hit_row(self, k):
+    def hit_row(self, k, value=1):
         """The action row first in a cancel list keeping "the move hit" in latch k (HIT_HELD): on the hit's frame (46)
-        it sets the latch to 1."""
+        it sets the latch to 1; value 2: on a block (49) while the latch is 0, to 2."""
         if self._hit_sets is None:
             self._hit_sets = {}
-        if k not in self._hit_sets:
-            self._hit_sets[k] = tagsystem.write(self.T, 'requirements', [
-                {'condition': HIT_NOW, 'param': 0}, {'condition': LATCH_PROP['ttt2'] + 3 * k, 'param': 1},
-                {'condition': TT_END, 'param': 0}])
-        return dict(self.action_row(self._hit_sets[k], 1), win_end=32767)
+        if (k, value) not in self._hit_sets:
+            now = {v: c for c, v in HELD.items()}[value]
+            tests = [{'condition': LATCH_REQ['ttt2'] + k, 'param': 0}] if value != HELD[HIT_NOW] else []
+            self._hit_sets[k, value] = tagsystem.write(self.T, 'requirements', [
+                {'condition': now, 'param': 0}] + tests + [{'condition': LATCH_PROP['ttt2'] + 3 * k, 'param': value},
+                                                           {'condition': TT_END, 'param': 0}])
+        return dict(self.action_row(self._hit_sets[k, value], 1), win_end=32767)
 
     def conv_reqs(self, i, overrides=None):
         """A Tekken 7 requirement list -> (the new list's index, ok); ok False: the list can never be true."""
@@ -1660,10 +1690,20 @@ class Converter:
                 self.stats['Tekken 8-only requirements -> false: ' + what] += 1
                 res = (None, False)
                 break
+            if c == OPP_FACING_SET[g]:            # the opponent's facing in a set: one of TTT2's tests (OPP_FACING)
+                c2 = (overrides or {}).get(c)
+                if c2 is None:
+                    self.stats['Tekken 8 facing sets outside a cancel row (or admitting none) -> false'] += 1
+                    res = (None, False)
+                    break
+                rows.append({'condition': c2, 'param': 0})
+                self.stats['Tekken 8 facing sets -> the opponent\'s facing tests'] += 1
+                continue
             c2 = overrides[c] if overrides and c in overrides else self.map_req(c)
-            if held and c in HIT_HELD[g] and c2 == HIT_NOW:     # "the move hit": the latch (HIT_HELD)
-                rows.append({'condition': LATCH_REQ['ttt2'] + self.hit_latch, 'param': 1})
-                self.stats['Tekken 8 "the move hit" tests -> the latch set on the hit\'s frame'] += 1
+            if held and c in HIT_HELD[g] and c2 in HELD:      # "the move hit" / "it was blocked": the latch (HIT_HELD)
+                rows.append({'condition': LATCH_REQ['ttt2'] + self.hit_latch, 'param': HELD[c2]})
+                self.stats['Tekken 8 "the move hit" tests -> the latch set on the hit\'s frame' if c2 == HIT_NOW else
+                           'Tekken 8 contact tests (block) -> the latch set on the blocked frame'] += 1
                 continue
             if c in AIR_SIDE_EFFECT[g] and p == 1 and c2 is not None:     # (1, n): the hit's side effect, no test
                 self.stats['Tekken 8 airborne tests: the hit\'s side effect (1, n) left out'] += 1
@@ -1757,9 +1797,10 @@ class Converter:
                 out.append(dict(d, req=r))
                 self.stats['cancels converted'] += 1
         self.counted, self.hit_latch = outer, outer_hit
-        if hit is not None and any((LATCH_REQ['ttt2'] + hit, 1) in tagsystem.reqs(self.T, r['req'])
-                                   for r in out if r['req'] is not None):
-            out = [self.hit_row(hit)] + out         # "the move hit" set on the hit's frame (HIT_HELD)
+        tested = [v for v in sorted(HELD.values()) if hit is not None and any(
+            (LATCH_REQ['ttt2'] + hit, v) in tagsystem.reqs(self.T, r['req']) for r in out if r['req'] is not None)]
+        if tested:                                # "the move hit" set on the hit's frame, the block on its (HIT_HELD)
+            out = [self.hit_row(hit, v) for v in tested] + out
             self.stats['Tekken 8 "the move hit": cancel lists keeping it in a latch'] += 1
         if table == 'cancels' and self.flag8:      # the flag slots' countdown as the move starts (FLAG8)
             out = self.flag8_block() + out
@@ -1767,11 +1808,18 @@ class Converter:
 
     def or_variants(self, i):
         """The overrides requirement list i converts with: one {id: TTT2 id} per combination of its REQ_OR ids'
-        alternatives, [None] when it has none."""
-        ids = dict.fromkeys(c for c, _, _ in self.req_rows(i) if c in REQ_OR[self.game])
+        alternatives (a facing set's: the TTT2 test of each quadrant it admits, OPP_FACING), [None] when it has
+        none."""
+        g = self.game
+        ids = {}
+        for c, p, _ in self.req_rows(i):
+            if c in REQ_OR[g]:
+                ids.setdefault(c, REQ_OR[g][c])
+            elif c == OPP_FACING_SET[g]:
+                ids.setdefault(c, tuple(OPP_FACING[q] for bit, q in OPP_FACING_BITS if p & bit) or (None,))
         out = [{}]
-        for c in ids:
-            out = [{**o, c: a} for o in out for a in REQ_OR[self.game][c]]
+        for c, alternatives in ids.items():
+            out = [{**o, c: a} for o in out for a in alternatives]
         return out if ids else [None]
 
     def counting_rows(self, i):
