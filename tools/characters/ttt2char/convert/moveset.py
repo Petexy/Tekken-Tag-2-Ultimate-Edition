@@ -2940,7 +2940,8 @@ class Converter:
         """Tekken 8: the 2D air moves (0x822C) baked as the runtime would fly them (convert/arcs.py): each way into one
         (a cancel row, its own or its group's, of a move with a baked ground arc or of an air move baked so) gives the
         height, vertical speed and gravity it starts with at the cancel's start frame (its window's start when that is
-        later); arcs.fly() flies it from there, its own 0x8226 restarting the arc. One copy of the air move per
+        later); arcs.fly() flies it from there (from that frame on when the way in keeps the frame count), its own
+        0x8226 restarting the arc. One copy of the air move per
         distinct start: its animation baked (arcs.bake_air), its frames (ground_fall, airborne_end, active frames,
         properties, cancels) moved, neither 0x822C nor 0x8226, and the way in leads to it (the lists copied: they are
         shared). The air move itself stays for any other way in (the runtime flies it). One that throws a projectile
@@ -3019,10 +3020,19 @@ class Converter:
                     return c
                 t = target(c['move_id'])
                 if t in air and depth < 8:
-                    y, vy, g = state(src, fly, frames, max(c['start_frame'], c['win_start']))
-                    key = (t, round(y, 2), round(vy, 3), g)
+                    at = max(c['start_frame'], c['win_start'])
+                    # a row keeping the frame count starts t at this frame, not at its frame 1 (Tag Assault: X's tag
+                    # row at 14 into XT, XT's exit on the hit into XDA, both playing X's clip on): flown from its frame
+                    # 0, Clive's Updraft 1 XDA was on the floor by 14 and its clip over as it started at 15 (to the
+                    # stance at once, its partner's 0x8081 at 14 never came). Its copy flies on from this frame, the
+                    # source's flight before it (where a row from that copy keeping the frames starts in turn)
+                    keep = c['extradata'] is not None and \
+                        self.T['cancel_extras'][c['extradata']]['value'] & tagcombo.KEEP_FRAMES
+                    before = tuple(state(src, fly, frames, f) for f in range(at)) if keep else ()
+                    y, vy, g = state(src, fly, frames, at)
+                    key = (t, round(y, 2), round(vy, 3), g, tuple((round(h, 2), round(v, 3), gg) for h, v, gg in before))
                     if key not in made:
-                        made[key] = self.air8_copy(t, air[t], y, vy, g, queue, depth + 1, land_by.get(t))
+                        made[key] = self.air8_copy(t, air[t], y, vy, g, queue, depth + 1, land_by.get(t), before)
                     c['move_id'] = made[key]
                     self.stats['2D arcs: ways into air moves led to their baked copies (Tekken 8)'] += 1
                 if frames is not None:
@@ -3037,12 +3047,14 @@ class Converter:
                     copies[key] = copy_rows(C, row['cancel'], M.LIST_END, change)
                 row['cancel'] = copies[key]
 
-    def air8_copy(self, t, restarts, y, vy, g, queue, depth, land_by=None):
+    def air8_copy(self, t, restarts, y, vy, g, queue, depth, land_by=None, before=()):
         """(bake_air8) The row of a copy of air move t baked as entered with height y, vertical speed vy and gravity
-        g, on the floor by frame land_by if given; it joins the queue (its own ways into air moves)."""
+        g (at its frame len(before), the flight `before` it: entered keeping a move's frame count; else at its frame
+        0), on the floor by frame land_by if given; it joins the queue (its own ways into air moves)."""
         rows, P = self.T['moves'], self.T['extra_move_properties']
         row = dict(rows[t])
-        fly = arcs.fly(y, vy, g, restarts)
+        n = len(before)
+        fly = list(before) + arcs.fly(y, vy, g, {f - n: v for f, v in restarts.items() if f >= n})
         if land_by is not None and len(fly) - 1 > land_by:
             fly = arcs.land_by(fly, land_by)
             self.stats['2D arcs: air moves brought down where a ground move goes on with their clip (Tekken 8)'] += 1

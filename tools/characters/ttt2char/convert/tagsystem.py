@@ -60,6 +60,8 @@ SAME = 'same'                        # (a learnt field) X's own
 # (0x200217 -> 0x200000 in the donors' item moves, 0x2C0217 -> 0x2C0000 ...), where a value of 0 fits only the moves
 # without a high half
 HIGH, HIGH_HALF = 'high half', 0xFFFF0000
+START = 0x8001                       # a property row's frame: as the move starts, whatever frame it starts at
+HIDE = 0x818f                        # the fighter hidden (1) or shown again (0): the tag-out's hide
 
 
 # ------------------------------------------------------------------------------------------------ lists
@@ -297,6 +299,21 @@ def twin(x, tpl, kind):
     return out
 
 
+def hidden_at(rows, entry):
+    """X's property rows for a twin that starts at X's frame `entry` (XT at the tag row's, XDA at the hit's, each
+    keeping X's frame count): its start rows fire as the twin starts, its rows before `entry` never do. A hide X sets
+    at its start and undoes before then (Victor's IAI 1,2,2 #1675: Tekken 8 hides him from the start to frame 8; Master
+    Raven's Nj_commet01 to 6) hid the twin for good (unseen, and no hit). The hide rows up to `entry` become the state
+    they leave there: a start row while he is hidden then, none once shown again (TTT2's own twins move X's rows before
+    their entry to it, Co_IHarisenT's to 34). -> X's rows (the list itself when nothing changes)"""
+    early = [p for p in rows if p['id'] == HIDE and (p['frame'] == START or p['frame'] < entry)]
+    if all(p['frame'] == START for p in early):
+        return rows
+    last = sorted((p for p in early if p['frame'] != START), key=lambda p: p['frame'])[-1]
+    out = [p for p in rows if all(p is not q for q in early)]
+    return [dict(frame=START, id=HIDE, value=last['value'])] + out if last['value'] else out
+
+
 def add_tag_assault(tables, tpl, first, name_of, string, finish_hit=()):
     """Every converted bound move X (move index >= first: a 467 hit condition, no 468 one, no tag cancel, active from
     frame 2 on) gets TTT2's Tag Assault after `tpl` (assault_template): its tag row (in a new list: X's rows, the tag
@@ -356,6 +373,11 @@ def add_tag_assault(tables, tpl, first, name_of, string, finish_hit=()):
             then = [c for c in keep if row_kind(tables, c) not in tpl['before']]
 
         xt['cancel'] = write(tables, 'cancels', first_ + [exit_] + then + [dict(end)])
+        # X's property rows, as they stand at XT's first frame (hidden_at; X's own list unless a hide changes)
+        xps = props(tables, x['extraprops'])
+        at_tag = hidden_at(xps, tag['start_frame'] + 1)
+        if at_tag is not xps:
+            xt['extraprops'] = write(tables, 'extra_move_properties', at_tag + [dict(frame=0, id=0, value=0)])
         xda = twin(x, tpl, 'XDA')
         xda['name'] = name(name_of(i) + 'DA')
         xda['hit_condition'] = tpl['no hit']
@@ -364,8 +386,9 @@ def add_tag_assault(tables, tpl, first, name_of, string, finish_hit=()):
                      win_end=n + b, start_frame=n + s) for dr, bt, rq, ex, op, mid, a, b, s in tpl['back']]
         xda['cancel'] = write(tables, 'cancels', back + [dict(end)])
         # X's property rows themselves (not copies: the converter renumbers effects in them after run()), less the
-        # ones the donor's XDAs leave out, then the ones they add
-        own = [p for p in props(tables, x['extraprops']) if p['id'] not in tpl['leaves out']]
+        # ones the donor's XDAs leave out, as they stand at its first frame (the hit's, from X's first active one on),
+        # then the ones they add
+        own = hidden_at([p for p in xps if p['id'] not in tpl['leaves out']], fa)
         adds = [dict(frame=n + f if plain_frame(f) else f, id=pid, value=v) for f, pid, v in tpl['adds']]
         adds = [p for p in adds if (p['frame'], p['id'], p['value']) not in
                 {(q['frame'], q['id'], q['value']) for q in own}]
