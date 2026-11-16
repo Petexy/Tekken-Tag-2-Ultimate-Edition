@@ -133,11 +133,20 @@ class JointSpotsTest(unittest.TestCase):
         self.assertEqual(got[0], 9)
         self.assertEqual(got[1], (summons8.JOINT_SPOT, 'R_Hand', (5000.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
 
-    def test_short_thick_line_is_a_sphere_at_the_joint(self):
-        """A flashlight's box, its round ends longer than the line; a gun's long thick line stays a line."""
+    def test_short_thick_line_is_a_sphere_at_its_far_end(self):
+        """A flashlight's box, its round ends longer than the line: the ball round the end away from the joint (the
+        cap that reaches out), whichever end that is; a gun's long thick line stays a line."""
         got = self.spots(Sphere(121, (0, -160, 160), 121, (0, 0, 0), 200), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
-        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (0.0, 0.0, 0.0), (0.0, 0.0, 200.0)))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (0.0, -160.0, 160.0), (0.0, 0.0, 200.0)))
         self.assertEqual(got[1], 9)
+        got = self.spots(Sphere(121, (0, 0, 0), 121, (0, -160, 160), 200), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
+        self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (0.0, -160.0, 160.0), (0.0, 0.0, 200.0)))
+        self.assertEqual(got[1], 9)
+        # its point stays in Tekken 8's box: the cap's centre one radius ahead, the line back to the joint inside it
+        got = self.spots(Sphere(121, (0, -160, 160), 121, (0, 0, 0), 200),
+                         Sphere(121, (-50, 0, 200), 121, (-50, 0, 200), 250))
+        self.assertEqual(got[2], (summons8.JOINT_SPOT, 'R_Hand', (-50.0, 0.0, 200.0), (0.0, 175.0, 175.0)))
+        self.assertEqual(got[3], 9)
         got = self.spots(Sphere(121, (2000, 0, 0), 121, (0, 0, 0), 150), Sphere(0, (0, 0, 0), 0, (0, 0, 0)))
         self.assertEqual(got[0], (summons8.JOINT_SPOT, 'R_Hand', (2000.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
 
@@ -175,6 +184,23 @@ class WideRootBoxTest(unittest.TestCase):
         place = lambda code: code
         self.assertIs(summons8.summary(hb, place, True, True)[1], column)
         self.assertIsNot(summons8.summary(hb, place, True, False)[1], column)
+
+
+class NamedRootSpotTest(unittest.TestCase):
+    def test_a_named_end_at_the_ground_origin(self):
+        """A definition's PREFABS hit_spots end given as an offset from the ground origin (Clive's Phoenix 2,1: the
+        hand's path, then a column's upright line where boxes 0 and 1 were the hand alone): the move's clip takes the
+        offsets as its root points, the move their codes; a thick column left out of the summary stays out (no line
+        across it)."""
+        top, low = (0.0, 1300.0, 1200.0), (0.0, 400.0, 1200.0)
+        hb = [Sphere(13, ZERO, 0, ZERO), Sphere(13, ZERO, 12, ZERO),
+              Sphere(125, (0, 1300, 800), 125, (0, 400, 800), 100), Sphere(125, top, 125, low, 100)]
+        k = Moveset([dict(hitboxes=hb, hitbox=bytes([13, 0, 13, 12]), key=4)])
+        k.move_name = lambda i: 'Pnx_21'
+        d = types.SimpleNamespace(WEAPONS=[], PREFABS={'hit_spots': {'Pnx_21': (13, 0, top, low)}})
+        got = summons8.prepare(k, d, log=lambda s: None, place=place)
+        self.assertEqual(got, {4: [top, low]})
+        self.assertEqual(bytes(k.tables['moves'][0]['hitbox']), bytes([13, 0, 0xFA, 0xFB]))
 
 
 class SummonsTest(unittest.TestCase):
@@ -596,6 +622,26 @@ class RootConverterTest(unittest.TestCase):
         a = animation.decode(cv.animation(fighter.clip(TR.smooth_values(10)), roots=list(GENERIC)))
         self.assertEqual(a['values'].shape[1], 27)
         self.assertEqual(cv.last_pairs, 2)
+
+    def test_spot_joint_outside_the_pairs(self):
+        """A joint root points follow that no pair needs (a definition's HIT_JOINTS: Victor's R_Have) joins the small
+        skeleton with its own stored translations, and does not count as a moving weapon; one the fighter lacks is
+        an error."""
+        bon = TR.ttt2_bon()
+        fighter = TA.Fighter(bon)
+        plain = T8.Converter(fighter.sk, bon)
+        cv = T8.Converter(fighter.sk, bon, spots=['Root'])
+        self.assertNotIn('Root', plain.sub.index)
+        self.assertEqual((cv.spots, cv.moved), ({'Root'}, set()))
+        values = TR.smooth_values(6)
+        clip = panm.Animation(fighter.clip(values))
+        np.testing.assert_allclose(cv.channels(clip)[0], plain.channels(clip)[0], atol=1e-9)
+        r = fighter.names.index('Root')
+        fighter.t[r] = fighter.t[r] + (3.0, 40.0, 12.0)     # (cm: the clip's own place for it, not the bind's)
+        _, _, Wp = cv.fk(panm.Animation(fighter.clip(values)))
+        np.testing.assert_allclose(Wp[:, cv.sub.index['Root']], np.repeat([fighter.t[r] * T8.CM], 6, 0), atol=1e-3)
+        with self.assertRaises(ValueError):
+            T8.Converter(fighter.sk, bon, spots=['No_Such_Joint'])
 
     def test_provider_roots(self):
         """Clips of root moves are converted with their offsets, even where TTT2 has the clip's original."""
