@@ -144,6 +144,57 @@ class InstallFolderWithAccent(unittest.TestCase):
         self.assertEqual(unreadable_letters('C:/Novit\u00e0/Jos\u00e9'),'')
         self.assertEqual(unreadable_letters('C:/\u6e38\u620f/TTT2'),'\u620f\u6e38')
 
+class OlderGame(unittest.TestCase):
+    """Testers played packs of the 0.6.2 importer on a game an 0.5.1 launcher built (the launcher had updated itself,
+    the game only says an update is ready): no summons or effects, other hit reactions. While the game is from an
+    older launcher, Play and adding or updating characters wait for its Update."""
+    def setUp(self):
+        temp=tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        self.root=Path(temp.name); self.build=self.root/'build-windows-tools'; self.build.mkdir()
+        (self.root/'launcher/builder').mkdir(parents=True)
+        (self.root/'launcher/builder/CMakeLists.txt').write_text('set(TTT2_LAUNCHER_VERSION 0.6.2)\n')
+        self.settings=Settings(self.build,self.root/'settings.json',self.root)
+        self.game=self.root/'game'; self.game.mkdir()
+        self.settings.values.update(data=str(self.root/'TTT2Ultimate'),packs=str(self.root/'packs'),
+                                    saves=str(self.root/'saves'),install=str(self.game),tools=str(self.root/'tools'))
+    def built(self,files):
+        (self.build/'ttt2-installed-version.txt').write_text(files+'\n',encoding='utf-8')
+    def test_only_an_older_version_is_blocked(self):
+        from backend import older_game
+        release='0.6.2 d9258007cb1c9533303c4fb917898bec14e19873'
+        self.built('0.5.1 79795183ad3a7f9fd51a4c8d2a8cd1b3fde3e6a1')
+        self.assertEqual(older_game(self.settings,release),'',"no game installed (a fresh setup): nothing waits")
+        (self.game/'.ttt2-install').touch()
+        self.assertEqual(older_game(self.settings,release),'0.5.1')
+        self.assertEqual(older_game(self.settings,'0.6.2'),'0.5.1')
+        for game,why in (('0.6.2 d9258007cb1c9533303c4fb917898bec14e19873','the game is current'),
+                         ('0.6.2 0123456789abcdef0123456789abcdef01234567','a test build\'s other commit'),
+                         ('0.6.2','the same version'),('0.7.0','a newer version'),
+                         ('0.10.0 aaaaaaa','numbers, not text'),('next','not a version')):
+            self.built(game); self.assertEqual(older_game(self.settings,release),'',why)
+        self.built('0.9.1'); self.assertEqual(older_game(self.settings,'0.10.0'),'0.9.1')
+        (self.build/'ttt2-installed-version.txt').unlink()
+        self.assertEqual(older_game(self.settings,release),'',"what built it is not known")
+    def test_note(self):
+        from backend import older_game_note
+        note=older_game_note('0.5.1','0.6.2 d9258007cb1c9533303c4fb917898bec14e19873')
+        self.assertIn('(0.5.1; this one is 0.6.2)',note)
+        self.assertIn('update it to play and to add or update characters',note)
+        self.assertNotIn('ttt2',note.lower())
+    def test_the_game_update_ends_the_wait(self):
+        # (The game card's Update: setup_game.upgrade, then what the game is from is recorded.)
+        from backend import older_game, worker
+        import self_update
+        (self.game/'.ttt2-install').touch(); self.built('0.5.1')
+        files=self_update.files_id(self.root)
+        self.assertEqual(older_game(self.settings,files),'0.5.1')
+        with mock.patch('setup_game.upgrade') as upgrade, mock.patch.dict(os.environ), \
+             mock.patch.object(sys,'path',sys.path[:]):
+            worker(self.settings,'upgrade',[])
+        upgrade.assert_called_once()
+        self.assertEqual((self.build/'ttt2-installed-version.txt').read_text().strip(),'0.6.2')
+        self.assertEqual(older_game(self.settings,files),'')
+
 class T8Extraction(unittest.TestCase):
     def extract(self, names, complete=True):
         from backend import worker

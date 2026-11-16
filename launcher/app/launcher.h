@@ -103,6 +103,10 @@ private:
     // runs, the card is shown again once it ends.
     bool game_running() const;
     void watch_game();
+    // While the installed program is from an older launcher than the kit
+    // (built_older): what the window says, as Play, adding and updating
+    // characters wait for its Update (in Play's place); else empty.
+    std::string older_game() const;
     void game_installed(GtkWidget* card);
     void game_unfinished(GtkWidget* card);
     void game_not_installed(GtkWidget* card);

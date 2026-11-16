@@ -32,6 +32,19 @@ std::optional<std::vector<unsigned>> version_numbers(std::string_view text);
 // (a missing number is 0: 0.2 is 0.2.0); none when either is not a version.
 std::optional<int> compare_versions(std::string_view a, std::string_view b);
 
+// The launcher version a kit's version names (kit_version, built_version):
+// "0.6.2" of "0.6.2-1cab8c68f39b".
+std::string_view launcher_version(std::string_view kit_version);
+// Whether an install's program, built by the kit `built` names
+// (built_version), is from an older launcher than this one's kit (`kit`,
+// kit_version). The characters this launcher's importer makes need what the
+// newer program has (their summons, effects and hit reactions: an older one
+// plays them without), so it is updated before it is played, and before
+// characters are added or updated. Not when either is unknown or not a
+// version (a program ttt2 --install made), nor for the same version (another
+// commit of it) or a newer one.
+bool built_older(std::string_view built, std::string_view kit);
+
 struct Release {
     std::string version;    // its tag without the "v"
     std::string tag;
