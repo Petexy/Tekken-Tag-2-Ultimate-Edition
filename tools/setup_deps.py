@@ -2,12 +2,25 @@
 """Fetch the pinned sources the build needs into third_party/."""
 
 import argparse
+import functools
 import json
 import os
 from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+@functools.lru_cache(maxsize=None)
+def git_for_windows():
+    """Whether the Git on PATH is Git for Windows (MinGit too: "git version 2.56.0.windows.1"), whose cURL has the
+    Windows TLS backend; another (MSYS2's, Cygwin's) has OpenSSL only and would stop at http.sslBackend=schannel."""
+    try:
+        said = subprocess.run(["git", "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              text=True).stdout
+    except OSError:
+        return False
+    return ".windows." in said
 
 
 def git(directory, *args, capture=False, check=True):
@@ -17,6 +30,11 @@ def git(directory, *args, capture=False, check=True):
     options = ["-c", "safe.directory=*"]
     if os.name == "nt":
         options += ["-c", "core.longpaths=true"]
+        # HTTPS trusts what Windows trusts (its certificate store, as curl.exe for the SDL download): Git's own
+        # bundle setting can point at a file that is gone, e.g. one a former Git for Windows left in the user's or
+        # the PC-wide Git settings, and then every download fails ("error adding trust anchors from file").
+        if git_for_windows():
+            options += ["-c", "http.sslBackend=schannel", "-c", "http.schannelUseSSLCAInfo=false"]
     # (stderr is not captured: what Git says goes into the setup log)
     return subprocess.run(["git", *options, "-C", str(directory), *args], check=check,
                           stdout=subprocess.PIPE if capture else None, text=True)
