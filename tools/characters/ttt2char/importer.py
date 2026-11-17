@@ -600,7 +600,8 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         plan = snakes8.prepare(k, d, log=sub)       # (a summoned model's clips: convert/snakes8.py)
         prefab_plan = prefabs8.prepare(k, d, log=sub)   # (its summoned creatures: convert/prefabs8.py)
         converter = anim.Converter(anim.load_skeleton(source.store, d.TEKKEN8_CODE), bone.read(bon),
-                                   weapons=summons8.weapons(d, k), hands=True)
+                                   weapons=summons8.weapons(d, k), hands=True,
+                                   spots=sorted({j for j, _ in getattr(d, 'HIT_JOINTS', {}).values()}))
         if prefab_plan:
             converter.scene = prefabs8.HoldClips(own_bank)
         snakes = snakes8.Snakes(source.store, d, converter.cal.offsets[snakes8.weapon(d)['parent']], log=sub) \

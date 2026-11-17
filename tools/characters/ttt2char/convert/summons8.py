@@ -39,8 +39,9 @@ for Tekken 7 fighters (title/roster.cpp, weapons; convert/weapons.py):
   {'offset': ...}) hits from the weapon's slot; an end with no offset hits from the body code; any other offset is a
   point of its own: prepare() makes it a root point whose pair follows the joint through the clip (a spot
   (JOINT_SPOT, joint, offset, delta): tekken8/anim.py pair_values). A sphere (both ends one point, a radius; or a thick
-  line from the joint shorter than two radii: the sphere at the joint) has no TTT2 form: a line of its radius from the
-  point forward, the second box's forward and up, from the body code.
+  line from the joint shorter than two radii: the sphere round its far end) has no TTT2 form: a line of its radius from
+  the point forward, the second box's forward and up, from the body code (all inside Tekken 8's box: the body code
+  sits at the joint).
 
 Written for this project from the files themselves (no third-party code).
 """
@@ -261,8 +262,13 @@ def joint_spots(boxes, joints, standard, every=()):
         at, to = plain(h.a), plain(h.b)
         if at == to:
             return at
-        near = not any(at) or not any(to)               # (a thick line from the joint, shorter than its round ends)
-        return (0.0, 0.0, 0.0) if near and float(np.linalg.norm(np.subtract(at, to))) <= 2 * h.radius else None
+        # a thick line from the joint, shorter than its round ends: the ball round its far end, the end cap that
+        # reaches out (Victor's b+2, his flashlight's box: the joint at his hand, the cap 0.18 m past it; from the
+        # joint his line stopped that much short of Tekken 8's reach, and never met an opponent)
+        if not any(at) or not any(to):
+            far = to if not any(at) else at
+            return far if float(np.linalg.norm(far)) <= 2 * h.radius else None
+        return None
     radius = {}
     for h in tuple(boxes) + tuple(every):
         if h.loc in joints and centre(h) is not None and h.radius >= SPHERE_RADIUS:
