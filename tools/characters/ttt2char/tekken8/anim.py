@@ -51,8 +51,9 @@ as for the drivers) and O_b the calibration offset of the TTT2 parent b (its wor
                                             fighter's frame before the turn, x left, y up, z forward), k the clip's
                                             root scale, s the skeleton's size scale, ch1 / H HARA_ROT1's channel 1
                                             and rotation (channel 3); a joint's point (summons8.JOINT_SPOT):
-                                            o = C (P_joint + S_joint offset - P_Top) + delta, each frame (C: the
-                                            source's frame to this one, retarget.Calibration)
+                                            o = T^T (C (P_joint + S_joint offset - P_Top) + delta), each frame (C:
+                                            the source's frame to this one, retarget.Calibration; T the turn
+                                            channel's rotation: without it the point stood off the body by T)
     a 'snakes' head under b:                R = I, t = the most forward (+z) of the heads of the summoned model's
                                             clip the move starts, given in b's frame (convert/snakes8.py: heads),
                                             from its start frame on (before it: the clip's first frame)
@@ -485,6 +486,10 @@ def root_point(conv, WR, Wp, values, k, o, follows=None, travel=None):
         j = idx[o[1]]
         o = (Wp[:, j] + np.einsum('fij,j->fi', WR[:, j], np.asarray(o[2], np.float64)) - Wp[:, idx[TOP]]) @ \
             conv.cal.C.T + np.asarray(o[3], np.float64)
+        # (turned back by the turn T: without it the point stood off the body by T where the turn is not 0; Victor's
+        # CH d/b+4 shots, his MUKI turned -68 degrees, went 71 and 76 degrees to his right, 1.6 m to his side, where
+        # Tekken 8's gun points straight at the opponent)
+        o = np.einsum('fji,fj->fi', animation.local_rotation(values[:, retarget.TURN], conv.kind), o)
     else:
         o = np.asarray(o, np.float64)[None]
     return np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))

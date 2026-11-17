@@ -467,7 +467,8 @@ class PairValuesTest(unittest.TestCase):
 
     def test_joint_point(self):
         """A root point following a joint: the joint's point in the fighter's frame (the source's frame turned by the
-        calibration's C), each frame, plus its delta."""
+        calibration's C), each frame, plus its delta, turned back by the turn channel's rotation T (T^T: without it the
+        point stood off his body by T, in game Victor's shots 70 degrees off his gun where his clip turns)."""
         C = TR.random_rotation(np.random.default_rng(8))
         conv = types.SimpleNamespace(sub=types.SimpleNamespace(index=dict(self.idx, **{T8.TOP: self.idx['Anc']})),
                                      pairs=self.pairs, scale=0.98, kind=animation.COMPRESSED,
@@ -481,8 +482,16 @@ class PairValuesTest(unittest.TestCase):
         world = 0.98 * self.values[:, 1] + np.einsum('fij,fj->fi', H, t)
         i = self.idx
         at = self.Wp[:, i['Joint']] + np.einsum('fij,j->fi', self.WR[:, i['Joint']], off) - self.Wp[:, i['Anc']]
-        np.testing.assert_allclose(world, 0.98 * k * (at @ C.T + delta), atol=1e-6)
+        turn = animation.local_rotation(self.values[:, RT.TURN], animation.COMPRESSED)
+        self.assertGreater(RT.angle(turn, np.eye(3)[None]).max(), 0.5)            # (the values turn)
+        np.testing.assert_allclose(world, 0.98 * k * np.einsum('fji,fj->fi', turn, at @ C.T + delta), atol=1e-6)
         self.assertLess(RT.angle(R, np.eye(3)[None]).max(), 1e-9)
+        still = self.values.copy()                                                  # (no turn: as before)
+        still[:, RT.TURN] = (-np.pi / 2, 0.0, 0.0)
+        R, t = self.local(T8.pair_values(conv, self.WR, self.Wp, still, k, [spot, spot], 5), 4)
+        Hs = animation.local_rotation(still[:, RT.HARA_CH], animation.COMPRESSED)
+        np.testing.assert_allclose(0.98 * still[:, 1] + np.einsum('fij,fj->fi', Hs, t), 0.98 * k * (at @ C.T + delta),
+                                   atol=1e-6)
 
     def test_ground(self):
         """A ground pair: the scene's origin (where Top is at the clip's frame 0); not held, where Top is each frame."""
