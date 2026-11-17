@@ -171,6 +171,31 @@ REQ_OVERRIDE = {'t7': {}, 't8': {}}                  # requirement ids mapped by
 # of Heihachi's (df+1,2 among them); the reaction map makes the slam the donor's bound reaction, which TTT2 plays only
 # under 467: a slam plays the donor's air hit after a bound (conv_hitconds), unless the definition makes it a bound
 T7_AIR = {'t7': 614, 't8': 723}
+# Tekken 8's tornado (724; the requirement function's case 0x141881bd0, build 26155785) is 723's "opponent airborne"
+# and the opponent's tornado counter (+0x1ac4) unspent, >= 0 (property 0x82c5: 0 counts it down, the tornado reactions
+# start with it; any other value sets it to 0). On an opponent on its feet the entry is false and the move's next
+# entries play. A string whose earlier hit lifts a standing opponent meets it airborne with the counter unspent, though:
+# there the tornado entry is how the string launches (Victor's u/f+4, Miary Zo's u/f+4,4, and her b+1,4 and BAO.4
+# when their first hit is a counter hit: Wavu +66a .. +73a, "Instant Tornado"); with the entry false the hit played the
+# air entry, a low push away, the opponent down as the attacker recovered. In such a string's moves (lifted_screws) the
+# entry tests TTT2's "opponent airborne" (466, through 723's map) and that the string began on an opponent on its feet,
+# and keeps its reaction, which spends nothing (SCREW_SPEND): a launch, with no tornado state and no bound. The same
+# string in a juggle (and every other tornado move, which meets an airborne opponent only in a juggle) plays its air
+# entry, as TTT2's juggles have no tornado (REQ_FALSE). "Began on its feet" is a moveset variable no TTT2 moveset of
+# the donor's uses and no id of the fighter's maps to: the earlier hit's cancel list sets it to LIFT_FRAMES on each
+# frame up to its first active one, then to 0 when the opponent is airborne (two action rows), and the tornado entry
+# tests it >= 1. The first active frame too: a string can enter the attack that late (Reina's 3 becomes the 3,2 one,
+# #1585, at frame 17 of its 18), and a hit frame's cancel rows run before the hit's reaction is picked (the opponent
+# not lifted yet). lifted_screws keeps only a tornado move those attacks' lists alone enter, attacks nothing enters
+# past that frame: else the variable could be one left over from another string's lift (a second launch in a juggle,
+# after its bound). LIFT_VAR first: one of the
+# variables the game counts down each frame (1..3, var_ids), so the state ends by itself (the tornado hits 23 .. 35
+# frames after the last set, LIFT_FRAMES is 2 s), which neither donor's moveset (Jun's, Lars's) uses, 11 of TTT2's 66
+# do, and taking no flag slot's place (Miary Zo's flag slots take every FLAG8_VARS one); else a FLAG8_VARS one the
+# flag slots left free (it keeps its value until the next such attack). Without a free variable the entry stays false.
+# Tekken 7's screws stay false
+LIFTED_SCREW = {'t7': False, 't8': True}
+LIFT_VAR, LIFT_FRAMES = 2, 120
 # A slam is also told by its standing reaction (lands_at_once): airborne and falling in its first frame only, then
 # down (Tekken 7's aDw_tataki). Tekken 8 has that move unnamed, which the reaction map can pair with an air hit:
 # after a bound, Reina's d/f+1,2 played TTT2's air spin aDw_ym_y01L with the slam's push down
@@ -395,7 +420,10 @@ PROP_OVERRIDE['t8'].update(LATCH_PROPS['t8'])        # the latches' properties (
 # >= 232 + k / 243..245, <= 261 + k / 272..274, == 290 + k / 301..303; set, add, subtract 0x806C + 3(k - 4) / 0x8081
 # + 3(k - 8) and the next two.
 def var_ids(k):
-    """TTT2's ids of moveset variable k (4..10): (>= test, <= test, == test, set, add, subtract)."""
+    """TTT2's ids of moveset variable k (4..10): (>= test, <= test, == test, set, add, subtract); for 0..3 (1..3
+    counted down each frame) the tests and the set: (>= test, <= test, == test, set)."""
+    if 0 <= k <= 3:
+        return VAR_GE + k, VAR_LE + k, 290 + k, VAR_SET[k]
     if 4 <= k <= 7:
         return VAR_GE + k, VAR_LE + k, 290 + k, 0x806C + 3 * (k - 4), 0x806D + 3 * (k - 4), 0x806E + 3 * (k - 4)
     if 8 <= k <= 10:
@@ -927,6 +955,75 @@ class ParamAsValue:
         self.row['param' if key == 'value' else key] = v
 
 
+def lifted_screws(k, screw):
+    """(The hit-condition lists (their first entries) of k's moves with a `screw` entry that a string enters after an
+    earlier hit of its own lifted a standing opponent (LIFTED_SCREW), {the cancel list of such an attack: its first
+    active frame}): a cancel row (a group's too) of an attack into the move, open at or after the attack's first active
+    frame, where the attack's unconditional entry plays a move with airborne frames (its standing, counter-hit or
+    crouching reaction). A row before the hit picks a variant of the attack (Miary Zo's d+1+2 -> #1675 at frames
+    14-17, active 19-20), whose hit nothing lifted. Only a move such attacks' cancel lists are every way into (no other
+    list's row or group's, no transition, reaction or projectile; no other move with its hit-condition list), each
+    list of attacks with one first active frame that nothing enters keeping its frame past that one: their lift_rows
+    then set the variable the entry tests afresh as each such string starts. Entered another way the move would find
+    it left over from an earlier string's lift and launch again in its juggle (Azazel's d+1+2, a command from his
+    stance too, after his 1517 lifted: past the bound, a second launch where Tekken 8's counter is spent)."""
+    moves, extras = k.tables['moves'], k.tables['cancel_extras']
+
+    def move(mid):
+        r = k.resolve_alias(mid)
+        return r if r is not None and r < len(moves) else None
+
+    def lifts(mv):
+        hits = M.hitconds(k, mv.get('hit_condition'))
+        if not mv.get('hitlevel') or not mv.get('first_active') or not hits or hits[-1][0]:
+            return False
+        r = k.tables['reactions'][hits[-1][2]]
+        return any(t is not None and moves[t]['airborne_start'] > 0
+                   for t in (move(r[f]) for f in ('default', 'ch', 'crouch', 'crouch_ch')))
+
+    def rows(i):                                        # a cancel list's rows, its groups' too
+        out = []
+        for c in M.cancels(k, i):
+            if c['direction'] == M.GROUP:
+                out += [g for g in M.cancels(k, c['move_id'], 'group_cancels', M.GROUP_END)
+                        if g['direction'] != M.GROUP_END]
+            elif c['direction'] != M.LIST_END:
+                out.append(c)
+        return out
+
+    screws = {i for i, mv in enumerate(moves)
+              if any(c == screw for rl, _, _ in M.hitconds(k, mv.get('hit_condition')) for c, _ in rl)}
+    if not screws:
+        return set(), {}
+    fas = collections.defaultdict(set)                  # cancel list -> its lifting attacks' first active frames
+    for mv in moves:
+        if lifts(mv) and mv['cancel'] is not None:
+            fas[mv['cancel']].add(mv['first_active'])
+    lifting = {ci: min(f) for ci, f in fas.items() if len(f) == 1}
+    lists = [(ci, rows(ci)) for ci in {mv['cancel'] for mv in moves}]
+    lists += [(None, rows(p['cancel'])) for p in k.tables['projectiles']]
+    into = collections.defaultdict(set)                 # move -> the cancel lists entering it (None: another way)
+    for ci, rs in lists:
+        for c in rs:
+            t = move(c['move_id'])
+            if t is None:
+                continue
+            into[t].add(ci)
+            fa = lifting.get(moves[t]['cancel'])        # (a lifting list's move entered past its lift rows' frames)
+            if fa and c['extradata'] is not None and extras[c['extradata']]['value'] & tagcombo.KEEP_FRAMES and \
+                    max(c['win_end'], c['start_frame']) > fa:
+                lifting[moves[t]['cancel']] = None
+    for t in [move(mv['transition']) for mv in moves] + [move(a) for a in k.aliases] + \
+            [move(r[f]) for r in k.tables['reactions'] for f in REACTION_MOVE_FIELDS if r[f] is not None]:
+        into[t].add(None)
+    kept = {t for t in screws if into[t] and all(lifting.get(ci) for ci in into[t])
+            and any(move(c['move_id']) == t and c['win_end'] >= lifting[ci] for ci in into[t] for c in rows(ci))}
+    out = {moves[t]['hit_condition'] for t in kept}
+    out -= {mv['hit_condition'] for i, mv in enumerate(moves) if i not in kept}
+    lifters = {ci: lifting[ci] for t in kept if moves[t]['hit_condition'] in out for ci in into[t]}
+    return out, lifters
+
+
 def rev32(v):
     return int('{:032b}'.format(v)[::-1], 2)
 
@@ -1067,6 +1164,9 @@ class Converter:
     _standing8 = None                   # standing8's set
     ttt2_floats8 = ()                   # names of TTT2's moves that leave the ground (other_float8), by the importer
     guard_copies8 = None                # {Tekken 8 reaction: (its guard copy, the donor's move, guard rows)}
+    _lifted = None                      # (lifted_screws' lists, its attacks' cancel lists, the variable) (lifted)
+    free_vars = ()                      # the variables LIFTED_SCREW can take (flag8_slots)
+    _lift_reqs = None                   # lift_rows' requirement lists
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
         """k: the fighter's moveset (Tekken 7: tkmvst.read; Tekken 8: tekken8.motbin.read, its moves named),
@@ -1626,8 +1726,8 @@ class Converter:
                 ids.add(x['id'])
                 if x['id'] == FLAG8_PROP[g]:
                     values[x['value']].add(x.get('value3', 0))
-        why = {v: 'a state flag of the definition' for v in FLAG8_VARS
-               if v in set(self.flag_props.values()) | {v for v, _ in self.flag_reqs.values()}}
+        flags = set(self.flag_props.values()) | {v for v, _ in self.flag_reqs.values()}
+        why = {v: 'a state flag of the definition' for v in FLAG8_VARS if v in flags}
         donor = {r['condition'] for r in d.tables['requirements']}
         for t in ('extra_move_properties', 'move_begin_props', 'move_end_props'):
             donor |= {x['id'] for x in d.tables[t]}
@@ -1655,6 +1755,10 @@ class Converter:
             else:
                 out[s] = free.pop(0)
                 self.stats['Tekken 8 flag slot %d -> moveset variable %d' % (s, out[s])] += 1
+        # (the variables LIFTED_SCREW can take: LIFT_VAR when no state flag, the donor's moveset or the fighter's ids
+        # use it, then what the flag slots left)
+        lift = LIFT_VAR not in flags and not (donor | mapped.keys()) & set(var_ids(LIFT_VAR))
+        self.free_vars = [LIFT_VAR] * lift + free
         return out
 
     def flag8_test(self, slot, value):
@@ -2010,6 +2114,8 @@ class Converter:
             # a projectile whiff's test (latch == 0) needs the hit's row: PROJECTILE_WHIFF)
             out = [self.hit_row(hit, v) for v in sorted({v or HELD[HIT_NOW] for v in tested})] + out
             self.stats['Tekken 8 "the move hit": cancel lists keeping it in a latch'] += 1
+        if table == 'cancels':                    # "the string began on an opponent on its feet" (LIFTED_SCREW)
+            out = self.lift_rows(i) + out
         if table == 'cancels' and self.flag8:      # the flag slots' countdown as the move starts (FLAG8)
             out = self.flag8_block() + out
         return out
@@ -3692,16 +3798,56 @@ class Converter:
         nxt = self.k.resolve_alias(mv['transition'])
         return nxt is not None and nxt < len(moves) and REST[2][1].search(self.name(nxt)) is not None
 
+    def lifted(self):
+        """(lifted_screws' hit-condition lists, its attacks' {cancel list: first active frame}, the moveset variable
+        telling the string began on an opponent on its feet) when the game has LIFTED_SCREW and a variable is free;
+        else nothing (the tornado entries stay false)."""
+        if self._lifted is None:
+            g = self.game
+            self._lifted = ((), {}, None)
+            if LIFTED_SCREW[g]:
+                hcs, lifters = lifted_screws(self.k, SCREW[g])
+                if hcs and not self.free_vars:
+                    self.stats['Tekken 8 tornado entries of a string that lifts: no free moveset variable (false)'] += 1
+                elif hcs:
+                    self._lifted = (hcs, lifters, self.free_vars[0])
+                    self.stats['Tekken 8 strings that lift -> moveset variable %d' % self.free_vars[0]] += 1
+        return self._lifted
+
+    def lift_rows(self, i):
+        """The action rows first in the cancel list at i of an attack whose hit lifts a standing opponent into a
+        string's tornado move (LIFTED_SCREW): on each frame up to the first active one, the variable set to
+        LIFT_FRAMES, then to 0 when the opponent is airborne."""
+        _, lifters, var = self.lifted()
+        if i not in lifters:
+            return []
+        if self._lift_reqs is None:
+            self._lift_reqs = [tagsystem.write(self.T, 'requirements', test + [
+                {'condition': var_ids(var)[3], 'param': 0 if test else LIFT_FRAMES}, {'condition': TT_END, 'param': 0}])
+                for test in ([], [{'condition': tagsystem.AIR, 'param': 0}])]
+        self.stats['Tekken 8 strings that lift: cancel lists telling a standing opponent'] += 1
+        return [dict(self.action_row(r, 1), win_end=lifters[i]) for r in self._lift_reqs]
+
     def conv_hitconds(self, i):
         if i is None:
             return None
+        g = self.game
+        hcs, _, var = self.lifted()
         out = []
         t = self.k.tables['hit_conditions']
         j = i
         while j < len(t):
             h = t[j]
             last = not M.reqs(self.k, h['req'])
-            r, ok = self.conv_reqs(h['req'])
+            if i in hcs and SCREW[g] in [c for c, p in M.reqs(self.k, h['req'])]:      # (LIFTED_SCREW)
+                r, ok = self.conv_reqs(h['req'], {SCREW[g]: self.map_req(T7_AIR[g])})
+                if ok:                            # ... and the string began on an opponent on its feet
+                    r = tagsystem.write(self.T, 'requirements', [
+                        {'condition': c, 'param': p} for c, p in tagsystem.reqs(self.T, r)] + [
+                        {'condition': var_ids(var)[0], 'param': 1}, {'condition': TT_END, 'param': 0}])
+                    self.stats['Tekken 8 tornado entries of a string that lifts -> "opponent airborne"'] += 1
+            else:
+                r, ok = self.conv_reqs(h['req'])
             if ok:
                 rl = [c for c, p in M.reqs(self.k, h['req'])]
                 rx = self.conv_reaction(h['reactions']) if h['reactions'] is not None else None
