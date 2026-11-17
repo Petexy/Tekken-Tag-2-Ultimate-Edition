@@ -141,7 +141,38 @@ class DependencyCheckout(unittest.TestCase):
     def test_windows_git_gets_process_local_longpath_option(self):
         with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module.subprocess,'run') as run:
             self.module.git('dependency','status')
-            self.assertEqual(run.call_args.args[0][:7],['git','-c','safe.directory=*','-c','core.longpaths=true','-C','dependency'])
+            self.assertEqual(run.call_args.args[0][:5],['git','-c','safe.directory=*','-c','core.longpaths=true'])
+    def test_windows_git_trusts_the_windows_certificate_store(self):
+        # a stale http.sslCAInfo in the user's or the PC-wide Git settings (a former Git for Windows') stopped every
+        # download; Windows' own store, as curl.exe has it, is used instead and that bundle setting is ignored
+        with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module.subprocess,'run') as run, \
+                mock.patch.object(self.module,'git_for_windows',return_value=True):
+            self.module.git('dependency','fetch')
+            command=run.call_args.args[0]
+            self.assertEqual(command[command.index('-C'):],['-C','dependency','fetch'])
+            options=command[1:command.index('-C')]
+            self.assertIn('http.sslBackend=schannel',options);self.assertIn('http.schannelUseSSLCAInfo=false',options)
+            self.assertTrue(all(options[k]=='-c' for k in range(0,len(options),2)))
+    def test_other_windows_gits_keep_their_own_certificates(self):
+        # MSYS2's or Cygwin's Git has no Windows TLS backend: http.sslBackend=schannel would stop it
+        with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module.subprocess,'run') as run, \
+                mock.patch.object(self.module,'git_for_windows',return_value=False):
+            self.module.git('dependency','fetch')
+            self.assertNotIn('http.sslBackend=schannel',run.call_args.args[0])
+    def test_git_for_windows_is_told_by_its_version(self):
+        from types import SimpleNamespace
+        for said,expected in (('git version 2.56.0.windows.1\n',True),('git version 2.47.1\n',False)):
+            self.module.git_for_windows.cache_clear()
+            with mock.patch.object(self.module.subprocess,'run',return_value=SimpleNamespace(stdout=said)):
+                self.assertEqual(self.module.git_for_windows(),expected)
+        self.module.git_for_windows.cache_clear()
+        with mock.patch.object(self.module.subprocess,'run',side_effect=OSError):
+            self.assertFalse(self.module.git_for_windows())
+        self.module.git_for_windows.cache_clear()
+    def test_linux_git_keeps_its_own_certificates(self):
+        with mock.patch.object(self.module.os,'name','posix'), mock.patch.object(self.module.subprocess,'run') as run:
+            self.module.git('dependency','fetch')
+            self.assertEqual(run.call_args.args[0],['git','-c','safe.directory=*','-C','dependency','fetch'])
     def test_only_missing_files_are_restored(self):
         from types import SimpleNamespace
         with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module,'git',return_value=SimpleNamespace(stdout='source/missing header.h\0')) as git:
