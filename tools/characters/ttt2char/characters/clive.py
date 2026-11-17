@@ -10,6 +10,8 @@ SHORT_NAME = 'CLIVE'          # his name on the 2D screens (TTT2 shows short nam
 TEKKEN8_ID = 36               # his FighterId in Tekken 8 (BaseCharacterItem BCI_okm_*; autodump.ROSTER; a DLC fighter)
 TEKKEN8_CODE = 'okm'          # his code in Tekken 8's files (Character/Item/model/unique/okm/)
 CODE = 'clv'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
+REVISION = 1                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
+                              # tornado hits that launch, f+3 / qcf+1 / Phoenix 2,1 reach, Updraft's Tag Assault
 SEX = 'male'
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
