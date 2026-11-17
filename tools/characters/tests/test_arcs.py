@@ -227,6 +227,49 @@ class Arcs(unittest.TestCase):
         self.assertEqual([(x['frame'], x['id']) for x in ps], [(18, 0x801F), (0, 0)])
         self.assertEqual(rows[1]['extraprops'], 2)                          # (the air move itself stays flown)
 
+    def test_tekken8_s_air_move_entered_keeping_the_frames_flies_on_from_that_frame(self):
+        # a jump (arc 110, 6.0 from frame 9) into air move A at its frame 17; A (its own arc at frame 3: A 0, g 8.0;
+        # ground_fall 8) goes on into B at frame 4 keeping the frame count (a Tag Assault tag row: B plays A's clip on
+        # from frame 5), B on hit into C keeping it too (the exit: from frame 1); B and C are A's twins (A's clip and
+        # arc). Their copies fly as A's: the same heights, landing and frames
+        c = moveset.Converter.__new__(moveset.Converter)
+        c.game, c.stats, c.aliases, c.pack0_count = 't8', collections.Counter(), [], 0
+        clip = made_up(10)
+        c.new_anims = [arcs.encode(clip['descriptors'], clip['values'])]
+        c.animation_bytes = lambda aid: (c.new_anims[aid & 0x3FFF], '>', 0)
+
+        def cancel(move, a, b, st, direction=0, extradata=None):
+            return dict(direction=direction, button=0, req=None, extradata=extradata, move_id=move, win_start=a,
+                        win_end=b, start_frame=st)
+
+        def move(props, cancels, gf=0):
+            return dict(anim=0x4000, extraprops=props, cancel=cancels, ground_fall=gf, airborne_end=gf and gf + 1,
+                        first_active=gf and 5, last_active=gf and 6, bitfield=0)
+        end = dict(frame=0, id=0, value=0)
+        c.T = dict(moves=[move(0, 0), move(2, 2, gf=8), move(2, 5, gf=8), move(2, 8, gf=8), move(None, None)],
+                   extra_move_properties=[dict(frame=arcs.BAKED_FRAME, id=arcs.BAKED, value=0x6E3C6409), end,
+                                          dict(frame=arcs.AIR_MARK_FRAME, id=arcs.AIR_MARK, value=0),
+                                          dict(frame=3, id=arcs.ARC, value=0x00500000), end],
+                   cancels=[cancel(1, 1, 8, 17), cancel(0, 0, 0, 0, M.LIST_END),
+                            cancel(2, 1, 4, 4, extradata=0), cancel(4, 9, 9, 9), cancel(0, 0, 0, 0, M.LIST_END),
+                            cancel(3, 1, 32767, 1, extradata=0), cancel(4, 9, 9, 9), cancel(0, 0, 0, 0, M.LIST_END),
+                            cancel(4, 9, 9, 9), cancel(0, 0, 0, 0, M.LIST_END)],
+                   group_cancels=[], cancel_extras=[dict(value=0x401)])
+        c.bake_air8()
+        rows, C = c.T['moves'], c.T['cancels']
+        a = rows[C[rows[0]['cancel']]['move_id']]
+        b = rows[C[a['cancel']]['move_id']]
+        cc = rows[C[b['cancel']]['move_id']]
+        self.assertEqual(len(rows), 8)
+        heights = [animation.decode(c.new_anims[m['anim'] & 0x3FFF])['values'][:, 1, 1] for m in (a, b, cc)]
+        self.assertEqual(a['ground_fall'], 17)
+        for m, h in zip((b, cc), heights[1:]):
+            self.assertEqual((m['ground_fall'], m['airborne_end']), (a['ground_fall'], a['airborne_end']))
+            self.assertEqual(h.shape, heights[0].shape)
+            self.assertTrue(np.allclose(h, heights[0]))
+            self.assertEqual([(x['win_start'], x['start_frame']) for x in C[m['cancel']:m['cancel'] + 2]
+                              if x['move_id'] == 4], [(18, 18)])
+
     def test_a_flight_brought_down_lands_on_its_frame_from_where_it_was(self):
         flight = arcs.fly(1274.0, 50.0, 10.0, {0: (40, 1.0), 20: (10, 20.0)})
         self.assertEqual(len(flight) - 1, 34)

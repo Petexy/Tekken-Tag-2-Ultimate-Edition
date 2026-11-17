@@ -185,6 +185,53 @@ class Assault(unittest.TestCase):
         # a move that has its twin already is left alone
         self.assertEqual(TS.add_tag_assault(T, tpl, first, lambda i: names[T['moves'][i]['name']], string), [])
 
+    def hidden_x(self, *x_props):
+        """A converted bound move X active from 16 (its tag row sf 15: XT starts at its frame 16, XDA at the hit's)
+        with these property rows, given its twins -> (tables, X, XT, XDA, X's property rows)."""
+        d = self.donor()
+        tpl = TS.assault_template(d.t, d.aliases)
+        r = self.reqs
+        first = len(d.t['moves'])
+        x = d.move('Lon_1675', first_active=16, last_active=17,
+                   hit_condition=d.hits((r['bound'], 21, self.r_bound), (r['air'], 21, self.r_air),
+                                        (r['never'], 21, self.r_ground)),
+                   cancel=d.cancels(dict(req=r['hit'], extradata=7, move_id=STANCE), d.end(50)),
+                   extraprops=d.props(*x_props))
+        x_rows = TS.props(d.t, d.t['moves'][x]['extraprops'])
+
+        def string(name):
+            d.names.append(name)
+            return len(d.names) - 1
+        made = TS.add_tag_assault(d.t, tpl, first, lambda i: d.names[d.t['moves'][i]['name']], string)
+        self.assertEqual(made, [(x, x + 1, x + 2)])
+        return (d.t,) + tuple(d.t['moves'][i] for i in made[0]) + (x_rows,)
+
+    def test_twins_start_shown_where_x_shows_again(self):
+        # Tekken 8 hides Victor from the start of IAI 1,2,2's last hit to its frame 8: the twins, which start at 16,
+        # play neither row (he stayed hidden, and never hit)
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (8, TS.HIDE, 0), (12, 0x801f, 7),
+                                              (30, 0x82f9, 5))
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xt['extraprops'])],
+                         [(12, 0x801f, 7), (30, 0x82f9, 5)])
+        self.assertIs(TS.props(t, xt['extraprops'])[0], x_rows[2])     # (X's rows themselves: effects renumbered)
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xda['extraprops'])][:2],
+                         [(12, 0x801f, 7), (30, 0x82f9, 5)])
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, x['extraprops'])],
+                         [(0x8001, TS.HIDE, 1), (8, TS.HIDE, 0), (12, 0x801f, 7), (30, 0x82f9, 5)])
+
+    def test_twins_start_hidden_where_x_hides_again(self):
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (5, TS.HIDE, 0), (10, TS.HIDE, 1),
+                                              (20, TS.HIDE, 0))
+        for twin in (xt, xda):
+            self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, twin['extraprops'])
+                              if p['id'] == TS.HIDE], [(0x8001, TS.HIDE, 1), (20, TS.HIDE, 0)])
+
+    def test_twins_keep_x_s_list_where_its_hide_lasts_past_their_start(self):
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (20, TS.HIDE, 0))
+        self.assertEqual(xt['extraprops'], x['extraprops'])
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xda['extraprops'])][:2],
+                         [(0x8001, TS.HIDE, 1), (20, TS.HIDE, 0)])
+
     def reina_string(self):
         d = self.donor()
         tpl = TS.assault_template(d.t, d.aliases)
