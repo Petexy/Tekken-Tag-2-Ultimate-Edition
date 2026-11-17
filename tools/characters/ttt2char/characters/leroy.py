@@ -10,7 +10,8 @@ SHORT_NAME = 'LEROY'
 TEKKEN7_ID = 53
 TEKKEN7_CODE = 'nsb'
 CODE = 'nsb'
-REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15); effects at his cane's point
+REVISION = 2                  # his moves' sound effects (Tekken 7's bank 15); effects at his cane's point;
+                              # his parries: b+2 and the ones that follow it (2)
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.

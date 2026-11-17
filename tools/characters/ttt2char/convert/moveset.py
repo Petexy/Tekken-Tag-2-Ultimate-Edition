@@ -317,7 +317,21 @@ MOVE_PROP = {'t7': 0x81d4, 't8': 0x8244}
 # itself (VALUE_KIND, sounds, projectiles, move ids, characters) and the ids of the overrides (format facts) are not
 # tested. Reina: 0x803d -> 0x8022 (1233 .. 3856 where TTT2 passes 0 .. 35), 0x8219 -> 0x8110 (1: TTT2 passes 0),
 # 0x8084 -> 0x8056 (TTT2's movesets never use it), her own 143 -> 139 (100: TTT2 tests 17 .. 46), ...
-PARRY = {'t7': {817, 823}, 't8': set()}            # parry lists: not converted
+PARRY = {'t7': {817, 823}, 't8': set()}            # parry lists (the opponent's move in a list): not converted
+# Parries and counters (Leroy's b+2 and the moves that parry as he guards, Geese's counters, Negan's low parries in his
+# bat stance): no-input cancel rows whose requirement is the opponent's attack hitting now, by its hit level, the
+# attacker facing them (Tekken 7's 859 high, 860 mid, 861 low, 862 high or mid) or turned away (863..866), parameter
+# the attacking limb, into the parry's move. TTT2 has the same tests in the same order (678..685; Asuka's AteN_move_0
+# lists the same limbs in the same order, Lei's Crane stance parries lows so, Wang's b+1 highs and mids), which it
+# makes during the hit: the hit is voided and the row's move plays (the id maps cannot pair them: Heihachi has none,
+# so the rows were dropped and the parries never happened). The limb: 0 any (not an attack whose hit box names 64: a
+# kiss, laser or mist, which only 64 takes), 1..4 the hips / trunk / neck / head with the points around them, 9 13 16
+# 19 a fist or foot with the points past it, others one code (TTT2's test, sub_0404D5C0); both games number the
+# body's bones (below PARRY_POINTS) alike, the points past the fists and feet as the fighter's hit boxes are converted
+# (hit_location: Leroy's 44 46 47 50 51 -> 37 37 38 39 40, the left foot's, right foot's, left fist's, right fist's)
+PARRY_TESTS = {'t7': {859 + k: 678 + k for k in range(8)}, 't8': {}}
+PARRY_POINTS = 22
+REQ_OVERRIDE['t7'].update(PARRY_TESTS['t7'])
 # the meter (Tekken 7's EX moves and supers): its requirement and its cost; left out with free_meter_specials, kept on
 # the runtime's gauge ids for a definition with GAUGE (convert/gauge.py)
 METER, METER_COST = {'t7': 629, 't8': 738}, {'t7': 0x81c2, 't8': 0x8232}
@@ -1694,6 +1708,9 @@ class Converter:
                 self.stats['parry requirement -> false'] += 1
                 res = (None, False)
                 break
+            elif c in PARRY_TESTS[g]:             # a parry's test: the attacking limb (PARRY_TESTS)
+                p = self.parry_limb(p)
+                self.stats['parry tests (the opponent\'s attack by its level and limb)'] += 1
             elif self.guarded(c) and not self.fits('req', c2, p):         # a parameter TTT2 never passes (FIT)
                 self.stats['requirement with a parameter TTT2 never passes -> false'] += 1
                 res = (None, False)
@@ -2067,6 +2084,11 @@ class Converter:
     def hit_location(self, x):
         """A Tekken 7 hit location code (a byte of a move's hitbox) -> TTT2's (hit_location)."""
         return hit_location(self.game, x, self.hit_locations, self.hitbox)
+
+    def parry_limb(self, p):
+        """A parry test's parameter (the attacking limb, PARRY_TESTS) -> TTT2's: 0, the classes and the body's bones
+        as they are, a point past them as the fighter's hit boxes have it."""
+        return p if p < PARRY_POINTS else self.hit_location(p)
 
     def conv_xps(self, i, move=None, extra=(), only=None):
         """Move `move`'s extra property list i (with rows `extra` after it) -> the new list's index, or None.
