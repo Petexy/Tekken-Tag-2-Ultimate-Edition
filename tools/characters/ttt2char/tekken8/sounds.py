@@ -16,6 +16,10 @@ scene) and not left out by the definition's drop_moves. Left out:
     Play_SE_<CODE>_Rage_*           Rage Arts' (as their lines: tekken8/voice.py UNSAID)
     TITLE_HAS                       the common sounds of what TTT2 sounds or has not by itself: its own wall hits,
                                     Tekken 8's tornado and its recoverable health's
+    ARMOUR                          the power crush's and armour's: TTT2 has no armour, the moves take hits as any
+                                    other (Play_SE_Pcrash_Invoke, a power crush's property row from its start, would
+                                    sound armour every time the move is done; Play_SE_Armor_Break, an attack's when it
+                                    breaks one)
     bank 12 (its SoundDataItemTone) the customisation items' moves: an added fighter wears none of them
 An event is one sound or a layer or random container (tekken8/wwise.py Bank.event_tree); it becomes one mono clip: a
 layer's sounds mixed, of a random container's the loudest. Wwise's per-sound values are applied: volume and make-up gain
@@ -44,6 +48,7 @@ from . import uprops, voice, wwise, zen
 TABLE_BANK = 15
 COMMON_DATA = 'Polaris/Content/Sound/BattleCom/SDA_BankBattleCom'
 TITLE_HAS = re.compile(r'^Play_SE_(Wall_Hit|Air_Tornado_EFX|HP_Recover|Heat_Timer_Recover)', re.I)
+ARMOUR = re.compile(r'^Play_SE_(Pcrash_|Armor_)', re.I)
 RAGE_ART = r'^Play_SE_%s_Rage_'
 PEAK = 0.97                 # of full scale
 LEVEL = 6.0                 # dB below Tekken 8's level (see above)
@@ -180,6 +185,8 @@ class Effects:
                 self.left_out.append((name, 'a Rage Art\'s'))
             elif TITLE_HAS.match(name):
                 self.left_out.append((name, 'the title has its own'))
+            elif ARMOUR.match(name):
+                self.left_out.append((name, 'armour: TTT2 has none'))
             elif name.startswith(STOP_EVENT):      # (no sound: it ends a loop; TTT2's clips end by themselves)
                 self.left_out.append((name, 'it only stops a sound'))
             elif name not in self.names:
