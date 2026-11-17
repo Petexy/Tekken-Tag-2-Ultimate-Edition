@@ -11,8 +11,8 @@ TEKKEN7_ID = 43
 TEKKEN7_CODE = 'mry'
 CODE = 'mry'
 SEX = 'male'
-REVISION = 2                  # his gauge and MAX mode (packs made before have his EX moves and supers free);
-                              # his cancel rows' sound effects, his own back-turned 3 and 4 (2)
+REVISION = 3                  # his gauge and MAX mode (packs made before have his EX moves and supers free);
+                              # his cancel rows' sound effects, his own back-turned 3 and 4 (2); his counters (3)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
