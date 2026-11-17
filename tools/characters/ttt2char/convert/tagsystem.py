@@ -8,7 +8,8 @@ Tekken 7 has no tag, and TTT2 keeps its tag system in the movesets, as moves and
   tag-in kind 11) while it returns to the stance. The converter makes the definition's bound moves bounds
   (move_overrides.py) but has no XT or XDA to give them: add_tag_assault makes both, after the donor's own triples
   (assault_template); add_tag_assault_continuations gives the tag row to the move before an X a string goes on into
-  too late for X's own. The partner jumping in (ChgInJmpDA, the donor's) attacks with a move of its own, not the
+  too late for X's own, or while that move's own tag row would still wait for its frame (a juggle copy that bounds,
+  entered by a switch). The partner jumping in (ChgInJmpDA, the donor's) attacks with a move of its own, not the
   donor's: set_assault_entry.
 * Bounds: bound_shape gives the donor's bound entry and what its air hit plays once the bound is used. Where TTT2 has
   a bound, Tekken 7 often has an air slam instead (the same move of Heihachi's in both games: [614 airborne -> slam]
@@ -424,9 +425,18 @@ def add_tag_assault_continuations(tables, made, first):
     Qt_fKAM_lrk00 `TAG 1-19 sf19 -> Qt_fKAM_lrk01T`; 15 such moves in its 58 movesets): P gets the tag row from X's
     tag row's first frame to the continuation's last, at its frame, extradata and requirements (and the tag row's),
     into XT, right before the continuation. Only where X keeps fewer than MIN_TAG_FRAMES frames of its tag row after
-    the continuation (TTT2 leaves several of its own at 3 to 5 without one: Yoshimitsu's Ym_RKatana2NG 28-31). Left
-    alone: P below `first` (the donor's), the twins and a P with a tag row already (its own Tag Assault); a list
-    several moves share is written anew once. made: add_tag_assault's [(X, XT, XDA)]. -> the rows added"""
+    the continuation (TTT2 leaves several of its own at 3 to 5 without one: Yoshimitsu's Ym_RKatana2NG 28-31), or
+    where P has a Tag Assault of its own whose tag row is open before the continuation's frame and taken after it
+    (`waits_past`): TTT2 takes no other row of a move while a pressed one waits for its start frame, so every Tag
+    pressed before the switch went to P's twin and the switch into X never came (Miary Zo's d+2 Wkz_2RP: on a juggled
+    opponent it goes on at 24 into its copy #1671 that bounds, under requirement 124, while its own tag row waits to
+    25: Tag gave Wkz_2RPT, the standing version, which whiffs in the air, and the partner never came in). TTT2's own
+    tag rows never wait past such a switch (Ni_2hitlprk's into its twin ends at 14, the switch at 15; Mn_R_lrp00's
+    go into its twin up to 12, X's from 13 to the switch at 16). The row then sits before P's own tag row, so it is
+    taken where the switch's requirements hold and P's own where they do not (a standing opponent). Left alone: P
+    below `first` (the donor's), the twins, a P with a tag row into XT already, and one whose own tag rows end by the
+    continuation (Akuma's Mx_6lrp: its own Tag Assault first); a list several moves share is written anew once. made:
+    add_tag_assault's [(X, XT, XDA)]. -> the rows added"""
     moves = tables['moves']
     twins = {x: (xt, next(c for c in cancels(tables, moves[x]['cancel'])
                           if c['direction'] == 0 and c['button'] == TAG_BUTTON and c['move_id'] == xt))
@@ -435,33 +445,46 @@ def add_tag_assault_continuations(tables, made, first):
     lists, added = {}, 0
     for p in range(first, len(moves)):
         old = moves[p]['cancel']
-        if p in skip or p in twins or old is None:
+        if p in skip or old is None:
             continue
         if old in lists:
             moves[p]['cancel'] = lists[old]
             continue
         rows = cancels(tables, old)
-        if any(c['direction'] == 0 and c['button'] == TAG_BUTTON for c in rows):
-            continue
-        out, n = [], 0
-        for c in rows:
+        tags = [k for k, c in enumerate(rows) if c['direction'] == 0 and c['button'] == TAG_BUTTON]
+        # the moves P goes on into by itself: their twins are not P's own Tag Assault
+        onward = {twins[c['move_id']][0] for c in rows if is_automatic(c) and c['move_id'] in twins}
+        own = [k for k in tags if rows[k]['move_id'] not in onward]
+        adds = []                       # (where, row)
+        for k, c in enumerate(rows):
             extra = row_kind(tables, c)[1]
-            if is_automatic(c) and c['move_id'] in twins and extra is not None and extra & KEEP_FRAMES \
-                    and c['start_frame'] > 1 \
-                    and twins[c['move_id']][1]['win_end'] - c['start_frame'] < MIN_TAG_FRAMES:
-                xt, tag = twins[c['move_id']]
-                conditions = reqs(tables, c['req'])
-                more = [x for x in reqs(tables, tag['req']) if x[0] != 0 and x not in conditions]
-                req = write(tables, 'requirements', [dict(condition=k, param=q) for k, q in conditions + more]
-                            + [dict(condition=TT_END, param=0)]) if more else c['req']
-                out.append(dict(c, button=TAG_BUTTON, req=req, win_start=tag['win_start'], move_id=xt,
-                                option=tag['option']))
-                n += 1
-            out.append(dict(c))
-        if n:
+            if not (is_automatic(c) and c['move_id'] in twins and extra is not None and extra & KEEP_FRAMES
+                    and c['start_frame'] > 1):
+                continue
+            xt, tag = twins[c['move_id']]
+            if any(rows[t]['move_id'] == xt for t in tags):
+                continue
+            waiting = [t for t in own if waits_past(rows[t], c['start_frame'])]
+            if not waiting and (tags or tag['win_end'] - c['start_frame'] >= MIN_TAG_FRAMES):
+                continue
+            conditions = reqs(tables, c['req'])
+            more = [x for x in reqs(tables, tag['req']) if x[0] != 0 and x not in conditions]
+            req = write(tables, 'requirements', [dict(condition=cond, param=q) for cond, q in conditions + more]
+                        + [dict(condition=TT_END, param=0)]) if more else c['req']
+            adds.append((min([k] + waiting), dict(c, button=TAG_BUTTON, req=req, win_start=tag['win_start'],
+                                                    move_id=xt, option=tag['option'])))
+        if adds:
+            out = []
+            for k, c in enumerate(rows):
+                out += [dict(row) for at, row in adds if at == k] + [dict(c)]
             lists[old] = moves[p]['cancel'] = write(tables, 'cancels', out)
-            added += n
+            added += len(adds)
     return added
+
+
+def waits_past(row, frame):
+    """Whether a pressed cancel row would still be waiting at `frame`: open before or at it, taken after it."""
+    return row['win_start'] <= frame < row['start_frame']
 
 
 ENTRY_MOVE = 'ChgInJmpDA'            # the incoming partner's Tag Assault jump-in (At_ChgInJmp, At_ChgInJmpNear -> it)
