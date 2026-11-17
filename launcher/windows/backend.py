@@ -189,6 +189,25 @@ def installed_by(settings):
     return file.read_text(encoding='utf-8').strip() if file.is_file() and settings.installed() else ''
 
 
+def older_game(settings, files):
+    """The launcher version the installed game is from ("0.5.1"), when it is older than this launcher's (`files`:
+    self_update.files_id()); else '': no game, what built it not known, the same version (a test build's other
+    commit) or a newer one. The characters this launcher's importer makes need what the newer game has (their
+    summons, effects and hit reactions: an older game plays them without), so the game is updated before it is
+    played, and before characters are added or updated."""
+    from self_update import compare_versions
+    game, this = installed_by(settings).partition(' ')[0], files.partition(' ')[0]
+    order = compare_versions(game, this) if game and this else None
+    return game if order is not None and order < 0 else ''
+
+
+def older_game_note(game, files):
+    """What the launcher says while the game is older (older_game gave `game`): Play, adding and updating characters
+    wait for its Update."""
+    return ('The game is from an older Ultimate Launcher (%s; this one is %s): update it to play and to add or update '
+            'characters, which need the newer game.' % (game, files.partition(' ')[0]))
+
+
 def importer(settings, *args, timeout=None):
     """The character importer's answer for the launcher (tools/characters/launcher.py), as for the
     Linux launcher: status (what is there) or owned (which DLC Steam says is owned)."""

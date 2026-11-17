@@ -199,6 +199,15 @@ void Launcher::watch_game() {
     }, this);
 }
 
+std::string Launcher::older_game() const {
+    if (install_.state != InstallState::kInstalled) return {};
+    const std::string built = built_version(install_.folder);
+    if (!built_older(built, kit_version_)) return {};
+    return "The game is from an older Ultimate Launcher (" + std::string(launcher_version(built)) + "; this one is " +
+           std::string(launcher_version(kit_version_)) +
+           "): update it to play and to add or update characters, which need the newer game.";
+}
+
 void Launcher::game_installed(GtkWidget* card) {
     const bool playing = game_running();
     if (playing) watch_game();
@@ -216,7 +225,15 @@ void Launcher::game_installed(GtkWidget* card) {
 
     const std::string built = built_version(install_.folder);
     const bool update = !kit_version_.empty() && built != kit_version_;
-    if (update) {
+    // An older launcher's program: Update in Play's place (the characters
+    // this launcher makes need the newer one).
+    const std::string older = older_game();
+    if (!older.empty()) {
+        gtk_box_append(GTK_BOX(card),
+                       icon_row("dialog-warning-symbolic", "warn",
+                                ui::label(older + " Update builds it again from the game in its folder: a few minutes.",
+                                          "small dim")));
+    } else if (update) {
         // (An install made with ttt2 --install has no record of what built
         // it: Update is offered, not urged.)
         const std::string text =
@@ -229,11 +246,22 @@ void Launcher::game_installed(GtkWidget* card) {
     if (!game_error_.empty()) gtk_box_append(GTK_BOX(card), ui::label(game_error_, "error-text"));
 
     GtkWidget* row = button_row();
-    GtkWidget* play_button =
-        button("play", playing ? "Playing" : "Play", "suggested-action play", "media-playback-start-symbolic");
-    gtk_widget_set_sensitive(play_button, !playing && !task_);
-    clicked(play_button, [](Launcher* self) { self->play(); });
-    gtk_box_append(GTK_BOX(row), play_button);
+    const auto update_button = [&](const char* classes, const char* icon) {
+        GtkWidget* b = button("update", "Update", classes, icon);
+        gtk_widget_set_tooltip_text(b, "Build the game program again with this launcher's version");
+        gtk_widget_set_sensitive(b, !playing && !task_ && there(kit_ / "bin/ttt2-build"));
+        clicked(b, [](Launcher* self) { self->start_update(); });
+        gtk_box_append(GTK_BOX(row), b);
+    };
+    if (!older.empty()) {
+        update_button("suggested-action play", "ttt2-update-symbolic");
+    } else {
+        GtkWidget* play_button =
+            button("play", playing ? "Playing" : "Play", "suggested-action play", "media-playback-start-symbolic");
+        gtk_widget_set_sensitive(play_button, !playing && !task_);
+        clicked(play_button, [](Launcher* self) { self->play(); });
+        gtk_box_append(GTK_BOX(row), play_button);
+    }
     // Settings, right of Play: its icon alone (keys can change while the
     // game runs, and during a task).
     GtkWidget* settings = gtk_button_new_from_icon_name("ttt2-settings-symbolic");
@@ -243,13 +271,7 @@ void Launcher::game_installed(GtkWidget* card) {
     gtk_widget_set_valign(settings, GTK_ALIGN_CENTER);
     clicked(settings, [](Launcher* self) { self->open_settings(); });
     gtk_box_append(GTK_BOX(row), settings);
-    if (update) {
-        GtkWidget* update_button = button("update", "Update");
-        gtk_widget_set_tooltip_text(update_button, "Build the game program again with this launcher's version");
-        gtk_widget_set_sensitive(update_button, !playing && !task_ && there(kit_ / "bin/ttt2-build"));
-        clicked(update_button, [](Launcher* self) { self->start_update(); });
-        gtk_box_append(GTK_BOX(row), update_button);
-    }
+    if (update && older.empty()) update_button(nullptr, nullptr);
     gtk_box_append(GTK_BOX(row), spacer());
     GtkWidget* open = gtk_button_new_from_icon_name("folder-symbolic");
     ui::set_id(open, "open-folder");
@@ -548,6 +570,7 @@ void Launcher::start_update() {
 void Launcher::play() {
     // (Two would share the saves and the shader cache.)
     if (game_running()) return refuse("The game is running", "Only one can run at a time.");
+    if (const std::string older = older_game(); !older.empty()) return refuse("Update the game first", older);
     const fs::path program = install_.folder / kProgramName;
     game_error_.clear();
     // Its output goes into a log of this run (none left of the last one

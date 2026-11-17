@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 import keys
 import look
 import self_update
-from backend import built_by, importer, installed_by
+from backend import built_by, importer, installed_by, older_game, older_game_note
 from look import (BAD, CARD_LINE, DIM, HEADER, HEADER_LINE, LIST, LOG, NOTICE, NOTICE_ICON, OK, ROW_LINE, TASK,
                   TASK_LINE, TEXT, WARN, WINDOW)
 
@@ -219,13 +219,23 @@ class Window:
                       'about 30 GB, and a while. Your archive is kept.')
         game_files = installed_by(self.settings)
         update = bool(installed and game_files and game_files != self.files_id)
-        if update:
+        # An older launcher's game: Update in Play's place (the characters this launcher makes need the newer game).
+        old = older_game(self.settings, self.files_id) if installed else ''
+        if old:
+            self.note(card, 'warning', older_game_note(old, self.files_id) + ' Update builds it again on this PC from '
+                      'your game: a few minutes.', WARN)
+        elif update:
             self.note(card, 'warning', 'An update of the game is ready (Ultimate Launcher %s; the game is from %s). '
                       'Update builds it again on this PC from your game: a few minutes.'
                       % (self_update.shown_id(self.files_id), self_update.shown_id(game_files)), WARN)
         buttons = L.frame(card)
         buttons.pack(fill='x', pady=(px(16), 0))
-        if installed:
+        if old:
+            b = L.button(buttons, 'Update', lambda: self.start('upgrade'), 'suggested', icon='update',
+                         tip='Build the game again with this launcher\'s version, then play')
+            b.configure(state='disabled' if busy or running else 'normal')
+            b.pack(side='left')
+        elif installed:
             play = L.button(buttons, 'Play', self.play, 'suggested', icon='play')
             play.configure(state='disabled' if busy or running else 'normal')
             play.pack(side='left')
@@ -235,7 +245,7 @@ class Window:
             setup.configure(state='disabled' if busy else 'normal')
             setup.pack(side='left')
         L.button(buttons, icon='settings', command=self.open_settings, tip='Settings').pack(side='left', padx=(px(8), 0))
-        if update:
+        if update and not old:
             b = L.button(buttons, 'Update', lambda: self.start('upgrade'))
             b.configure(state='disabled' if busy or running else 'normal')
             b.pack(side='left', padx=(px(8), 0))
@@ -284,6 +294,7 @@ class Window:
     def play(self):
         try:
             if self.game and self.game.poll() is None: raise ValueError('The game is already running.')
+            if old := older_game(self.settings, self.files_id): raise ValueError(older_game_note(old, self.files_id))
             command = self.settings.game_command()
             logs = Path(self.settings.values['data']) / 'logs'
             logs.mkdir(parents=True, exist_ok=True)
@@ -325,6 +336,7 @@ class Window:
         """None, or why no character can be added now."""
         s = self.status
         if not self.settings.installed(): return 'Set up the game first: characters are made from it.'
+        if old := older_game(self.settings, self.files_id): return older_game_note(old, self.files_id)
         if not s: return 'The importer cannot tell what this PC has: %s' % (self.status_error or 'still looking')
         if s.get('game', {}).get('error'): return 'The importer cannot read the installed game: ' + s['game']['error']
         return None
@@ -879,6 +891,8 @@ class Window:
             if action == 'setup':
                 from setup_game import validate_setup_paths
                 validate_setup_paths(self.settings)
+            if action == 'import' and (old := older_game(self.settings, self.files_id)):
+                raise ValueError(older_game_note(old, self.files_id))
             if action in ('import', 'remove'):
                 if self.game and self.game.poll() is None: raise ValueError('Close the game before changing its characters.')
                 self.settings.import_command(names, action == 'remove')

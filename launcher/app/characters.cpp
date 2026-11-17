@@ -107,6 +107,7 @@ bool Launcher::can_import(std::string* why) const {
     };
     if (importer_.empty() || python_.empty()) return no("The character importer or Python 3 is missing.");
     if (install_.state != InstallState::kInstalled) return no("Install the game first: characters are made from it.");
+    if (const std::string older = older_game(); !older.empty()) return no(older);
     if (!status_) return no("The importer cannot tell what this PC has: " + status_error_);
     if (!status_->numpy || !status_->pillow) return no("Python needs numpy and Pillow to add characters.");
     if (!status_->game_error.empty()) return no("The importer cannot read the installed game: " + status_->game_error);
@@ -480,6 +481,8 @@ void Launcher::show_characters() {
                   "Install the game first: the characters are made from it and from your Tekken 7 or Tekken 8.",
                   false);
     }
+    // (Adding and updating them wait for the game's Update, as Play does.)
+    if (const std::string older = older_game(); !older.empty()) note_line(card, "dialog-warning-symbolic", older, true);
 
     // Tekken 7, Tekken 8 and Steam. (A game that is not installed is only a
     // note while the other one can be used.)

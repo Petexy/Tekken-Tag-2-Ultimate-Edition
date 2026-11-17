@@ -967,6 +967,22 @@ void test_release(const fs::path& root) {
               compare_versions("v0.10.0", "0.9.9") == 1 && compare_versions("0.1.0", "1.0") == -1 &&
               !compare_versions("next", "0.1.0"),
           "release: comparing");
+    // An install's program from an older launcher than the kit: Play and adding characters wait for its Update
+    // (testers played the 0.6.2 importer's packs on a game an 0.5.1 launcher built). The same version (another
+    // commit), a newer one, or one not known never wait.
+    check(launcher_version("0.6.2-1cab8c68f39b") == "0.6.2" && launcher_version("0.6.2") == "0.6.2" &&
+              launcher_version("").empty(),
+          "release: a kit's launcher version");
+    check(built_older("0.5.1-79795183ad3a", "0.6.2-d9258007cb1c") && built_older("0.5.1", "0.6.2-d9258007cb1c") &&
+              built_older("0.9.1-aaaaaaa", "0.10.0"),
+          "release: a program an older launcher built");
+    check(!built_older("0.6.2-d9258007cb1c", "0.6.2-d9258007cb1c") &&
+              !built_older("0.6.2-0123456789ab", "0.6.2-d9258007cb1c") && !built_older("0.6.2", "0.6.2-d9258007cb1c") &&
+              !built_older("0.7.0-aaaaaaa", "0.6.2-d9258007cb1c") && !built_older("0.10.0", "0.9.1"),
+          "release: a program of this launcher's version or a newer one");
+    check(!built_older("", "0.6.2-d9258007cb1c") && !built_older("0.5.1", "") && !built_older("next", "0.6.2") &&
+              !built_older("0.5.1", "next"),
+          "release: a program whose launcher is not known");
 
     // GitHub's answers: a release, none yet, the hourly limit.
     const std::string asset = R"({"name": "%s", "state": "uploaded", "size": 2652664,
