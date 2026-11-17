@@ -844,6 +844,35 @@ DROP_T_RE = re.compile(r'Balcony|_RA$|RAtk|RageArt|^vra_|_7CS$|^SE_|^FACE|Story|
 # same kind (TTT2's bounds and Tag Crash need them; a Tekken 7 slam takes the donor's bound reaction, T7_AIR).
 REST = (('stand', re.compile(r'sKAM00_$')), ('crouch', re.compile(r'^cKAM')), ('down', re.compile(r'^d(w|Dw)')))
 REST_STEPS = 12                   # transitions followed at most
+# A Tekken 8 reaction of an opponent on its feet (Converter.standing8) must also float and guard as Tekken 8's does
+# (2026-11-14, beta testers: "d+1+2 weird animation on hit", "1,2 isn't natural", "3,1,2 is fully guaranteed"; all
+# five Tekken 8 fighters). The fall classes above let a launch take any TTT2 launch: Tekken 8's dw_He_shoryu (airborne
+# 1-30, landing face down; TTT2's own dw_He_shoryu of 22 movesets has those very frames, Lars and Jun none) became
+# sDw_UP_01_ (1-52, face up) in Clive's d+1+2, Miary's b+1,4 and Victor's 1,2,1; Clive's ws2 #374 (1-77) and Victor's
+# d/b+3 #383 (1-83) became 33- and 48-frame launches, which his combos after ws2 can no longer reach. So the remap of
+# such a reaction is refused when TTT2's move has another float (FLOAT8, its airborne start, end and ground fall) or
+# comes to rest otherwise (Converter.lands8: standing, crouching, lying face up or face down), and Tekken 8's own is
+# converted. The float is compared exactly for a reaction TTT2 has an airborne move of that name for (Converter.
+# ttt2_floats8: the same frames, the same animation, idmaps.frame_signatures; converted, it plays TTT2's own clip,
+# tekken8.anim.originals): Victor's IAI 1+2 ym_y01mixL (1-35) is not the remap's ym_y01L (1-38). For one TTT2 has no
+# name of, the TTT2 launch stays within FLOAT8_NEAR frames of its end and fall: its juggles, bounds and tag combos are
+# TTT2's own, where Tekken 8's converted one would change their timing (Reina's EWGF #296, 1-48, keeps sDw_UP_01_,
+# 1-52, as since her port: EWGF > f+4, a bound of her list, hits at its frame 49-50). TTT2's air, bound, floor
+# and wall reactions are not touched: juggles need them (a version converting Tekken 8's air reactions broke juggles).
+# The frame a staggered opponent may guard from (GUARD_FROM8, TTT2's TT_GUARD_FROM: value 1 at that frame; without it,
+# when the reaction ends) is the other half: Tekken 8 times its strings to it. Clive's jab reaction on a normal hit,
+# #1529, lets the victim guard from 24 (a cancel row back into the stance that sets it: 1,2's 2 at reaction frame 21-22
+# is natural, 1,f+2's f+2 at 25 not), his counter-hit one, sDm_KAO10FLP, not before its end (1,f+2 combos); Lars's
+# sDm_KAO10FLP guards from 20, so both were blocked. Miary's 3,1 hit sDm_HAR00M14G guards from 14, the remap's
+# sDm_KAO00L never, so her 3,1,2 was guaranteed. A reaction whose TTT2 move (its own name's too) guards from other
+# frames takes a copy of that move with Tekken 8's guard rows (Converter.guard_copy8: TTT2's animation and lists).
+FLOAT8 = ('airborne_start', 'airborne_end', 'ground_fall')
+FLOAT8_NEAR = 4                   # frames a TTT2 launch may float longer or shorter (no TTT2 name)
+LYING = re.compile(r'^dw(?:DWN|KAM)_\d\d([UD])')       # the lying states a fall ends in: face up (U) or down (D)
+GUARD_FROM8, TT_GUARD_FROM = 0x81ec, 0x80ea
+# the reaction slots of an opponent on its feet (the downed, wall-slumped and guard slots are left as they were)
+STANDING_SLOTS = frozenset(('standing', 'default', 'crouch', 'ch', 'crouch_ch', 'left', 'crouch_left', 'right',
+                            'crouch_right', 'back', 'crouch_back'))
 ANIM_KEY_BYTES = 256                 # animations are matched by a hash of their first bytes
 
 
@@ -1006,6 +1035,9 @@ class Converter:
     hands8 = None                       # tekken8.anim.HandClips of a Tekken 8 fighter, by the importer
     _hands = None                       # hand_map's map
     _throw_victims = None               # throw_victims' set
+    _standing8 = None                   # standing8's set
+    ttt2_floats8 = ()                   # names of TTT2's moves that leave the ground (other_float8), by the importer
+    guard_copies8 = None                # {Tekken 8 reaction: (its guard copy, the donor's move, guard rows)}
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
         """k: the fighter's moveset (Tekken 7: tkmvst.read; Tekken 8: tekken8.motbin.read, its moves named),
@@ -1284,8 +1316,9 @@ class Converter:
             self.stats['moves with a delta animation -> the donor\'s generic move'] += 1
             return self.delta_move[mid]
         n = self.name(mid)
+        standing8 = reaction and self.game == 't8' and self.standing8(mid)       # (FLOAT8, GUARD_FROM8)
         if n in self.dn:
-            return self.dn[n]
+            return self.guard_copy8(mid, self.dn[n]) if standing8 else self.dn[n]
         r = self.react_remap.get(n) if n not in PRESERVE_T7_REACTIONS and n not in self.own_reactions else None
         if r and r in self.dn and self.other_fall(mid, self.dn[r]):
             self.stats['reaction remap refused (the TTT2 move does another thing: stagger, crumple, launch)'] += 1
@@ -1293,9 +1326,11 @@ class Converter:
                 self.dn[r] == 0 or self.other_stun(mid, self.dn[r])):
             why = 'TTT2 has no move there, motOrigin' if self.dn[r] == 0 else 'a guard or stagger of another length'
             self.stats['reaction remap refused (%s: Tekken 8\'s own kept)' % why] += 1
+        elif r and r in self.dn and standing8 and self.convertible8(mid, n) and self.other_float8(mid, self.dn[r]):
+            self.stats['reaction remap refused (a TTT2 move floating or landing otherwise: Tekken 8\'s own kept)'] += 1
         elif r and r in self.dn:
             self.stats['target remapped (Tekken 7-only move -> the TTT2 move in its place)'] += 1
-            return self.dn[r]
+            return self.guard_copy8(mid, self.dn[r]) if standing8 else self.dn[r]
         # Shared attacks (FC jabs/kicks, jump attacks, throw follow-ups) can be absent from the donor too.
         # Import them when a retained input/follow-up reaches them, not only when a reaction needs them.
         if self.cls[mid] == 'T' and not DROP_T_RE.search(n) and (
@@ -1404,6 +1439,103 @@ class Converter:
         """Tekken 8 move mid (name n) is one target() converts as a reaction ('T' not dropped, 'N'): a remap refused
         for it then gives Tekken 8's own move, not none."""
         return (self.cls[mid] == 'T' and not DROP_T_RE.search(n)) or self.cls[mid] == 'N'
+
+    def standing8(self, mid):
+        """Tekken 8 move mid is a reaction of an opponent on its feet only: the hit rows naming it test no airborne
+        opponent (AIR_SIDE_EFFECT) and name it in STANDING_SLOTS alone (FLOAT8)."""
+        if self._standing8 is None:
+            k, ok, other = self.k, set(), set()
+            for mv in k.tables['moves']:
+                for rl, _, ri in M.hitconds(k, mv.get('hit_condition')):
+                    if ri is None:
+                        continue
+                    air = any(c in AIR_SIDE_EFFECT[self.game] for c, _ in rl)
+                    for f in REACTION_MOVE_FIELDS:
+                        (other if air or f not in STANDING_SLOTS else ok).add(k.tables['reactions'][ri][f])
+            self._standing8 = ok - other
+        return mid in self._standing8
+
+    @staticmethod
+    def lands8(m, i, name):
+        """Where move i of moveset m (name: its names) comes to rest: 'stand', 'crouch', 'U' / 'D' (lying face up /
+        down: LYING), or None when its transitions reach none of those within REST_STEPS."""
+        seen = set()
+        for _ in range(REST_STEPS):
+            if i is None or i in seen or not 0 <= i < len(m.tables['moves']):
+                return None
+            seen.add(i)
+            n = name(i) or ''
+            lying = LYING.match(n)
+            if lying:
+                return lying.group(1)
+            for kind, pattern in REST[:2]:
+                if pattern.search(n):
+                    return kind
+            t = m.tables['moves'][i]['transition']
+            i = m.resolve_alias(t) if t >= 0x8000 else t
+        return None
+
+    def other_float8(self, mid, j):
+        """The Tekken 8 reaction mid and the donor's move j float on other frames (FLOAT8: exactly when TTT2 has an
+        airborne move of mid's name, ttt2_floats8; else the same start, the end and fall within FLOAT8_NEAR) or come
+        to rest otherwise (lands8; unknown counts as the same)."""
+        a, b = self.k.tables['moves'][mid], self.d.tables['moves'][j]
+        la, lb = self.lands8(self.k, mid, self.name), self.lands8(self.d, j, self.d.move_name)
+        near = 0 if self.name(mid) in self.ttt2_floats8 else FLOAT8_NEAR
+        return a[FLOAT8[0]] != b[FLOAT8[0]] or any(abs(a[f] - b[f]) > near for f in FLOAT8[1:]) or (
+            la is not None and lb is not None and la != lb)
+
+    @staticmethod
+    def extra_rows(m, i):
+        """The rows of move i's extra property list in tables m (its end row left out)."""
+        rows, x, t = [], m['moves'][i]['extraprops'], m['extra_move_properties']
+        while x is not None and x < len(t) and (t[x]['id'] or t[x]['frame']):
+            rows.append(t[x])
+            x += 1
+        return rows
+
+    def guard_rows(self, m, i, gid):
+        """[(frame, value)] of the guard-from rows (property gid) of move i in tables m, in frame order."""
+        return sorted((r['frame'], r['value']) for r in self.extra_rows(m, i) if r['id'] == gid)
+
+    def guard_from8(self, mid):
+        """[(frame, value)] the Tekken 8 reaction mid guards from (GUARD_FROM8): its property rows, and its cancel rows
+        that set it as an action, at their window's start (as Clive's jab reaction on a normal hit, #1529, lets the
+        victim guard from 24, back into the stance: the only such row of the five fighters)."""
+        k = self.k
+        rows = self.guard_rows(k.tables, mid, GUARD_FROM8)
+        rows += [(c['win_start'], p) for c in M.cancels(k, k.tables['moves'][mid]['cancel'])
+                 for cond, p in M.reqs(k, c['req']) if cond == GUARD_FROM8]
+        return sorted(set(rows))
+
+    def guard_copy8(self, mid, j):
+        """The donor's move j (the new moveset's index), or, when the Tekken 8 reaction mid guards from other frames
+        (GUARD_FROM8), a copy of it with Tekken 8's guard rows (one per reaction). The copy is only reserved here:
+        the passes after the conversion still change the donor's moves (rebuild_hubs gives a move the fighter has
+        by name its converted list, dismiss_when_hit and hands8_generic their properties: each walks the donor's
+        moves alone), so guard_copies_final8 makes it again from j as they leave it."""
+        mine = self.guard_from8(mid)
+        if mine == self.guard_rows(self.T, j, TT_GUARD_FROM):
+            return j
+        if self.guard_copies8 is None:
+            self.guard_copies8 = {}
+        if mid not in self.guard_copies8:
+            name = self.ttt2_name(mid)
+            name = self.string(name if name not in self.dn else '%s_%s' % (self.prefix, name))
+            mv = dict(self.T['moves'][j], name=name)
+            self.guard_copies8[mid] = (self.add('moves', mv), j, mine)
+            self.stats['reactions guarding from Tekken 8\'s frame (a copy of the TTT2 move)'] += 1
+        return self.guard_copies8[mid][0]
+
+    def guard_copies_final8(self):
+        """Each guard copy (guard_copy8): the donor's move as the conversion left it, its own guard rows replaced by
+        Tekken 8's, under the copy's name."""
+        for idx, j, mine in (self.guard_copies8 or {}).values():
+            rows = [dict(r) for r in self.extra_rows(self.T, j) if r['id'] != TT_GUARD_FROM]
+            rows += [dict(frame=f, id=TT_GUARD_FROM, value=v) for f, v in mine]
+            self.T['moves'][idx] = dict(self.T['moves'][j], name=self.T['moves'][idx]['name'],
+                                        extraprops=tagsystem.write(self.T, 'extra_move_properties',
+                                                                   rows + [dict(frame=0, id=0, value=0)]))
 
     def is_state(self, i):
         """Tekken 7 move i is a movement state TTT2 lets a fighter tag out of (by TTT2's own movesets' move names,
@@ -3719,6 +3851,7 @@ class Converter:
         self.flag8_rows()                   # Tekken 8's flag slots: the properties that set or test them (FLAG8)
         if self.game == 't8':
             self.bake_air8()                # (last: copies of whole moves)
+            self.guard_copies_final8()      # (... and the guard copies of the donor's moves, as those are now)
         # every move belongs to the new motion row
         for n, row in enumerate(self.T['moves']):
             combined = (self.newid << 16) + n - (self.newid - 1)

@@ -617,6 +617,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         c = moveset.Converter(k, None, ttt2_movesets[d.DONOR_ROW], archives.entry('data005', d.DONOR_ROW),
                               ttt2_movesets[13], common, (req, prop, reactions, hitboxes), usage, place['row'], d)
         c.animations = animations
+        c.ttt2_floats8 = set(idmaps.frame_signatures(ttt2_movesets, by_set=True))     # (a reaction's float)
         if converter.hands:
             c.hands8 = anim.HandClips(banks, converter.hands)
         # (the win poses play the quote of their tone: the fighter's lines are its win moves', zbr_w01's

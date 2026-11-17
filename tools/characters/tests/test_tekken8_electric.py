@@ -159,7 +159,8 @@ class ImporterEffect(unittest.TestCase):
                 mock.patch('ttt2char.tekken8.movelist.convert', return_value=b'mvl'), \
                 mock.patch.object(importer, '_read', side_effect=lambda p: p.encode()), \
                 mock.patch.object(importer.idmaps, 'tekken8_maps', return_value=('r', 'p', 'rr', 'hb', 'ev')), \
-                mock.patch.object(importer.idmaps, 'ttt2_usage'), \
+                mock.patch.multiple(importer.idmaps, ttt2_usage=mock.DEFAULT,
+                                    frame_signatures=mock.Mock(return_value={})), \
                 mock.patch.object(importer.tagsystem, 'TagStates'), \
                 mock.patch.object(importer.moveset, 'Converter', return_value=c), \
                 mock.patch.object(importer, '_options'), \
