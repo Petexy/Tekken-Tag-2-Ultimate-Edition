@@ -1230,6 +1230,21 @@ panel lists the five slots of the added fighter's own file only (its
 costumes are whole bodies, not records), and the mode's save writes that
 file, with the slot's picture. `TTT2_TEST_MONEY=<gold>` (a developer switch)
 adds gold once when the mode first asks for it, for making a test save.
+The title's save call has no failure of its own, so a save the disk refuses
+is said on the screen by the port (`framedata::notice`: a box in the title's
+fonts over the picture, the overlay Practice's panels use), and again when
+a later try has written it. The mode's two other screens with a character
+grid, REGISTER TAG and TOUCH SELECT, are the title's own code with the
+fights' grid, where the cursor stands on an added fighter's cell as on any
+other; both keep their picks in the title's save by select id and read
+tables of 63 fighters by it (the tag screen's costume panel never finished
+loading for an added fighter and took no more input). A confirm on an added
+fighter's cell is taken out of the screen's events there (`sub_0267499C`,
+`sub_02675C18`, `sub_0239C4B8`) and the notice says why. The other screens
+that place their cursor through the class (the profile's character
+information, the gallery's ending movies) keep handlers of their own over
+the title's 3 x 22 cells: no added cell can be reached there, and the class
+now draws their cursor a row down with the new top row, as the layouts do.
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml

@@ -15,6 +15,7 @@
 #include "gpu/still_draws.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
+#include "title/framedata.h"
 #include "title/warp.h"
 #include "outfit_menu.h"
 
@@ -3395,6 +3396,12 @@ PPC_FUNC(sub_02669264) {
                      named ? customize_store::file_of(vfs::save_root(), g_added[k].code).string().c_str()
                            : "a file (the pack's code is no file name)",
                      named ? ": they stay for this session and the save is tried again every few seconds" : "");
+    // (the title's save call has no failure of its own to show: the port's message, on the screen)
+    if (!written)
+        framedata::notice({"The customization could not be saved to the disk.",
+                           named ? "It is kept while the game runs and the save is tried again."
+                                 : "It is kept only while the game runs."},
+                          10.0);
     else if (traces().roster)
         std::fprintf(stderr, "ttt2: customize: %s: saved to its own file (player %u)\n", g_added[k].code.c_str(),
                      player);
@@ -3409,7 +3416,10 @@ void retry_unsaved() {
     if (now - last < std::chrono::seconds(2)) return;
     last = now;
     for (const std::string& code : g_unsaved.retry(vfs::save_root()))
+    {
         std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s are saved now\n", code.c_str());
+        framedata::notice({"The customization is saved now."}, 5.0);
+    }
 }
 
 // Developer switch TTT2_TEST_SAVE_SLOT (off unless set): `<slot>=<who>:<entries>` (who and entries as
@@ -3635,6 +3645,35 @@ PPC_FUNC(sub_026466F0) {
     }
     sub_026466F0_orig(ctx, base);
 }
+
+// REGISTER TAG and TOUCH SELECT (CUSTOMIZE mode's two other screens with a character grid) are the title's own
+// code, not scripts: their grid is the fights' one, where the cursor stands on an added fighter's cell as on any
+// other. Both keep what is picked in the title's save by select id, and read tables of the title's 63 fighters
+// by it (the tag screen's costume panel never finished loading for an added fighter and took no input any more).
+// So a confirm on an added fighter's cell is not passed on, as the title itself passes none on for a fighter
+// already in the team: REGISTER TAG's two grid states (the team's first and second member: sub_0267499C,
+// sub_02675C18; the cursor's cell at this + 136) and TOUCH SELECT's (sub_0239C4B8; this + 112) read the
+// screen's events (a word of bits set by the menu's handlers, 8: confirm) each frame.
+constexpr uint32_t kTagScreenEvents = 0x10851834 + 8, kTouchScreenEvents = 0x108516E4 + 8, kEventConfirm = 8;
+PPC_FUNC(sub_033E10C4); // a cell of a select grid (grid r3: 1 the fights' one, cell r4): 32 bytes, +0 the select id
+void refuse_added_pick(PPCContext& ctx, uint8_t* base, uint32_t events, uint32_t cell) {
+    if (!g_active || (load(events) & kEventConfirm) == 0) return;
+    const uint32_t entry = guest_call(ctx, base, sub_033E10C4, {1, cell});
+    if (entry == 0 || slot_of_id(load(entry)) < 0) return;
+    store(events, load(events) & ~kEventConfirm);
+    if (traces().roster) std::fprintf(stderr, "ttt2: customize: no pick of added fighter %u on this screen\n", load(entry));
+    framedata::notice({"Added fighters cannot be set on this screen."}, 2.5);
+}
+#define NO_ADDED_PICK(name, events, cell)                                                                        \
+    PPC_FUNC(name##_orig);                                                                                       \
+    PPC_FUNC(name) {                                                                                             \
+        refuse_added_pick(ctx, base, events, load(ctx.r[3] + cell));                                             \
+        name##_orig(ctx, base);                                                                                  \
+    }
+NO_ADDED_PICK(sub_0267499C, kTagScreenEvents, 136)
+NO_ADDED_PICK(sub_02675C18, kTagScreenEvents, 136)
+NO_ADDED_PICK(sub_0239C4B8, kTouchScreenEvents, 112)
+#undef NO_ADDED_PICK
 
 // Developer switch TTT2_TEST_MONEY=<gold> (off unless set): once, when CUSTOMIZE mode first asks how much gold the
 // player has (the script native getMoney), that much is added through the title's own addMoney: for making a test
