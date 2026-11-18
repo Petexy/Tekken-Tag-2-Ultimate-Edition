@@ -1183,10 +1183,27 @@ key nobody requested makes the chooser assert. The added fighter has one
 costume: the list function reads its row (the donor's costume 1) in the
 place of Paul's, its pictures (the pack's `art/costumes.nut`, else the
 donor's) have their key lent to that place only while the chooser's
-functions run, and the chooser leaves out the customisation slots (made per
-fighter in a mode the added fighter is not in). Opening the chooser notes the
-fighter under the cursor (`sub_02669380`, which asserts an id below 63): an
-added fighter is noted as its donor.
+functions run. Opening the chooser loads the fighter's saved customizations
+(`sub_02669380`, which asserts an id below 63: the title's save has one
+file per select id, 63 of them, in a full directory). An added fighter's are
+the port's own file, `<save folder>/customize/<code>.bin`, in the title's
+layout (ten 4096-byte records and the slots' pictures, 256,400 bytes;
+`title/customize_store.h`), named by the pack's code because select ids move
+when packs are added or removed: the load request never reaches the save, the
+buffer's update (`sub_02669BAC`) fills the buffer from that file or leaves it
+empty, and the save (`sub_02669264`) of a buffer that holds an added fighter
+writes that file, a temporary file renamed over it, and nothing else. The
+donor's file is not involved. The chooser's builder (`sub_033E3460`) then
+lists, after the costumes, the slots that file has filled (the title lists
+all five, filled or not; an added fighter has no CUSTOMIZE mode yet to fill
+an empty one from), each with the slot's picture or, for a slot without one
+(written by `tools/characters/customize_slot.py`, a developer's tool), the
+fighter's first costume picture; confirming one goes the title's own way
+(`sub_033E3208`: the record into the match set-up, which the fight's loader
+hands to the character manager), on the fighter's first body. The developer
+switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
+record into a slot and makes the title's save call once, for testing the
+saving before a menu calls it.
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
@@ -1197,7 +1214,8 @@ Outfits boxes; all by default); the preset of the fighter's own costume is its o
 the only one with 2P colour layers (palette entries go by select id, which
 outfits share). The chooser then lists the donor's costume 1 once per outfit
 and the pick (`sub_033E265C`) chooses the body; 14 entries is the chooser's
-room (its customisation rows stop there, `033E379C`). Each outfit is
+room (its customisation rows stop there, `033E379C`: with 9 outfits all five
+saved slots fit, with 10 to 13 the first 4 to 1 filled ones, with 14 none). Each outfit is
 registered as a body of its own (registry and chara master) under a private
 32-bit key from 0x10000, never a select id: the chara master's lookup by code
 (`sub_0209506C`) gives back the fighter's id, the loader (`sub_044BE1EC`) asks

@@ -6,6 +6,7 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
+#include "title/customize_store.h"
 #include "title/test_record.h"
 #include "title/unblurred.h"
 #include "gpu/still_draws.h"
@@ -1254,10 +1255,9 @@ void prepare_art(const Pack& pack, size_t slot, const fs::path& shared) {
 // has one costume. Optional complete outfit bodies repeat the donor's first
 // equipment set, with one preview each; the pick chooses a separate body code.
 // Its pictures are the pack's (`<code>/` + kCostumeFile, else the donor's),
-// its key lent to the table only while the chooser's functions run. The chooser
-// leaves out the customisation slots (customisation is made per fighter in a
-// mode an added fighter is not in; loading a slot's items would read past
-// tables).
+// its key lent to the table only while the chooser's functions run. After the
+// costumes come the slots the fighter's own customization file has filled
+// (sub_033E3460 below; title/customize_store.h).
 constexpr uint32_t kCostumeLists = 0x103B4B84, kCostumePreviews = 0x10161590;
 constexpr const char* kCostumeFile = "art/costumes.nut";
 constexpr uint32_t kCostumeOne = 0;                          // the type of costume 1 in a list
@@ -3227,7 +3227,9 @@ PPC_FUNC(sub_033E265C) {
     g_outfit_choice = k >= 0 && ctx.r[8] > 0 && ctx.r[8] <= g_added[k].outfits.size() ? ctx.r[8] - 1 : 0;
     // Opening and confirming use this same function. Only confirmation may
     // substitute the native equipment style; opening must keep its input.
-    ctx.r[8] = outfit_menu::native_style(k >= 0 ? g_added[k].outfits.size() : 0, ctx.lr, ctx.r[8]);
+    // (an added fighter has one equipment style, whatever row was confirmed: an outfit or a saved slot)
+    ctx.r[8] = outfit_menu::native_style(k >= 0 ? std::max<size_t>(1, g_added[k].outfits.size()) : 0, ctx.lr,
+                                         ctx.r[8]);
     if (k >= 0 && !g_added[k].outfits.empty() && outfit_menu::confirming(ctx.lr) && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: confirmed menu entry %u for %s\n",
                      g_outfit_choice + 1, g_added[k].code.c_str());
@@ -3292,21 +3294,160 @@ PPC_FUNC(sub_033E1A54) {
     }
 }
 
-// Notes the fighter a player's cursor is on for the chooser (object r3,
-// player r4, select id r5), asserting that the id is below 63: an added
-// fighter's donor's.
-PPC_FUNC(sub_02669380_orig);
-PPC_FUNC(sub_02669380) {
-    if (const int k = slot_of_id(ctx.r[5]); k >= 0) ctx.r[5] = g_added[k].donor;
-    sub_02669380_orig(ctx, base);
+// ------------------------------------------------------------------ an added fighter's saved customizations
+
+// The title keeps a fighter's ten customization records and the slots' pictures in one file of its save per select
+// id (save type 8: 63 files, the save's directory is full, an id of 63 or more asserts), and works on them in two
+// buffers, one per player side (the save object at manager + 28, manager = *kCustomizeManager; buffer = object +
+// kSaveBuffer * player): +0 state (0 idle, 1 saving, 2 loading), +4 the select id whose file it holds (63: none),
+// +16 the file's bytes (title/customize_store.h), then a byte "a file was read". Three functions reach the file:
+// the load request sub_02669380 (object r3, player r4, id r5: empties the buffer, notes the id, asks the save for
+// the file, state 2), the update sub_02669BAC (object r3, each frame: a finished load is copied into the buffer if
+// the save has that file, state 0; a finished save, state 0), and the save sub_02669264 (object r3, player r4, id
+// r5: writes the buffer as the file of id r5, state 1). An added fighter's file is the port's own, by its code
+// (customize_store.h): its load request never reaches the save, the update fills the buffer from the port's file
+// (or leaves it empty, as the title leaves it for a file its save does not have), and a save of a buffer that
+// holds an added fighter (or for an added id) writes the port's file and nothing else. The donor's file and the
+// title's save are not read or written for an added fighter.
+constexpr uint32_t kCustomizeManager = 0x107A71EC, kManagerSave = 28;
+constexpr uint32_t kSaveBuffer = 0x3E9B0, kSaveState = 0, kSaveId = 4, kSaveBytes = 16;
+constexpr uint32_t kSaveRead = kSaveBytes + customize_store::kSize;
+constexpr uint32_t kSaveIdle = 0, kSaveSaving = 1, kSaveLoading = 2;
+PPC_FUNC(sub_0266D5F8); // empties a buffer's bytes (r3)
+PPC_FUNC(sub_024306B4); // the title's save call (manager r3, player r4, select id r5) -> sub_02669264
+
+std::optional<fs::path> customize_file(int k) {
+    if (k < 0 || !customize_store::valid_code(g_added[k].code)) return std::nullopt;
+    return customize_store::file_of(vfs::save_root(), g_added[k].code);
 }
 
-// Builds the chooser's entries (cursor r3, select id r4) once the pictures
-// are there: for an added fighter without the customisation slots.
+PPC_FUNC(sub_02669380_orig);
+PPC_FUNC(sub_02669380) {
+    const uint32_t object = ctx.r[3], player = ctx.r[4], id = ctx.r[5];
+    if (slot_of_id(id) < 0 || player > 1) {
+        sub_02669380_orig(ctx, base);
+        return;
+    }
+    const uint32_t buffer = object + kSaveBuffer * player;
+    // The title empties the ten records only; what else the buffer held stays (the pictures of the fighter
+    // before, bytes between fields). Here all of it goes but the first word, so that an added fighter's file never
+    // carries another fighter's pictures and is the same bytes whoever wrote it.
+    std::memset(guest_pointer(buffer + kSaveBytes + 4), 0, customize_store::kSize - 4);
+    guest_call(ctx, base, sub_0266D5F8, {buffer + kSaveBytes});
+    store(buffer + kSaveId, id);
+    store8(buffer + kSaveRead, 0);
+    store(buffer + kSaveState, kSaveLoading);
+}
+
+PPC_FUNC(sub_02669264_orig);
+PPC_FUNC(sub_02669264) {
+    const uint32_t object = ctx.r[3], player = ctx.r[4], id = ctx.r[5];
+    if (player > 1) {
+        sub_02669264_orig(ctx, base);
+        return;
+    }
+    const uint32_t buffer = object + kSaveBuffer * player;
+    int k = slot_of_id(load(buffer + kSaveId)); // whose records the buffer holds decides, then the id asked for
+    if (k < 0) k = slot_of_id(id);
+    if (k < 0) {
+        sub_02669264_orig(ctx, base);
+        return;
+    }
+    const auto file = customize_file(k);
+    const bool written = file && customize_store::write(*file, guest_pointer(buffer + kSaveBytes));
+    if (!written || traces().roster)
+        std::fprintf(stderr, "ttt2: customize: %s: %s (player %u)\n", g_added[k].code.c_str(),
+                     written ? "saved to its own file" : "could not be saved", player);
+    store(buffer + kSaveState, kSaveSaving); // the update makes it idle, as after the title's own save
+}
+
+// Developer switch TTT2_TEST_SAVE_SLOT (off unless set): `<slot>=<who>:<entries>` (who and entries as
+// TTT2_TEST_CUSTOMIZE, title/test_record.h; slot 0..4). Once, when a buffer holds that fighter's loaded records,
+// the record is put into the slot and the title's own save call is made for that buffer and fighter: for testing
+// the saving of an added fighter's file (and for making a slot of one of the title's fighters in a test save)
+// before CUSTOMIZE mode can do it.
+struct SaveSwitch {
+    uint32_t slot = 0;
+    test_record::Spec spec;
+};
+const std::optional<SaveSwitch>& save_switch() {
+    static const std::optional<SaveSwitch> read = []() -> std::optional<SaveSwitch> {
+        const char* text = std::getenv("TTT2_TEST_SAVE_SLOT");
+        if (!text || !*text) return std::nullopt;
+        const std::string_view all = text;
+        std::optional<test_record::Spec> spec;
+        if (all.size() > 2 && all[0] >= '0' && all[0] < '0' + static_cast<char>(customize_store::kSlots) &&
+            all[1] == '=')
+            spec = test_record::parse(all.substr(2));
+        if (!spec) {
+            std::fprintf(stderr, "ttt2: TTT2_TEST_SAVE_SLOT: cannot read '%s'\n", text);
+            return std::nullopt;
+        }
+        return SaveSwitch{static_cast<uint32_t>(all[0] - '0'), *spec};
+    }();
+    return read;
+}
+
+PPC_FUNC(sub_02669BAC_orig);
+PPC_FUNC(sub_02669BAC) {
+    const uint32_t object = ctx.r[3];
+    for (uint32_t player = 0; player < 2; ++player) {
+        const uint32_t buffer = object + kSaveBuffer * player;
+        if (load(buffer + kSaveState) != kSaveLoading) continue;
+        const int k = slot_of_id(load(buffer + kSaveId));
+        if (k < 0) continue;
+        const auto file = customize_file(k);
+        const auto bytes = file ? customize_store::read(*file) : std::nullopt;
+        if (bytes) {
+            std::memcpy(guest_pointer(buffer + kSaveBytes), bytes->data(), customize_store::kSize);
+            store8(buffer + kSaveRead, 1);
+        }
+        store(buffer + kSaveState, kSaveIdle);
+        if (traces().roster) {
+            std::string slots;
+            for (uint32_t n = 0; bytes && n < customize_store::kRecords; ++n) {
+                if (customize_store::filled(bytes->data(), n)) slots += " " + std::to_string(n);
+            }
+            std::fprintf(stderr, "ttt2: customize: %s (id %u, player %u): %s%s\n", g_added[k].code.c_str(),
+                         load(buffer + kSaveId), player,
+                         bytes ? "its own file, records" : "no file of its own, nothing saved",
+                         bytes && slots.empty() ? " none" : slots.c_str());
+        }
+    }
+    sub_02669BAC_orig(ctx, base);
+    static bool saved = false;
+    const auto& test = save_switch();
+    for (uint32_t player = 0; test && !saved && player < 2; ++player) {
+        const uint32_t buffer = object + kSaveBuffer * player, id = load(buffer + kSaveId);
+        if (load(buffer + kSaveState) != kSaveIdle || id == 63) continue;
+        const int k = slot_of_id(id);
+        if (test->spec.who != (k >= 0 ? g_added[k].code : "#" + std::to_string(id))) continue;
+        const uint32_t record = buffer + kSaveBytes + customize_store::kFirstRecord +
+                                customize_store::kRecordSize * test->slot;
+        test_record::apply(test->spec, guest_pointer(record));
+        store(record + 3276, test->slot); // (as the title's own store of a record into a slot, sub_0266DA48)
+        saved = true;
+        guest_call(ctx, base, sub_024306B4, {load(kCustomizeManager), player, id});
+        std::fprintf(stderr, "ttt2: TTT2_TEST_SAVE_SLOT: slot %u of fighter %u saved by the title's save call "
+                             "(player %u)\n", test->slot, id, player);
+    }
+}
+
+// Builds the chooser's entries (cursor r3, select id r4) once the pictures are there: the costumes, then (while
+// there are fewer than 14 entries) one row per customization slot 0..4, filled or not. For an added fighter the
+// slot rows are made again here: only the slots its own file has filled (it has no CUSTOMIZE mode to fill an
+// empty one from yet, and up to 14 preset outfits share the 14 entries: with 9 outfits all five slots fit, with
+// 10 to 13 the first 4 to 1 filled ones, with 14 none). A row is {kind, slot byte, picture, "has a saved
+// thumbnail"}; a filled slot's picture is the texture the title makes from the slot's picture in the buffer
+// (0x56200000 | player << 8 | slot, sub_0266DBBC). A slot whose picture is blank (written by a tool: CUSTOMIZE
+// mode takes the picture) shows the fighter's first costume picture instead.
+constexpr uint32_t kChooserMax = outfit_menu::kMaxPresets, kChooserCursorRow = 84, kChooserPlayer = 340;
+constexpr uint32_t kSlotPicture = 0x56200000;
+PPC_FUNC(sub_02430624); // whether a slot is EMPTY (manager r3, player r4, slot r5)
 PPC_FUNC(sub_033E3460_orig);
 PPC_FUNC(sub_033E3460) {
-    const uint32_t cursor = ctx.r[3];
-    const int k = slot_of_id(ctx.r[4]);
+    const uint32_t cursor = ctx.r[3], id = ctx.r[4];
+    const int k = slot_of_id(id);
     const bool added = k >= 0 && g_costumes[k].key != 0;
     const bool pending = load8(cursor + kChooserPending) != 0;
     lend_costume_keys(true);
@@ -3316,10 +3457,29 @@ PPC_FUNC(sub_033E3460) {
     const uint32_t count = load8(cursor + kChooserCount);
     uint32_t kept = 0;
     while (kept < count && load(cursor + kChooserEntries + kChooserEntrySize * kept) != kChooserSlot) ++kept;
-    store8(cursor + kChooserCount, static_cast<uint8_t>(kept));
-    if (!g_added[k].outfits.empty() && traces().roster)
-        std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
-                     kept, g_added[k].code.c_str());
+    uint32_t rows = kept;
+    const uint32_t manager = load(kCustomizeManager), player = load(cursor + kChooserPlayer);
+    const uint32_t object = manager ? load(manager + kManagerSave) : 0;
+    const uint32_t buffer = object + kSaveBuffer * player;
+    // (only the fighter's own loaded records: a buffer still loading, or another fighter's, gives no rows)
+    if (object && player < 2 && kept > 0 && load(buffer + kSaveState) == kSaveIdle && load(buffer + kSaveId) == id) {
+        const uint32_t first_picture = load(cursor + kChooserEntries + 8);
+        for (uint32_t slot = 0; slot < customize_store::kSlots && rows < kChooserMax; ++slot) {
+            if (guest_call(ctx, base, sub_02430624, {manager, player, slot}) != 0) continue; // empty
+            const uint32_t entry = cursor + kChooserEntries + kChooserEntrySize * rows++;
+            const bool blank = customize_store::picture_blank(guest_pointer(buffer + kSaveBytes), slot);
+            store(entry, kChooserSlot);
+            store(entry + 4, slot << 24);
+            store(entry + 8, blank ? first_picture : kSlotPicture | player << 8 | slot);
+            store(entry + 12, 0);
+        }
+    }
+    store8(cursor + kChooserCount, static_cast<uint8_t>(rows));
+    // (the row the chooser opens on is remembered per fighter and mode: never past the rows there are now)
+    if (rows > 0 && load(cursor + kChooserCursorRow) >= rows) store(cursor + kChooserCursorRow, rows - 1);
+    if (traces().roster && (rows > kept || !g_added[k].outfits.empty()))
+        std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s (%u saved slots)\n",
+                     rows, g_added[k].code.c_str(), rows - kept);
 }
 
 // Developer switch TTT2_TEST_CUSTOMIZE (title/test_record.h; off unless set): a customization record for one

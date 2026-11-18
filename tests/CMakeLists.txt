@@ -197,3 +197,10 @@ target_include_directories(test_record_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/
 target_compile_features(test_record_test PRIVATE cxx_std_20)
 target_compile_options(test_record_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME test_record_test COMMAND test_record_test)
+
+# An added fighter's saved customizations (title/customize_store.h): the port's own file per fighter code.
+add_executable(customize_store_test customize_store_test.cpp)
+target_include_directories(customize_store_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(customize_store_test PRIVATE cxx_std_20)
+target_compile_options(customize_store_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME customize_store_test COMMAND customize_store_test)
