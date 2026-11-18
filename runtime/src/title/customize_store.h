@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -81,6 +82,50 @@ inline bool write(const std::filesystem::path& file, const uint8_t* bytes) {
     }
     return true;
 }
+
+// The saves that did not reach the disk (a full or read-only save folder, a folder that cannot be made). The title's
+// save call has no failure to hand back (its own save system keeps asking until the save is taken), so a failed
+// write must not pass for a done one: the bytes are kept here by code, they are what a later load of that fighter
+// gets (the slot stays there for the rest of the session, in the chooser and in a fight), and `retry` writes them
+// again until the disk takes them. The file on the disk is never touched by a failed write (temporary + rename).
+class Unsaved {
+  public:
+    // Saves a fighter's bytes: true when they are on the disk now, false when they are kept for `retry`.
+    bool save(const std::filesystem::path& save_root, std::string_view code, const uint8_t* bytes) {
+        if (write(file_of(save_root, code), bytes)) {
+            kept_.erase(std::string(code));
+            return true;
+        }
+        kept_[std::string(code)].assign(bytes, bytes + kSize);
+        return false;
+    }
+
+    // A fighter's bytes: the ones still waiting for the disk if there are any (they are the newer), else the file.
+    std::optional<std::vector<uint8_t>> load(const std::filesystem::path& save_root, std::string_view code) const {
+        if (const auto kept = kept_.find(std::string(code)); kept != kept_.end()) return kept->second;
+        return read(file_of(save_root, code));
+    }
+
+    // Tries the waiting saves again; the codes that reached the disk this time.
+    std::vector<std::string> retry(const std::filesystem::path& save_root) {
+        std::vector<std::string> done;
+        for (auto kept = kept_.begin(); kept != kept_.end();) {
+            if (write(file_of(save_root, kept->first), kept->second.data())) {
+                done.push_back(kept->first);
+                kept = kept_.erase(kept);
+            } else {
+                ++kept;
+            }
+        }
+        return done;
+    }
+
+    bool waiting(std::string_view code) const { return kept_.count(std::string(code)) != 0; }
+    bool any() const { return !kept_.empty(); }
+
+  private:
+    std::map<std::string, std::vector<uint8_t>> kept_;
+};
 
 // Whether record `number` of a file's or buffer's bytes holds a customization.
 inline bool filled(const uint8_t* bytes, uint32_t number) {

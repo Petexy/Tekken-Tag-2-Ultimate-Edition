@@ -47,6 +47,40 @@ int main() {
 
     { std::ofstream(file, std::ios::binary | std::ios::trunc) << "short"; }
     check(!store::read(file), "a file of another size is not a save");
+    // A save the disk does not take: the folder's place is taken by a file, so nothing can be written under it.
+    fs::remove_all(root);
+    fs::create_directories(root);
+    { std::ofstream(root / "customize") << "in the way"; }
+    store::Unsaved unsaved;
+    bytes[store::kFirstRecord + store::kRecordSize * 2] = 1;
+    check(!store::write(file, bytes.data()), "a write that cannot be done says so");
+    check(!unsaved.save(root, "abc", bytes.data()), "a failed save is not a done one");
+    check(unsaved.waiting("abc") && unsaved.any() && !unsaved.waiting("abd"), "it waits, by code");
+    const auto kept = unsaved.load(root, "abc");
+    check(kept && *kept == bytes, "the fighter still gets what was saved");
+    check(!unsaved.load(root, "abd"), "another fighter gets nothing of it");
+    check(unsaved.retry(root).empty() && unsaved.waiting("abc"), "still no disk: it keeps waiting");
+    std::vector<uint8_t> newer = bytes;
+    newer[store::kFirstRecord + store::kRecordSize * 3] = 1;
+    check(!unsaved.save(root, "abc", newer.data()), "a second failed save");
+    check(*unsaved.load(root, "abc") == newer, "the newest bytes are the ones kept");
+    fs::remove(root / "customize");
+    const auto done = unsaved.retry(root);
+    check(done.size() == 1 && done[0] == "abc" && !unsaved.any(), "the disk is back: written, nothing waits");
+    check(store::read(file) && *store::read(file) == newer, "the file holds the newest bytes");
+    check(*unsaved.load(root, "abc") == newer, "and a load reads the file");
+    check(unsaved.retry(root).empty(), "nothing left to try");
+    // A failed save leaves the file that is there as it was.
+    fs::permissions(file.parent_path(), fs::perms::owner_read | fs::perms::owner_exec);
+    if (!store::write(file, bytes.data())) { // (a user who may write anywhere cannot make this case)
+        check(!unsaved.save(root, "abc", bytes.data()), "a read-only folder: not saved");
+        check(*store::read(file) == newer, "the old file is whole");
+        check(*unsaved.load(root, "abc") == bytes, "the session has the new bytes");
+        fs::permissions(file.parent_path(), fs::perms::owner_all);
+        check(unsaved.retry(root).size() == 1 && *store::read(file) == bytes, "written once the folder allows it");
+        check(!fs::exists(file.string() + ".tmp"), "no temporary file is left after the retries");
+    }
+    fs::permissions(file.parent_path(), fs::perms::owner_all);
     fs::remove_all(root);
     std::puts("Customize store tests passed");
 }

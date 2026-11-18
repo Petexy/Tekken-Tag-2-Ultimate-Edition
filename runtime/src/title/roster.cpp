@@ -29,6 +29,7 @@
 #include <atomic>
 #include <bit>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -3316,10 +3317,7 @@ constexpr uint32_t kSaveIdle = 0, kSaveSaving = 1, kSaveLoading = 2;
 PPC_FUNC(sub_0266D5F8); // empties a buffer's bytes (r3)
 PPC_FUNC(sub_024306B4); // the title's save call (manager r3, player r4, select id r5) -> sub_02669264
 
-std::optional<fs::path> customize_file(int k) {
-    if (k < 0 || !customize_store::valid_code(g_added[k].code)) return std::nullopt;
-    return customize_store::file_of(vfs::save_root(), g_added[k].code);
-}
+customize_store::Unsaved g_unsaved; // saves the disk refused: kept, read back by a load, tried again
 
 PPC_FUNC(sub_02669380_orig);
 PPC_FUNC(sub_02669380) {
@@ -3353,12 +3351,31 @@ PPC_FUNC(sub_02669264) {
         sub_02669264_orig(ctx, base);
         return;
     }
-    const auto file = customize_file(k);
-    const bool written = file && customize_store::write(*file, guest_pointer(buffer + kSaveBytes));
-    if (!written || traces().roster)
-        std::fprintf(stderr, "ttt2: customize: %s: %s (player %u)\n", g_added[k].code.c_str(),
-                     written ? "saved to its own file" : "could not be saved", player);
+    // The title's save call hands nothing back, so a write the disk refuses is kept and tried again (g_unsaved).
+    const bool named = customize_store::valid_code(g_added[k].code);
+    const bool written = named && g_unsaved.save(vfs::save_root(), g_added[k].code,
+                                                 guest_pointer(buffer + kSaveBytes));
+    if (!written)
+        std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s could not be saved to %s%s\n",
+                     g_added[k].code.c_str(),
+                     named ? customize_store::file_of(vfs::save_root(), g_added[k].code).string().c_str()
+                           : "a file (the pack's code is no file name)",
+                     named ? ": they stay for this session and the save is tried again every few seconds" : "");
+    else if (traces().roster)
+        std::fprintf(stderr, "ttt2: customize: %s: saved to its own file (player %u)\n", g_added[k].code.c_str(),
+                     player);
     store(buffer + kSaveState, kSaveSaving); // the update makes it idle, as after the title's own save
+}
+
+// Tries the saves the disk refused again, every two seconds while there are any (from the buffers' update).
+void retry_unsaved() {
+    if (!g_unsaved.any()) return;
+    static std::chrono::steady_clock::time_point last;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(2)) return;
+    last = now;
+    for (const std::string& code : g_unsaved.retry(vfs::save_root()))
+        std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s are saved now\n", code.c_str());
 }
 
 // Developer switch TTT2_TEST_SAVE_SLOT (off unless set): `<slot>=<who>:<entries>` (who and entries as
@@ -3396,8 +3413,8 @@ PPC_FUNC(sub_02669BAC) {
         if (load(buffer + kSaveState) != kSaveLoading) continue;
         const int k = slot_of_id(load(buffer + kSaveId));
         if (k < 0) continue;
-        const auto file = customize_file(k);
-        const auto bytes = file ? customize_store::read(*file) : std::nullopt;
+        const auto bytes = customize_store::valid_code(g_added[k].code)
+                               ? g_unsaved.load(vfs::save_root(), g_added[k].code) : std::nullopt;
         if (bytes) {
             std::memcpy(guest_pointer(buffer + kSaveBytes), bytes->data(), customize_store::kSize);
             store8(buffer + kSaveRead, 1);
@@ -3410,11 +3427,14 @@ PPC_FUNC(sub_02669BAC) {
             }
             std::fprintf(stderr, "ttt2: customize: %s (id %u, player %u): %s%s\n", g_added[k].code.c_str(),
                          load(buffer + kSaveId), player,
-                         bytes ? "its own file, records" : "no file of its own, nothing saved",
+                         !bytes ? "no file of its own, nothing saved"
+                         : g_unsaved.waiting(g_added[k].code) ? "its save not yet on the disk, records"
+                                                              : "its own file, records",
                          bytes && slots.empty() ? " none" : slots.c_str());
         }
     }
     sub_02669BAC_orig(ctx, base);
+    retry_unsaved();
     static bool saved = false;
     const auto& test = save_switch();
     for (uint32_t player = 0; test && !saved && player < 2; ++player) {
