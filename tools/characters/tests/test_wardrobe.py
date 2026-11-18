@@ -115,13 +115,16 @@ class Fitting(unittest.TestCase):
         np.testing.assert_allclose(np.hypot(top[:, 0], top[:, 2] - 6.0), 44 - inward, atol=1.0)
         np.testing.assert_allclose(bottom, ring(50, 1380), atol=1e-3)      # beyond the reach: only its joint's move
 
-    def test_skin_takes_the_colour_of_the_fighters_rim(self):
-        shifts = wardrobe.joint_shifts(SOURCE, TARGET)
+    def test_skin_takes_the_tone_of_the_fighters_plain_face_skin(self):
         source_face, target_face = cap('cha:kao_O_OBJ', 50, 1490, 2, ), cap('abc_fac', 50, 1510, 2)
         target_face['polys'][0]['materials'][0]['textures'][0]['id'] = 6
-        images = {5: np.full((8, 8, 4), 128, np.uint8), 6: np.full((8, 8, 4), 160, np.uint8)}
-        gain = wardrobe.Neck(source_face, target_face, shifts).gain(source_face, images, target_face, images)
+        made_up = np.full((8, 8, 4), 160, np.uint8)
+        made_up[0, 0] = 40                        # make-up and shade: the darker part of a face is not its tone
+        target_face['polys'][0]['verts']['uv'][:8, 0] = (0.5, 0.5)         # (5 of its 13 vertices lie in the shade)
+        images = {5: np.full((8, 8, 4), 128, np.uint8), 6: made_up}
+        gain = wardrobe.skin_gain(source_face, target_face, images)
         np.testing.assert_allclose(gain, [wardrobe._linear(160) / wardrobe._linear(128)] * 3, rtol=1e-6)
+        np.testing.assert_allclose(wardrobe.skin_gain(source_face, target_face, {5: images[5]}), 1.0)
         self.assertEqual(wardrobe._srgb8(wardrobe._linear(np.array([0, 77, 255]))).tolist(), [0, 77, 255])
 
 
@@ -139,13 +142,30 @@ class Pieces(unittest.TestCase):
         one = dict(meshes=[mesh(n, tri, [(0, 1, 2)], 0) for n in ('abc_bdf_1p', 'abc_fac')])
         self.assertEqual(wardrobe.own_pieces(one, 'abc'), {})
 
-    def test_an_item_with_its_own_skeleton_or_springs_is_not_fitted(self):
-        def inst(attrs):
-            return el('Instance', [], [el('Model', [('section', 'A')], [el('Group', attrs)])])
+    def test_which_items_are_fitted(self):
+        def inst(attrs, kind='clothes'):
+            return el('Instance', [], [el('Data', [('EquipType', kind)]),
+                                       el('Model', [('section', 'A')], [el('Group', attrs)])])
         self.assertTrue(wardrobe.fits(inst([('mi', '1'), ('ti', '2'), ('bci', '116')])))
         self.assertTrue(wardrobe.fits(el('Instance', [], [el('Model', [('section', 'A')])])))
-        self.assertFalse(wardrobe.fits(inst([('mi', '1'), ('bi', '2')])))
-        self.assertFalse(wardrobe.fits(inst([('mi', '1'), ('tci', '2'), ('bci', '3'), ('pi', '4')])))
+        self.assertTrue(wardrobe.fits(inst([('mi', '1'), ('bi', '2')])))                  # bones of its own
+        self.assertTrue(wardrobe.fits(inst([('mi', '1'), ('tci', '2'), ('bi', '3'), ('pi', '4')])))   # and springs
+        self.assertFalse(wardrobe.fits(inst([('mi', '1'), ('gi', '4')])))
+        swaying = inst([('mi', '1'), ('tci', '2'), ('bi', '3'), ('pi', '4')])
+        still = wardrobe.static(swaying)            # worn without its springs: its bones held by their joints
+        self.assertEqual(itemdb.groups(still)[0]['attrs'], [('mi', '1'), ('tci', '2'), ('bi', '3')])
+        self.assertEqual(len(itemdb.groups(swaying)[0]['attrs']), 4)
+        # the source's own costume: its Instances are the ones the fighter's own outfit is worn as
+        self.assertFalse(wardrobe.fits(inst([('mi', '1'), ('ti', '2')], kind=itemdb.DEFAULT_COSTUME)))
+
+    def test_a_garments_skeleton_takes_the_fighters_joints_and_keeps_its_own_bones(self):
+        part = skeleton([('HARA', -1, (0, 1000, 0)), ('KUBI_jnt', 0, (0, 1400, 0)), ('ATAMA_jnt', 1, (0, 1500, 0)),
+                         ('TE_R_jnt', 0, (-700, 1400, 0)), ('OPT250_hem', 0, (0, 900, 30))], prefix='par:cha:')
+        made = wardrobe.part_skeleton(part, TARGET)
+        np.testing.assert_allclose(made['t'][:4], TARGET['t'][:4])
+        np.testing.assert_allclose(made['t'][4], (0, -100, 30))        # where it hangs from its joint: unchanged
+        self.assertEqual(made['names'], part['names'])
+        np.testing.assert_allclose(part['t'][3], (-700, 400, 0))       # (the source's is left as it was)
 
 
 class Shop(unittest.TestCase):
@@ -154,7 +174,8 @@ class Shop(unittest.TestCase):
             el('Fighter', [('id', '7')], [el('Equipment', [('Position', '1')], [
                 el('Item', [('label', 'abc_shirt_set'), ('instances', '8_42_-1|9_36_-1|10_29_-1'),
                             ('colorgara', '5_0_0_91_-1|6_1_0_34_-1')]),
-                el('Item', [('label', 'abc_plain'), ('instances', '12_2_-1'), ('colorgara', '')])])]),
+                el('Item', [('label', 'abc_plain'), ('instances', '12_2_-1'), ('colorgara', '')]),
+                el('Item', [('label', 'abc_glasses'), ('instances', '5_253_-1'), ('colorgara', '')])])]),
             el('Fighter', [('id', '8')], [el('Equipment', [('Position', '2')], [
                 el('Item', [('label', 'xyz_pants_set'), ('instances', '12_77_-1|13_66_-1'),
                             ('colorgara', '8_0_0_96_-1')])])])])
@@ -165,6 +186,12 @@ class Shop(unittest.TestCase):
         self.assertEqual(sorted(rows), ['abc_shirt_set', 'xyz_pants_set'])
         self.assertEqual(rows['abc_shirt_set'], dict(items=[(8, 42, -1), (9, 36, -1), (10, 29, -1)],
                                                      colours=[(51, 91), (57, 34)]))
+
+    def test_a_fighters_outfit_rows_are_its_rows_for_the_upper_or_lower_body(self):
+        self.assertEqual(wardrobe.outfit_rows(self.archives, 'abc'), ['abc_shirt_set', 'abc_plain'])
+        self.assertEqual(wardrobe.outfit_rows(self.archives, 'xyz'), ['xyz_pants_set'])
+        self.assertEqual(wardrobe.outfit_rows(self.archives, 'ab'), [])
+        self.assertEqual(wardrobe.outfit_rows(Archives({}), 'abc'), [])
 
     def test_record_text(self):
         rows = wardrobe.shop_rows(self.archives, ['abc_shirt_set', 'xyz_pants_set'])

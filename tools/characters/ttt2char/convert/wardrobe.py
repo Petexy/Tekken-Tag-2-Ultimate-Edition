@@ -17,21 +17,31 @@ So an added fighter, whose body is one imported model with its own outfit in it,
      its own weights' blend of the joints' shifts (the skeletons share bones 0..137 by name, with the same rest
      rotations; helper joints sit in proportion along the limbs, so the blend stretches a limb evenly);
   2. the cuts appended to its body model with copies of the source's skin textures, their colours scaled to the
-     fighter's own skin where its head meets the neck (`Neck.gain`), and the neck's top ring moved onto the head's
-     open rim (`Neck`: tucked just inside it, so no gap opens);
+     fighter's own skin (`skin_gain`: its face's plain skin against the source's), and the neck's top ring moved
+     onto the head's open rim (`Neck`: tucked just inside it, so no gap opens);
   3. its own imported outfit taken OUT of the body model and made the parts of the default-costume Instances
      (`<code>_bdu*` meshes: the upper body item, `<code>_bdl*`: the lower), bound to its skeleton as before. Worn by
      default it looks as it did; a record that puts a garment in that slot does not load it, exactly as the game
-     drops a default costume: nothing of it can show under or through the garment;
+     drops a default costume: nothing of it can show under or through the garment (a record that leaves the
+     slot empty, or names an item the database lacks, gets the default item from the game: seen in fights, the
+     body cannot go missing that way);
   4. the garments as own-pack parts under the SOURCE's member numbers with the source's Instances as they are (labels
      and indices kept: records and shop rows name items by index), their common-pack members left to the game.
 
 What an outfit is comes from the game's shop list (key C0810D5D: a row names the Instances of one purchase, such as
-a T-shirt with its sleeves and gloves, and its default colours); `OUTFITS` lists the rows fitted.
+a T-shirt with its sleeves and gloves, and its default colours); every row of the source fighter that dresses the
+upper or the lower body is fitted (`outfit_rows`), except its own default costumes.
 
-Not done here (say so to the player rather than guess): garments with spring bones or skeletons of their own
-(`bi`, `pi`: skirts that swing, coats), hair and head items, fighters whose imported body is one mesh (Tekken 8),
-giants. `fits` leaves those out.
+A garment with bones of its own (`bi`: a skeleton that is the source's body plus the garment's swaying bones, held
+by the body's joints) keeps them: the bones' places are relative to the body joint that holds them, so the skeleton
+is written with the fighter's joints under the same member number. Its springs (`pi`) are NOT given to the fighter:
+the game's loader of a part's spring file crashes on an added fighter (null read under sub_02102D68 right after the
+member is fetched; seen with the hakama's). So such a garment is worn STATIC: its Instance loses the `pi`
+attribute and its swaying bones stay where their joints hold them (`static`). A hakama's legs, a necktie and the
+like do not swing until that loader works for added fighters.
+
+Not done here (say so to the player rather than guess): hair and head items, items with the rarer own-pack members
+(`fits`), fighters whose imported body is one mesh (Tekken 8), giants.
 """
 import copy
 
@@ -53,14 +63,11 @@ OWN_FIRST = 900                     # own-pack member numbers of the fighter's o
 UPPER, LOWER = '上半身(胴体)', '下半身'    # EquipPos of the upper-body and lower-body items
 OWN_PIECES = (('_bdu', UPPER), ('_bdl', LOWER))     # the imported body's meshes (model.py's names) -> the item
 SOURCES = {'female': 'jun'}         # whose wardrobe a fighter of that sex is fitted with
-# the shop rows fitted (labels of the source's rows in the shop list)
-OUTFITS = {'jun': ('jun_wcf_upb_tshirt_uneck_wcf_slv_tsode_half_wcf_arm_ultimateglove',
-                   'jun_wcf_lob_cargo_wcf_sho_sneaker',
-                   'jun_wcf_upb_tubetopcami_wcf_arm_no',
-                   'jun_wcf_lob_slittight_wcf_sho_sto_pumps_b_sk')}
+BODY_SLOTS = (8, 12)                 # the record's slots of the upper-body and the lower-body garment
 NECK_REACH = 45.0                   # mm from the head's rim over which the neck is drawn toward it
 NECK_TUCK = (2.0, 1.5)              # mm the neck's top ring goes up and inward of the rim
 GAIN_SPAN = (0.5, 2.0)              # the skin gain is kept within this
+LUMA = np.array([0.2126, 0.7152, 0.0722])
 HALVED = 2                          # texture format (BC3: normal and specular maps) stored at half size
 
 
@@ -103,18 +110,19 @@ def _group_members(db_info, kind):
 
 
 def source_packs(archives, db_info, base_nut):
-    """The source fighter's own model and texture packs' keys, and the common bone pack's: (model, texture, bones).
+    """The source fighter's own model and texture packs' keys, the common bone pack's, and the source's own bone
+    pack's: (model, texture, bones, own bones), None for one not found.
     The model pack is the one whose member is the mesh an Instance's Filename names; the texture pack the one whose
-    member holds the textures a model of the same Group draws; the bone pack the one whose member is the source's
-    skeleton again."""
+    member holds the textures a model of the same Group draws; a bone pack one whose member is the source's
+    skeleton again (an own one: with more bones after it)."""
     models = _group_members(db_info, 'mi')
 
     def is_model(index, data):
         name = models[index][1].rsplit('/', 1)[-1].replace('.nud', '')
         return data[:4] == b'NDP3' and any(m['name'] == name for m in nudfile.read(data)['meshes'])
     model_pack = find_pack(archives, models, is_model)
-    texture_pack = bone_pack = None
-    pairs, bones = {}, set()
+    texture_pack = bone_pack = own_bone_pack = None
+    pairs, bones, own_bones = {}, set(), set()
     for inst in db_info['children']:
         for g in itemdb.groups(inst):
             a = _attrs(g)
@@ -122,13 +130,15 @@ def source_packs(archives, db_info, base_nut):
                 pairs.setdefault(int(a['ti']), int(a['mi']))
             if 'bci' in a:
                 bones.add(int(a['bci']))
+            if 'bi' in a:
+                own_bones.add(int(a['bi']))
     if model_pack is not None and pairs:
         def is_textures(index, data):
             ids = {t['gidx'] for t in nutfile.read(data)['textures']}
             drawn = _texture_ids(nudfile.read(archives.read(member_key(model_pack, pairs[index]))))
             return bool(ids & drawn)
         texture_pack = find_pack(archives, pairs, is_textures)
-    if bones:
+    if bones or own_bones:
         base = bonefile.read(base_nut) if isinstance(base_nut, bytes) else base_nut
 
         def is_bones(index, data):
@@ -137,7 +147,8 @@ def source_packs(archives, db_info, base_nut):
             return len(b['names']) >= n and [x.split(':')[-1] for x in b['names'][:n]] == \
                 [x.split(':')[-1] for x in base['names']] and np.abs(b['t'][:n] - base['t']).max() < 0.01
         bone_pack = find_pack(archives, bones, is_bones)
-    return model_pack, texture_pack, bone_pack
+        own_bone_pack = find_pack(archives, own_bones, is_bones)
+    return model_pack, texture_pack, bone_pack, own_bone_pack
 
 
 def _texture_ids(model):
@@ -165,6 +176,23 @@ def shop_rows(archives, labels):
                         if len(f) >= 4:
                             colours.append((26 + 5 * int(f[0]) + int(f[1]), int(f[3])))
                     out[a['label']] = dict(items=items, colours=colours)
+    return out
+
+
+def outfit_rows(archives, code):
+    """The labels of fighter `code`'s shop rows that dress the upper or the lower body (its rows are the ones
+    labelled `<code>_...`), in the list's order."""
+    out = []
+    if not archives.has(SALE_KEY):
+        return out
+    for fighter in bxml.parse(archives.read(SALE_KEY)):
+        for equipment in fighter['children']:
+            for item in equipment['children']:
+                a = _attrs(item)
+                slots = [part.split('_')[0] for part in a.get('instances', '').split('|') if part]
+                if a.get('label', '').startswith(code + '_') and any(s in slots for s in map(str, BODY_SLOTS)) \
+                        and a['label'] not in out:
+                    out.append(a['label'])
     return out
 
 
@@ -357,36 +385,35 @@ class Neck:
         out[near] = self.error.at(angle) * f[:, None]
         return out
 
-    # ---- skin tone
-    @staticmethod
-    def _colour(mesh, indices, textures):
-        """The mean linear colour the mesh's first texture shows around the vertices `indices`."""
-        _, _, owner = _mesh_points(mesh)
-        got = []
-        for i in indices:
-            poly, v = owner[i]
-            p = mesh['polys'][poly]
-            image = textures.get(p['materials'][0]['textures'][0]['id']) if p['materials'] and p['materials'][0]['textures'] else None
-            if image is None or 'uv' not in p['verts'].dtype.names:
-                continue
-            h, w = image.shape[:2]
-            u, t = p['verts']['uv'][v][0]
-            x, y = int((u % 1.0) * w), int((t % 1.0) * h)
-            patch = image[max(0, y - 3):y + 4, max(0, x - 3):x + 4, :3].reshape(-1, 3)
-            if len(patch):
-                got.append(_linear(patch).mean(0))
-        return np.median(np.array(got), 0) if len(got) >= 4 else None
 
-    def gain(self, source_face, source_images, target_face, target_images):
-        """The per-channel gain (linear colour) that gives the source's skin the colour of the fighter's skin at the
-        rim: there the two are drawn side by side. Both faces are sampled on their own rims (a face's lower edge
-        is neck skin, clear of make-up)."""
-        _, idx = neck_loop(source_face)
-        theirs = self._colour(source_face, idx, source_images)
-        ours = self._colour(target_face, self.target_index, target_images)
-        if theirs is None or ours is None or (theirs < 1e-4).any():
-            return np.ones(3)
-        return np.clip(ours / theirs, *GAIN_SPAN)
+# ------------------------------------------------------------------------------------------------ skin tone
+def plain_skin(face, textures):
+    """The linear colour of a face's plain skin: its skin polygon (the one with the most vertices) sampled at its
+    vertices, the mean of the brighter half (make-up, lips, brows and the shaded rim under the chin are the
+    darker half). None without a texture."""
+    poly = max(face['polys'], key=lambda p: len(p['verts']))
+    image = textures.get(poly['materials'][0]['textures'][0]['id']) if poly['materials'] and \
+        poly['materials'][0]['textures'] else None
+    if image is None or 'uv' not in poly['verts'].dtype.names or len(poly['verts']) < 8:
+        return None
+    h, w = image.shape[:2]
+    uv = poly['verts']['uv'][:, 0].astype(np.float64)
+    x = ((uv[:, 0] % 1.0) * w).astype(np.int64) % w
+    y = ((uv[:, 1] % 1.0) * h).astype(np.int64) % h
+    colours = _linear(image[y, x, :3])
+    luma = colours @ LUMA
+    return colours[luma >= np.median(luma)].mean(0)
+
+
+def skin_gain(source_face, target_face, textures):
+    """The per-channel gain (linear colour) that gives the source's body skin the fighter's skin tone: the ratio of
+    the two faces' plain skin (the game paints a fighter's body in its face's tone, and a player sees the body
+    beside the face: a gain measured only where head and neck meet, a shaded strip, left a fair face on a darker
+    body). textures: {id: decoded image} of both faces."""
+    theirs, ours = plain_skin(source_face, textures), plain_skin(target_face, textures)
+    if theirs is None or ours is None or (theirs < 1e-4).any():
+        return np.ones(3)
+    return np.clip(ours / theirs, *GAIN_SPAN)
 
 
 def _linear(rgb8):
@@ -434,9 +461,35 @@ def renumber(model, ids):
 
 # ------------------------------------------------------------------------------------------------ the item database
 def fits(inst):
-    """Whether an Instance can be fitted here: every own-pack member of its Groups is a model or a texture (no
-    skeleton or spring file of its own: `bi`, `pi`, and none of the rarer kinds)."""
-    return not any(name in ('bi', 'pi', 'gi', 'hi', 'ei', 'ni', 'ci') for g in itemdb.groups(inst) for name, _ in g['attrs'])
+    """Whether an Instance can be fitted here: every own-pack member of its Groups is a model, a texture, a
+    skeleton or springs (worn without them: `static`; none of the rarer kinds), and it is not a default costume (the source's own outfit: its
+    Instances are the ones the fighter's own outfit is worn as)."""
+    data = [c for c in inst['children'] if c['tag'] == 'Data']
+    if data and _attrs(data[0]).get('EquipType') == itemdb.DEFAULT_COSTUME:
+        return False
+    return not any(name in ('gi', 'hi', 'ei', 'ni', 'ci') for g in itemdb.groups(inst) for name, _ in g['attrs'])
+
+
+def static(inst):
+    """A copy of the Instance without its Groups' own spring files (`pi`): worn with its own bones held still."""
+    out = copy.deepcopy(inst)
+    for g in itemdb.groups(out):
+        g['attrs'] = [(name, value) for name, value in g['attrs'] if name != 'pi']
+    return out
+
+
+def part_skeleton(part, target):
+    """A garment's own skeleton (`bi`: the source's body and the garment's bones) with the fighter's joints: every
+    bone the fighter's skeleton has by name takes its place there; the garment's own bones keep theirs, which are
+    relative to the joint that holds them."""
+    out = dict(part)
+    out['t'], out['r'], out['s'] = part['t'].copy(), part['r'].copy(), part['s'].copy()
+    where = {n.split(':')[-1]: i for i, n in enumerate(target['names'])}
+    for i, name in enumerate(part['names']):
+        j = where.get(name.split(':')[-1])
+        if j is not None:
+            out['t'][i], out['r'][i], out['s'][i] = target['t'][j], target['r'][j], target['s'][j]
+    return out
 
 
 def is_cut(name):
@@ -489,10 +542,10 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     texture_base: the copied skin textures are numbered from texture_base + FIRST_TEXTURE (default: the id range
     the body's own textures are in);
     own_first: the first own-pack member number for its own outfit pieces;
-    labels: the shop rows to fit (default OUTFITS[source_code]).
+    labels: the shop rows to fit (default: outfit_rows of the source).
     -> {file name: bytes} to add to the pack's files (the four changed, and `parts/...`), or {} when it cannot be
     done for this fighter (said through log)."""
-    labels = OUTFITS.get(source_code, ()) if labels is None else labels
+    labels = outfit_rows(archives, source_code) if labels is None else labels
     body = nudfile.read(files['.nud'])
     pieces = own_pieces(body, code)
     face = next((m for m in body['meshes'] if m['name'] == code + '_fac'), None)
@@ -514,6 +567,11 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         return {}
     rows = shop_rows(archives, labels)
     by_index = {int(_attrs(i)['index']): i for i in source_db[0]['children']}
+    model_pack, texture_pack, bone_pack, own_bone_pack = source_packs(archives, source_db[0], source_bon)
+    if model_pack is None:
+        log('wardrobe: no outfits: %s\'s part models were not found in the game' % source_code)
+        return {}
+    missing = [kind for kind, pack in (('ti', texture_pack), ('bi', own_bone_pack)) if pack is None]
     wanted = []                     # the Instances the rows name, each once, in row order
     for label in labels:
         row = rows.get(label)
@@ -521,15 +579,14 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
             log('wardrobe: the shop list has no %s' % label)
             continue
         insts = [by_index.get(index) for _, index, _ in row['items']]
-        if any(i is None or not fits(i) for i in insts):
-            log('wardrobe: %s left out (an item with a skeleton or springs of its own)' % label)
+        if any(i is None or not fits(i) or any(name in missing for g in itemdb.groups(i) for name, _ in g['attrs'])
+               for i in insts):
+            if not all(i is not None and _attrs([c for c in i['children'] if c['tag'] == 'Data'][0]).get('EquipType')
+                       == itemdb.DEFAULT_COSTUME for i in insts):
+                log('wardrobe: %s left out (an item this cannot fit)' % label)
             rows.pop(label)
             continue
         wanted += [i for i in insts if i not in wanted]
-    model_pack, texture_pack, bone_pack = source_packs(archives, source_db[0], source_bon)
-    if model_pack is None:
-        log('wardrobe: no outfits: %s\'s part models were not found in the game' % source_code)
-        return {}
 
     shifts = joint_shifts(source_bon, target_bon)
     neck = Neck(source_face, face, shifts)
@@ -543,7 +600,9 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
             a = _attrs(g)
             if 'mi' in a:
                 garments[int(a['mi'])] = nudfile.read(archives.read(member_key(model_pack, int(a['mi']))))
-                if 'bci' in a and bone_pack is not None:
+                if 'bi' in a:               # (its own skeleton: what its vertices' bone numbers mean)
+                    garment_bones[int(a['mi'])] = bonefile.read(archives.read(member_key(own_bone_pack, int(a['bi']))))
+                elif 'bci' in a and bone_pack is not None:
                     garment_bones[int(a['mi'])] = bonefile.read(archives.read(member_key(bone_pack, int(a['bci']))))
     used = set()
     colour_ids = set()
@@ -558,7 +617,7 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         for t in nut['textures']:
             if t['gidx'] in ids and t['fmt'] in (0, 1, 2):
                 images[t['gidx']] = nutfile.decode(t)
-    gain = neck.gain(source_face, images, face, images)
+    gain = skin_gain(source_face, face, images)
     if texture_base is None:
         texture_base = min(t['gidx'] for t in own_nut['textures']) & ~0xFFF
     textures, ids = skin_textures(source_nut, used, colour_ids, gain, texture_base + FIRST_TEXTURE)
@@ -611,11 +670,11 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         for g in itemdb.groups(inst):
             a = _attrs(g)
             if 'ti' in a:
-                if texture_pack is None:
-                    log('wardrobe: no outfits: %s\'s part textures were not found in the game' % source_code)
-                    return {}
                 out['parts/texture/%s.nut' % a['ti']] = archives.read(member_key(texture_pack, int(a['ti'])))
-    out['.xml'] = itemdb.with_wardrobe(files['.xml'], source_db, wanted, groups)
+            if 'bi' in a:
+                out['parts/bone/%s.bon' % a['bi']] = bonefile.write(part_skeleton(
+                    bonefile.read(archives.read(member_key(own_bone_pack, int(a['bi'])))), target_bon))
+    out['.xml'] = itemdb.with_wardrobe(files['.xml'], source_db, [static(i) for i in wanted], groups)
     out['wardrobe.txt'] = ''.join('%s: %s\n' % (label, record_text([rows[label]])) for label in labels
                                   if label in rows).encode('utf-8')
     return out
