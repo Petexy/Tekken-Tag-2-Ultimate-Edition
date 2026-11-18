@@ -204,3 +204,10 @@ target_include_directories(customize_store_test PRIVATE ${CMAKE_SOURCE_DIR}/runt
 target_compile_features(customize_store_test PRIVATE cxx_std_20)
 target_compile_options(customize_store_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME customize_store_test COMMAND customize_store_test)
+
+# CUSTOMIZE mode's character grid with the added fighters' cells (title/customize_grid.h); a made-up script.
+add_executable(customize_grid_test customize_grid_test.cpp)
+target_include_directories(customize_grid_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(customize_grid_test PRIVATE cxx_std_20)
+target_compile_options(customize_grid_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME customize_grid_test COMMAND customize_grid_test)

@@ -6,7 +6,10 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
+#include "title/customize_grid.h"
 #include "title/customize_store.h"
+#include "title/menudata.h"
+#include "title/presentation.h"
 #include "title/test_record.h"
 #include "title/unblurred.h"
 #include "gpu/still_draws.h"
@@ -162,6 +165,7 @@ constexpr const char* kMotionName = ".motion", *kMovesetName = ".moveset", *kMov
 // The packs its item database takes costume parts from (attributes mi, ti,
 // bi, pi): a part is the pack's key extended by its index; an added fighter's
 // packs are `<code>/parts/<kind>`. In a pack: `parts/<kind>/<index>.<extension>`.
+constexpr const char* kShopFile = "shop.bxml"; // a pack's shop list (convert/wardrobe.py SHOP_FILE)
 constexpr const char* kPartKinds[] = {"model", "texture", "bone", "mop"};
 
 // A fighter's sound banks (NUS3BANKs, stored raw in the sound archives):
@@ -288,6 +292,9 @@ struct Added {
     uint64_t rest_summons = 0;      // the summons out when no move says otherwise (bit n: summon n)
     std::vector<Outfit> outfits;
     std::vector<std::string> unblurred; // meshes TTT2's motion blur leaves out (title/unblurred.h)
+    std::vector<uint8_t> shop;      // its shop list (the pack's shop.bxml): what CUSTOMIZE mode offers it; empty:
+                                    // the mode stays closed for it
+    uint32_t shop_fighter = 0;      // the title's fighter the list is of (its rows, item ids and names)
 };
 std::vector<Added> g_added;
 std::map<uint32_t, int> g_outfit_ids;
@@ -1505,6 +1512,16 @@ void prepare_roster() {
         }
         added.code_string = guest_string(pack.code);
         added.active = true;
+        if (auto shop = read_file(pack.directory / kShopFile)) {
+            const auto of = customize_grid::shop_fighter(*shop);
+            if (of && *of < 59) {
+                added.shop = std::move(*shop);
+                added.shop_fighter = *of;
+            } else {
+                std::fprintf(stderr, "ttt2: warning: %s: %s is not a shop list; CUSTOMIZE mode stays closed for %s\n",
+                             pack.directory.string().c_str(), kShopFile, pack.code.c_str());
+            }
+        }
         if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory);
         if (pack.camera > 0) fight_camera::configure(static_cast<int>(k), pack.camera);
         if (pack.body > 1) giant_body::configure(static_cast<int>(k), pack.body);
@@ -3171,9 +3188,14 @@ PPC_FUNC(sub_06F046D4) {
 
 // A fighter's list of costumes: an added fighter's (see kCostumeLists), in
 // the place of Paul's row while the function reads it.
+constexpr uint32_t kPanelNatives = 0x085B416C, kPanelNativesEnd = 0x085B4E00;
 PPC_FUNC(sub_0580D690_orig);
 PPC_FUNC(sub_0580D690) {
     const int k = slot_of_id(ctx.r[4]);
+    // CUSTOMIZE mode's costume panel (its natives sub_085B416C..sub_085B4DEC, through a thunk) lists a fighter's
+    // costumes, then its customization slots: an added fighter has the slots only there (its costumes are whole
+    // bodies of their own, not records; and the natives keep at most ten rows on their stack).
+    if (k >= 0 && ctx.lr >= kPanelNatives && ctx.lr < kPanelNativesEnd) return; // (the caller's list is empty)
     if (k < 0 || g_costumes[k].entries == 0) {
         sub_0580D690_orig(ctx, base);
         return;
@@ -3206,6 +3228,18 @@ void lend_costume_keys(bool on) {
             store(place, g_costume_places[k]);
         }
     }
+}
+
+// The costume previews' key of a fighter (select id r3), read straight from kCostumePreviews by the CUSTOMIZE
+// character select's costume panel (sub_085B4B14, its set-up): an added fighter's own key, or Paul's when its
+// pack has no pictures (the table has 59 rows).
+PPC_FUNC(sub_033EAFB8_orig);
+PPC_FUNC(sub_033EAFB8) {
+    if (const int k = slot_of_id(ctx.r[3]); k >= 0) {
+        ctx.r[3] = g_costumes[k].key != 0 ? g_costumes[k].key : load(kCostumePreviews);
+        return;
+    }
+    sub_033EAFB8_orig(ctx, base);
 }
 
 #define COSTUME_SCOPE(name)                                                                                      \
@@ -3455,8 +3489,7 @@ PPC_FUNC(sub_02669BAC) {
 
 // Builds the chooser's entries (cursor r3, select id r4) once the pictures are there: the costumes, then (while
 // there are fewer than 14 entries) one row per customization slot 0..4, filled or not. For an added fighter the
-// slot rows are made again here: only the slots its own file has filled (it has no CUSTOMIZE mode to fill an
-// empty one from yet, and up to 14 preset outfits share the 14 entries: with 9 outfits all five slots fit, with
+// slot rows are made again here: only the slots its own file has filled (up to 14 preset outfits share the 14 entries: with 9 outfits all five slots fit, with
 // 10 to 13 the first 4 to 1 filled ones, with 14 none). A row is {kind, slot byte, picture, "has a saved
 // thumbnail"}; a filled slot's picture is the texture the title makes from the slot's picture in the buffer
 // (0x56200000 | player << 8 | slot, sub_0266DBBC). A slot whose picture is blank (written by a tool: CUSTOMIZE
@@ -3527,6 +3560,99 @@ PPC_FUNC(sub_0242F438) {
     test_record::apply(*spec, guest_pointer(manager + 96 + test_record::kSize * player));
     std::fprintf(stderr, "ttt2: TTT2_TEST_CUSTOMIZE: player %u, fighter %u, costume %u wears the test record\n",
                  player, id, number);
+}
+
+// ------------------------------------------------------------------ CUSTOMIZE mode with an added fighter
+
+// The mode (the object at *kCustomizeManager + 0) takes a fighter by select id and code: its character select's
+// script calls loadCharacter(id, costume number) (sub_02302C50), which finds the id's code in the chara master
+// and calls sub_02A86B80(mode, code, id): the mode notes the code (its viewer loads the model by it: `loadPlayer
+// PLAYER1 ... <code>`) and the id (mode + 0x6A790, and its per-fighter list object: sub_0241FA08 reads a table of
+// 63 file keys, 0x10046018, by it with no bound), then sub_02A8F5DC(mode, id): the shop list (sub_0263540C: the
+// title's one file of every fighter's rows is read and its parser sub_026466F0 keeps the `<Fighter>` whose id is
+// the one asked for; then the item names' file from a table of 63 keys, 0x1006B08C, by that id, no bound) and the
+// list object again. For an added fighter:
+// * both functions get the id of the title's fighter its shop list is of (shop_fighter: the fighter the importer
+//   fitted its wardrobe from), so every table by id inside the mode is read in bounds and the item ids, names,
+//   prices, owned and unlocked items are that fighter's;
+// * the mode gets the added fighter's own code (its first preset outfit's body when it has presets: the body a
+//   saved slot is worn on in a fight), so the viewer shows the added fighter;
+// * the parser gets the pack's own shop list (shop.bxml: the rows whose items the pack's item database has; a
+//   listed item that cannot be loaded would never finish loading) in place of the title's file;
+// * the select id in the script, the costume panel and the save stays the added fighter's own: the panel's
+//   set-up loads its own file into save buffer 0 (sub_02669380 above), and the mode's save (saveItemCustomize ->
+//   sub_024306B4(manager, 0, the mode's id) -> sub_02669264) writes that buffer to the added fighter's file,
+//   because the buffer holds an added fighter.
+// g_custom_subject: the added fighter the mode holds (-1: one of the title's).
+constexpr uint32_t kModeFighter = 0x6A790;
+int g_custom_subject = -1;
+uint32_t g_shop_copy = 0, g_shop_room = 0; // the subject's shop list in guest memory
+
+PPC_FUNC(sub_02A86B80_orig);
+PPC_FUNC(sub_02A86B80) {
+    const int k = slot_of_id(ctx.r[5]);
+    g_custom_subject = k >= 0 && !g_added[k].shop.empty() ? k : -1;
+    if (k >= 0) {
+        const Added& added = g_added[k];
+        if (!added.outfits.empty()) {
+            ctx.r[4] = added.outfits[0].code_string;
+            g_outfit_bodies.remember(0, added.id, added.outfits[0].id); // (the viewer's player is loader slot 0)
+        } else {
+            g_outfit_bodies.remember(0, added.id, 0);
+        }
+        // (a fighter without a list is never let in by the grid; if it comes all the same, its donor's lists)
+        ctx.r[5] = g_custom_subject >= 0 ? added.shop_fighter : added.donor;
+        if (traces().roster)
+            std::fprintf(stderr, "ttt2: customize: the mode takes %s (id %u) as %s, lists of fighter %u\n",
+                         added.code.c_str(), added.id,
+                         reinterpret_cast<const char*>(guest_pointer(ctx.r[4])), ctx.r[5]);
+    }
+    sub_02A86B80_orig(ctx, base);
+}
+
+PPC_FUNC(sub_02A8F5DC_orig);
+PPC_FUNC(sub_02A8F5DC) {
+    if (const int k = slot_of_id(ctx.r[4]); k >= 0) {
+        ctx.r[4] = !g_added[k].shop.empty() ? g_added[k].shop_fighter : g_added[k].donor;
+    }
+    sub_02A8F5DC_orig(ctx, base);
+}
+
+PPC_FUNC(sub_026466F0_orig);
+PPC_FUNC(sub_026466F0) {
+    if (g_custom_subject >= 0) {
+        const std::vector<uint8_t>& shop = g_added[g_custom_subject].shop;
+        if (g_shop_room < shop.size()) {
+            g_shop_room = static_cast<uint32_t>(shop.size() + 0x4000);
+            g_shop_copy = system_alloc(g_shop_room);
+        }
+        std::memcpy(guest_pointer(g_shop_copy), shop.data(), shop.size());
+        ctx.r[4] = g_shop_copy;
+        ctx.r[5] = static_cast<uint32_t>(shop.size());
+        if (traces().roster)
+            std::fprintf(stderr, "ttt2: customize: the shop list of %s (%zu bytes) in place of the title's\n",
+                         g_added[g_custom_subject].code.c_str(), shop.size());
+    }
+    sub_026466F0_orig(ctx, base);
+}
+
+// Developer switch TTT2_TEST_MONEY=<gold> (off unless set): once, when CUSTOMIZE mode first asks how much gold the
+// player has (the script native getMoney), that much is added through the title's own addMoney: for making a test
+// save that can buy items.
+PPC_FUNC(sub_0230BBBC); // addMoney(gold r3)
+PPC_FUNC(sub_0230BB28_orig);
+PPC_FUNC(sub_0230BB28) {
+    static bool done = false;
+    if (!done) {
+        done = true;
+        const char* text = std::getenv("TTT2_TEST_MONEY");
+        const uint32_t gold = text ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 0;
+        if (gold > 0 && gold < 1000000000) {
+            guest_call(ctx, base, sub_0230BBBC, {gold});
+            std::fprintf(stderr, "ttt2: TTT2_TEST_MONEY: %u G added\n", gold);
+        }
+    }
+    sub_0230BB28_orig(ctx, base);
 }
 
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)
@@ -5673,4 +5799,58 @@ PPC_FUNC(sub_08977AE8) {
     store(config + 8, kSkinningRoom * total);
     sub_08977AE8_orig(ctx, base);
     store(config + 8, total);
+}
+
+// ------------------------------------------------------------------ CUSTOMIZE mode's character grid
+
+// The added fighters' cells in CUSTOMIZE mode's character select (title/customize_grid.h): the interfaces' file
+// gets the cursor's class with their cells (a fighter whose pack has a shop list can be entered, the others'
+// faces are there and the cursor passes them), and the menus' file the frame's four direction handlers as source
+// text. The menus' file is the one prepare_solo_ghost_battle (called before this) changes too, so its change is
+// made again here first: the entry set last is the one the title reads.
+namespace {
+constexpr uint32_t kInterfaces = 0xB43EB78F, kMenus = 0x4615C394;
+constexpr const char* kMenuArchives[] = {"content/hdd/data100", "content/hdd/data000"}; // the update's copy first
+} // namespace
+
+void cafe::title::prepare_customize_select() {
+    if (!g_active) return;
+    std::vector<customize_grid::Cell> cells;
+    for (const Added& added : g_added) {
+        if (added.active && added.cell != 0)
+            cells.push_back({added.column, added.grid_row, added.id, !added.shop.empty()});
+    }
+    bool script = false, handlers = false;
+    for (const char* archive : kMenuArchives) {
+        uint8_t flags[8] = {};
+        const auto file = game_file(archive, kInterfaces, &flags);
+        if (!file) continue;
+        const auto changed = menudata::with_cursor_script(*file, [&](std::string_view text) {
+            return customize_grid::with_cells(text, cells, g_grid_rows);
+        });
+        script = changed && vfs::set_archive_entries(archive, {{kInterfaces, archive::pack(*changed, kInterfaces, flags)}});
+        break;
+    }
+    for (const char* archive : kMenuArchives) {
+        uint8_t flags[8] = {};
+        auto file = script ? game_file(archive, kMenus, &flags) : std::nullopt;
+        if (!file) continue;
+        if (auto solo = menudata::add_solo_ghost_row(*file)) file = std::move(solo);
+        const auto changed = menudata::with_select_handlers(
+            *file, {customize_grid::handler(-1, 0, "KeyLeft", "KeyLSLeft"),
+                    customize_grid::handler(1, 0, "KeyRight", "KeyLSRight"),
+                    customize_grid::handler(0, -1, "KeyUp", "KeyLSUp"),
+                    customize_grid::handler(0, 1, "KeyDown", "KeyLSDown")});
+        handlers = changed && vfs::set_archive_entries(archive, {{kMenus, archive::pack(*changed, kMenus, flags)}});
+        break;
+    }
+    if (!script)
+        std::fprintf(stderr, "ttt2: warning: CUSTOMIZE mode's character select is not as expected: the added "
+                             "fighters cannot be picked there\n");
+    else if (!handlers)
+        std::fprintf(stderr, "ttt2: warning: CUSTOMIZE mode's character select: its cursor keeps the title's "
+                             "steps (an added fighter beside or above the title's rows cannot be reached)\n");
+    else if (traces().roster)
+        std::fprintf(stderr, "ttt2: customize: the character select has %zu added cells%s\n", cells.size(),
+                     g_grid_rows ? ", the new top row" : "");
 }

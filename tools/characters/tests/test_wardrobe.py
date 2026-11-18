@@ -228,6 +228,49 @@ class Shop(unittest.TestCase):
         self.assertEqual(text, '0=5,8=42,9=36,10=29,12=77,13=66,c51=91,c57=34,c66=96')
 
 
+class ShopList(unittest.TestCase):
+    """The pack's own shop list for CUSTOMIZE mode (made-up fighters, rows and items)."""
+
+    def setUp(self):
+        def item(label, instances, **more):
+            return el('Item', [('id', str(100 + len(label))), ('label', label), ('price', '500'),
+                               ('instances', instances)] + sorted(more.items()))
+        sale = bxml.write([
+            el('Fighter', [('id', '8')], [el('Equipment', [('Position', '7')], [item('xyz_coat', '8_42_-1')])]),
+            el('Fighter', [('id', '7')], [
+                el('Equipment', [('Position', '7')], [item('abc_shirt_set', '8_42_-1|9_36_-1|10_29_-1'),
+                                                      item('abc_coat', '8_53_-1|10_29_-1'),
+                                                      item('abc_top', '8_1_-1', defitem='True')]),
+                el('Equipment', [('Position', '4')], [item('abc_cmn_glasses', '5_253_-1')]),
+                el('Equipment', [('Position', '9')], [item('abc_cmn_bag', '15_300_2'), item('abc_nothing', '')])])])
+        self.archives = Archives({wardrobe.SALE_KEY: sale})
+
+    @staticmethod
+    def database(indices):
+        return bxml.write([el('InstanceInfo', [], [el('Instance', [('label', 'i%d' % i), ('index', str(i))])
+                                                    for i in indices]), el('OffsetInfo')])
+
+    def labels(self, shop):
+        fighter, = bxml.parse(shop)
+        return dict(fighter['attrs']), [(dict(e['attrs'])['Position'], [dict(i['attrs'])['label'] for i in e['children']])
+                                        for e in fighter['children']]
+
+    def test_the_sources_rows_whose_every_item_the_database_has_under_the_sources_element(self):
+        shop = wardrobe.shop_list(self.archives, 'abc', self.database([1, 2, 5, 29, 36, 42, 253]))
+        attrs, rows = self.labels(shop)
+        self.assertEqual(attrs, {'id': '7'})
+        # (the coat names item 53, the bag 300: not listed; a category with nothing left is not there)
+        self.assertEqual(rows, [('7', ['abc_shirt_set', 'abc_top']), ('4', ['abc_cmn_glasses'])])
+        item = bxml.parse(shop)[0]['children'][0]['children'][0]
+        self.assertEqual(dict(item['attrs'])['id'], str(100 + len('abc_shirt_set')))     # (the source's item id)
+        self.assertEqual(dict(item['attrs'])['price'], '500')
+
+    def test_no_list_when_nothing_fits_or_the_game_has_none(self):
+        self.assertIsNone(wardrobe.shop_list(self.archives, 'abc', self.database([7, 8])))
+        self.assertIsNone(wardrobe.shop_list(self.archives, 'nobody', self.database([1, 42])))
+        self.assertIsNone(wardrobe.shop_list(Archives({}), 'abc', self.database([1, 42])))
+
+
 class Database(unittest.TestCase):
     def test_own_pieces_become_the_default_items_parts_and_garments_keep_their_numbers(self):
         def instance(label, index, pos, groups=(), kind=itemdb.DEFAULT_COSTUME):

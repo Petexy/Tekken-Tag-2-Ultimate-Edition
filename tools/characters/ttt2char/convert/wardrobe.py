@@ -54,6 +54,7 @@ from ..ttt2.archive import key_of, member_key, pack_of
 from . import itemdb
 
 SALE_KEY = 0xC0810D5D               # the shop list (BXML: a Fighter element per fighter, Equipment/Item rows)
+SHOP_FILE = 'shop.bxml'             # a pack's own shop list: what CUSTOMIZE mode offers the fighter (shop_list)
 FACE_MESH = 'cha:kao_O_OBJ'         # the game's face mesh (not copied: the fighter keeps its own head)
 CUT_PREFIXES = ('kubi', 'ude_', 'asi_', 'hara')     # the bare-body families of a base model
 SKIN_FLAGS = 0x20A00099             # the body-skin material
@@ -226,6 +227,32 @@ def outfit_rows(archives, code):
                         and a['label'] not in out:
                     out.append(a['label'])
     return out
+
+
+def shop_list(archives, source_code, db):
+    """The fighter's own shop list for CUSTOMIZE mode (SHOP_FILE, the game's format: one Fighter element): the
+    source fighter's rows whose every item is an Instance of the fighter's database `db` (bytes), under the source's
+    element id, item ids and labels, so that the game's names, prices, ownership and unlocks of those rows are the
+    source's. A row is only listed when all it wears can be loaded (the mode waits for ever on a missing one).
+    -> bytes, or None when the game has no list for the source or nothing of it fits."""
+    if not archives.has(SALE_KEY):
+        return None
+    have = {int(_attrs(i)['index']) for i in bxml.parse(db)[0]['children'] if i['tag'] == 'Instance'}
+    for fighter in bxml.parse(archives.read(SALE_KEY)):
+        labels = [_attrs(item).get('label', '') for e in fighter['children'] for item in e['children']]
+        if not any(label.startswith(source_code + '_') for label in labels):
+            continue
+        kept = []
+        for equipment in fighter['children']:
+            rows = []
+            for item in equipment['children']:
+                parts = [part.split('_') for part in _attrs(item).get('instances', '').split('|') if part]
+                if parts and all(len(f) >= 2 and f[1].lstrip('-').isdigit() and int(f[1]) in have for f in parts):
+                    rows.append(item)
+            if rows:
+                kept.append(dict(equipment, children=rows))
+        return bxml.write([dict(fighter, children=kept)]) if kept else None
+    return None
 
 
 def record_text(rows, defaults=()):
@@ -590,6 +617,14 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
                 out[code + name] = data
             else:
                 out.setdefault(name, data)
+    # what CUSTOMIZE mode offers: the rows the body it shows can wear (the port shows the first preset outfit's
+    # body when there are presets, as a saved slot is worn on it in a fight)
+    first = (outfit_codes[0] + '.xml') if outfit_codes else '.xml'
+    shop = shop_list(archives, source_code, out[first]) if first in out else None
+    if shop is None:
+        log('wardrobe: no shop list (CUSTOMIZE mode stays closed for this fighter)')
+    else:
+        out[SHOP_FILE] = shop
     return out
 
 

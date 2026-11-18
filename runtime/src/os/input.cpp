@@ -164,6 +164,9 @@ uint32_t scripted_buttons(int port) {
             if (start < 0.0 || next_reached || t < start + p.at) continue;
             if (released_reads(p.button) < kReleasedReads || (buttons & p.button)) continue; // wait for a release
             p.reads = 0;
+            // TTT2_TRACE_INPUT: when each scripted press begins (seconds after start-up, as TTT2_CAPTURE_START counts)
+            static const bool trace = std::getenv("TTT2_TRACE_INPUT") != nullptr;
+            if (trace) std::fprintf(stderr, "ttt2: input script: %.1f (button %08X, pad %d) pressed at %.2f s\n", p.at, p.button, port, t);
         }
         buttons |= p.button;
         if (++p.reads >= kHeldReads && t < start + p.at + 0.2) p.reads = kHeldReads - 1; // hold the fifth second

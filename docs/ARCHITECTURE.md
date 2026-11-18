@@ -1195,8 +1195,7 @@ empty, and the save (`sub_02669264`) of a buffer that holds an added fighter
 writes that file, a temporary file renamed over it, and nothing else. The
 donor's file is not involved. The chooser's builder (`sub_033E3460`) then
 lists, after the costumes, the slots that file has filled (the title lists
-all five, filled or not; an added fighter has no CUSTOMIZE mode yet to fill
-an empty one from), each with the slot's picture or, for a slot without one
+all five, filled or not), each with the slot's picture or, for a slot without one
 (written by `tools/characters/customize_slot.py`, a developer's tool), the
 fighter's first costume picture; confirming one goes the title's own way
 (`sub_033E3208`: the record into the match set-up, which the fight's loader
@@ -1204,6 +1203,33 @@ hands to the character manager), on the fighter's first body. The developer
 switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
 record into a slot and makes the title's save call once, for testing the
 saving before a menu calls it.
+
+**Its CUSTOMIZE mode.** The mode's character select is not the fights'
+select screen: its grid is an Xtal script in the interfaces' file (entry
+`B43EB78F`, class `CharacterSelectCursor`: a table of 3 x 22 fighters, a
+"may the cursor stop here" test, the cursor's place) and four direction
+handlers (compiled Xtal) in the menus' file. The shared layouts draw an
+added fighter's face in that grid too, and move the grid a row down when it
+has the new top row, which the script knew nothing of: the faces could not
+be picked, and with the new row the cursor was drawn a row above the cell it
+was on. At start-up (`prepare_customize_select`, `title/customize_grid.h`)
+the class's four methods are renamed and new ones answer for the added
+fighters' cells first (a fighter whose pack has a shop list can be entered;
+the others' cells are passed by the cursor), and the frame's handlers are
+replaced by source text that steps through the grid's own columns and rows.
+A pack's shop list (`shop.bxml`, the title's format, written by
+`convert/wardrobe.py`) holds the rows of the fighter its wardrobe was fitted
+from whose items the pack's item database has, under that fighter's item
+ids. Inside the mode (`sub_02A86B80`, `sub_02A8F5DC`) the added fighter is
+that fighter's select id with its own body code (its first preset outfit's
+when it has presets, the body a saved slot is worn on): every table by id is
+read in bounds, names, prices, owned and unlocked items are that fighter's
+(an item bought for one is bought for both), and the shop list's parser
+(`sub_026466F0`) gets the pack's list in place of the title's. The costume
+panel lists the five slots of the added fighter's own file only (its
+costumes are whole bodies, not records), and the mode's save writes that
+file, with the slot's picture. `TTT2_TEST_MONEY=<gold>` (a developer switch)
+adds gold once when the mode first asks for it, for making a test save.
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
@@ -2013,6 +2039,7 @@ debugging:
 | `TTT2_CAPTURE_SEQUENCE=<n>` | with `TTT2_CAPTURE`, also every image shown for the next n frames after each capture, in order (`seq_<capture>_<frame>_<n>.png`, the real image last) |
 | `TTT2_TRACE_AT=<s>`, `TTT2_TRACE_FRAME=<n>` | log every command of one frame; with `TTT2_CAPTURE`, save all its render targets |
 | `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run) |
+| `TTT2_TRACE_INPUT=1` | log when each scripted press begins (seconds after start-up, as `TTT2_CAPTURE_START` counts) |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
 | `TTT2_DUMP_SHADERS=<dir>` | shader binaries, draw registers and generated GLSL |
