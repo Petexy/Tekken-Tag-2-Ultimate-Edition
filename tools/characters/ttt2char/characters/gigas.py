@@ -9,7 +9,8 @@ SHORT_NAME = 'GIGAS'
 TEKKEN7_ID = 25
 TEKKEN7_CODE = 'crz'
 CODE = 'crz'
-REVISION = 2                  # his moves' sound effects (Tekken 7's bank 15); his Overkill throw at his own frames (2)
+REVISION = 3                  # his moves' sound effects (Tekken 7's bank 15); his Overkill throw at his own frames (2);
+                              # his Claw Hammer deals 20 when it ends a juggle (3)
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
@@ -80,6 +81,9 @@ MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
     'bounds': dict.fromkeys(('Cz_10comb8', 'Cz_2rp', 'Cz_3rk4lrp', 'Cz_4lrp', 'Cz_4rk', 'Cz_6lrp2', 'Cz_6rplplp',
                              'Cz_s_trkrp', 'Cz_zutuki'), True),
+    # his Claw Hammer (1+3 / 2+4 on an opponent in the air: Cz_air_n, Tekken 7's 60) deals 20 when it ends a juggle
+    # (TTT2 never scales a throw's damage in a combo); a jumping opponent still takes the 60
+    'juggle_throw_damage': {'Cz_air_n': 20},
     'drop_moves': r'^Cz_Direct$',
     'direct': [(r'^(la|mk)_s', 'anim', ['cz_s%02d' % k for k in range(3)]),     # the donor's intros -> his
                (r'^la_w', 'anim', ['cz_w%02d' % k for k in range(3)])],         # win poses
