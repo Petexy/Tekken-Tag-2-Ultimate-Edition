@@ -1,6 +1,8 @@
 #include "title/roster.h"
 #include "title/solo_ghost.h"
 #include "title/eliza_assist.h"
+#include "title/fight_camera.h"
+#include "title/giant_body.h"
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
@@ -421,6 +423,8 @@ struct Pack {
     std::vector<std::string> outfits;  // optional complete body sets, in chooser order
     std::optional<gauge::Config> gauge; // a Tekken 7 2D fighter's gauge (title/gauge.h)
     std::vector<std::string> unblurred; // character.ini unblurred: meshes the motion blur leaves out (title/unblurred.h)
+    float camera = 0;                  // character.ini camera: mm from its feet up the fight camera frames (title/fight_camera.h)
+    float body = 1;                    // character.ini body: its body this many times a man's in the fight (title/giant_body.h)
 };
 
 fs::path packs_directory() {
@@ -487,6 +491,12 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         } else if (key == "unblurred") { // mesh names, e.g. clv_pts clv_pmi
             std::istringstream names(value);
             for (std::string name; names >> name;) pack.unblurred.push_back(name);
+        } else if (key == "camera") { // mm, e.g. 3950 (a giant: Azazel)
+            const float height = std::strtof(value.c_str(), nullptr);
+            if (std::isfinite(height) && height > 0 && height < 20000) pack.camera = height;
+        } else if (key == "body") { // a scale, e.g. 1.8 (a giant: Azazel)
+            const float scale = std::strtof(value.c_str(), nullptr);
+            if (std::isfinite(scale) && scale >= 1 && scale <= 4) pack.body = scale;
         } else if (key == "rest_summons") { // summon numbers, e.g. 2 3 4 8 9
             std::istringstream numbers(value);
             for (uint32_t n; numbers >> n;) {
@@ -1494,6 +1504,8 @@ void prepare_roster() {
         added.code_string = guest_string(pack.code);
         added.active = true;
         if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory);
+        if (pack.camera > 0) fight_camera::configure(static_cast<int>(k), pack.camera);
+        if (pack.body > 1) giant_body::configure(static_cast<int>(k), pack.body);
         if (const auto place = cell_of(k)) {
             added.cell = kFirstAddedCell + static_cast<uint32_t>(k);
             added.column = place->column;
@@ -2485,7 +2497,11 @@ void with_donor_id(PPCContext& ctx, uint8_t* base, uint32_t player, void (*f)(PP
     if (load(player + kPlayerSelectId) == g_added[k].donor) store(player + kPlayerSelectId, g_added[k].id);
 }
 PPC_FUNC(sub_03D6B9F4_orig);
-PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); }
+PPC_FUNC(sub_03D6B9F4) { // (the hurt spheres' radii; a giant's grow with him: giant_body.h)
+    const uint32_t player = ctx.r[3];
+    with_donor_id(ctx, base, player, sub_03D6B9F4_orig);
+    giant_body::hurt_spheres_sized(base, player);
+}
 // Each frame sub_03D6B544 sizes the 8 spheres the fighters push each other
 // apart with (sub_03A40400): the radii (+2516 + 16k) come from the select
 // id's row of 0x107C3D04 (8 floats; 288 115.2 115.2 360 and four 144 mm for
@@ -2494,7 +2510,11 @@ PPC_FUNC(sub_03D6B9F4) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B9F4_orig); 
 // table's row id - 63, hurt sizes: 220 220 220 220 and four 132, or 275 for
 // all eight (a big fighter's), which held the opponent off a lunge's reach.
 PPC_FUNC(sub_03D6B544_orig);
-PPC_FUNC(sub_03D6B544) { with_donor_id(ctx, base, ctx.r[3], sub_03D6B544_orig); }
+PPC_FUNC(sub_03D6B544) {
+    const uint32_t player = ctx.r[3];
+    with_donor_id(ctx, base, player, sub_03D6B544_orig);
+    giant_body::push_spheres_sized(base, player);
+}
 // The CPU's set-up at a round's start (sub_0399221C) goes through the four
 // players (kCpuPlayers) and copies each one's distances and its opponent's
 // (+152) from such a table (0x107BABD0, 12-byte rows): past it an added
@@ -4517,12 +4537,15 @@ eliza_assist::InputWindow special_assist_window(uint32_t player) {
     return result;
 }
 std::map<uint32_t, uint32_t> g_special_assist_returns;
+// player+7820: this fighter's bound started the current Tag Assault (see
+// eliza_assist::holds_sessions).
+constexpr uint32_t kPlayerAssaultStarter = 0x1e8c;
 bool special_assist_sequence(uint32_t player) {
     static std::map<uint32_t, eliza_assist::Session> sequences;
     if (!player) return false;
     const int slot = slot_of_id(load(player + kPlayerSelectId));
-    const bool supported = slot >= 0 &&
-        eliza_assist::supported(g_added[slot].code);
+    const bool supported = slot >= 0 && eliza_assist::holds_sessions(
+        eliza_assist::supported(g_added[slot].code), load(player + kPlayerAssaultStarter) != 0);
     if (!supported) {
         sequences.erase(player);
         return false;
@@ -4601,9 +4624,11 @@ void trace_eliza_move(uint32_t player) {
 } // namespace
 
 PPC_FUNC(sub_04E187B8_orig);
+void trace_assist_lifetime(const char* operation, uint32_t player, bool deferred);
 // A deferred native return is a request, not a new timeout. Complete it at
 // selection boundary, before either fighter decodes another human input.
 // A committed finisher keeps animating on the native inactive assist route.
+// Never on the fighter that started the Tag Assault: the expiry would tag it out.
 void finish_special_assist(PPCContext& ctx, uint8_t* base, uint32_t player) {
     if (!player) return;
     const uint32_t pair[] = {player, load(player + 0xac)};
@@ -4615,7 +4640,8 @@ void finish_special_assist(PPCContext& ctx, uint8_t* base, uint32_t player) {
         const uint32_t partner = it->second;
         g_special_assist_returns.erase(it);
         if (load(assist + 0xac) != partner || load(assist + 0x1e88) != 1 ||
-            !load(assist + 0x1e80)) continue;
+            !load(assist + 0x1e80) || load(assist + kPlayerAssaultStarter)) continue;
+        trace_assist_lifetime("return", assist, false);
         store(assist + 0x7b8, 0);
         store(assist + 0x7c0, UINT32_MAX);
         store(assist + 0x7c4, 0);

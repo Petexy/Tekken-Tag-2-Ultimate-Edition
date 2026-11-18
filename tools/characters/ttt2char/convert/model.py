@@ -917,7 +917,7 @@ def weapons_frame(k, joint):
     return weapons_mod.joint_frame(k['bones'], joint)
 
 
-def convert(source, archives, d, slot=0, log=print, standing=None, weapons=None):
+def convert(source, archives, d, slot=0, log=print, standing=None, weapons=None, stance8=None):
     """_convert. A Tekken 8 fighter's target leaves room for its 2P colour layers by an estimate (vertex_target: as if
     they took all the vertices of their materials); trimmed to the triangles they draw they take less (Miary Zo: 10k
     of 16.4k), so when the model ends more than LAYER_SLACK under the budget (or over it) it is made again, its loaded
@@ -928,7 +928,7 @@ def convert(source, archives, d, slot=0, log=print, standing=None, weapons=None)
     source = sources.of(source)
     cache, lines = {}, []
     t0 = time.time()
-    out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache)
+    out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache, stance8=stance8)
     tries = 0
     while isinstance(out, dict):
         log('  model: %d vertices of the budget %d with the 2P colour layers trimmed to what they draw (%d of them; '
@@ -937,13 +937,14 @@ def convert(source, archives, d, slot=0, log=print, standing=None, weapons=None)
         tries += 1
         out['last'] = tries == 2
         lines = []
-        out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache, out)
+        out = _convert(source, archives, d, slot, lines.append, standing, weapons, cache, out, stance8)
     for line in lines:
         log(line)
     return out
 
 
-def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None, cache=None, fill=None):
+def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None, cache=None, fill=None,
+             stance8=None):
     """source: the fighter's game (source.py; Tekken 7's paks as such too: outfits.py's), d: the character definition,
     slot: its number (pack.place), standing: the fighter's standing pose (cloth.standing; the cloth rests outside its
     legs there), weapons: its weapons (None: the definition's WEAPONS; a Tekken 8 fighter's with its root points:
@@ -952,7 +953,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
     cloth = None, else the cloth's spring entries (cloth.springs). cache (convert's: a Tekken 8 fighter's loaded
     model): a Tekken 8 model more than LAYER_SLACK off the budget returns its measures instead (fill None: the first
     try), or is decimated to fill it by them (fill: those measures), returning its own when it ends over the budget
-    (unless fill['last']).
+    (unless fill['last']). stance8: a Tekken 8 fighter's stance (tekken8/cloth.py stance), when its definition's
+    dynamic-bone chains lie on the floor in it.
     A Tekken 8 fighter (tekken8_model) has none of what only Tekken 7's reading makes: costume items worn with
     others, socket items, hanging chains or a tiger; its cloth is the strands its source finds, its weapons
     (tekken8_weapons) the meshes of its definition's WEAPONS, made parts of its model, and hit-only points."""
@@ -960,13 +962,22 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
     donor = bone.read(archives.read_name(d.DONOR + '.bon'))
     weapons = list(getattr(d, 'WEAPONS', []) if weapons is None else weapons)
     armed = []                                   # (Tekken 8: the weapons' meshes, parts of its model)
+    bone_chains = []                             # (Tekken 8: chains of its own joints, its dynamic bones)
     if source.game == 'tekken8':
         k, worn, colours, colours_2p = tekken8_model(source, d, donor, log, weapons, cache, fill)
         counted = _counts(k)                     # (convert's second try: _fill_target)
         armed = [tag for tag, _ in weapon_parts(weapons)]
         paks, items, extra, chains = None, [], [], []
         # the strands Tekken 8 simulates (cords, strap ends: tekken8/cloth.py), as cloth.find gives Tekken 7's cloth
-        cloths = source.cloth(k, [p for p in worn if p[0] not in armed], log) if getattr(d, 'CLOTH', True) else []
+        # (a definition's TEKKEN8['drawn_cloth']: the simulation meshes that are drawn sections themselves, swinging)
+        drawn_sims = (getattr(d, 'TEKKEN8', None) or {}).get('drawn_cloth')
+        cloths = source.cloth(k, [p for p in worn if p[0] not in armed], log, **(
+            {'drawn_sims': drawn_sims} if drawn_sims else {})) if getattr(d, 'CLOTH', True) else []
+        # chains of the costume's own joints Tekken 8 swings with dynamic bones (Azazel's tail): a definition's
+        # TEKKEN8['bone_chains'] (tekken8/cloth.py bone_chains), springing as the cloth's chains do
+        if (getattr(d, 'TEKKEN8', None) or {}).get('bone_chains'):
+            from ..tekken8 import cloth as cloth8
+            bone_chains = cloth8.bone_chains(k, d.TEKKEN8['bone_chains'], log)
     else:
         paks = source.paks
         t7 = d.TEKKEN7
@@ -998,7 +1009,7 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
             4 * len(weapons) if source.game == 'tekken7' else weapon_bones(weapons)) - (
             len(t7mesh.SkeletalMesh(load(paks, d.TIGER['mesh'])).skeleton['names'])
             if getattr(d, 'TIGER', None) else 0) - (snakes8.bone_count(d) if source.game == 'tekken8' else 0) - (
-            prefabs8.bone_count(d) if source.game == 'tekken8' else 0)
+            prefabs8.bone_count(d) if source.game == 'tekken8' else 0) - sum(len(c['bones']) for c in bone_chains)
         spare = (getattr(d, 'TEKKEN8', {}) or {}).get('cloth_spare') if source.game == 'tekken8' else None
         if spare and room < cloth.MAX_BONES:     # (weapons take bones the cloth would have: these pieces go first)
             kept = [c for c in cloths if not re.search(spare, c.get('name', ''))]
@@ -1008,6 +1019,7 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         cloth_chains = cloth.add(k, cloths, room, log, most=getattr(d, 'CLOTH_BONES', cloth.MAX_BONES))
     else:
         cloth_chains = []
+    cloth_chains = cloth_chains + bone_chains
     skel = skeleton.build(k['bones'], donor)
     weight_maps = {tag: skeleton.weight_map(k['bones'], skel['names'], lambda i, tag=tag: tag)[0]
                    for tag, _ in worn}
@@ -1029,12 +1041,18 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         s0 = k['prims'][0]
         body = np.zeros(len(s0['pos']), bool)
         body[np.concatenate([p['tris'].reshape(-1) for p in k['prims']])] = True
-        for c in cloths:
+        for c in cloths + bone_chains:
             body[c['vertices']] = False
         body = s0['pos'][body]
         if standing is not None:                 # (resting outside the legs as the fighter stands)
             turned, moved = cloth.settle(k, cloth_chains, skel, parents, standing, body)
             log('  cloth: %d links turned off the legs in the standing pose (%d vertices moved)' % (turned, moved))
+        if stance8 is not None and any(c.get('floor') is not None for c in cloth_chains):
+            from ..tekken8 import cloth as cloth8    # (a Tekken 8 chain resting on the floor in the stance)
+            laid, moved = cloth8.lay_on_floor(k, cloth_chains, skel, parents, stance8(skel))
+            for root, heights in laid:
+                log('  %s: laid on the floor in the stance, its joints %s mm high (%d vertices moved)' % (
+                    root, ' '.join('%.0f' % h for h in heights), moved))
         skel, made = hanging.append_bones(skel, k, [c['bones'] for c in cloth_chains], parents, cloth.OPT_FIRST)
         for c, new in zip(cloth_chains, made):
             for wm in weight_maps.values():

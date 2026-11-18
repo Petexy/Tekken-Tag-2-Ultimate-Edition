@@ -403,6 +403,74 @@ class Pieces(unittest.TestCase):
             cloth.FREE_MIN, cloth8.SWING = saved
 
 
+class DrawnCloth(unittest.TestCase):
+    """A simulation mesh that is a drawn section itself (its particles its own vertices, no proxy, nothing in
+    catwalk()'s 'driven': Azazel's bandages) swings only when the definition names it (TEKKEN8['drawn_cloth'])."""
+
+    def setUp(self):
+        self.k, data, self.jacket, self.cord = costume(particles=True)
+        n = self.jacket + self.cord
+        self.k['parts']['bdf']['mesh'].lods[0].sections[1].cloth_mapping = 0     # (drawn: no proxy)
+        prim = self.k['prims'][0]
+        prim['tris'] = prim['tris'] + n                                  # (only the simulated section is drawn)
+        data['driven'] = {}
+        self.n = n
+        self.saved = cloth8.catwalk
+        cloth8.catwalk = lambda mesh: data
+
+    def tearDown(self):
+        cloth8.catwalk = self.saved
+
+    def test_left_skinned_unless_named(self):
+        self.assertEqual(cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None), [])
+        self.assertEqual(cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None, drawn_sims=r'^other$'), [])
+
+    def test_named_its_own_vertices_follow_it(self):
+        found = cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None, drawn_sims=r'^sim_mesh_jacketShape$')
+        self.assertEqual(len(found), 2)                                  # (the coat and its cord)
+        strand, coat = sorted(found, key=lambda c: len(c['vertices']))
+        n = self.n
+        for c in found:
+            self.assertTrue(((c['vertices'] >= n) & (c['vertices'] < 2 * n)).all())
+        cords = set(range(n + self.jacket, 2 * n))
+        self.assertGreater(len(set(strand['vertices'].tolist()) & cords), self.cord - 3)
+        self.assertGreaterEqual(coat['link'], cloth.LINK)                # (Tekken 7's chains, at most DRAWN_LINKS links)
+
+    def test_held_where_pinned_on_an_arm_too(self):
+        saved = cloth8._on_arm
+        cloth8._on_arm = lambda *a: True                                 # (sleeves: held higher till only strands)
+        try:
+            held = cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None)
+            found = cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None, drawn_sims=r'jacket')
+        finally:
+            cloth8._on_arm = saved
+        self.assertEqual(held, [])
+        self.assertEqual(len(found), 2)
+        self.assertEqual(float(max(found, key=lambda c: len(c['vertices']))['asset'].max_distance.min()), 0.0)
+
+    def test_mostly_held_its_loose_ends_swing(self):
+        """The jacket may move at most 8 cm (a wrap, Azazel's chest bandage), its cord 40: the jacket stays as
+        modelled (held up to DRAWN_FREE), the cord swings from it."""
+        saved = cloth8.particles
+
+        def particles(m, data, geo):
+            out = saved(m, data, geo)
+            for sim in out.values():
+                x = geo['positions'][m.lods[0].sections[sim['section']].base_vertex + sim['vertex'], 0]
+                sim['max_distance'] = np.where(x > 20.01, 40.0, sim['max_distance'] * 0.2)
+            return out
+        cloth8.particles = particles
+        try:
+            found = cloth8.find(self.k, [('bdf', '/Game/x')], log=lambda s: None, drawn_sims=r'jacket')
+        finally:
+            cloth8.particles = saved
+        self.assertEqual(len(found), 1)
+        strand = found[0]
+        self.assertIn('reach', strand)                                   # (the cord, a strand)
+        self.assertAlmostEqual(float(strand['asset'].max_distance.max()), 40.0 - cloth8.DRAWN_FREE, delta=0.5)
+        n = self.n
+        self.assertLessEqual(len(set(strand['vertices'].tolist()) - set(range(n + self.jacket, 2 * n))), 2)
+
 class Hair(unittest.TestCase):
     """What of the hair swings is hair (pieces() 'hair', HAIR_SPRING entries): Miary Zo's braids and back hair."""
 
@@ -505,6 +573,96 @@ class Rig(unittest.TestCase):
         w = k['bones']['world']
         d = w[made[0]['bones'][-1]][:3, 3] - w[made[0]['bones'][0]][:3, 3]
         self.assertLess(np.degrees(np.arccos(d[0] / np.linalg.norm(d))), np.degrees(cloth.HANG) + 3)
+
+
+class BoneChains(unittest.TestCase):
+    """A definition's dynamic-bone chains (a tail of the costume's own joints): bone_chains, lay_on_floor."""
+
+    def tail(self):
+        """A made-up model: hips at 1 m, a tail of four joints back and slightly down, a sibling joint; the vertices
+        on the tail's joints, one on the hips."""
+        names = ['Hip__offset', 'PHY_T__a001', 'PHY_T__a002', 'PHY_T__a003', 'PHY_T__a004', 'Spine1']
+        parents = [-1, 0, 1, 2, 3, 0]
+        at = [(0, 1000, 0), (0, 1000, -100), (0, 950, -600), (0, 900, -1100), (0, 850, -1600), (0, 1200, 0)]
+        world = np.tile(np.eye(4), (len(names), 1, 1))
+        world[:, :3, 3] = at
+        pos = np.array([(0, 1000, -350), (0, 925, -850), (0, 875, -1350), (0, 1000, 0)], np.float32)
+        joints = np.array([[1, 2, 0, 0], [2, 3, 0, 0], [3, 4, 0, 0], [0, 0, 0, 0]])
+        weights = np.array([[0.5, 0.5, 0, 0], [0.5, 0.5, 0, 0], [0.5, 0.5, 0, 0], [1, 0, 0, 0]], np.float32)
+        prim = dict(pos=pos.copy(), nrm=np.tile([0.0, 1.0, 0.0], (4, 1)), tan=np.tile([1.0, 0, 0, 1], (4, 1)),
+                    joints=joints, weights=weights, tris=np.array([[0, 1, 2], [1, 2, 3]]), part='fac')
+        return dict(bones=dict(names=names, parents=parents, world=world), prims=[prim])
+
+    SPRING = dict(flags=0x60, parameters=(30.0, 70.0, 40.0), limits=(0.25, -0.25, 0.5, -0.02), last=0.2)
+
+    def test_the_chain_its_frames_and_names(self):
+        k = self.tail()
+        before = k['bones']['world'].copy()
+        names = list(k['bones']['names'])
+        chains = cloth8.bone_chains(k, [dict(root='PHY_T__a001', spring=self.SPRING, floor=100.0)], log=lambda s: None)
+        self.assertEqual(len(chains), 1)
+        c = chains[0]
+        self.assertEqual((c['bones'], c['parent'], c['part'], c['hair'], c['floor']), ([1, 2, 3, 4], 0, 'fac', True, 100.0))
+        self.assertIs(c['spring'], self.SPRING)
+        self.assertEqual(sorted(c['vertices'].tolist()), [0, 1, 2])
+        w = k['bones']['world']
+        np.testing.assert_allclose(w[:, :3, 3], before[:, :3, 3])            # (positions stay)
+        for j in range(3):                                                    # X along its link, Y up across it
+            x = w[j + 2][:3, 3] - w[j + 1][:3, 3]
+            np.testing.assert_allclose(w[j + 1][:3, 0], x / np.linalg.norm(x), atol=1e-9)
+            self.assertGreater(w[j + 1][1, 1], 0.9)
+        np.testing.assert_allclose(w[4][:3, :3], w[3][:3, :3])               # (the last: its link's)
+        self.assertEqual(k['bones']['names'][1:5], ['cloth90_0_%d' % j for j in range(4)])
+        self.assertEqual(names[1], 'PHY_T__a001')                             # (the list given stays as it was)
+        np.testing.assert_array_equal(k['bones']['world'][[0, 5]], before[[0, 5]])
+
+    def test_no_such_joint(self):
+        with self.assertRaises(ValueError):
+            cloth8.bone_chains(self.tail(), [dict(root='PHY_X__a001', spring=self.SPRING)], log=lambda s: None)
+
+    def stance(self):
+        from ttt2char.ttt2 import bone
+        skel = dict(names=['cha:KOSHI_jnt'], parent=[-1], t=np.array([[0.0, 1000.0, 0.0]]), r=np.zeros((1, 3)),
+                    s=np.ones((1, 3)))
+        return skel, bone.world_matrices(skel)
+
+    def test_laid_on_the_floor(self):
+        k = self.tail()
+        chains = cloth8.bone_chains(k, [dict(root='PHY_T__a001', spring=self.SPRING, floor=100.0)], log=lambda s: None)
+        skel, posed = self.stance()
+        pos = k['prims'][0]['pos'].copy()
+        laid, moved = cloth8.lay_on_floor(k, chains, skel, [0], posed)
+        self.assertEqual(laid[0][0], 'PHY_T__a001')
+        heights = laid[0][1]
+        w = k['bones']['world']
+        np.testing.assert_allclose([w[b][1, 3] for b in chains[0]['bones']], heights)
+        self.assertEqual(heights[0], 1000.0)                                  # (its root stays on the hips)
+        self.assertTrue(all(a > b for a, b in zip(heights, heights[1:])))
+        self.assertTrue(all(h >= 100.0 - 1e-6 for h in heights))
+        pitch = []
+        for j in range(3):                                                    # links as long, bent at most 20 more
+            d = w[chains[0]['bones'][j + 1]][:3, 3] - w[chains[0]['bones'][j]][:3, 3]
+            self.assertAlmostEqual(np.linalg.norm(d), 502.5, delta=0.5)
+            pitch.append(np.degrees(np.arcsin(d[1] / np.linalg.norm(d))))
+            np.testing.assert_allclose(w[chains[0]['bones'][j]][:3, 0], d / np.linalg.norm(d), atol=1e-9)
+        self.assertAlmostEqual(pitch[0], -5.7 - 20.0, delta=0.2)
+        self.assertTrue(all(a - b <= 20.0 + 1e-6 for a, b in zip(pitch, pitch[1:])))
+        self.assertEqual(moved, 3)
+        self.assertLess(k['prims'][0]['pos'][2][1], pos[2][1] - 200)          # (its vertices follow it down)
+        np.testing.assert_array_equal(k['prims'][0]['pos'][3], pos[3])
+
+    def test_below_the_floor_it_rises_and_without_a_floor_stays(self):
+        k = self.tail()
+        k['bones']['world'][2:5, 1, 3] = [40.0, 30.0, 20.0]                   # (modelled lying under the floor)
+        chains = cloth8.bone_chains(k, [dict(root='PHY_T__a001', spring=self.SPRING, floor=100.0)], log=lambda s: None)
+        skel, posed = self.stance()
+        heights = cloth8.lay_on_floor(k, chains, skel, [0], posed)[0][0][1]
+        np.testing.assert_allclose(heights[1:], 100.0, atol=1e-6)
+        k = self.tail()
+        chains = cloth8.bone_chains(k, [dict(root='PHY_T__a001', spring=self.SPRING)], log=lambda s: None)
+        before = k['bones']['world'].copy()
+        self.assertEqual(cloth8.lay_on_floor(k, chains, skel, [0], posed), ([], 0))
+        np.testing.assert_array_equal(k['bones']['world'], before)
 
 
 if __name__ == '__main__':

@@ -343,7 +343,8 @@ class ConvertStep(unittest.TestCase):
                 mock.patch.object(importer, '_read', side_effect=lambda p: p.encode()), \
                 mock.patch.object(importer.idmaps, 'tekken8_maps', return_value=('req', 'prop', 'rr', hb, 'ev')) \
                 as maps, \
-                mock.patch.object(importer.idmaps, 'ttt2_usage', return_value='usage'), \
+                mock.patch.multiple(importer.idmaps, ttt2_usage=mock.Mock(return_value='usage'),
+                                    frame_signatures=mock.Mock(return_value={})), \
                 mock.patch.object(importer.tagsystem, 'TagStates', return_value='states'), \
                 mock.patch.object(importer.moveset, 'Converter', return_value=c) as Converter, \
                 mock.patch.object(importer, '_options') as options, \

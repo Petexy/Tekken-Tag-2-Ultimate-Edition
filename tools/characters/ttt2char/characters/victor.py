@@ -10,6 +10,8 @@ SHORT_NAME = 'VICTOR'         # his name on the 2D screens (TTT2 shows short nam
 TEKKEN8_ID = 30               # his FighterId in Tekken 8 (BaseCharacterItem BCI_lon_ex0_1p; autodump.ROSTER)
 TEKKEN8_CODE = 'lon'          # his code in Tekken 8's files (Character/Item/model/unique/lon/)
 CODE = 'vic'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
+REVISION = 1                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
+                              # tornado hits that launch, b+2 and gun reach, Iai 1,2,2's Tag Assault
 SEX = 'male'
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
@@ -89,9 +91,12 @@ SUMMON_MASKS = True                      # his moves' 0x83a6 / 0x83a7 rows (conv
 # reset rows and the rows of his moves that hide and show them again)
 REST_SUMMONS = (2, 3, 4, 8, 9)
 WEAPON_DISMISS = r'^Lon_sKAM00_$'        # his stance starts with them so (moveset.dismiss_at_start)
-# His own hit codes, each read in a joint's frame with offsets (summons8.joint_spots): 121 the right hand's (the gun's
-# lines, the grenades' spheres, the flashlight), 128 the knife's, 129 the karambit's, 130 the scabbard's, 131 the sword's
-HIT_JOINTS = {121: ('R_Hand', 9), 128: ('ATH_L_knife', None), 129: ('ATH_R_karambit', None),
+# His own hit codes, each read in a joint's frame with offsets (summons8.joint_spots): 121 the right hand's holding
+# joint's (the gun's lines, the grenades' spheres, the flashlight; R_Have as Clive's 121: at the shots' frames its x
+# points level ahead of him where R_Hand's points 14 to 24 degrees up and aside, which sent d/f+4,2's shot over the
+# opponent, and b+2's flashlight box came out behind the hand), 128 the knife's, 129 the karambit's, 130 the scabbard's,
+# 131 the sword's
+HIT_JOINTS = {121: ('R_Have', 9), 128: ('ATH_L_knife', None), 129: ('ATH_R_karambit', None),
               130: ('ATH_L_saya01', None), 131: ('ATH_R_katana', None)}
 
 # his Tekken 8 effects converted (convert/effects8.py): effect id -> TTT2 body part (3 his waist, 9 his right hand, 12

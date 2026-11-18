@@ -90,8 +90,11 @@ def game_files(*fids, moves=3):
     files, tables = {autodump.common_paths()[0][0]: anmbin(5)}, {}
     for fid in fids:
         code = autodump.ROSTER[fid][0]
-        (mot, _), (anm, _), (mvl, _) = autodump.archive_paths(code)
-        files.update({mot: motbin(fid, moves), anm: anmbin(), mvl: MVL})
+        paths = autodump.archive_paths(code)
+        (mot, _), (anm, _) = paths[:2]
+        files.update({mot: motbin(fid, moves), anm: anmbin()})
+        if len(paths) > 2:                  # (NO_COMMAND_LIST's fighters have no .mvl)
+            files[paths[2][0]] = MVL
         tables[mot] = (moves, fields(fid, moves))
     return files, tables
 
@@ -109,7 +112,7 @@ class Roster(unittest.TestCase):
         self.assertEqual(autodump.fighter_id('grl'), KAZUYA)
 
     def test_unknown_words(self):
-        for word in ('', 'nobody', '32', '43', '999', 'jack'):
+        for word in ('', 'nobody', '43', '116', '999', 'jack'):
             self.assertIsNone(autodump.fighter_id(word), word)
 
     def test_table(self):
@@ -119,7 +122,7 @@ class Roster(unittest.TestCase):
         self.assertNotIn(autodump.COMMON, codes)
         self.assertTrue(set(autodump.DLC) <= set(autodump.ROSTER))
         base = [fid for fid in autodump.ROSTER if fid not in autodump.DLC]
-        self.assertEqual(base, list(range(32)))             # (the base game's 32 fighters always are owned)
+        self.assertEqual(base, list(range(33)))             # (the base game's 32 fighters and Azazel always are owned)
         self.assertEqual(len(set(autodump.DLC.values())), len(autodump.DLC))
         self.assertEqual(autodump.ROSTER[REINA], ('zbr', 'Reina'))
 
@@ -130,6 +133,9 @@ class Roster(unittest.TestCase):
         self.assertEqual(autodump.archive_paths('grl', motbin_only=True),
                          [('Binary/mothead/bin/grl.motbin', 'grl.motbin')])
         self.assertEqual(autodump.common_paths(), [('Binary/mothead/bin/com.anmbin', 'com.anmbin')])
+        self.assertEqual(autodump.archive_paths('got'), [('Binary/mothead/bin/got.motbin', 'got.motbin'),
+                                                         ('Binary/mothead/bin/got.anmbin', 'got.anmbin')])
+        self.assertEqual(autodump.fighter_id('Azazel'), 32)
 
 
 # ---------------------------------------------------------------- the checks of what the game hands over
@@ -289,6 +295,12 @@ class Saved(unittest.TestCase):
         autodump.write_manifest(self.out, m)
         return m
 
+    def test_saved_without_command_list(self):
+        self.save('got', ['got.motbin', 'got.motbin.fields.bin', 'got.anmbin'])     # (Azazel: no .mvl in the game)
+        got = autodump.saved_files('got', self.out, self.VERSION)
+        self.assertEqual(sorted(got), ['anmbin', 'common', 'fields', 'motbin'])
+        self.assertTrue(autodump.whole(got))
+
     def test_saved_files(self):
         self.save('zbr', ['zbr.motbin', 'zbr.motbin.fields.bin', 'zbr.anmbin', 'zbr.mvl'])
         self.save('grl', ['grl.motbin', 'grl.motbin.fields.bin'], motbin_only=True)
@@ -312,10 +324,10 @@ class Saved(unittest.TestCase):
 
     def test_plan(self):
         m = self.save('grl', ['grl.motbin', 'grl.motbin.fields.bin'], motbin_only=True, common=False)
-        todo, common, skipped = autodump.plan([REINA, KAZUYA, REINA], [JIN, KAZUYA, 32], m, self.out)
+        todo, common, skipped = autodump.plan([REINA, KAZUYA, REINA], [JIN, KAZUYA, 43], m, self.out)
         self.assertEqual(todo, [(REINA, False), (KAZUYA, False), (JIN, True)])   # (Kazuya whole now)
         self.assertTrue(common)
-        self.assertEqual(list(skipped), [32])
+        self.assertEqual(list(skipped), [43])
         todo, common, _ = autodump.plan([], [KAZUYA, JIN], m, self.out)
         self.assertEqual((todo, common), ([(JIN, True)], False))         # (a reference needs no shared bank)
         m = self.save('zbr', ['zbr.motbin', 'zbr.anmbin'])
@@ -545,7 +557,7 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(self.run_main('--all', '--motbin-only')[:2], ([], list(autodump.ROSTER)))
 
     def test_wrong_words(self):
-        for argv in ([], ['nobody'], ['reina', '--references', 'azazel']):
+        for argv in ([], ['nobody'], ['reina', '--references', 'jack']):
             with mock.patch.object(autodump, 'dump') as dump, mock.patch('ttt2char.signals.stop_on_signals'), \
                     mock.patch('sys.stderr'):
                 with self.assertRaises(SystemExit):

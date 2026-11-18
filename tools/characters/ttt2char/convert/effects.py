@@ -12,6 +12,7 @@ Written for this project from the files themselves (no third-party code).
 """
 import os
 
+from ..ttt2 import alo
 from ..ttt2.archive import key_of
 
 ALO_END = b'AL_EFFECT\0'
@@ -25,10 +26,19 @@ def textures_of(alo):
     return [t.decode('latin1') for t in alo[at + len(ALO_END):].split(b'\0') if t.endswith(b'.nut')]
 
 
-def copy_files(archives, donor, donor_names, effects, log=None):
+def models_of(alo):
+    """The meshes an effect file names after its textures (found under `<code>/alo/model/`: Devil Jin's laser,
+    eff_koyuu_beam00, draws mfm_dvjbeam00.nud and mfm_dvjbeam01.nud)."""
+    at = alo.find(ALO_END)
+    if at < 0:
+        return []
+    return [t.decode('latin1') for t in alo[at + len(ALO_END):].split(b'\0') if t.endswith(b'.nud')]
+
+
+def copy_files(archives, donor, donor_names, effects, log=None, models=False):
     """-> (pack files {'alo/<name>.alo' or 'alo/texture/<name>': bytes}, {effect id: [(bare name, bone)]} for
     effects, the donor's names that exist). donor_names: the donor's cmn_eff_default EffectGroup names; effects:
-    {id: [(effect file path, bone or None)]}."""
+    {id: [(effect file path, bone or None)]}; models: the meshes they name too ('alo/model/<name>')."""
     files, names, kept = {}, {}, []
 
     def take(src):
@@ -47,6 +57,10 @@ def copy_files(archives, donor, donor_names, effects, log=None):
             path = '%s/texture/%s' % (folder, t)
             if 'alo/texture/' + t not in files and archives.has(key_of(path)):
                 files['alo/texture/' + t] = archives.read_name(path)
+        for m in models_of(data) if models else ():
+            path = '%s/model/%s' % (folder, m)
+            if 'alo/model/' + m not in files and archives.has(key_of(path)):
+                files['alo/model/' + m] = archives.read_name(path)
         return base
 
     for name in donor_names:                     # the donor's own effects (its generic moves fire them)
@@ -62,20 +76,27 @@ def copy_files(archives, donor, donor_names, effects, log=None):
             names.setdefault(effect_id, []).append((base, bone))
     if log:
         log('effects: %d files of the donor\'s, %d ids of its own (%d effect files, %d textures)' % (
-            len(kept), len(names), sum(1 for f in files if not f.startswith('alo/texture/')),
+            len(kept), len(names), sum(1 for f in files if f.endswith('.alo')),
             sum(1 for f in files if f.startswith('alo/texture/'))))
     return files, names, kept
 
 
+def tinted(files, tint):
+    """The pack files with every effect file's colour tracks set to `tint` (r, g, b: the texture's colour times it)."""
+    return {path: alo.write(alo.recolour(alo.read(data), tint=tuple(tint))) if path.endswith('.alo') else data
+            for path, data in files.items()}
+
+
 def still_named(files, names):
-    """The pack files of the effects in `names` (bare names) and the textures they name."""
+    """The pack files of the effects in `names` (bare names) and the textures (and meshes: copy_files models) they
+    name."""
     out = {}
     for path, data in files.items():
-        if path.startswith('alo/texture/'):
+        if path.startswith(('alo/texture/', 'alo/model/')):
             continue
         if os.path.splitext(os.path.basename(path))[0] in names:
             out[path] = data
-            for t in textures_of(data):
-                if 'alo/texture/' + t in files:
-                    out['alo/texture/' + t] = files['alo/texture/' + t]
+            for t in ['texture/' + t for t in textures_of(data)] + ['model/' + m for m in models_of(data)]:
+                if 'alo/' + t in files:
+                    out['alo/' + t] = files['alo/' + t]
     return out

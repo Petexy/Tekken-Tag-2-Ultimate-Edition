@@ -179,6 +179,11 @@ class Selection(unittest.TestCase):
         self.assertTrue(sounds.TITLE_HAS.match('Play_SE_Wall_Hit'))
         self.assertTrue(sounds.TITLE_HAS.match('Play_SE_HP_Recover_Long'))
         self.assertFalse(sounds.TITLE_HAS.match('Play_SE_Swish_Homing'))
+        # no armour in TTT2: a power crush's sound from its start, an armour break's
+        self.assertTrue(sounds.ARMOUR.match('Play_SE_Pcrash_Invoke'))
+        self.assertTrue(sounds.ARMOUR.match('Play_SE_Armor_Break'))
+        self.assertFalse(sounds.ARMOUR.match('Play_SE_Parry'))
+        self.assertFalse(sounds.ARMOUR.match('Play_SE_Powup_Attack'))
 
 
 class Rows(unittest.TestCase):

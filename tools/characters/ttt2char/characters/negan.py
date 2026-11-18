@@ -9,7 +9,8 @@ SHORT_NAME = 'NEGAN'
 TEKKEN7_ID = 50
 TEKKEN7_CODE = 'nsa'
 CODE = 'nsa'
-REVISION = 1                  # his moves' sound effects (Tekken 7's bank 15); effects at his bat's point; his knife
+REVISION = 2                  # his moves' sound effects (Tekken 7's bank 15); effects at his bat's point; his knife;
+                              # his bat stance's low parries (2)
 SEX = 'male'
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.

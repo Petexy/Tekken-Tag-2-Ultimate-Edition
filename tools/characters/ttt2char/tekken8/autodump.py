@@ -30,7 +30,8 @@ What is saved, in MOVESETS (or another folder), per fighter (by its Tekken 8 cod
                               +0xf0 (+0xd0 is the roster id x 0xFFFF + 1 again in every move)
     <code>.anmbin             the fighter's animation bank (Binary/mothead/bin/<code>.anmbin): six u32 entry counts at
                               4, six u64 entry list offsets at 0x38 (entries of 0x38 bytes)
-    <code>.mvl                the command list (Binary/mothead/movelist/<code>.mvl): "MVLT" at 0
+    <code>.mvl                the command list (Binary/mothead/movelist/<code>.mvl): "MVLT" at 0 (none for the
+                              fighters of NO_COMMAND_LIST)
 and once for all fighters:
     com.anmbin                the shared animation bank (552 MB; an entry's 256-bit mask at +0x18 names the fighters
                               that use it by roster id), in the anmbin layout
@@ -82,8 +83,7 @@ RUNNING = 'Tekken 8 is running: close it first'
 BUSY = 'Tekken 8 is busy with another import (or check of your DLC)'
 
 # Tekken 8's fighters: roster id -> (code, name). The id is the game's (its loader's id -> code switch; a motbin names
-# it at 0x160); the code names the fighter's files. 32 (Azazel, a boss: no command list of his own) and the story
-# mode's fighters (0x74 on) are left out.
+# it at 0x160); the code names the fighter's files. The story mode's fighters (0x74 on) are left out.
 ROSTER = {
     0: ('grf', 'Paul'), 1: ('pig', 'Law'), 2: ('pgn', 'King'), 3: ('cml', 'Yoshimitsu'), 4: ('snk', 'Hwoarang'),
     5: ('rat', 'Xiaoyu'), 6: ('ant', 'Jin'), 7: ('cht', 'Bryan'), 8: ('grl', 'Kazuya'), 9: ('bsn', 'Steve'),
@@ -91,7 +91,7 @@ ROSTER = {
     15: ('kmd', 'Dragunov'), 16: ('ghp', 'Leo'), 17: ('lzd', 'Lars'), 18: ('mnt', 'Alisa'), 19: ('ctr', 'Claudio'),
     20: ('hrs', 'Shaheen'), 21: ('kal', 'Nina'), 22: ('wlf', 'Lee'), 23: ('rbt', 'Kuma'), 24: ('ttr', 'Panda'),
     25: ('crw', 'Zafina'), 26: ('jly', 'Leroy'), 27: ('aml', 'Jun'), 28: ('zbr', 'Reina'), 29: ('cat', 'Azucena'),
-    30: ('lon', 'Victor'), 31: ('bbn', 'Raven'),
+    30: ('lon', 'Victor'), 31: ('bbn', 'Raven'), 32: ('got', 'Azazel'),
     33: ('dog', 'Eddy'), 34: ('cbr', 'Lidia'), 35: ('bee', 'Heihachi'), 36: ('okm', 'Clive'), 37: ('kgr', 'Anna'),
     38: ('tgr', 'Fahkumram'), 39: ('knk', 'Armor King'), 40: ('wkz', 'Miary Zo'), 41: ('ker', 'Kunimitsu'),
     42: ('usi', 'Bob'),
@@ -102,6 +102,7 @@ DLC = {33: 2732280, 34: 2891170, 35: 3024980, 36: 3145880, 37: 3417000, 38: 3564
 COMMON = 'com'                                   # the shared animation bank's code (the loader's id 0xff)
 FIGHTER_FILES = (('Binary/mothead/bin/%s.motbin', '%s.motbin'), ('Binary/mothead/bin/%s.anmbin', '%s.anmbin'),
                  ('Binary/mothead/movelist/%s.mvl', '%s.mvl'))
+NO_COMMAND_LIST = {'got'}                        # codes of fighters the game has no .mvl of (Azazel, a boss)
 FIELDS_SUFFIX = '.fields.bin'
 NEW_SUFFIX = '.new'                              # a file being saved, until all of a fighter's are there and checked
 MANIFEST = 'manifest.json'
@@ -167,7 +168,7 @@ def fighter_id(word):
 
 def archive_paths(code, motbin_only=False):
     """[(path in the moveset archive, name of the file saved)] of a fighter's files (its code: ROSTER)."""
-    files = FIGHTER_FILES[:1] if motbin_only else FIGHTER_FILES
+    files = FIGHTER_FILES[:1] if motbin_only else FIGHTER_FILES[:2] if code in NO_COMMAND_LIST else FIGHTER_FILES
     return [(path % code, name % code) for path, name in files]
 
 
@@ -363,7 +364,7 @@ def common_saved(folder, manifest):
 
 def saved_files(code, folder=None, version=None):
     """{'motbin', 'fields', 'anmbin', 'mvl', 'common'} paths of a fighter's saved files (only 'motbin' and 'fields' when
-    it was saved with motbin_only), or None when they are not all saved: for `version` (game_version) when given,
+    it was saved with motbin_only; no 'mvl' for NO_COMMAND_LIST's), or None when they are not all saved: for `version` (game_version) when given,
     else for the version the manifest is of, or before it (read_manifest's 'before': a moveset an earlier version of
     the game saved, with the shared bank it was saved with)."""
     folder = folder or MOVESETS
@@ -378,8 +379,9 @@ def saved_files(code, folder=None, version=None):
         if not saved['fighters'][code].get('motbin_only'):
             if not common_saved(folder, saved):
                 continue
-            out.update(anmbin=os.path.join(folder, '%s.anmbin' % code), mvl=os.path.join(folder, '%s.mvl' % code),
-                       common=os.path.join(folder, common_paths()[0][1]))
+            out.update(anmbin=os.path.join(folder, '%s.anmbin' % code), common=os.path.join(folder, common_paths()[0][1]))
+            if code not in NO_COMMAND_LIST:
+                out['mvl'] = os.path.join(folder, '%s.mvl' % code)
         return out
     return None
 
@@ -794,7 +796,8 @@ def _save_fighter(h, fid, out, motbin_only, log):
         os.replace(os.path.join(out, new[-1] + '.part'), os.path.join(out, new[-1]))
         if not motbin_only:
             check_anmbin(_head(os.path.join(out, new[1]), ANMBIN_HEAD), sizes[1])
-            check_mvl(_head(os.path.join(out, new[2]), len(MVL_MAGIC)))
+            if len(paths) > 2:
+                check_mvl(_head(os.path.join(out, new[2]), len(MVL_MAGIC)))
     except BaseException:
         _remove(out, new + [new[-1] + '.part'])
         raise

@@ -478,7 +478,7 @@ class Tekken8Model(unittest.TestCase):
                    dict(total=56400, budget=56000, layers={'x': 1}, counts={}, target=45900, room=-500),
                    ('nud', 'nut', 'bon', None, None)]
 
-        def made(source, archives, d, slot, log, standing, weapons, cache, fill=None):
+        def made(source, archives, d, slot, log, standing, weapons, cache, fill=None, stance8=None):
             fills.append(None if fill is None else (fill['target'], fill['last']))
             log('try %d' % len(fills))
             return replies[len(fills) - 1]

@@ -412,7 +412,10 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                 band = members[(g[members] >= lo) & (g[members] <= lv + step / 2)]
                 if not len(band):
                     break
-                nodes.append(sim[band].mean(0))
+                node = sim[band].mean(0)
+                if np.linalg.norm(node - nodes[-1]) < 1e-6:          # (the same band again where the particles
+                    continue                                         # are sparse, Azazel's bandage cards: no link)
+                nodes.append(node)
             nodes = np.array(nodes)
             if len(nodes) < 2:
                 made.append(None)

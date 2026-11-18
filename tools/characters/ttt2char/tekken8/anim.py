@@ -51,8 +51,9 @@ as for the drivers) and O_b the calibration offset of the TTT2 parent b (its wor
                                             fighter's frame before the turn, x left, y up, z forward), k the clip's
                                             root scale, s the skeleton's size scale, ch1 / H HARA_ROT1's channel 1
                                             and rotation (channel 3); a joint's point (summons8.JOINT_SPOT):
-                                            o = C (P_joint + S_joint offset - P_Top) + delta, each frame (C: the
-                                            source's frame to this one, retarget.Calibration)
+                                            o = T^T (C (P_joint + S_joint offset - P_Top) + delta), each frame (C:
+                                            the source's frame to this one, retarget.Calibration; T the turn
+                                            channel's rotation: without it the point stood off the body by T)
     a 'snakes' head under b:                R = I, t = the most forward (+z) of the heads of the summoned model's
                                             clip the move starts, given in b's frame (convert/snakes8.py: heads),
                                             from its start frame on (before it: the clip's first frame)
@@ -155,9 +156,10 @@ def bind_leg(sk):
 class Converter:
     """Clips of a fighter -> TTT2 body animations. sk: the fighter's skeleton (load_skeleton / skeleton()); target:
     bone.read() of the TTT2 skeleton they will play on (the added fighter's, skeleton.build); kind: 0x64
-    (animation.COMPRESSED) or 0xC8 (animation.RAW); hands: the hands' calibration exact (HandFrames)."""
+    (animation.COMPRESSED) or 0xC8 (animation.RAW); hands: the hands' calibration exact (HandFrames); spots: the
+    Tekken 8 joints root points follow (a definition's HIT_JOINTS: convert/summons8.py joint spots)."""
 
-    def __init__(self, sk, target, kind=animation.COMPRESSED, weapons=(), hands=False):
+    def __init__(self, sk, target, kind=animation.COMPRESSED, weapons=(), hands=False, spots=()):
         self.sk, self.kind = sk, kind
         dst = retarget.ttt2_skeleton(target)
         self.cal = retarget.Calibration(sk, LANDMARKS, DRIVERS, dst)
@@ -173,17 +175,25 @@ class Converter:
         # the joints the channels need, and their ancestors: a small skeleton of its own
         body = sk.chain([sk.index[j] for j in set(DRIVERS.values()) | {TOP, TRANS, ROT}])
         want = body + [sk.index[j] for j in pair_joints(self.pairs)]
-        chain = sk.chain(want)
+        weapons_chain = sk.chain(want)
+        # .. and the joints root points follow that no pair needs (Victor's R_Have, his gun's frame: the hand's own
+        # frame aimed its shots up and off to his side), with their own translations too: they do not count as
+        # weapons that move (channels' pairs)
+        missing = [j for j in spots if j not in sk.index]
+        if missing:
+            raise ValueError('the fighter\'s skeleton has no joint %s (a hit code\'s joint)' % ', '.join(missing))
+        chain = sk.chain(want + [sk.index[j] for j in spots])
         at = {j: k for k, j in enumerate(chain)}
         self.sub = retarget.Skeleton([sk.names[j] for j in chain],
                                      [at[sk.parents[j]] if sk.parents[j] >= 0 else -1 for j in chain],
                                      sk.t[chain], sk.R[chain], sk.s[chain])
-        self.moved = {sk.names[j] for j in chain if j not in set(body)}     # the weapons' joints (pairs)
+        self.moved = {sk.names[j] for j in weapons_chain if j not in set(body)}     # the weapons' joints (pairs)
+        self.spots = {sk.names[j] for j in chain if j not in set(weapons_chain)}
         self.scene = None                               # the hold clips (convert/prefabs8.py HoldClips)
 
     def fk(self, anim):
         """(joints {name: panm.Joint}, world rotations (F, n, 3, 3), positions (F, n, 3) mm) of the clip on the small
-        skeleton: the root's and the weapons' joints' stored translations, the others' the bind's."""
+        skeleton: the root's, the weapons' and the root points' joints' stored translations, the others' the bind's."""
         J = anim.joints()
         sub, F = self.sub, anim.frames
         LR = np.repeat(sub.R[None], F, 0)
@@ -194,7 +204,7 @@ class Converter:
                 continue
             if j.stored_rotation:
                 LR[:, i] = animation.quaternion_to_matrix(_quaternions(j.rotation))
-            if j.stored_translation and (name in ROOT or name in self.moved):
+            if j.stored_translation and (name in ROOT or name in self.moved or name in self.spots):
                 Lt[:, i] = j.translation * CM
         WR, Wp = sub.fk(LR, Lt)
         return J, WR, Wp
@@ -485,6 +495,10 @@ def root_point(conv, WR, Wp, values, k, o, follows=None, travel=None):
         j = idx[o[1]]
         o = (Wp[:, j] + np.einsum('fij,j->fi', WR[:, j], np.asarray(o[2], np.float64)) - Wp[:, idx[TOP]]) @ \
             conv.cal.C.T + np.asarray(o[3], np.float64)
+        # (turned back by the turn T: without it the point stood off the body by T where the turn is not 0; Victor's
+        # CH d/b+4 shots, his MUKI turned -68 degrees, went 71 and 76 degrees to his right, 1.6 m to his side, where
+        # Tekken 8's gun points straight at the opponent)
+        o = np.einsum('fji,fj->fi', animation.local_rotation(values[:, retarget.TURN], conv.kind), o)
     else:
         o = np.asarray(o, np.float64)[None]
     return np.einsum('fji,fj->fi', H, conv.scale * (k * o - values[:, 1]))

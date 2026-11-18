@@ -76,6 +76,30 @@ class Format(unittest.TestCase):
         self.assertNotIn('unblurred', pack.character_ini(type('D', (), made_up), 3))
         self.assertNotIn('unblurred', pack.character_ini(KAZUMI, 3, chr_tones=26))
 
+    def test_camera_height_written_only_for_a_definition_that_gives_one(self):
+        made_up = dict(NAME='X', CODE='abc', DONOR='lar', SEX='male')
+        text = pack.character_ini(type('D', (), dict(made_up, CAMERA=4300)), 3)
+        self.assertIn('camera = 4300\n', text)
+        with tempfile.TemporaryDirectory() as d:
+            write(os.path.join(d, 'character.ini'), text)
+            self.assertEqual(pack.read_ini(os.path.join(d, 'character.ini'))['camera'], '4300')
+        for none in (dict(made_up), dict(made_up, CAMERA=0), dict(made_up, CAMERA=True)):
+            self.assertNotIn('camera', pack.character_ini(type('D', (), none), 3))
+        self.assertNotIn('camera', pack.character_ini(KAZUMI, 3, chr_tones=26))
+
+    def test_body_size_written_only_for_a_giant(self):
+        made_up = dict(NAME='X', CODE='abc', DONOR='lar', SEX='male')
+        text = pack.character_ini(type('D', (), dict(made_up, BODY=1.6)), 3)
+        self.assertIn('body = 1.6\n', text)
+        with tempfile.TemporaryDirectory() as d:
+            write(os.path.join(d, 'character.ini'), text)
+            self.assertEqual(pack.read_ini(os.path.join(d, 'character.ini'))['body'], '1.6')
+        self.assertIn('body = 2\n', pack.character_ini(type('D', (), dict(made_up, BODY=2)), 3))
+        for none in (dict(made_up), dict(made_up, BODY=1), dict(made_up, BODY=0.8), dict(made_up, BODY=5),
+                     dict(made_up, BODY=True), dict(made_up, BODY='1.6')):
+            self.assertNotIn('body', pack.character_ini(type('D', (), none), 3))
+        self.assertNotIn('body', pack.character_ini(KAZUMI, 3, chr_tones=26))
+
     def test_older_and_newer_packs_are_not_current(self):
         with tempfile.TemporaryDirectory() as d:
             old_kazumi(d)                                           # (no format, its own keys/: format 0)

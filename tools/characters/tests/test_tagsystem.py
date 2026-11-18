@@ -185,6 +185,53 @@ class Assault(unittest.TestCase):
         # a move that has its twin already is left alone
         self.assertEqual(TS.add_tag_assault(T, tpl, first, lambda i: names[T['moves'][i]['name']], string), [])
 
+    def hidden_x(self, *x_props):
+        """A converted bound move X active from 16 (its tag row sf 15: XT starts at its frame 16, XDA at the hit's)
+        with these property rows, given its twins -> (tables, X, XT, XDA, X's property rows)."""
+        d = self.donor()
+        tpl = TS.assault_template(d.t, d.aliases)
+        r = self.reqs
+        first = len(d.t['moves'])
+        x = d.move('Lon_1675', first_active=16, last_active=17,
+                   hit_condition=d.hits((r['bound'], 21, self.r_bound), (r['air'], 21, self.r_air),
+                                        (r['never'], 21, self.r_ground)),
+                   cancel=d.cancels(dict(req=r['hit'], extradata=7, move_id=STANCE), d.end(50)),
+                   extraprops=d.props(*x_props))
+        x_rows = TS.props(d.t, d.t['moves'][x]['extraprops'])
+
+        def string(name):
+            d.names.append(name)
+            return len(d.names) - 1
+        made = TS.add_tag_assault(d.t, tpl, first, lambda i: d.names[d.t['moves'][i]['name']], string)
+        self.assertEqual(made, [(x, x + 1, x + 2)])
+        return (d.t,) + tuple(d.t['moves'][i] for i in made[0]) + (x_rows,)
+
+    def test_twins_start_shown_where_x_shows_again(self):
+        # Tekken 8 hides Victor from the start of IAI 1,2,2's last hit to its frame 8: the twins, which start at 16,
+        # play neither row (he stayed hidden, and never hit)
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (8, TS.HIDE, 0), (12, 0x801f, 7),
+                                              (30, 0x82f9, 5))
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xt['extraprops'])],
+                         [(12, 0x801f, 7), (30, 0x82f9, 5)])
+        self.assertIs(TS.props(t, xt['extraprops'])[0], x_rows[2])     # (X's rows themselves: effects renumbered)
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xda['extraprops'])][:2],
+                         [(12, 0x801f, 7), (30, 0x82f9, 5)])
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, x['extraprops'])],
+                         [(0x8001, TS.HIDE, 1), (8, TS.HIDE, 0), (12, 0x801f, 7), (30, 0x82f9, 5)])
+
+    def test_twins_start_hidden_where_x_hides_again(self):
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (5, TS.HIDE, 0), (10, TS.HIDE, 1),
+                                              (20, TS.HIDE, 0))
+        for twin in (xt, xda):
+            self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, twin['extraprops'])
+                              if p['id'] == TS.HIDE], [(0x8001, TS.HIDE, 1), (20, TS.HIDE, 0)])
+
+    def test_twins_keep_x_s_list_where_its_hide_lasts_past_their_start(self):
+        t, x, xt, xda, x_rows = self.hidden_x((0x8001, TS.HIDE, 1), (20, TS.HIDE, 0))
+        self.assertEqual(xt['extraprops'], x['extraprops'])
+        self.assertEqual([(p['frame'], p['id'], p['value']) for p in TS.props(t, xda['extraprops'])][:2],
+                         [(0x8001, TS.HIDE, 1), (20, TS.HIDE, 0)])
+
     def reina_string(self):
         d = self.donor()
         tpl = TS.assault_template(d.t, d.aliases)
@@ -284,6 +331,75 @@ class Assault(unittest.TestCase):
                 cancel = d.t['moves'][p]['cancel']
                 self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 0)
                 self.assertEqual((d.t['moves'][p]['cancel'], d.t['moves'][q]['cancel']), (cancel, cancel))
+
+    def switched(self, p_first, sf, x_first):
+        """A bound move P (active from p_first) that goes on by itself at frame sf, keeping the frame count, into
+        its own juggle copy X (active from x_first) when the opponent is down (requirement 124), as Miary Zo's d+2
+        Wkz_2RP -> #1671 at 24. Both get their Tag Assault (add_tag_assault)."""
+        d = self.donor()
+        tpl = TS.assault_template(d.t, d.aliases)
+        r = self.reqs
+        first = len(d.t['moves'])
+        keep = TS.write(d.t, 'cancel_extras', [dict(value=0x401)])
+        down = d.req((124, 0), (0, 0))
+        hits = d.hits((r['bound'], 20, self.r_bound), (r['air'], 20, self.r_air), (r['never'], 20, self.r_ground))
+        x = d.move('Wkz_#1671', first_active=x_first, last_active=x_first + 1, hit_condition=hits,
+                   cancel=d.cancels(dict(req=r['hit'], extradata=7, move_id=STANCE), d.end(58)),
+                   extraprops=d.props())
+        p = d.move('Wkz_2RP', first_active=p_first, last_active=p_first, hit_condition=hits,
+                   cancel=d.cancels(dict(req=r['hit'], extradata=7, move_id=STANCE),
+                                    dict(req=down, extradata=keep, win_start=sf, win_end=sf, start_frame=sf,
+                                         move_id=x), d.end(58)),
+                   extraprops=d.props())
+
+        def string(name):
+            d.names.append(name)
+            return len(d.names) - 1
+        made = TS.add_tag_assault(d.t, tpl, first, lambda i: d.names[d.t['moves'][i]['name']], string)
+        self.assertEqual(sorted(m[0] for m in made), [x, p])
+        return d, first, p, x, down, keep, made
+
+    def test_continuation_before_own_tag_row_waiting_past_the_switch(self):
+        """P's own tag row waits past the switch (to 25: d+2; to 29 with X keeping 5 frames: d/f+1,1,2's 2): a Tag
+        pressed before it would wait there and the switch never come. P gets the tag row into X's twin at the
+        switch's frame and requirements, before the switch and its own tag row; its own stays for a standing
+        opponent."""
+        for p_first, x_first in ((26, 26), (30, 30)):
+            with self.subTest(p_first=p_first, x_first=x_first):
+                d, first, p, x, down, keep, made = self.switched(p_first, 24, x_first)
+                twin = {m[0]: m[1] for m in made}
+                old = copy.deepcopy(TS.cancels(d.t, d.t['moves'][p]['cancel']))
+                self.assertEqual([c['move_id'] for c in old if c['button'] == TS.TAG_BUTTON], [twin[p]])
+                self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 1)
+                rows = TS.cancels(d.t, d.t['moves'][p]['cancel'])
+                self.assertEqual(rows[:1] + rows[2:], old)
+                tag = rows[1]
+                self.assertEqual((tag['direction'], tag['button'], tag['req'], tag['extradata'], tag['win_start'],
+                                  tag['win_end'], tag['start_frame'], tag['move_id']),
+                                 (0, TS.TAG_BUTTON, down, keep, 1, 24, 24, twin[x]))
+                self.assertEqual(rows[2]['move_id'], x)                                     # the switch
+                self.assertEqual((rows[3]['move_id'], rows[3]['start_frame']), (twin[p], p_first - 1))
+                # the twins keep their lists; a second pass adds nothing
+                self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 0)
+
+    def test_continuation_waiting_row_listed_before_the_switch(self):
+        """P's own tag row listed before the switch: the new row goes in front of it (the first that takes Tag)."""
+        d, first, p, x, down, keep, made = self.switched(26, 24, 26)
+        rows = [dict(c) for c in TS.cancels(d.t, d.t['moves'][p]['cancel'])]
+        d.t['moves'][p]['cancel'] = TS.write(d.t, 'cancels', [rows[0], rows[2], rows[1], rows[3]])
+        self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 1)
+        rows = TS.cancels(d.t, d.t['moves'][p]['cancel'])
+        twin = {m[0]: m[1] for m in made}
+        self.assertEqual([(c['button'], c['move_id']) for c in rows[1:4]],
+                         [(TS.TAG_BUTTON, twin[x]), (TS.TAG_BUTTON, twin[p]), (0, x)])
+
+    def test_continuation_own_tag_row_ending_before_the_switch(self):
+        """P's own tag row is taken by the switch's frame (Akuma's Mx_6lrp: 1-19, the switch at 21): its own Tag
+        Assault comes first, P is left alone."""
+        d, first, p, x, down, keep, made = self.switched(20, 21, 22)
+        cancel = d.t['moves'][p]['cancel']
+        self.assertEqual(TS.add_tag_assault_continuations(d.t, made, first), 0)
+        self.assertEqual(d.t['moves'][p]['cancel'], cancel)
 
     def test_no_triple(self):
         d = self.donor()

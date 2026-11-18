@@ -6,6 +6,10 @@ from . import tagsystem as TS
 STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
 LATCHES = 4                     # TTT2's latches: the string buffer is the first of four, 313..316 (moveset.py)
 CONTACT = (46, 49)              # TTT2's tests: the attack connected (its hit latch), was blocked
+AIR_THROW = 27                  # a throw's catch row: the opponent in the air (TTT2's own air throws, Tekken 7's alike)
+OPPONENT_DOWN = 124             # TTT2's test: the opponent is down: lying, or in the air after a hit (a juggle), not
+                                # jumping (its state flag 4, sub_0404FF30); TTT2's own run (sRUN__00F) tests it
+THROW_POINTS = (0x8058, 0x8059) # a throw's damage in points at a frame (moveset.py DAMAGE_DEAL)
 
 
 
@@ -112,12 +116,16 @@ def apply(c):
         c.stats['explicit move damage overrides'] += 1
     for name, bound in c.defn.MOVESET.get('bounds', {}).items():
         set_bound(c, name, bound)
+    for name, damage in c.defn.MOVESET.get('juggle_throw_damage', {}).items():
+        juggle_throw_damage(c, name, damage)
 
     for name, locations in c.defn.MOVESET.get('hitboxes', {}).items():
         c.T['moves'][c.newidx[c.kn[name]]]['hitbox'] = bytes(c.hit_location(x) for x in locations)
     for name, (first, last) in c.defn.MOVESET.get('active_frames', {}).items():
         move = c.T['moves'][c.dn[name] if name in c.dn else c.newidx[c.kn[name]]]     # (a generic move: the donor's row)
         move['first_active'], move['last_active'] = first, last
+    for name, spec in c.defn.MOVESET.get('hit_grabs', {}).items():
+        hit_grab(c, name, spec)
     for name, reaction in c.defn.MOVESET.get('downed_reactions', {}).items():
         downed_reaction(c, name, reaction)
     for name, template in c.defn.MOVESET.get('air_reactions', {}).items():
@@ -194,6 +202,44 @@ def apply(c):
     for name in c.defn.MOVESET.get('direct_buffered_strings', ()):
         direct_buffered_string(c, name)
     normalize_buffered_strings(c)
+
+
+GUARDS = ('block', 'crouch_block', 'pb_block')      # a reaction list's guard half: the two guard moves, the pushback
+
+
+def hit_grab(c, name, spec):
+    """A grab of the definition's MOVESET['hit_grabs'] made one that only a hit starts, as TTT2's own: Jinpachi's
+    Jn_ganmen (a high, active at 15, its row into the hold Jn_ganmen2_n at 15 testing 46: the attack connected, not
+    blocked). Attack `name`'s automatic row into its grab half spec['grab'] (a Tekken 8 grab whose own rows force whoever is
+    in front into its reaction, guard or not) tests 46 too, in spec['window'] (frames: default the
+    attack's active ones and the one after, as the hit is seen), entering the grab half at spec['start_frame']
+    (default: the row's own start frame, or the window's first frame if that is later: a hold whose clip goes on from
+    the attack's enters it where a hit can first land, never at a frame before, so its rows at that frame still run);
+    its hit conditions' guard half (GUARDS: the hold on guard as well) is that of spec['guard_as']'s last hit
+    condition, a plain attack's; the rest (the hold's reaction on hit and counter hit, damage, the row's target)
+    stays."""
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    grab = c.newidx[c.kn[spec['grab']]]
+    first, last = spec.get('window', (move['first_active'], move['last_active'] + 1))
+    rows = [dict(r) for r in TS.cancels(c.T, move['cancel'])]
+    into = [r for r in rows if r['move_id'] == grab and TS.is_automatic(r)]
+    if len(into) != 1 or TS.has(c.T, into[0]['req'], CONTACT[0]) or not 0 < first <= last:
+        raise ValueError('no single automatic row into its grab half without a hit test: ' + name)
+    kept = [(a, b) for a, b in TS.reqs(c.T, into[0]['req']) if a != 0]
+    into[0].update(req=TS.write(c.T, 'requirements', [dict(condition=a, param=b) for a, b in kept + [(CONTACT[0], 0)]]
+                                + [dict(condition=TS.TT_END, param=0)]),
+                   win_start=first, win_end=last,
+                   start_frame=spec.get('start_frame', max(into[0]['start_frame'], first)))
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    ref = c.T['moves'][c.newidx[c.kn[spec['guard_as']]]]
+    guard = c.T['reactions'][TS.hits(c.T, ref['hit_condition'])[-1]['reactions']]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    for hit in hits:
+        row = dict(c.T['reactions'][hit['reactions']])
+        row.update((field, guard[field]) for field in GUARDS)
+        hit['reactions'] = c.add('reactions', row)
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['grabs that only a hit starts (hit_grabs)'] += 1
 
 
 def direct_buffered_string(c, name):
@@ -599,6 +645,59 @@ def command_bounds(c):
                 out[n] = marked[move]
         return out
     return marks
+
+
+def juggle_throw_damage(c, name, damage):
+    """An air throw (`name`: the move its catch rows lead to) dealing `damage` when it ends a juggle. TTT2 never
+    scales a throw's damage in a combo, so a throw that also catches a jumping opponent deals the same in both. Here
+    a copy of the move (named with a J) deals `damage` (its hit condition and its one points row; its other property
+    rows are the move's own rows, so later passes renumber both alike), and every catch row into the move gets a copy
+    into it before it, testing also that the opponent is down (OPPONENT_DOWN): a juggled opponent takes the copy, a
+    jumping one the move as it was. Lists shared by several throw attempts stay shared."""
+    from . import idmaps as M
+    if type(damage) is not int or not 0 < damage <= 255:
+        raise ValueError('juggle throw damage must be an integer from 1 to 255: ' + name)
+    target = c.newidx[c.kn[name]]
+    move = c.T['moves'][target]
+    props = TS.props(c.T, move['extraprops']) if move['extraprops'] is not None else []
+    deals = [p for p in props if p['id'] in THROW_POINTS and p['value']]
+    hits = TS.hits(c.T, move['hit_condition']) if move['hit_condition'] is not None else []
+    if len(deals) != 1 or not hits:
+        raise ValueError('juggle throw damage needs a throw with one points row and a hit condition: ' + name)
+    copy = dict(move, name=c.string(name + 'J'))
+    copy['hit_condition'] = TS.write(c.T, 'hit_conditions', [dict(h, damage=damage) for h in hits])
+    copy['extraprops'] = TS.write(c.T, 'extra_move_properties', [dict(p, value=damage) if p is deals[0] else p
+                                                                 for p in props] + [dict(frame=0, id=0, value=0)])
+    index = len(c.T['moves'])
+    c.T['moves'].append(copy)
+    lists = {}
+    for attempt in c.T['moves']:
+        start = attempt['cancel']
+        if start is None or start in lists:
+            if start is not None:
+                attempt['cancel'] = lists[start]
+            continue
+        rows = TS.cancels(c.T, start)
+        if not any(row['move_id'] == target and row['direction'] not in (M.GROUP, M.GROUP_END) for row in rows):
+            continue
+        out = []
+        for row in rows:
+            if row['move_id'] == target and row['direction'] not in (M.GROUP, M.GROUP_END):
+                tests = TS.reqs(c.T, row['req'])
+                if not any(cond == AIR_THROW for cond, _ in tests):
+                    raise ValueError('juggle throw damage: a row into the move is not an air throw catch: ' + name)
+                req = TS.write(c.T, 'requirements', [dict(condition=cond, param=param) for cond, param in tests] +
+                               [dict(condition=OPPONENT_DOWN, param=0), dict(condition=TS.TT_END, param=0)])
+                out.append(dict(row, req=req, move_id=index))
+                c.stats['air throws: catch rows given a juggle copy'] += 1
+            out.append(dict(row))
+        lists[start] = attempt['cancel'] = TS.write(c.T, 'cancels', out)
+    if any(row['move_id'] == target and row['direction'] not in (M.GROUP, M.GROUP_END, M.LIST_END)
+           for row in c.T.get('group_cancels', ())):
+        raise ValueError('juggle throw damage: grouped rows into the move are not handled: ' + name)
+    if not lists:
+        raise ValueError('juggle throw damage: no catch rows into the move: ' + name)
+    c.stats['air throws: juggle copies (their own damage)'] += 1
 
 
 def set_bound(c, name, bound):

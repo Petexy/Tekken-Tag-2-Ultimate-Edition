@@ -56,6 +56,16 @@ std::optional<int> compare_versions(std::string_view a, std::string_view b) {
     return 0;
 }
 
+std::string_view launcher_version(std::string_view kit_version) {
+    return kit_version.substr(0, kit_version.find('-'));
+}
+
+bool built_older(std::string_view built, std::string_view kit) {
+    if (built.empty() || kit.empty()) return false;
+    const auto order = compare_versions(launcher_version(built), launcher_version(kit));
+    return order && *order < 0;
+}
+
 ReleaseAnswer parse_release(std::string_view text) {
     ReleaseAnswer answer;
     std::string why;

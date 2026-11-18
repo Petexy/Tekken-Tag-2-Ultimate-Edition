@@ -1,7 +1,8 @@
 """Unit tests of the Tekken 8 flag slots (FLAG8: 507 tests a slot's value, 0x815a sets a slot for a number of moves;
 TTT2 keeps a slot in a moveset variable counted down as each of the fighter's moves starts), the wall tests (WALL8:
 Tekken 8's 194..201 -> TTT2's 174..181) and the contact tests 51 / 49 (the move hit kept in a latch: HIT_HELD)
-(convert/moveset.py), on made-up tables.
+(convert/moveset.py), on made-up tables. Also 59 (the reaction slot of the opponent's last hit) and 509 (the
+opponent's facing in a set) of the counter-hit rows.
 
     python3 -m pytest -q tools/characters/tests/test_tekken8_flags.py
 """
@@ -233,14 +234,28 @@ class Contact(unittest.TestCase):
 
     def test_hit_and_contact(self):
         """51 (the move hit) is 46 outside a cancel list, 49 (hit or block) too; in a cancel list 49 is one row on the
-        hit (kept in a latch: HIT_HELD) and one on 49."""
+        hit and one on the block, both kept in the latch (HIT_HELD): 1 set on the hit's frame, 2 on the blocked one
+        while the move has not hit."""
         start, ok = self.c.conv_reqs(self.k.req((51, 0)))
         self.assertEqual(converted(self.c, start), [(46, 0)])
         start, ok = self.c.conv_reqs(self.k.req((49, 0)))
         self.assertEqual(converted(self.c, start), [(46, 0)])
         i = self.cancels(dict(row(2, self.k.req((49, 0)), button=0x4000_0001, win=(1, 20)), extradata=0))
         self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [
-            ((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]), ((1, 20), 2, [(316, 1)]), ((1, 20), 2, [(49, 0)])])
+            ((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]), ((1, 32767), 0x8001, [(49, 0), (316, 0), (0x8096 + 9, 2)]),
+            ((1, 20), 2, [(316, 1)]), ((1, 20), 2, [(316, 2)])])
+
+    def test_blocked_follow_up(self):
+        """f,f+2's `[(358, 1), (49)] 16-16 -> f,f+2,2` (blocked on frame 15) tests the latch's 1 or 2; with 51 beside it
+        (`[(51)] -> on hit only`) the hit row alone tests 1, and the lists' action rows set both."""
+        i = self.cancels(row(1, self.k.req((358, 1), (49, 0)), win=(16, 16)), row(2, self.k.req((51, 0)), win=(16, 16)))
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [
+            ((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]), ((1, 32767), 0x8001, [(49, 0), (316, 0), (0x8096 + 9, 2)]),
+            ((16, 16), 1, [(313, 1), (316, 1)]), ((16, 16), 1, [(313, 1), (316, 2)]), ((16, 16), 2, [(316, 1)])])
+        self.assertEqual(self.c.stats['Tekken 8 contact tests (block) -> the latch set on the blocked frame'], 1)
+        i = self.cancels(row(2, self.k.req((51, 0)), win=(16, 16)))        # no block test: no block row
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [
+            ((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]), ((16, 16), 2, [(316, 1)])])
 
     def test_hit_held(self):
         """u+4's `[(51)] 17-17 -> Baobab Mihira` (the hit on frame 16, TTT2's 46 true on that frame only): the list's
@@ -268,6 +283,63 @@ class Contact(unittest.TestCase):
         self.assertEqual(converted(self.c, self.c.conv_cancel_list(g, 'group_cancels', M.GROUP_END)[0]['req']), [(46, 0)])
         i = self.cancels(row(2, self.k.req((51, 0), (777, 0))), row(1, self.k.req((0, 0))))
         self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [((1, 32767), 1, [(0, 0)])])
+
+    def test_projectile_whiff(self):
+        """A projectile_whiffs move's list (Azazel's d+3+4: `[(48)] 25-40 -> 4 pillars, 40-40 -> 3`): the whiff test is
+        the hit latch still 0, decided at the window's end, the latch set on the hit's frame first; another list's 48
+        stays the id maps' (PROJECTILE_WHIFF)."""
+        rows = (dict(row(2, self.k.req((48, 0)), win=(25, 40)), start_frame=40),
+                dict(row(1, self.k.req((0, 0)), win=(40, 40)), start_frame=40))
+        self.c = flagged(converter(self.k, req={0: 0, 48: 51}), {})
+        i = self.cancels(*rows)
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [((25, 40), 2, [(51, 0)]), ((40, 40), 1, [(0, 0)])])
+        j = self.cancels(*rows)
+        self.c.proj_whiffs = frozenset({j})
+        out = self.c.conv_cancel_list(j)
+        self.assertEqual(self.shown(out), [((1, 32767), 0x8001, [(46, 0), (0x8096 + 9, 1)]),
+                                           ((40, 40), 2, [(316, 0)]), ((40, 40), 1, [(0, 0)])])
+        self.assertEqual([r['start_frame'] for r in out[1:3]], [40, 40])
+        self.assertEqual(self.c.stats['Tekken 8 whiff tests of projectile moves -> "the move hit" latch still 0'], 1)
+        self.assertFalse(self.c.whiff_list)
+
+
+class CounterHit(unittest.TestCase):
+    """59 (the reaction slot of the opponent's last hit: TTT2's 56, the same numbers) and 509 (the opponent's facing
+    in a set: one row per quadrant, TTT2's 93..96)."""
+
+    def setUp(self):
+        self.k = Flags8(refs=[(0, 'own')] * 3)
+        self.k.tables['cancel_extras'] = [dict(value=0x80)]
+        self.c = flagged(converter(self.k, req={0: 0, 130: 128}), {})
+
+    def cancels(self, *rows):
+        i = len(self.k.tables['cancels'])
+        self.k.tables['cancels'] += list(rows) + [row(direction=M.LIST_END)]
+        return i
+
+    def shown(self, out):
+        return [(r['move_id'], converted(self.c, r['req'])) for r in out[:-1]]
+
+    def test_reaction_slot(self):
+        """Clive's 2,2 entries `[(59, 10)]` / `[(59, 11)]` (the first hit's counter-hit reaction, standing /
+        crouching) -> TTT2's 56 with the same slots, though no TTT2 moveset tests 56 (the stub map has none)."""
+        for slot in (10, 11):
+            start, ok = self.c.conv_reqs(self.k.req((59, slot)))
+            self.assertTrue(ok)
+            self.assertEqual(converted(self.c, start), [(56, slot)])
+
+    def test_facing_set(self):
+        """`[(130), (509, 11)] -> 0x8001` (a counter hit on an opponent not turned away: quadrants 0, 1, 3) -> one row
+        per quadrant on the opponent's facing (93 front, 94 / 95 the sides), parameter 0; a set of the back alone -> 96;
+        a set admitting none, or 509 outside a cancel list: false."""
+        i = self.cancels(row(0x8001, self.k.req((130, 0), (509, 11))))
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [
+            (0x8001, [(128, 0), (93, 0)]), (0x8001, [(128, 0), (94, 0)]), (0x8001, [(128, 0), (95, 0)])])
+        self.assertEqual(self.c.stats['Tekken 8 facing sets -> the opponent\'s facing tests'], 3)
+        i = self.cancels(row(1, self.k.req((509, 4))), row(2, self.k.req((509, 0))))
+        self.assertEqual(self.shown(self.c.conv_cancel_list(i)), [(1, [(96, 0)])])
+        start, ok = self.c.conv_reqs(self.k.req((509, 11)))
+        self.assertFalse(ok)
 
 
 if __name__ == '__main__':
