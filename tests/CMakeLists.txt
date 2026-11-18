@@ -190,3 +190,10 @@ target_include_directories(summon_fade_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/
 target_compile_features(summon_fade_test PRIVATE cxx_std_20)
 target_compile_options(summon_fade_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME summon_fade_test COMMAND summon_fade_test)
+
+# The developer's customization record (title/test_record.h); made-up items and colours.
+add_executable(test_record_test test_record_test.cpp)
+target_include_directories(test_record_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(test_record_test PRIVATE cxx_std_20)
+target_compile_options(test_record_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME test_record_test COMMAND test_record_test)

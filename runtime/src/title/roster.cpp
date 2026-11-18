@@ -6,6 +6,7 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
+#include "title/test_record.h"
 #include "title/unblurred.h"
 #include "gpu/still_draws.h"
 #include "title/damage_scaling.h"
@@ -3319,6 +3320,33 @@ PPC_FUNC(sub_033E3460) {
     if (!g_added[k].outfits.empty() && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
                      kept, g_added[k].code.c_str());
+}
+
+// Developer switch TTT2_TEST_CUSTOMIZE (title/test_record.h; off unless set): a customization record for one
+// fighter, without Customize mode or a save. The title fills a player's working record (manager r3 = *0x107A71EC,
+// player r4, costume number r5, select id r6: manager + 96 + 4096 * player) when a costume is confirmed on the
+// select screen, and copies it from there into the match set-up, which the fight's loader hands to the character
+// manager. The switch's items and colours are put into the working record right after the title filled it.
+PPC_FUNC(sub_0242F438_orig);
+PPC_FUNC(sub_0242F438) {
+    const uint32_t manager = ctx.r[3], player = ctx.r[4], number = ctx.r[5], id = ctx.r[6];
+    sub_0242F438_orig(ctx, base);
+    static const std::optional<test_record::Spec> spec = [] {
+        const char* text = std::getenv("TTT2_TEST_CUSTOMIZE");
+        std::optional<test_record::Spec> parsed;
+        if (text && *text && !(parsed = test_record::parse(text)))
+            std::fprintf(stderr, "ttt2: TTT2_TEST_CUSTOMIZE: cannot read '%s'\n", text);
+        return parsed;
+    }();
+    if (spec && traces().roster)
+        std::fprintf(stderr, "ttt2: roster: working record of player %u filled: fighter %u, costume %u, buffers %08X\n",
+                     player, id, number, load(manager + 28));
+    if (!spec || player > 1 || !load(manager + 28)) return; // (no save buffers: the title left the record alone)
+    const int k = slot_of_id(id);
+    if (spec->who != (k >= 0 ? g_added[k].code : "#" + std::to_string(id))) return;
+    test_record::apply(*spec, guest_pointer(manager + 96 + test_record::kSize * player));
+    std::fprintf(stderr, "ttt2: TTT2_TEST_CUSTOMIZE: player %u, fighter %u, costume %u wears the test record\n",
+                 player, id, number);
 }
 
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)
