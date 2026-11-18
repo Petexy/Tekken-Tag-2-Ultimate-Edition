@@ -10,6 +10,7 @@ TEKKEN7_CODE = 'kzm'          # her code in Tekken 7's files (AkBankVoiceKZM.bnk
 CODE = 'kzm'                  # her three-letter code in the pack (not a code TTT2 already has)
 REVISION = 1                  # her tiger in f,F+2's throw (1)
 SEX = 'female'
+WARDROBE = True               # the game's own Customize outfits fitted to her (convert/wardrobe.py)
 
 PRESETS = (
     ('DefaultCos1P', 'Default'),

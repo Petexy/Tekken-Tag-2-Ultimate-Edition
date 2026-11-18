@@ -95,6 +95,38 @@ def with_items(db, donor_db, items=ITEMS):
     return bxml.write([info, offsets])
 
 
+def with_wardrobe(db, source, instances, own_groups):
+    """The database with garments fitted to the fighter (wardrobe.py).
+    source: the parsed database the garments come from; instances: its Instances to add, as they are (label, index
+    and Groups kept: their own-pack members are in the fighter's pack under the same numbers), with the Offsets they
+    name; own_groups: {EquipPos: Group attributes}: the part model of the fighter's own outfit piece, given to its
+    default-costume Instance of that position (section A), so that the piece is worn as an item and gives way to a
+    garment in its slot."""
+    info, offsets = bxml.parse(db)[:2]
+    for inst in info['children']:
+        data = [c for c in inst['children'] if c['tag'] == 'Data']
+        attrs = own_groups.get(dict(data[0]['attrs']).get('EquipPos')) if data and \
+            dict(data[0]['attrs']).get('EquipType') == DEFAULT_COSTUME else None
+        if attrs is None:
+            continue
+        model = next((c for c in inst['children'] if c['tag'] == 'Model' and dict(c['attrs']).get('section') == 'A'), None)
+        if model is not None and not any(dict(g['attrs']).get('mi') == dict(attrs)['mi'] for g in model['children']):
+            model['children'].insert(0, dict(tag='Group', attrs=list(attrs), children=[]))
+    indices = {dict(i['attrs']).get('index') for i in info['children']}
+    placed = set()
+    for inst in instances:
+        if dict(inst['attrs']).get('index') not in indices:
+            info['children'].append(copy.deepcopy(inst))
+            indices.add(dict(inst['attrs']).get('index'))
+            placed |= offsets_named(inst)
+
+    def name(offset):
+        return dict(offset['attrs']).get('Name'), dict(offset['attrs']).get('Path')
+    placed -= {name(o) for o in offsets['children']}
+    offsets['children'] += [copy.deepcopy(o) for o in source[1]['children'] if name(o) in placed]
+    return bxml.write([info, offsets])
+
+
 def effect_names(donor_db):
     """The bare effect names of the donor's character effect Instance."""
     info = bxml.parse(donor_db)[0]

@@ -36,6 +36,33 @@ def member_key(pack, index):
     return zlib.crc32(bytes(digits), pack) if digits else pack
 
 
+def _crc_table():
+    table = []
+    for n in range(256):
+        c = n
+        for _ in range(8):
+            c = (c >> 1) ^ 0xEDB88320 if c & 1 else c >> 1
+        table.append(c)
+    return table
+
+
+_CRC = _crc_table()
+_CRC_TOP = {c >> 24: n for n, c in enumerate(_CRC)}
+
+
+def pack_of(key, index):
+    """The pack whose member `index` has this key (member_key undone: a CRC step can be taken back)."""
+    digits = bytearray()
+    while index:
+        digits.append(index & 3)
+        index >>= 2
+    r = key ^ 0xFFFFFFFF
+    for b in reversed(digits):
+        n = _CRC_TOP[r >> 24]
+        r = (((r ^ _CRC[n]) << 8) & 0xFFFFFFFF) | (n ^ b)
+    return r ^ 0xFFFFFFFF
+
+
 def _keystream_coefficients(blocks):
     # The state after k steps is a_k * s_0 + b_k (mod 2^32) with a_k = MUL^k and b_k = ADD * (1 + MUL + ... MUL^(k-1)).
     with np.errstate(over='ignore'):
