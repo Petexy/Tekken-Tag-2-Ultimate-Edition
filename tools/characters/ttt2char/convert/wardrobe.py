@@ -34,20 +34,22 @@ upper or the lower body is fitted (`outfit_rows`), except its own default costum
 
 A garment with bones of its own (`bi`: a skeleton that is the source's body plus the garment's swaying bones, held
 by the body's joints) keeps them: the bones' places are relative to the body joint that holds them, so the skeleton
-is written with the fighter's joints under the same member number. Its springs (`pi`) are NOT given to the fighter:
-the game's loader of a part's spring file crashes on an added fighter (null read under sub_02102D68 right after the
-member is fetched; seen with the hakama's). So such a garment is worn STATIC: its Instance loses the `pi`
-attribute and its swaying bones stay where their joints hold them (`static`). A hakama's legs, a necktie and the
-like do not swing until that loader works for added fighters.
+is written with the fighter's joints under the same member number. Its springs (`pi`: a spring file naming those
+bones by number, with the capsules of the body they slide over) are copied as they are under the same member number:
+a hakama's legs and a necktie swing on the fighter as on the source. The game's loader of a part's springs stops the
+game on a member that does not begin as a spring file does (`SPRING_MAGIC`: its own check, a write to address 0 in
+sub_02102D68), so only such members are copied, and when the source's spring pack is not found the garments are
+worn without springs (`static`: the bones stay where their joints hold them) rather than with a wrong file.
 
 Not done here (say so to the player rather than guess): hair and head items, items with the rarer own-pack members
 (`fits`), fighters whose imported body is one mesh (Tekken 8), giants.
 """
 import copy
+import struct
 
 import numpy as np
 
-from ..ttt2 import bone as bonefile, bxml, nud as nudfile, nut as nutfile
+from ..ttt2 import bone as bonefile, bxml, mop as mopfile, nud as nudfile, nut as nutfile
 from ..ttt2.archive import key_of, member_key, pack_of
 from . import itemdb
 
@@ -68,6 +70,7 @@ NECK_REACH = 45.0                   # mm from the head's rim over which the neck
 NECK_TUCK = (2.0, 1.5)              # mm the neck's top ring goes up and inward of the rim
 GAIN_SPAN = (0.5, 2.0)              # the skin gain is kept within this
 LUMA = np.array([0.2126, 0.7152, 0.0722])
+SPRING_MAGIC = b'\x40\xa0\x00\x00'  # how a spring file begins (5.0): the game's loader insists on it
 HALVED = 2                          # texture format (BC3: normal and specular maps) stored at half size
 
 
@@ -94,6 +97,28 @@ def find_pack(archives, indices, accepts):
     return None
 
 
+def spring_pack(archives, bones):
+    """The key of the pack whose members are the spring files of the garments: `bones` = {member number: the
+    spring bones' numbers of the skeleton the same Group names}. Every member must begin as a spring file does (the
+    game stops on one that does not) and drive every spring bone of its skeleton: many packs hold spring files under
+    the same few numbers, and another fighter's would be loaded without complaint and throw the cloth about.
+    None when there is none."""
+    def fits_bones(index, data):
+        return data[:4] == SPRING_MAGIC and set(bones[index]) <= set(mopfile.read(data)['opt_ids'])
+    indices = sorted(bones)
+    if not indices:
+        return None
+    for key in archives.where:
+        pack = pack_of(key, indices[0])
+        try:
+            if all(archives.has(member_key(pack, i)) for i in indices) and \
+                    all(fits_bones(i, archives.read(member_key(pack, i))) for i in indices):
+                return pack
+        except (ValueError, AssertionError, KeyError, IndexError, struct.error):
+            continue
+    return None
+
+
 def _attrs(el):
     return dict(el['attrs'])
 
@@ -111,10 +136,11 @@ def _group_members(db_info, kind):
 
 def source_packs(archives, db_info, base_nut):
     """The source fighter's own model and texture packs' keys, the common bone pack's, and the source's own bone
-    pack's: (model, texture, bones, own bones), None for one not found.
+    and spring packs': (model, texture, bones, own bones, springs), None for one not found.
     The model pack is the one whose member is the mesh an Instance's Filename names; the texture pack the one whose
     member holds the textures a model of the same Group draws; a bone pack one whose member is the source's
-    skeleton again (an own one: with more bones after it)."""
+    skeleton again (an own one: with more bones after it); the spring pack the one whose members drive the spring
+    bones of the skeletons their Groups name (`spring_pack`)."""
     models = _group_members(db_info, 'mi')
 
     def is_model(index, data):
@@ -122,7 +148,7 @@ def source_packs(archives, db_info, base_nut):
         return data[:4] == b'NDP3' and any(m['name'] == name for m in nudfile.read(data)['meshes'])
     model_pack = find_pack(archives, models, is_model)
     texture_pack = bone_pack = own_bone_pack = None
-    pairs, bones, own_bones = {}, set(), set()
+    pairs, bones, own_bones, springs = {}, set(), set(), {}
     for inst in db_info['children']:
         for g in itemdb.groups(inst):
             a = _attrs(g)
@@ -132,6 +158,8 @@ def source_packs(archives, db_info, base_nut):
                 bones.add(int(a['bci']))
             if 'bi' in a:
                 own_bones.add(int(a['bi']))
+            if 'pi' in a and 'bi' in a:
+                springs.setdefault(int(a['pi']), int(a['bi']))
     if model_pack is not None and pairs:
         def is_textures(index, data):
             ids = {t['gidx'] for t in nutfile.read(data)['textures']}
@@ -148,7 +176,11 @@ def source_packs(archives, db_info, base_nut):
                 [x.split(':')[-1] for x in base['names']] and np.abs(b['t'][:n] - base['t']).max() < 0.01
         bone_pack = find_pack(archives, bones, is_bones)
         own_bone_pack = find_pack(archives, own_bones, is_bones)
-    return model_pack, texture_pack, bone_pack, own_bone_pack
+    springs_of = None
+    if own_bone_pack is not None:
+        springs_of = spring_pack(archives, {pi: bonefile.read(archives.read(member_key(own_bone_pack, bi)))['opt']
+                                            for pi, bi in springs.items()})
+    return model_pack, texture_pack, bone_pack, own_bone_pack, springs_of
 
 
 def _texture_ids(model):
@@ -437,16 +469,41 @@ def skin_textures(source_nut, wanted, colour_ids, gain, first_id):
             continue
         new = first_id + len(out)
         ids[t['gidx']] = new
-        levels = len(t['mips'])
-        if t['gidx'] in colour_ids and t['fmt'] in (0, 2):
-            rgba = nutfile.decode(t)
-            rgba[..., :3] = _srgb8(_linear(rgba[..., :3]) * gain)
-            out.append(nutfile.make_texture(rgba, new, t['fmt'], mips=min(levels, 3)))
-        elif t['fmt'] == HALVED and levels > 1 and min(t['w'], t['h']) >= 64:
-            out.append(dict(fmt=t['fmt'], w=t['w'] // 2, h=t['h'] // 2, mips=list(t['mips'][1:]), gidx=new))
-        else:
-            out.append(dict(fmt=t['fmt'], w=t['w'], h=t['h'], mips=list(t['mips'][:3]), gidx=new))
+        out.append(_skin_copy(t, new, gain if t['gidx'] in colour_ids else None))
     return out, ids
+
+
+def _skin_copy(t, new, gain):
+    """Texture `t` under the id `new`: a colour texture times `gain` (None: not one), a BC3 map at half size."""
+    levels = len(t['mips'])
+    if gain is not None and t['fmt'] in (0, 2):
+        rgba = nutfile.decode(t)
+        rgba[..., :3] = _srgb8(_linear(rgba[..., :3]) * gain)
+        return nutfile.make_texture(rgba, new, t['fmt'], mips=min(levels, 3))
+    if t['fmt'] == HALVED and levels > 1 and min(t['w'], t['h']) >= 64:
+        return dict(fmt=t['fmt'], w=t['w'] // 2, h=t['h'] // 2, mips=list(t['mips'][1:]), gidx=new)
+    return dict(fmt=t['fmt'], w=t['w'], h=t['h'], mips=list(t['mips'][:3]), gidx=new)
+
+
+def garment_textures(part_nut, source_nut, copies, ids, colour_ids, gain):
+    """A garment's own texture file for the fighter. The game's garments carry, beside their cloth, the body skin
+    textures their own skin polygons draw, under the base model's ids (a part finds its textures in its own file:
+    a skin polygon whose textures are only in the body's file is drawn black or with whatever was drawn before it).
+    The fitted garments' skin polygons name the fighter's copies (`ids` {source id: new id}), so those textures go
+    in under the new ids: the fighter's copy (`copies`) where the garment's is the base model's, else the
+    garment's own version treated the same way. -> [textures]."""
+    base = {t['gidx']: t for t in source_nut['textures']}
+    mine = {t['gidx']: t for t in copies}
+    out = []
+    for t in part_nut['textures']:
+        new = ids.get(t['gidx'])
+        if new is None:
+            out.append(t)
+        elif t['gidx'] in base and t['mips'] == base[t['gidx']]['mips'] and new in mine:
+            out.append(mine[new])
+        else:
+            out.append(_skin_copy(t, new, gain if t['gidx'] in colour_ids else None))
+    return out
 
 
 def renumber(model, ids):
@@ -462,7 +519,7 @@ def renumber(model, ids):
 # ------------------------------------------------------------------------------------------------ the item database
 def fits(inst):
     """Whether an Instance can be fitted here: every own-pack member of its Groups is a model, a texture, a
-    skeleton or springs (worn without them: `static`; none of the rarer kinds), and it is not a default costume (the source's own outfit: its
+    skeleton or springs (none of the rarer kinds), and it is not a default costume (the source's own outfit: its
     Instances are the ones the fighter's own outfit is worn as)."""
     data = [c for c in inst['children'] if c['tag'] == 'Data']
     if data and _attrs(data[0]).get('EquipType') == itemdb.DEFAULT_COSTUME:
@@ -471,7 +528,8 @@ def fits(inst):
 
 
 def static(inst):
-    """A copy of the Instance without its Groups' own spring files (`pi`): worn with its own bones held still."""
+    """A copy of the Instance without its Groups' own spring files (`pi`): worn with its own bones held still
+    (for a source whose spring pack was not found)."""
     out = copy.deepcopy(inst)
     for g in itemdb.groups(out):
         g['attrs'] = [(name, value) for name, value in g['attrs'] if name != 'pi']
@@ -567,7 +625,7 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         return {}
     rows = shop_rows(archives, labels)
     by_index = {int(_attrs(i)['index']): i for i in source_db[0]['children']}
-    model_pack, texture_pack, bone_pack, own_bone_pack = source_packs(archives, source_db[0], source_bon)
+    model_pack, texture_pack, bone_pack, own_bone_pack, spring_pack = source_packs(archives, source_db[0], source_bon)
     if model_pack is None:
         log('wardrobe: no outfits: %s\'s part models were not found in the game' % source_code)
         return {}
@@ -670,11 +728,20 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         for g in itemdb.groups(inst):
             a = _attrs(g)
             if 'ti' in a:
-                out['parts/texture/%s.nut' % a['ti']] = archives.read(member_key(texture_pack, int(a['ti'])))
+                out['parts/texture/%s.nut' % a['ti']] = nutfile.write(garment_textures(
+                    nutfile.read(archives.read(member_key(texture_pack, int(a['ti'])))), source_nut, textures, ids,
+                    colour_ids, gain))
             if 'bi' in a:
                 out['parts/bone/%s.bon' % a['bi']] = bonefile.write(part_skeleton(
                     bonefile.read(archives.read(member_key(own_bone_pack, int(a['bi'])))), target_bon))
-    out['.xml'] = itemdb.with_wardrobe(files['.xml'], source_db, [static(i) for i in wanted], groups)
+            if 'pi' in a and 'bi' in a and spring_pack is not None:
+                out['parts/mop/%s.mop' % a['pi']] = archives.read(member_key(spring_pack, int(a['pi'])))
+    if any('pi' in _attrs(g) and ('bi' not in _attrs(g) or spring_pack is None)
+           for i in wanted for g in itemdb.groups(i)):
+        log('wardrobe: %s\'s spring files were not found in the game: its garments are worn without springs'
+            % source_code)
+        wanted = [static(i) for i in wanted]
+    out['.xml'] = itemdb.with_wardrobe(files['.xml'], source_db, wanted, groups)
     out['wardrobe.txt'] = ''.join('%s: %s\n' % (label, record_text([rows[label]])) for label in labels
                                   if label in rows).encode('utf-8')
     return out

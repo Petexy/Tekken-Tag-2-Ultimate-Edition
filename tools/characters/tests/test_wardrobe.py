@@ -1,4 +1,5 @@
 """The game's garments fitted to an added fighter (convert/wardrobe.py): made-up skeletons, meshes and lists."""
+import struct
 import unittest
 
 import numpy as np
@@ -85,6 +86,20 @@ class Packs(unittest.TestCase):
         self.assertEqual(found, pack)
         self.assertIsNone(wardrobe.find_pack(Archives(entries), [5, 9, 77], lambda index, data: True))
 
+    def test_the_spring_pack_is_the_one_whose_members_drive_the_garments_own_bones(self):
+        def springs(ids, magic=wardrobe.SPRING_MAGIC):
+            return magic + bytes(28) + struct.pack('>I', len(ids)) + bytes(12) + \
+                b''.join(struct.pack('>I', i) + bytes(92) for i in ids)
+        pack, other, third = 0x6DD3B9FF, 0x33333333, 0x44444444
+        entries = {archive.member_key(pack, 3): springs([0, 250, 251]), archive.member_key(pack, 6): springs([100])}
+        # another fighter's pack has spring files under the same numbers, for other bones
+        entries.update({archive.member_key(other, 3): springs([0, 300]), archive.member_key(other, 6): springs([100])})
+        entries.update({archive.member_key(third, 3): b'NDP3', archive.member_key(third, 6): springs([100])})
+        bones = {3: [0, 250, 251], 6: [100]}
+        self.assertEqual(wardrobe.spring_pack(Archives(entries), bones), pack)
+        entries[archive.member_key(pack, 6)] = springs([100], b'\x00\x00\xa0\x40')     # the game would stop on it
+        self.assertIsNone(wardrobe.spring_pack(Archives(entries), bones))
+        self.assertIsNone(wardrobe.spring_pack(Archives(entries), {}))
 
 class Fitting(unittest.TestCase):
     def test_joints_move_by_name_and_a_parts_own_bone_follows_its_parent(self):
@@ -126,6 +141,20 @@ class Fitting(unittest.TestCase):
         np.testing.assert_allclose(gain, [wardrobe._linear(160) / wardrobe._linear(128)] * 3, rtol=1e-6)
         np.testing.assert_allclose(wardrobe.skin_gain(source_face, target_face, {5: images[5]}), 1.0)
         self.assertEqual(wardrobe._srgb8(wardrobe._linear(np.array([0, 77, 255]))).tolist(), [0, 77, 255])
+
+    def test_a_garments_texture_file_holds_the_fighters_skin_under_the_ids_its_polygons_name(self):
+        def tex(gidx, value, fmt=0):
+            return dict(fmt=fmt, w=4, h=4, mips=[bytes([value]) * 16], gidx=gidx)
+        source = dict(textures=[tex(0x10, 1), tex(0x11, 2), tex(0x12, 3)])
+        copies = [tex(0x700, 101), tex(0x701, 102)]              # the fighter's copies of 0x10 and 0x11
+        ids = {0x10: 0x700, 0x11: 0x701}
+        part = dict(textures=[tex(0x900, 9), tex(0x10, 1), tex(0x11, 77), tex(0x12, 3)])
+        made = wardrobe.garment_textures(part, source, copies, ids, set(), np.ones(3))
+        self.assertEqual([t['gidx'] for t in made], [0x900, 0x700, 0x701, 0x12])
+        self.assertIs(made[0], part['textures'][0])               # its cloth: as it is
+        self.assertIs(made[1], copies[0])                         # the base model's skin: the fighter's copy
+        self.assertEqual(made[2]['mips'], [bytes([77]) * 16])     # its own version of a skin map: kept, renamed
+        self.assertIs(made[3], part['textures'][3])               # a base texture no fitted polygon names
 
 
 class Pieces(unittest.TestCase):
