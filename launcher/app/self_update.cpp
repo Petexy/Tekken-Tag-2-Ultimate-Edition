@@ -297,23 +297,10 @@ void Launcher::release_known(const ReleaseAnswer& answer) {
 }
 
 void Launcher::show_update_notice() {
+    // (Only a newer release: what main has beyond this build marks fighters, not this notice.)
     const bool shown = appimage_ && newer_;
-    // Else newer changes on main, until a release brings them (no Update then).
-    const bool main = !shown && main_news_ && main_news_->ahead > 0;
-    gtk_widget_set_visible(update_notice_, shown || main);
+    gtk_widget_set_visible(update_notice_, shown);
     gtk_widget_set_visible(update_notice_button_, shown);
-    if (main) {
-        const MainNews& news = *main_news_;
-        ui::set_text(update_notice_title_, "Newer changes are on main");
-        ui::set_text(update_notice_detail_,
-                     std::to_string(news.ahead) + (news.ahead == 1 ? " change" : " changes") +
-                         " since this version (" TTT2_LAUNCHER_VERSION ", " + build_commit_.substr(0, 7) + ")" +
-                         (news.changes.empty() ? "" : ", the newest: \u201c" + news.changes[0] + "\u201d") +
-                         ". They come with the next release.");
-        notice_link_ = news.page;
-        const char* custom = std::getenv("TTT2_LAUNCHER_GITHUB");
-        gtk_widget_set_visible(update_notice_page_, news.page.starts_with("https://") || (custom && *custom));
-    }
     if (shown) {
         gtk_widget_add_css_class(update_button_, "update-available");
         ui::set_text(update_notice_title_, "Version " + newer_->version + " of the launcher is out");

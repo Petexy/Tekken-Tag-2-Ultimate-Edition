@@ -189,8 +189,8 @@ it is that version), puts it in that one's place and opens it: it unpacks its
 files over the old ones, keeping everything else there. Anything failing, or
 Cancel, leaves the `.exe` as it was. A game an older version built gets
 **Update** beside Play, which builds it again on this PC with the new version's
-changes. The launcher also says when `main` has newer changes than its release,
-as the Linux launcher does (below).
+changes. Fighters `main` gives a newer pack show **Newer on main**, as in the
+Linux launcher (below).
 
 A test build (an `.exe` made on a branch other than `main`, for testers) follows
 its branch instead: when the branch has newer commits, the notice says so with
@@ -339,14 +339,14 @@ the AppImage and the Windows launcher attached, both built with that version as 
 `launcher/builder/CMakeLists.txt`: before it replaces anything each launcher
 checks that the new one says it is that version (`ttt2-launcher --version`).
 
-Both launchers also say when `main` has changes their build lacks, before a
-release brings them: each knows the commit it was built from (Git's, when it is
+Both launchers also know what `main` has that their build lacks, before a
+release brings it: each knows the commit it was built from (Git's, when it is
 built; the Windows `.exe` keeps it in its files) and asks GitHub, with the release,
-what `main` has beyond it (`tools/characters/launcher.py main`). The notice then
-says how many changes and the newest one, with **What's New** (GitHub's
-comparison); fighters `main` gives a newer pack show **Newer on main**, and
-fighters only `main` has are named. All of it comes with the next release. A
-build of commits never pushed shows nothing.
+what `main` has beyond it (`tools/characters/launcher.py main`). Fighters `main`
+gives a newer pack show **Newer on main**, and fighters only `main` has are named;
+all of it comes with the next release. (No notice counts `main`'s changes: a
+release's own pull request is merged after its build.) A build of commits never
+pushed shows nothing.
 
 The Windows launcher of a release is made on Linux too, from a commit:
 
