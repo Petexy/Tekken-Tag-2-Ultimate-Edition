@@ -86,6 +86,8 @@ NECK_REACH = 45.0                   # mm from the head's rim over which the neck
 NECK_TUCK = (2.0, 1.5)              # mm the neck's top ring goes up and inward of the rim
 GAIN_SPAN = (0.1, 2.5)              # the skin gain is kept within this
 LUMA = np.array([0.2126, 0.7152, 0.0722])
+GAIN_KNEE = 0.6                     # linear level above which a brightened skin texture is eased toward white
+                                    # instead of cut off at it (toned)
 SKIN_SATURATION = 0.15              # the least saturation (of the 8-bit colour) of a texel counted as skin (plain_skin)
 SPRING_MAGIC = b'\x40\xa0\x00\x00'  # how a spring file begins (5.0): the game's loader insists on it
 TEXTURE_CHECKS = 6                  # how many of a texture pack's files are held against their models (source_packs)
@@ -543,6 +545,17 @@ def _srgb8(linear):
     return np.clip(np.where(x <= 0.0031308, x * 12.92, 1.055 * x ** (1 / 2.4) - 0.055) * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
 
+def toned(linear, gain):
+    """Linear colours (.., 3) times the skin `gain`. A channel that is made brighter is eased toward white above
+    GAIN_KNEE (never below what it was) rather than cut off there: a pale fighter's gain (Noctis: 1.6 to 1.9)
+    turned the lit half of the source's muscles into one flat white, which the game's lights then burnt out."""
+    x = np.asarray(linear, np.float64)
+    y = x * gain
+    room = 1.0 - GAIN_KNEE
+    eased = np.maximum(GAIN_KNEE + room * (1.0 - np.exp(-(y - GAIN_KNEE) / room)), np.minimum(x, 1.0))
+    return np.where((np.asarray(gain) > 1.0) & (y > GAIN_KNEE), eased, y)
+
+
 # ------------------------------------------------------------------------------------------------ textures
 def skin_textures(source_nut, wanted, colour_ids, gain, first_id):
     """Copies of the source's base textures `wanted` (ids) under new ids from `first_id`: the skin's colour
@@ -563,7 +576,7 @@ def _skin_copy(t, new, gain):
     levels = len(t['mips'])
     if gain is not None and t['fmt'] in (0, 2):
         rgba = nutfile.decode(t)
-        rgba[..., :3] = _srgb8(_linear(rgba[..., :3]) * gain)
+        rgba[..., :3] = _srgb8(toned(_linear(rgba[..., :3]), gain))
         return nutfile.make_texture(rgba, new, t['fmt'], mips=min(levels, 3))
     if t['fmt'] == HALVED and levels > 1 and min(t['w'], t['h']) >= 64:
         return dict(fmt=t['fmt'], w=t['w'] // 2, h=t['h'] // 2, mips=list(t['mips'][1:]), gidx=new)

@@ -183,6 +183,15 @@ class Fitting(unittest.TestCase):
         np.testing.assert_allclose(gain, [wardrobe._linear(144) / wardrobe._linear(128)] * 3, rtol=1e-6)
         np.testing.assert_allclose(wardrobe.skin_gain(source_face, painted, images, [cloth]), 1.0)
 
+    def test_a_brightening_gain_eases_toward_white_instead_of_cutting_off(self):
+        x = np.array([[0.1, 0.5, 0.9]] * 3).T                   # three levels, the same in each channel
+        gain = np.array([0.5, 1.0, 1.8])
+        out = wardrobe.toned(x, gain)
+        np.testing.assert_allclose(out[:, :2], (x * gain)[:, :2])           # no brightening: the plain product
+        np.testing.assert_allclose(out[0, 2], 0.18)                         # under the knee: the plain product
+        self.assertTrue(wardrobe.GAIN_KNEE < out[1, 2] < out[2, 2] < 1.0)    # above: still told apart, under white
+        self.assertGreaterEqual(out[2, 2], 0.9)                             # and never darker than it was
+
     def test_skin_without_colour_is_not_the_tone(self):
         face = cap('abc_fac', 50, 1510, 2)
         image = np.zeros((8, 8, 4), np.uint8)
