@@ -1206,7 +1206,7 @@ switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
 record into a slot and makes the title's save call once, for testing the
 saving before a menu calls it.
 
-**Its wardrobe.** A human-sized Tekken 7 fighter is given the title's own
+**Its wardrobe.** A human-sized fighter, from Tekken 7 or Tekken 8, is given the title's own
 Customize outfits at import (`convert/wardrobe.py`, whose opening text says
 how the title dresses a fighter and what is done to follow it): the outfits
 of its donor (women Jun's, men Lars's: every shop row of the donor that
@@ -1224,9 +1224,21 @@ A definition's one option is `WARDROBE = False`: no wardrobe, and so no
 shop list, for that fighter (no definition sets it now). The rules leave out the rest by themselves: a fighter not
 of the donor's size (a joint more than 200 mm from the donor's: Gigas,
 Fahkumram), one whose body is not an upper piece, a lower piece and a face
-(a preset outfit in one piece keeps its body whole and shows as it is), a
-Tekken 8 fighter (not done yet), a garment whose own bones are numbered
-like bones of the fighter's body. A pack without a shop list cannot be
+(a Tekken 7 preset outfit in one piece keeps its body whole and shows as it is),
+a fighter imported on its stand-in, a garment whose own bones are numbered
+like bones of the fighter's body. A Tekken 8 costume is one mesh, so the
+wardrobe step makes it two (`split_piece`): each polygon's islands (a
+jacket, a boot, a buckle, an arm's skin) go whole to the half of the body
+that holds most of their weights, a coat with its tails to the chest, a belt
+to the hips; only bare skin that runs through the waist is cut, and a 2P
+colour layer goes where the cloth under it went. The head, hair, worn
+head items, weapons and summoned things stay in the body model, so they
+show with any garment. Azazel is left out by the size rule (a joint two
+metres from Lars's). Two things had to give way for this: Miary Zo's snake
+parent bone is numbered 597, not 599 (598 and 599 are the swaying bust bones
+of the women's tops), and a texture file's textures now end on 16 bytes when
+another follows (the title walks the file rounding up; a 4 x 4 texture
+before the copied skin textures stopped the fight from loading). A pack without a shop list cannot be
 entered in CUSTOMIZE: the cursor passes its cell and the importer draws its
 face grey in that grid.
 
