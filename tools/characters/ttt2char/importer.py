@@ -450,7 +450,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                    (nud, nut, bon, mop), standing=standing,
                                    log=lambda s: log('         ' + s.strip()), reference_bon=bon))
         outfit_codes = [c for c in outfits.codes(d) if c + '.nud' in contents]     # (but presets left out)
-    if getattr(d, 'WARDROBE', False):
+    if wardrobe.source_of(d) is not None:
         step('wardrobe: the Customize outfits of Tekken Tag Tournament 2 fitted to %s' % d.NAME)
         contents.update(wardrobe.for_pack(archives, d, contents, outfit_codes, log=lambda s: log('         ' + s)))
     gauge_sound = effects.number(gauge.full_sound(d)) if effects and gauge.full_sound(d) else None

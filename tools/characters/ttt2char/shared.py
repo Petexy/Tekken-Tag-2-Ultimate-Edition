@@ -24,7 +24,7 @@ from PIL import Image
 
 from . import InputError, pack, signals
 from .characters import GAMES, game_of
-from .convert import art, colours, voice
+from .convert import art, colours, voice, wardrobe
 from .ttt2.archive import key_of
 from .ttt2.nus3bank import wave as wave_file
 
@@ -166,8 +166,11 @@ def build(source_of, archives, rpx, folder, definitions, log=None, leaving=()):
     files = {}
     if fighters:
         new_row = pack.needs_new_row(slot for slot, _, _ in fighters)
+        # (the fighters CUSTOMIZE mode stays closed to: the port lets in the ones whose pack has a shop list)
+        closed = {d.CODE for _, d, path in fighters if d is not None and (
+            path is None or not os.path.isfile(os.path.join(path, wardrobe.SHOP_FILE)))}
         files.update(art.shared_files(own, archives, rpx, [(slot, d) for slot, d, _ in fighters], log=log,
-                                      new_row=new_row))
+                                      new_row=new_row, closed=closed))
         try:
             art.keep(files, earlier, kept, archives)
         except art.Lost as lost:

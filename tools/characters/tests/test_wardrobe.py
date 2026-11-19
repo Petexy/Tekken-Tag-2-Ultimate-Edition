@@ -86,6 +86,30 @@ class Packs(unittest.TestCase):
         self.assertEqual(found, pack)
         self.assertIsNone(wardrobe.find_pack(Archives(entries), [5, 9, 77], lambda index, data: True))
 
+    def test_a_pack_is_told_by_the_members_asked_for_not_only_its_first(self):
+        # two packs hold members 5, 9 and 600; the first members pass in both, the second only in the right one
+        pack, other = 0x1101524B, 0x22222222
+        entries = {archive.member_key(other, 5): b'body', archive.member_key(other, 9): b'two bones',
+                   archive.member_key(pack, 5): b'body', archive.member_key(pack, 9): b'body',
+                   archive.member_key(other, 600): b'', archive.member_key(pack, 600): b''}
+        body = lambda index, data: data == b'body'
+        self.assertEqual(wardrobe.find_pack(Archives(entries), [5, 9, 600], body, [5, 9]), pack)
+        self.assertIsNone(wardrobe.find_pack(Archives(entries), [5, 9, 600], body, [5, 9, 600]))
+        self.assertIn(wardrobe.find_pack(Archives(entries), [5, 9, 600], body), (pack, other))
+
+    def test_a_spring_pack_need_not_agree_bone_for_bone(self):
+        def springs(ids):
+            return wardrobe.SPRING_MAGIC + bytes(28) + struct.pack('>I', len(ids)) + bytes(12) + \
+                b''.join(struct.pack('>I', i) + bytes(92) for i in ids)
+        pack, other = 0x66C4E6AD, 0x33333333
+        # the skeleton of member 3 has two helper bones (1010, 1011) no spring drives
+        bones = {3: [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 1010, 1011], 6: [200, 201]}
+        entries = {archive.member_key(pack, 3): springs(bones[3][:10]), archive.member_key(pack, 6): springs([200, 201]),
+                   archive.member_key(other, 3): springs([100, 101, 300]), archive.member_key(other, 6): springs([200])}
+        self.assertEqual(wardrobe.spring_pack(Archives(entries), bones), pack)
+        del entries[archive.member_key(pack, 3)], entries[archive.member_key(pack, 6)]
+        self.assertIsNone(wardrobe.spring_pack(Archives(entries), bones))
+
     def test_the_spring_pack_is_the_one_whose_members_drive_the_garments_own_bones(self):
         def springs(ids, magic=wardrobe.SPRING_MAGIC):
             return magic + bytes(28) + struct.pack('>I', len(ids)) + bytes(12) + \
@@ -142,6 +166,34 @@ class Fitting(unittest.TestCase):
         np.testing.assert_allclose(wardrobe.skin_gain(source_face, target_face, {5: images[5]}), 1.0)
         self.assertEqual(wardrobe._srgb8(wardrobe._linear(np.array([0, 77, 255]))).tolist(), [0, 77, 255])
 
+    def test_a_face_not_drawn_as_skin_leaves_the_tone_to_the_outfits_bare_skin(self):
+        source_face, painted = cap('cha:kao_O_OBJ', 50, 1490, 2), cap('abc_fac', 50, 1510, 2)
+        painted['polys'][0]['materials'][0].update(flags=0x24600099)        # the cloth material: not her tone
+        painted['polys'][0]['materials'][0]['textures'][0]['id'] = 6
+        arms = cap('abc_bdu', 40, 1300, 0)
+        arms['polys'][0]['materials'][0]['textures'][0]['id'] = 7
+        cloth = cap('abc_bdu', 60, 1200, 0)
+        cloth['polys'][0]['materials'][0].update(flags=0x24400099)
+        images = {5: np.full((8, 8, 4), 128, np.uint8), 6: np.full((8, 8, 4), 90, np.uint8),
+                  7: np.full((8, 8, 4), 144, np.uint8)}
+        self.assertIs(wardrobe.skin_polygon(painted, [cloth, arms]), arms['polys'][0])
+        self.assertIsNone(wardrobe.skin_polygon(painted, [cloth]))
+        self.assertIs(wardrobe.skin_polygon(source_face, [arms]), source_face['polys'][0])
+        gain = wardrobe.skin_gain(source_face, painted, images, [cloth, arms])
+        np.testing.assert_allclose(gain, [wardrobe._linear(144) / wardrobe._linear(128)] * 3, rtol=1e-6)
+        np.testing.assert_allclose(wardrobe.skin_gain(source_face, painted, images, [cloth]), 1.0)
+
+    def test_skin_without_colour_is_not_the_tone(self):
+        face = cap('abc_fac', 50, 1510, 2)
+        image = np.zeros((8, 8, 4), np.uint8)
+        image[..., :3] = (120, 84, 70)                          # dark skin
+        image[:4, :4, :3] = 235                                 # a white beard: brighter, and not skin
+        uv = face['polys'][0]['verts']['uv']
+        uv[:, 0] = (0.75, 0.75)
+        uv[:6, 0] = (0.1, 0.1)
+        tone = wardrobe.plain_skin(face, {5: image})
+        np.testing.assert_allclose(tone, wardrobe._linear(np.array([120, 84, 70])), rtol=1e-6)
+
     def test_a_garments_texture_file_holds_the_fighters_skin_under_the_ids_its_polygons_name(self):
         def tex(gidx, value, fmt=0):
             return dict(fmt=fmt, w=4, h=4, mips=[bytes([value]) * 16], gidx=gidx)
@@ -170,6 +222,49 @@ class Pieces(unittest.TestCase):
                          {wardrobe.LOWER: ['abc_bdl_1p'], wardrobe.UPPER: ['abc_bdu_1p']})
         one = dict(meshes=[mesh(n, tri, [(0, 1, 2)], 0) for n in ('abc_bdf_1p', 'abc_fac')])
         self.assertEqual(wardrobe.own_pieces(one, 'abc'), {})
+
+    def test_a_full_body_piece_and_the_piece_worn_with_it_are_the_halves_they_cover(self):
+        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('MUNE1_jnt', 0, (0, 1200, 0)), ('KOSHI_jnt', 0, (0, 950, 0)),
+                        ('MOMO_R_jnt', 2, (-90, 900, 0)), ('OPT400_hem', 3, (-90, 600, 0))])
+        tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        jacket, trousers = mesh('abc_bdf', tri, [(0, 1, 2)], 1), mesh('abc_dep0', tri, [(0, 1, 2)], [3, 4, 4])
+        self.assertEqual(wardrobe.lower_share(jacket, bon), 0.0)
+        self.assertEqual(wardrobe.lower_share(trousers, bon), 1.0)        # (a bone of its own under a leg joint too)
+        found = wardrobe.own_pieces(dict(meshes=[jacket, trousers, mesh('abc_fac', tri, [(0, 1, 2)], 0)]), 'abc', bon)
+        self.assertEqual({pos: [m['name'] for m in ms] for pos, ms in found.items()},
+                         {wardrobe.UPPER: ['abc_bdf'], wardrobe.LOWER: ['abc_dep0']})
+        # a piece that covers both halves stays whole, and so does the body
+        whole = mesh('abc_bdf', tri, [(0, 1, 2)], [1, 3, 3])
+        self.assertEqual(wardrobe.own_pieces(dict(meshes=[whole, trousers]), 'abc', bon), {})
+        self.assertEqual(wardrobe.own_pieces(dict(meshes=[jacket, trousers]), 'abc'), {})      # (no skeleton: names only)
+
+    def test_a_pieces_skeleton_holds_the_bodys_bones_and_only_its_own_extra_ones(self):
+        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('KUBI_jnt', 0, (0, 1400, 0)), ('OPT300_hair', 1, (0, 1450, -50)),
+                        ('KOSHI_jnt', 0, (0, 950, 0)), ('OPT400_hem', 3, (0, 700, 0)), ('OPT401_hem', 4, (0, 500, 0)),
+                        ('OPT800_weapon', 0, (300, 1000, 0))])
+        bon['opt'] = [300, 400, 401, 800]
+        tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        skirt, shirt = mesh('abc_bdl', tri, [(0, 1, 2)], [3, 5, 5]), mesh('abc_bdu', tri, [(0, 1, 2)], [0, 1, 1])
+        lower = wardrobe.piece_skeleton(bon, [skirt])
+        self.assertEqual([n.split(':')[-1] for n in lower['names']],
+                         ['HARA', 'KUBI_jnt', 'KOSHI_jnt', 'OPT400_hem', 'OPT401_hem'])      # (401's parent with it)
+        self.assertEqual(lower['parent'], [-1, 0, 0, 2, 3])
+        self.assertEqual(lower['opt'], [400, 401])                 # exactly the extra bones it holds
+        self.assertEqual(skirt['polys'][0]['verts']['bones'][:, 0].tolist(), [2, 4, 4])
+        np.testing.assert_allclose(lower['t'][4], bon['t'][5])
+        upper = wardrobe.piece_skeleton(bon, [shirt])
+        self.assertEqual(len(upper['names']), 3)
+        self.assertEqual(upper['opt'], [])
+        self.assertEqual(shirt['polys'][0]['verts']['bones'][:, 0].tolist(), [0, 1, 1])
+        self.assertEqual(len(bon['names']), 7)                     # (the body's skeleton is left as it was)
+
+    def test_whose_wardrobe(self):
+        import types
+        tekken7 = dict(TEKKEN7={}, DONOR='lar', CODE='abc', NAME='A')
+        self.assertEqual(wardrobe.source_of(types.SimpleNamespace(**tekken7)), 'lar')
+        self.assertEqual(wardrobe.source_of(types.SimpleNamespace(WARDROBE=True, **tekken7)), 'lar')
+        self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(WARDROBE=False, **tekken7)))
+        self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(TEKKEN8_CODE='xyz', DONOR='jun', CODE='abd', NAME='B')))
 
     def test_which_items_are_fitted(self):
         def inst(attrs, kind='clothes'):
