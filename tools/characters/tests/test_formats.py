@@ -88,6 +88,20 @@ class Textures(unittest.TestCase):
         plain = np.asarray(nut.decode(nut.make_texture(img, 1, 2, mips=2)))[..., 3].astype(int)
         self.assertLess(plain[0, 0], 110)
 
+    def test_a_texture_another_follows_ends_on_16_bytes(self):
+        """The game walks the file rounding each texture's end up to 16: a 4 x 4 texture with its smaller levels
+        (24 bytes) is filled up when another comes after it, and left as it is when it is the last."""
+        small = nut.make_texture(np.full((4, 4, 4), 90, np.uint8), 1, 0, mips=3)
+        self.assertEqual(sum(len(m) for m in small['mips']) % 16, 8)
+        big = nut.make_texture(np.full((8, 8, 4), 200, np.uint8), 2, 0, mips=1)
+        alone, pair = nut.write([small]), nut.write([small, big])
+        self.assertEqual(len(alone) % 16, 8)
+        self.assertEqual((len(pair) - len(nut.write([big])) + 16) % 16, 0)       # the small one's record: whole 16s
+        back = nut.read(pair)
+        self.assertEqual([t['gidx'] for t in back['textures']], [1, 2])
+        self.assertEqual(back['textures'][1]['mips'], big['mips'])
+        self.assertEqual(nut.write(back), pair)                                    # (read and written again: the same)
+
 
 class Skeleton(unittest.TestCase):
     def test_round_trip(self):

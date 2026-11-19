@@ -23,7 +23,7 @@ So an added fighter, whose body is one imported model with its own outfit in it,
      onto the head's open rim (`Neck`: tucked just inside it, so no gap opens);
   3. its own imported outfit taken OUT of the body model and made the parts of the default-costume Instances
      (`<code>_bdu*` meshes: the upper body item, `<code>_bdl*`: the lower; a full-body piece and the piece worn
-     with it by the half they cover: own_pieces), each with a skeleton of its own (piece_skeleton). Worn by
+     with it by the half they cover, a Tekken 8 costume's one mesh parted in two: own_pieces), each with a skeleton of its own (piece_skeleton). Worn by
      default it looks as it did; a record that puts a garment in that slot does not load it, exactly as the game
      drops a default costume: nothing of it can show under or through the garment (a record that leaves the
      slot empty, or names an item the database lacks, gets the default item from the game: seen in fights, the
@@ -48,9 +48,13 @@ Whose wardrobe: the fighter's donor's (`source_of`: the default items and the In
 are the donor's, so the donor's shop rows mean the same items in its database; women: Jun, men: Lars). A definition
 says `WARDROBE = False` to have none; there is no list of garments or of fighters anywhere: what is fitted is read
 from the player's game by the rules here, and a fighter is left without a wardrobe by rule too: one that is not the
-source's size (HUMAN_REACH: the giants), one whose body is not an upper piece, a lower piece and a face (a preset
-outfit in one piece keeps its body whole), one from Tekken 8 (not yet). A pack without a shop list (SHOP_FILE) is
-one CUSTOMIZE mode cannot be entered with: the port's grid passes it and its face there is grey (art.greyed).
+source's size (HUMAN_REACH: the giants, Azazel among them), one whose body is not an upper piece, a lower piece and
+a face (a Tekken 7 preset outfit in one piece keeps its body whole). A Tekken 8 fighter's costume is ONE mesh; it is
+made an upper and a lower piece here (split_piece: island by island, by the half of the body that holds it; only
+bare skin running through the waist is parted), so Reina, Azucena, Miary Zo, Victor and Clive have the wardrobe as
+the Tekken 7 fighters do, their heads, hair, worn items, weapons and summoned things staying in the body model.
+A pack without a shop list (SHOP_FILE) is one CUSTOMIZE mode cannot be entered with: the port's grid passes it and
+its face there is grey (art.greyed).
 
 Not done here (say so to the player rather than guess): hair and head items, items with the rarer own-pack members
 (`fits`), garments whose own bones are numbered like bones of the fighter's body (left out, not renumbered), a
@@ -82,6 +86,8 @@ OWN_PIECES = (('_bdu', UPPER), ('_bdl', LOWER))     # the imported body's meshes
 OWN_OTHERS = ('_bdf', '_dep')       # ... and its pieces that are the one or the other by what they cover (own_pieces)
 LOWER_ROOT = 'KOSHI_jnt'            # the joint the lower body hangs from (a piece bound to it and below is a lower)
 PIECE_SIDE = 0.75                   # the share of a piece's weights on one half of the body that makes it that half's
+PIECE_WELD = 1                      # decimals of a mm within which two vertices of a piece are one point (split_piece)
+PIECE_COVER = 0.98                  # the share of a polygon's vertices lying on another's that makes it drawn over it
 HUMAN_REACH = 200.0                 # mm a joint may lie from the source's for the source's clothes to be fitted
                                     # (the human-sized fighters' joints: up to about 130; the giants': 250 and more)
 BODY_SLOTS = (8, 12)                 # the record's slots of the upper-body and the lower-body garment
@@ -100,6 +106,7 @@ GIRTH_BINS = 4                      # girth is measured in this many stretches o
 GIRTH_SECTORS = 6                   # ... and this many directions round it (a patch of skin is held against the same patch)
 GIRTH_SAMPLES = 4                   # vertices of each body a patch needs
 GIRTH_PATCHES = 6                   # patches a limb needs to be measured at all
+GIRTH_RINGS = 2                     # whole rings of patches a limb needs to be measured by its rings (girth_of)
 GIRTH_SPAN = (0.8, 1.5)             # a limb is made this much thinner or thicker at most
 GIRTH_SAME = 0.12                   # a limb within this of the source's keeps the source's girth
 GIRTH_SHARE = 0.7                   # the share of a vertex's weights on a limb's bones that makes it a sample of it
@@ -472,7 +479,7 @@ def skin_patches(meshes, bon):
     return out
 
 
-def girth_of(source, target):
+def girth_of(source, target, rings=False):
     """How much thicker than the source's the fighter's arms, legs and trunk are: {kind: factor}, from the two
     bodies' skin_patches (the fighter's: of every outfit it has). A patch of bare skin both show is held against
     the same patch (a rolled sleeve shows one stretch of the arm); a limb's factor is the median over its patches.
@@ -480,13 +487,31 @@ def girth_of(source, target):
     trousers; 1 for one who bares neither). The trunk's factor is for its top, the shoulders, and is the mean of the
     two (what a collar bares of a trunk is the neck's root more than the chest, and measures as anything); toward
     the hips a trunk takes the legs' (Girth). Within GIRTH_SAME of the source a factor is 1 (the
-    source's girth as it is); kept within GIRTH_SPAN."""
+    source's girth as it is); kept within GIRTH_SPAN.
+    rings: a limb with GIRTH_RINGS stretches bare all the way round is measured by those rings instead, each ring's
+    mean distance against the source's (for a body whose limbs do not lie about their joints' axes as the source's
+    do: patch by patch a limb that is only off its axis measures thick on one side and thin on the other, and the
+    median of that is not its girth; a Tekken 8 body's arm, of the source's girth, measured 0.86 of it)."""
     ratios = {}
     for key, (total, count) in target.items():
         theirs = source.get(key)
         if theirs is not None and count >= GIRTH_SAMPLES and theirs[1] >= GIRTH_SAMPLES and theirs[0] > 0:
             ratios.setdefault(key[0].split(' ')[0], []).append((total / count) / (theirs[0] / theirs[1]))
     seen = {kind: float(np.median(ratios[kind])) for kind in ('arm', 'leg') if len(ratios.get(kind, ())) >= GIRTH_PATCHES}
+    if rings:
+        whole = {}                  # (limb, stretch) -> [the fighter's mean distances, the source's], a patch each
+        for key, (total, count) in target.items():
+            theirs = source.get(key)
+            if theirs is not None and count >= GIRTH_SAMPLES and theirs[1] >= GIRTH_SAMPLES and theirs[0] > 0:
+                cell = whole.setdefault(key[:2], [[], []])
+                cell[0].append(total / count)
+                cell[1].append(theirs[0] / theirs[1])
+        round_ = {}
+        for (limb, _), (ours, theirs) in sorted(whole.items()):
+            if len(ours) == GIRTH_SECTORS:
+                round_.setdefault(limb.split(' ')[0], []).append(sum(ours) / sum(theirs))
+        seen.update({kind: float(np.median(round_[kind])) for kind in ('arm', 'leg')
+                     if len(round_.get(kind, ())) >= GIRTH_RINGS})
     rest = float(np.mean(list(seen.values()))) if seen else 1.0
     raw = {kind: seen.get(kind, rest) for kind in ('arm', 'leg')}
     raw['trunk'] = (raw['arm'] + raw['leg']) / 2
@@ -502,9 +527,9 @@ def own_skin(body, code, bon):
     return skin_patches([m for m in body['meshes'] if m['name'].startswith(code + '_bd')], bon)
 
 
-def pack_girth(archives, code, source_code, bodies):
+def pack_girth(archives, code, source_code, bodies, rings=False):
     """girth_of a fighter against its wardrobe's source, over all its bodies ([(model bytes, skeleton bytes)]: an
-    arm one outfit covers is bare in another), or None when the game has no such source."""
+    arm one outfit covers is bare in another), or None when the game has no such source. rings: girth_of's."""
     if not archives.has(key_of(source_code + '.nud')) or not archives.has(key_of(source_code + '.bon')):
         return None
     source = nudfile.read(archives.read_name(source_code + '.nud'))
@@ -516,7 +541,7 @@ def pack_girth(archives, code, source_code, bodies):
             cell = ours.setdefault(key, [0.0, 0])
             cell[0] += total
             cell[1] += count
-    return girth_of(theirs, ours)
+    return girth_of(theirs, ours, rings)
 
 
 class Girth:
@@ -955,16 +980,18 @@ def source_of(d):
     """The code of the fighter of the game whose wardrobe definition `d` is fitted with, or None for none.
     A definition's `WARDROBE`: False = no wardrobe (the fighter cannot be entered in CUSTOMIZE mode); left out (or
     True) = its donor's (`DONOR`: the Instances its own outfit is worn as and its default items are the donor's, so
-    the donor's shop rows mean the same items in its database). Tekken 7 fighters only so far."""
-    from ..characters import game_of
+    the donor's shop rows mean the same items in its database), whichever game the fighter comes from. None too for
+    a Tekken 8 fighter imported on its stand-in (importer.with_stand_in: another fighter's skeleton, moves and item
+    database until its own moveset can be had; the pack is made again then)."""
     choice = getattr(d, 'WARDROBE', True)
-    if choice is False or choice is None or game_of(d) != 'tekken7':
+    if choice is False or choice is None or getattr(d, 'WITHOUT_OWN_MOVESET', False):
         return None
     return d.DONOR
 
 
-def lower_share(mesh, bon):
-    """The share of a mesh's skin weights that are on the lower body's joints (LOWER_ROOT and what hangs from it)."""
+def _below(bon):
+    """Per bone (and one more, False: a number past the skeleton), whether it is of the lower body: LOWER_ROOT or
+    hanging from it."""
     names = [n.split(':')[-1] for n in bon['names']]
     below = np.zeros(len(names) + 1, bool)
     for i, name in enumerate(names):
@@ -972,23 +999,137 @@ def lower_share(mesh, bon):
         while j >= 0 and names[j] != LOWER_ROOT:
             j = bon['parent'][j]
         below[i] = j >= 0
+    return below
+
+
+def lower_share(mesh, bon):
+    """The share of a mesh's skin weights that are on the lower body's joints (LOWER_ROOT and what hangs from it)."""
+    below = _below(bon)
     lower = total = 0.0
     for poly in mesh['polys']:
         v = poly['verts']
         if 'bones' not in v.dtype.names:
             continue
         w = v['w'].astype(np.float64)
-        lower += float((w * below[np.minimum(v['bones'].astype(np.int64), len(names))]).sum())
+        lower += float((w * below[np.minimum(v['bones'].astype(np.int64), len(below) - 1)]).sum())
         total += float(w.sum())
     return lower / total if total else 0.0
 
 
-def own_pieces(body, code, bon=None):
+def _islands(points, tris):
+    """Which island each vertex of a polygon belongs to (a number per vertex): vertices are of one island when
+    triangles join them, vertices at one point (PIECE_WELD) counting as one."""
+    _, point = np.unique(np.round(points, PIECE_WELD), axis=0, return_inverse=True)
+    point = point.reshape(-1)
+    root = np.arange(int(point.max()) + 1 if len(point) else 0)
+
+    def find(x):
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+    for a, b, c in point[tris].tolist():
+        a, b, c = find(a), find(b), find(c)
+        root[b] = a
+        root[c] = a
+    return np.array([find(x) for x in point.tolist()], np.int64)
+
+
+def split_piece(mesh, bon):
+    """A piece of the fighter's own outfit that covers both halves of the body (a Tekken 8 costume is one mesh:
+    jacket, trousers, boots and the skin they leave bare), as an upper and a lower piece: (upper mesh, lower mesh),
+    each None when nothing of the piece is that half's; `bon`: the body's skeleton.
+
+    Nothing is cut that is one thing. Each polygon (one material) falls into islands (_islands: a jacket, a boot,
+    a buckle, an arm's skin); an island is the lower body's when half of its weights are on the lower body's joints
+    (lower_share), else the upper body's: a coat goes with the chest that holds it, tails and all, a belt with the
+    hips. Only bare skin that runs through the waist (an island of the skin material with between 1 - PIECE_SIDE and
+    PIECE_SIDE of its weights below) is parted, triangle by triangle, where its weights pass from the trunk to the
+    hips: a bare midriff is the top's above and the trousers' below, as the game's own outfits carry it.
+    A polygon drawn over another's triangles (PIECE_COVER of its vertices lie on the other's: a 2P colour layer
+    over its cloth) goes, triangle by triangle, where what it is drawn over went."""
+    from . import strips
+    below = _below(bon)
+    plans = []                      # per polygon: (triangles, which are the lower body's, each vertex's half, points)
+    for poly in mesh['polys']:
+        v = poly['verts']
+        tris = np.array(nudfile.strip_to_tris(poly['indices']), np.int64).reshape(-1, 3)
+        if 'bones' in v.dtype.names:
+            share = (_weights(v) * below[np.minimum(v['bones'].astype(np.int64), len(below) - 1)]).sum(1)
+        else:
+            share = np.zeros(len(v))
+        island = _islands(v['pos'].astype(np.float64), tris)
+        skin = bool(poly['materials']) and poly['materials'][0]['flags'] == SKIN_FLAGS
+        low, parted = np.zeros(len(v), bool), np.zeros(len(v), bool)
+        for i in np.unique(island):
+            pick = island == i
+            mean = float(share[pick].mean())
+            if skin and 1 - PIECE_SIDE < mean < PIECE_SIDE:
+                low[pick], parted[pick] = share[pick] >= 0.5, True
+            else:
+                low[pick] = mean >= 0.5
+        lower = low[tris[:, 0]] if len(tris) else np.zeros(0, bool)
+        if len(tris):
+            lower = np.where(parted[tris[:, 0]], share[tris].mean(1) >= 0.5, lower)
+        where = {}
+        for key, side in zip(map(tuple, np.round(v['pos'].astype(np.float64), PIECE_WELD).tolist()), low.tolist()):
+            where.setdefault(key, side)
+        plans.append([tris, lower, where])
+    # what is drawn over another polygon goes with it
+    def lying(a, b):
+        return sum(1 for key in plans[a][2] if key in plans[b][2]) / max(len(plans[a][2]), 1)
+    under = {}
+    for a in range(len(plans)):
+        best = None
+        for b in range(len(plans)):
+            if a == b or not plans[a][2] or lying(a, b) < PIECE_COVER or (b > a and lying(b, a) >= PIECE_COVER):
+                continue
+            if best is None or len(plans[b][2]) > len(plans[best][2]):
+                best = b
+        if best is not None:
+            under[a] = best
+    for a, b in under.items():
+        if b in under:              # (drawn over a polygon that is itself drawn over one: left to its own islands)
+            continue
+        tris, lower, where = plans[a]
+        if not len(tris):
+            continue
+        keys = list(map(tuple, np.round(mesh['polys'][a]['verts']['pos'].astype(np.float64), PIECE_WELD).tolist()))
+        mine = np.array([plans[b][2].get(key, where[key]) for key in keys], bool)
+        plans[a][1] = mine[tris].sum(1) >= 2
+    out = []
+    for half in (False, True):
+        polys = []
+        for poly, (tris, lower, _) in zip(mesh['polys'], plans):
+            mine = tris[lower == half]
+            if not len(mine):
+                continue
+            used = np.unique(mine)
+            table = np.zeros(len(poly['verts']), np.int64)
+            table[used] = np.arange(len(used))
+            mine = table[mine]
+            strip = strips.stripify(mine)
+            if not strips.check(mine, strip) or len(strip) >= 0x10000:
+                raise ValueError('could not make triangle strips for a half of %s' % mesh['name'])
+            part = {k: x for k, x in poly.items() if k != '_offs'}
+            part['verts'], part['indices'] = poly['verts'][used].copy(), np.array(strip, '>u2')
+            part['materials'] = copy.deepcopy(poly['materials'])
+            polys.append(part)
+        if polys:
+            sphere = nudfile.bounding_sphere(np.concatenate([p['verts']['pos'] for p in polys]))
+            out.append(dict(mesh, polys=polys, sphere=sphere, center=sphere[:3]))
+        else:
+            out.append(None)
+    return tuple(out)
+
+
+def own_pieces(body, code, bon=None, split=False):
     """{EquipPos: [meshes]} of the fighter's own outfit in its body model (model.py's part names), or {} unless it
     has both an upper and a lower piece (a one-piece body cannot give way to one garment). A piece named as an
     upper or a lower body is one; a full-body piece or one worn with it (Noctis's jacket and the trousers it
-    comes with) is the half that holds PIECE_SIDE of its weights (`bon`: the body's skeleton), and neither when it
-    covers both (the body stays whole then)."""
+    comes with) is the half that holds PIECE_SIDE of its weights (`bon`: the body's skeleton); one that covers
+    both is neither and the body stays whole, unless `split`: then it is made two pieces (split_piece: new meshes,
+    not the body's)."""
     out = {}
     for mesh in body['meshes']:
         for tag, pos in OWN_PIECES:
@@ -1000,9 +1141,29 @@ def own_pieces(body, code, bon=None):
                 out.setdefault(LOWER, []).append(mesh)
             elif share <= 1 - PIECE_SIDE:
                 out.setdefault(UPPER, []).append(mesh)
+            elif split:
+                for pos, half in zip((UPPER, LOWER), split_piece(mesh, bon)):
+                    if half is not None:
+                        out.setdefault(pos, []).append(half)
             else:
                 return {}
     return out if len(out) == len(OWN_PIECES) else {}
+
+
+def outfit_meshes(body, code, bon=None):
+    """The meshes of the body model that are the fighter's own outfit pieces (what own_pieces takes out of it)."""
+    tags = tuple(code + tag for tag, _ in OWN_PIECES) + (tuple(code + tag for tag in OWN_OTHERS) if bon is not None
+                                                          else ())
+    return [m for m in body['meshes'] if m['name'].startswith(tags)]
+
+
+def splits(d):
+    """Whether definition d's one-piece body is made an upper and a lower piece (split_piece): a Tekken 8 fighter's
+    (its costume comes as one mesh). A Tekken 7 fighter's preset outfit in one piece stays whole, as it was.
+    The same fighters' girth is measured by whole rings (girth_of): their bodies are the ones whose limbs lie off
+    their joints' axes (a bind pose turned from Tekken 8's A-pose, on a mesh the importer thinned out)."""
+    from ..characters import game_of
+    return game_of(d) == 'tekken8'
 
 
 def for_pack(archives, d, contents, outfit_codes=(), log=print):
@@ -1013,9 +1174,9 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
     if source_code is None:
         return {}
     girth = pack_girth(archives, d.CODE, source_code, [(contents[c + '.nud'], contents[c + '.bon'])
-                                                       for c in ('',) + tuple(outfit_codes)])
+                                                       for c in ('',) + tuple(outfit_codes)], rings=splits(d))
     out = build(archives, d.CODE, source_code, {s: contents[s] for s in ('.nud', '.nut', '.bon', '.xml')}, log=log,
-                girth=girth)
+                girth=girth, split=splits(d))
     if not out:
         return {}
     base = min(t['gidx'] for t in nutfile.read(contents['.nut'])['textures']) & ~0xFFF
@@ -1023,7 +1184,7 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
         files = {s: contents[code + s] for s in ('.nud', '.nut', '.bon', '.xml')}
         # (the garments' own skin names the copied skin textures by id: every body holds them under the first's)
         more = build(archives, d.CODE, source_code, files, own_first=OWN_FIRST + OWN_STEP * (k + 1),
-                     log=lambda s: None, texture_base=base, girth=girth)
+                     log=lambda s: None, texture_base=base, girth=girth, split=splits(d))
         if not more:
             log('wardrobe: preset %s keeps its body whole (no outfits on it)' % code)
             continue
@@ -1044,7 +1205,7 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
 
 
 def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, log=print, texture_base=None,
-          girth=None):
+          girth=None, split=False):
     """Fits the source fighter's outfits to the added fighter.
 
     files: the body's {'.nud', '.nut', '.bon', '.xml'} (bytes, as the importer made them);
@@ -1052,17 +1213,13 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     the body's own textures are in);
     own_first: the first own-pack member number for its own outfit pieces;
     labels: the shop rows to fit (default: outfit_rows of the source);
-    girth: how much thicker than the source the fighter is (girth_of; default: measured on this body alone).
+    girth: how much thicker than the source the fighter is (girth_of; default: measured on this body alone);
+    split: a piece of its own outfit that covers both halves of the body is made two (own_pieces).
     -> {file name: bytes} to add to the pack's files (the four changed, and `parts/...`), or {} when it cannot be
     done for this fighter (said through log)."""
     labels = outfit_rows(archives, source_code) if labels is None else labels
     body = nudfile.read(files['.nud'])
     target_bon = bonefile.read(files['.bon'])
-    pieces = own_pieces(body, code, target_bon)
-    face = next((m for m in body['meshes'] if m['name'] == code + '_fac'), None)
-    if not pieces or face is None:
-        log('wardrobe: no outfits: the body is not an upper piece, a lower piece and a face')
-        return {}
     for key in (source_code + '.nud', source_code + '.nut', source_code + '.bon', source_code + '.xml'):
         if not archives.has(key_of(key)):
             log('wardrobe: no outfits: the game has no %s' % key)
@@ -1075,6 +1232,11 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     if np.abs(shifts).max() > HUMAN_REACH:
         log('wardrobe: no outfits: not %s\'s size (a joint %.0f mm from its place on %s)'
             % (source_code, np.abs(shifts).max(), source_code))
+        return {}
+    pieces = own_pieces(body, code, target_bon, split)
+    face = next((m for m in body['meshes'] if m['name'] == code + '_fac'), None)
+    if not pieces or face is None:
+        log('wardrobe: no outfits: the body is not an upper piece, a lower piece and a face')
         return {}
     source_face = next((m for m in source['meshes'] if m['name'] == FACE_MESH), None)
     if source_face is None:
@@ -1171,7 +1333,7 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     # the body: the fighter's own pieces leave it, the cuts join it
     cut_model = renumber(fit(dict(meshes=copy.deepcopy(cuts), sphere=source['sphere']), shifts, neck, thick.of()),
                          ids)
-    moved = [m for ms in pieces.values() for m in ms]
+    moved = outfit_meshes(body, code, target_bon)       # (as they are in the body: a piece made two is new meshes)
     body['meshes'] = [m for m in body['meshes'] if not any(m is x for x in moved)] + cut_model['meshes']
     body['bone_first'] = body['bone_last'] = None
     out['.nud'] = nudfile.write(body)

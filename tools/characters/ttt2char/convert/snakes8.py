@@ -62,8 +62,9 @@ from . import retarget, tiger
 
 START_PROP, STOP_PROP = 0x83aa, 0x83ab      # Tekken 8: start the summoned object's animation k / stop it
 REST = 0xFFFF                               # START_PROP value prepare() gives STOP_PROP rows (the REST animation)
-PARENT_NUMBER = 599                         # the still weapon they hang under: before OPT_FIRST (character.ini
-                                            # k = -201: weapons.number_of)
+PARENT_NUMBER = 597                         # the still weapon they hang under: before OPT_FIRST (character.ini
+                                            # k = -203: weapons.number_of); 598 and 599 are bones of the game's
+                                            # own garments (convert/wardrobe.py: a clash leaves the garment out)
 COPY_FIRST = 0x1000                         # START_PROP values of the continuations' copies (COPY_FIRST + n)
 AT_START = 0x8001                           # a property frame: the move's first
 FRAME_OFFSET = 0                            # frames between a part-3 start property's frame and its first frame shown

@@ -283,6 +283,16 @@ class Girth(unittest.TestCase):
         huge = wardrobe.skin_patches([sleeve('abc_bdu', 150.0, limbed())], limbed())
         self.assertEqual(wardrobe.girth_of(theirs, huge)['arm'], wardrobe.GIRTH_SPAN[1])
 
+    def test_a_limb_off_its_axis_is_measured_by_its_whole_rings(self):
+        bon = limbed()
+        ours = sleeve('abc_bdu', 40, bon)
+        ours['polys'][0]['verts']['pos'][:, 2] += 12               # the same arm, a little in front of its joints
+        theirs = wardrobe.skin_patches([sleeve('ude_A_O_OBJ', 40, bon)], bon)
+        mine = wardrobe.skin_patches([ours], bon)
+        self.assertEqual(wardrobe.girth_of(theirs, mine, rings=True)['arm'], 1.0)
+        thick = wardrobe.skin_patches([sleeve('abc_bdu', 52, bon)], bon)
+        self.assertAlmostEqual(wardrobe.girth_of(theirs, thick, rings=True)['arm'], 1.3, 2)
+
     def test_a_longer_arm_is_not_a_thicker_one(self):
         long = limbed(arm=800.0)
         theirs = wardrobe.skin_patches([sleeve('ude_A_O_OBJ', 50.0, limbed())], limbed())
@@ -368,7 +378,67 @@ class Pieces(unittest.TestCase):
         self.assertEqual(wardrobe.source_of(types.SimpleNamespace(**tekken7)), 'lar')
         self.assertEqual(wardrobe.source_of(types.SimpleNamespace(WARDROBE=True, **tekken7)), 'lar')
         self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(WARDROBE=False, **tekken7)))
-        self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(TEKKEN8_CODE='xyz', DONOR='jun', CODE='abd', NAME='B')))
+        tekken8 = dict(TEKKEN8_CODE='xyz', DONOR='jun', CODE='abd', NAME='B')
+        self.assertEqual(wardrobe.source_of(types.SimpleNamespace(**tekken8)), 'jun')       # (whichever game)
+        self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(WARDROBE=False, **tekken8)))
+        self.assertIsNone(wardrobe.source_of(types.SimpleNamespace(WITHOUT_OWN_MOVESET=True, **tekken8)))   # (a stand-in)
+        # a Tekken 8 costume is one mesh: made two pieces; a Tekken 7 preset in one piece stays whole
+        self.assertTrue(wardrobe.splits(types.SimpleNamespace(**tekken8)))
+        self.assertFalse(wardrobe.splits(types.SimpleNamespace(**tekken7)))
+
+    BODY = [('HARA', -1, (0, 1000, 0)), ('MUNE1_jnt', 0, (0, 1200, 0)), ('KOSHI_jnt', 0, (0, 950, 0)),
+            ('MOMO_R_jnt', 2, (-90, 900, 0)), ('OPT400_tail', 1, (0, 800, -100))]
+
+    @staticmethod
+    def triangles(m):
+        return sum(len(nud.strip_to_tris(p['indices'])) for p in m['polys'])
+
+    def test_a_one_piece_body_is_parted_only_where_bare_skin_runs_through_the_waist(self):
+        bon = skeleton(self.BODY)
+        # bare skin from the chest to the thighs: three rings, the middle one half the trunk's, half the hips'
+        n = 8
+        points = np.concatenate([ring(100, y, n) for y in (1300, 1000, 700)])
+        tris = []
+        for row in range(2):
+            for i in range(n):
+                j = (i + 1) % n
+                tris += [(row * n + i, row * n + j, row * n + n + i), (row * n + j, row * n + n + j, row * n + n + i)]
+        skin = mesh('abc_bdf_1p', points, tris, [1] * n + [1] * n + [3] * n)
+        skin['polys'][0]['verts']['bones'][n:2 * n, 1] = 3
+        skin['polys'][0]['verts']['w'][n:2 * n, :2] = (0.6, 0.4)
+        upper, lower = wardrobe.split_piece(skin, bon)
+        self.assertEqual((self.triangles(upper), self.triangles(lower)), (2 * n, 2 * n))
+        self.assertLess(lower['polys'][0]['verts']['pos'][:, 1].max(), 1001)
+        self.assertGreater(upper['polys'][0]['verts']['pos'][:, 1].min(), 999)
+        self.assertEqual(upper['name'], 'abc_bdf_1p')
+        self.assertEqual(len(skin['polys'][0]['verts']), 3 * n)                # (the body's mesh is left as it was)
+        # the same shape as cloth is one thing: it goes whole to the half that holds most of it
+        cloth = mesh('abc_bdf_1p', points, tris, [1] * n + [1] * n + [3] * n, flags=0x24600099)
+        upper, lower = wardrobe.split_piece(cloth, bon)
+        self.assertEqual(self.triangles(upper), 4 * n)
+        self.assertIsNone(lower)
+
+    def test_a_coat_keeps_its_tails_and_a_layer_goes_with_what_it_is_drawn_over(self):
+        bon = skeleton(self.BODY)
+        # a coat: chest (the trunk's) with a tail on a bone of its own under the trunk and a hem bound to the hips
+        points = [(0, 1300, 0), (100, 1300, 0), (0, 1200, 0), (100, 1200, 0), (0, 1000, 0), (100, 1000, 0),
+                  (0, 700, 0), (100, 700, 0)]
+        tris = [(0, 1, 2), (1, 3, 2), (2, 3, 4), (3, 5, 4), (4, 5, 6), (5, 7, 6)]
+        coat = mesh('abc_bdf_1p', points, tris, [1, 1, 1, 1, 1, 1, 3, 3], flags=0x24600099)
+        boot = mesh('x', [(0, 100, 0), (50, 100, 0), (0, 0, 0)], [(0, 1, 2)], 3, flags=0x24600099)['polys'][0]
+        # its 2P colour layer over the hem only: by itself the hips', but drawn over the coat
+        layer = mesh('x', points[4:], [(0, 1, 2), (1, 3, 2)], [1, 1, 3, 3], flags=0x24400099)['polys'][0]
+        coat['polys'] += [boot, layer]
+        upper, lower = wardrobe.split_piece(coat, bon)
+        self.assertEqual([len(nud.strip_to_tris(p['indices'])) for p in upper['polys']], [6, 2])
+        self.assertEqual([p['materials'][0]['flags'] for p in upper['polys']], [0x24600099, 0x24400099])
+        self.assertEqual(self.triangles(lower), 1)                               # the boot
+        # ... and the body gives way as two pieces when asked to part it
+        body = dict(meshes=[coat, mesh('abc_fac', points[:3], [(0, 1, 2)], 0)])
+        self.assertEqual(wardrobe.own_pieces(body, 'abc', bon), {})
+        found = wardrobe.own_pieces(body, 'abc', bon, split=True)
+        self.assertEqual(sorted(found), sorted([wardrobe.UPPER, wardrobe.LOWER]))
+        self.assertEqual(wardrobe.outfit_meshes(body, 'abc', bon), [coat])
 
     def test_which_items_are_fitted(self):
         def inst(attrs, kind='clothes'):

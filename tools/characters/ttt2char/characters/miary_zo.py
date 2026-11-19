@@ -86,9 +86,11 @@ WEAPONS = [
     {'mesh': _HORN, 'bone': 'horn', 'joint': 'Head', 'parent': 'ATAMA_jnt', 'summon': 3, 'weights': ('Head',),
      'points': {0x23: ('tip', 1)}},
     # the snakes' own bones hang under this one (SNAKES['parent']): at her forearm, shown with them (summon 4);
-    # numbered 599, before theirs (OPT 600..): the game makes its bones' world matrices in number order, and theirs
-    # made before their parent's would be a frame behind her arm (convert/snakes8.py)
-    {'bone': 'snakes', 'parent': 'UDE_R_jnt', 'still': True, 'summon': 4, 'number': 599},
+    # numbered 597, before theirs (OPT 600..): the game makes its bones' world matrices in number order, and theirs
+    # made before their parent's would be a frame behind her arm (convert/snakes8.py). Not 598 or 599: those are
+    # the swaying bust bones of the women's tops in Tekken Tag Tournament 2's wardrobe (the common skeleton they
+    # are bound to), and a garment whose bones are numbered like bones of her body is not offered (convert/wardrobe.py)
+    {'bone': 'snakes', 'parent': 'UDE_R_jnt', 'still': True, 'summon': 4, 'number': 597},
 ]
 # Her snakes (convert/snakes8.py): Tekken 8's Org actor on her right forearm, its own mesh and skeleton, its 16 clips
 # (the MissileAnimData table's) started by her moves (0x83aa, stopped by 0x83ab) -> extra bones OPT 600.. under the
