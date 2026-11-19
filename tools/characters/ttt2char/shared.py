@@ -84,7 +84,9 @@ class PackSource:
 
 
 def palettes(archives, fighters):
-    """The colour grid and both palettes with every fighter's player 2 colours: {file name: bytes}, or {}."""
+    """The colour grid and both palettes with every fighter's player 2 colours: {file name: bytes}, or {}.
+    (The grid is a copy the port reads the added fighters' entries from; the title keeps its own: roster.cpp
+    kColourGrid.)"""
     texts = [archives.read(k).decode('utf-8') for k in (colours.KEY_1P, colours.KEY_2P)]
     grid = colours.Palette(archives.read(colours.KEY_GRID), texts)
     placed = False

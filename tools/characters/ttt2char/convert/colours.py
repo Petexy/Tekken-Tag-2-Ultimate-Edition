@@ -6,7 +6,9 @@ in slot 3 (r = 1), A and B the colours of two palette numbers: NU_vReg_04 = (r, 
 (r, g, b, 500 + NN_B). Palettes: XML entries `<Color id="SELECT_ID" palette="NN" x="X" y="Y" s="S" />`, player 1's
 in data003[14] (key 9cdcd24f), player 2's in data003[13] (key a6e0a5e2), (x, y) a cell of the colour grid
 data003[10] (32 rows x 64 columns x 3 colours x RGB f32), s a saturation step (9: the cell's colour). The fighter's
-colours go into free cells of a copy of the grid (the pack replaces the grid: other fighters' cells are unchanged).
+colours go into free cells of a copy of the grid (shared/'s; the port keeps the title's grid in place, whose every
+cell CUSTOMIZE mode's colour picker uses, and reads the added fighters' palette entries from the copy: roster.cpp
+kColourGrid).
 
 A Tekken 7 costume changes some texels between 1P and 2P and keeps the others (red trims stay red). The added
 fighter keeps its 1P materials as they are and gets, over each cloth polygon that changes, a second polygon on the

@@ -841,6 +841,69 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     return true;
 }
 
+// The added fighters' costume colours. The title's colours are cells of one
+// colour grid (entry 05add6d5: 32 rows x 64 columns x 3 colours, RGB f32; a
+// colour number is s << 11 | (row - 1) << 6 | (column - 1), s = 9 the cell's
+// own colour), and CUSTOMIZE mode's colour picker and the items' default
+// colours use every cell of it. The importer puts each added fighter's
+// player 1 / player 2 colours into cells of a copy of the grid that no palette
+// entry of the title uses (shared/keys/05add6d5.bin) and names those cells in
+// the palettes under the fighter's select id. That copy must not replace the
+// title's grid: with twenty fighters hundreds of the picker's colours would
+// be other colours (a garment turned white or black as its hue was changed,
+// for the title's own fighters as well). So the copy is kept here, the
+// title keeps its grid, and the palettes' rows of the added fighters are
+// marked when they are read (sub_06839C28: the palette manager's four lists of
+// {s16 fighter, u32 register, u32 colour number} at this + 36 + 16 n): a
+// marked number takes its colour from the copy (sub_06321C7C, the colour
+// object's "set number": cell at +112 / +116, s at +120, the cell's first
+// colour at +124 and second at +136; sub_06322428 only splits a number).
+constexpr uint32_t kColourGrid = 0x05ADD6D5;
+constexpr size_t kColourGridSize = 32 * 64 * 3 * 3 * 4;
+constexpr uint32_t kAddedColour = 0x7E000000; // the mark (the title's numbers end at 0x4FFF)
+std::vector<uint8_t> g_added_colours;         // the importer's copy of the grid
+
+bool added_colour(uint32_t number) { return (number & 0xFF000000) == kAddedColour && !g_added_colours.empty(); }
+
+PPC_FUNC(sub_06839C28_orig);
+PPC_FUNC(sub_06839C28) {
+    const uint32_t manager = ctx.r[3];
+    sub_06839C28_orig(ctx, base);
+    if (g_added_colours.empty()) return;
+    for (uint32_t list = 0; list < 4; ++list) {
+        const uint32_t first = load(manager + 36 + 16 * list), end = load(manager + 40 + 16 * list);
+        if (first == 0 || end < first || (end - first) % 12 != 0 || end - first > 12 * 65536) continue;
+        for (uint32_t row = first; row < end; row += 12) {
+            const uint32_t number = load(row + 8);
+            if (static_cast<int16_t>(load16(row)) >= static_cast<int16_t>(kFirstAddedId) && number != 0 &&
+                number < 0x5000) {
+                store(row + 8, kAddedColour | number);
+            }
+        }
+    }
+}
+
+PPC_FUNC(sub_06321C7C_orig);
+PPC_FUNC(sub_06321C7C) {
+    const uint32_t colour = ctx.r[3], number = ctx.r[4];
+    if (!added_colour(number)) {
+        sub_06321C7C_orig(ctx, base);
+        return;
+    }
+    const uint32_t cell = number & 0x7FF;
+    store(colour + 112, (cell & 63) + 1);
+    store(colour + 116, cell >> 6);
+    store(colour + 120, (number >> 11) & 31);
+    std::memcpy(guest_pointer(colour + 124), &g_added_colours[size_t{36} * cell], 12);      // (both big-endian)
+    std::memcpy(guest_pointer(colour + 136), &g_added_colours[size_t{36} * cell + 12], 12);
+}
+
+PPC_FUNC(sub_06322428_orig);
+PPC_FUNC(sub_06322428) {
+    if (added_colour(ctx.r[4])) ctx.r[4] &= 0xFFFF;
+    sub_06322428_orig(ctx, base);
+}
+
 // The title entries the added fighters share (`shared/keys/`, made by the
 // importer for every installed pack: layouts with each one's labels, the
 // big portraits' container with their frames, the pages and HUD pictures to
@@ -856,6 +919,10 @@ void add_shared(const fs::path& directory) {
         const auto key = named_key(name);
         const auto contents = key ? read_file(item.path()) : std::nullopt;
         if (!contents) continue;
+        if (*key == kColourGrid) { // (see kColourGrid: kept here, the title keeps its own)
+            if (contents->size() == kColourGridSize) g_added_colours = *contents;
+            continue;
+        }
         if (!add_title_copy(located, name, *key, *contents, entries, raw)) {
             std::fprintf(stderr, "ttt2: warning: %s: %s does not fit the title's entry; left out\n",
                          directory.string().c_str(), name.c_str());
@@ -2863,8 +2930,9 @@ PPC_FUNC(sub_07A5D01C) {
 // The button guide (the one object every menu shows, made at start-up:
 // placed by sub_04DC6A48 from kGuidePlace, r3 the guide, x r4, y r5 from the
 // screen's bottom), with the new top row: in the banner's place under the
-// grid while the grid is shown (sub_06F4D7B8 runs every frame then), where
-// the title put it elsewhere. sub_04DC933C runs for it every frame;
+// grid while the grid is shown (sub_06F4D7B8 runs every frame then; the
+// menus' grids that are scripts: script_grid_shown), where the title put it
+// elsewhere. sub_04DC933C runs for it every frame;
 // sub_04DC35F0 (its class's method 148) places it (r3, x r4, y r5, r6 0).
 constexpr uint32_t kGuidePlace = 0x0581F874;
 constexpr int32_t kRowsGuideDown = 40;
@@ -2894,10 +2962,38 @@ PPC_FUNC(sub_04DC6A48) {
     sub_04DC6A48_orig(ctx, base);
 }
 
+// The menus' grids that are scripts (CUSTOMIZE's character select, the
+// profile's character records, the ending movies: title/customize_grid.h)
+// have no function of their own that runs every frame: they are shown while
+// their frame is the menus' current one. The menu system (kMenuSystem, set up
+// when the word before it is set; the scripts' natives go the same way,
+// sub_085A9AB4): its object's +744 is the frames' holder, whose +4 + 56 is
+// the current frame; a frame starts with its name (a string object: the text
+// at +4 when its room at +28 is under 16 characters, else a pointer to it at
+// +20; its length at +24).
+constexpr uint32_t kMenuSystem = 0x1084FEBC;
+constexpr std::string_view kScriptGridFrames[] = {"FrameCharacterSelect", "FrameCharacterInfo",
+                                                  "FrameEndingMovieSelect"};
+bool script_grid_shown() {
+    const auto object = [](uint32_t at) { return at >= 0x10000000 && at < 0x50000000 && at % 4 == 0; };
+    if (load(kMenuSystem - 4) == 0) return false;
+    const uint32_t system = load(kMenuSystem);
+    const uint32_t holder = object(system) ? load(system + 744) : 0;
+    const uint32_t frame = object(holder) ? load(holder + 60) : 0;
+    if (!object(frame)) return false;
+    const uint32_t length = load(frame + 24), room = load(frame + 28);
+    if (length < 16 || length > 32 || room < length) return false; // (the three names are 18 to 22 long)
+    const uint32_t text = load(frame + 20);
+    if (!object(text & ~3u) || text >= 0x50000000 - 32) return false;
+    const std::string_view name(reinterpret_cast<const char*>(guest_pointer(text)), length);
+    return std::find(std::begin(kScriptGridFrames), std::end(kScriptGridFrames), name) != std::end(kScriptGridFrames);
+}
+
 PPC_FUNC(sub_04DC35F0);
 PPC_FUNC(sub_04DC933C_orig);
 PPC_FUNC(sub_04DC933C) {
     if (g_grid_rows && g_guide.object && ctx.r[3] == g_guide.object) {
+        if (script_grid_shown()) note_select_frame();
         ++g_guide.frames;
         const bool shown = g_guide.grid_seen && g_guide.frames - g_guide.grid_frame <= kGuideFramesShown;
         if (shown != g_guide.moved) {
@@ -3594,7 +3690,6 @@ PPC_FUNC(sub_0242F438) {
 //   sub_024306B4(manager, 0, the mode's id) -> sub_02669264) writes that buffer to the added fighter's file,
 //   because the buffer holds an added fighter.
 // g_custom_subject: the added fighter the mode holds (-1: one of the title's).
-constexpr uint32_t kModeFighter = 0x6A790;
 int g_custom_subject = -1;
 uint32_t g_shop_copy = 0, g_shop_room = 0; // the subject's shop list in guest memory
 

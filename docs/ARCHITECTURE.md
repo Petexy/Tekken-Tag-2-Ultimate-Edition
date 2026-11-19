@@ -1052,7 +1052,9 @@ under the grid, stretches the '?' panel over four rows and drops the
 show the background); `shared/grid.ini` (`grid = rows`) tells the port,
 which then moves the '?' cell up, the cursor's row 1 down 65
 (`0x10531388`) and the button guide (one object every menu shares, placed
-by `sub_04DC6A48`) down 40 while the grid is on screen. Every row is a
+by `sub_04DC6A48`) down 40 while the grid is on screen (the fights' select,
+and the menus' grids that are scripts, known by the menus' current frame:
+`script_grid_shown`). Every row is a
 ring left and right and every column a ring up and down, in column and
 row order, as the title's own cells are
 (rebuilt from the cells' columns and rows, this reproduces the title's
@@ -1245,6 +1247,18 @@ that place their cursor through the class (the profile's character
 information, the gallery's ending movies) keep handlers of their own over
 the title's 3 x 22 cells: no added cell can be reached there, and the class
 now draws their cursor a row down with the new top row, as the layouts do.
+
+**Its colours and the colour grid.** The title's costume colours are cells
+of one grid (entry `05ADD6D5`, 32 x 64 cells), and CUSTOMIZE's colour picker
+and the items' default colours use every cell of it. The importer gives each
+added fighter's player 1 and player 2 colours cells of a copy of that grid
+(`shared/keys/05add6d5.bin`) and names them in the palettes under the
+fighter's select id. The port does not put that copy in the title's place
+(with twenty fighters it changed hundreds of the picker's colours, for the
+title's own fighters too: a garment went white or black as its hue was
+turned): it keeps the copy, marks the colour numbers of the added fighters'
+palette rows as they are read (`sub_06839C28`) and answers a marked number
+from the copy where the title turns a number into a colour (`sub_06321C7C`).
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
