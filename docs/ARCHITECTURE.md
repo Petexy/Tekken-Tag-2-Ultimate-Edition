@@ -1206,6 +1206,31 @@ switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
 record into a slot and makes the title's save call once, for testing the
 saving before a menu calls it.
 
+**Its wardrobe.** A human-sized Tekken 7 fighter is given the title's own
+Customize outfits at import (`convert/wardrobe.py`, whose opening text says
+how the title dresses a fighter and what is done to follow it): the outfits
+of its donor (women Jun's, men Lars's: every shop row of the donor that
+dresses the upper or the lower body, read from the player's game; there is
+no list of garments or of fighters), re-posed to the fighter's joints, with
+the donor's bare body cut the ways garments leave it showing, its skin
+textures in the tone of the fighter's own face, the neck drawn into the
+fighter's own head, and arms, legs and trunk made as thick as the fighter's
+where its own outfits bare enough skin to measure that (Akuma's arms are
+half again as thick as Lars's, Noctis's a sixth thinner; a limb within an
+eighth of the donor's is left as it is). The fighter's own outfit becomes
+the default items' parts, so a garment in a slot replaces that half of it.
+A definition's one option is `WARDROBE = False`: no wardrobe, and so no
+shop list, for that fighter (Leroy Smith: the importer's skin for him is
+much lighter than his Tekken 7 portrait, which a bare chest shows as his
+coat never did). The rules leave out the rest by themselves: a fighter not
+of the donor's size (a joint more than 200 mm from the donor's: Gigas,
+Fahkumram), one whose body is not an upper piece, a lower piece and a face
+(a preset outfit in one piece keeps its body whole and shows as it is), a
+Tekken 8 fighter (not done yet), a garment whose own bones are numbered
+like bones of the fighter's body. A pack without a shop list cannot be
+entered in CUSTOMIZE: the cursor passes its cell and the importer draws its
+face grey in that grid.
+
 **Its CUSTOMIZE mode.** The mode's character select is not the fights'
 select screen: its grid is an Xtal script in the interfaces' file (entry
 `B43EB78F`, class `CharacterSelectCursor`: a table of 3 x 22 fighters, a

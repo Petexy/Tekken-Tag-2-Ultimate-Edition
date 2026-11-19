@@ -16,6 +16,8 @@ So an added fighter, whose body is one imported model with its own outfit in it,
   1. `fit`: the source fighter's cuts and garments moved from the source's bind pose to the fighter's, each vertex by
      its own weights' blend of the joints' shifts (the skeletons share bones 0..137 by name, with the same rest
      rotations; helper joints sit in proportion along the limbs, so the blend stretches a limb evenly);
+     and made as thick as the fighter where it is not the source's build (`girth_of`: its own outfits' bare skin
+     against the source's bare body, patch by patch: Akuma's arms are half again as thick as Lars's);
   2. the cuts appended to its body model with copies of the source's skin textures, their colours scaled to the
      fighter's own skin (`skin_gain`: its face's plain skin against the source's), and the neck's top ring moved
      onto the head's open rim (`Neck`: tucked just inside it, so no gap opens);
@@ -51,8 +53,9 @@ outfit in one piece keeps its body whole), one from Tekken 8 (not yet). A pack w
 one CUSTOMIZE mode cannot be entered with: the port's grid passes it and its face there is grey (art.greyed).
 
 Not done here (say so to the player rather than guess): hair and head items, items with the rarer own-pack members
-(`fits`), garments whose own bones are numbered like bones of the fighter's body (left out, not renumbered), girth
-(the bare body and the garments are the source's build in the fighter's proportions), a source other than the donor.
+(`fits`), garments whose own bones are numbered like bones of the fighter's body (left out, not renumbered), a
+source other than the donor. Girth is the limbs' and the trunk's only (`Girth`): the muscles' shapes, the hands and
+the feet stay the source's.
 """
 import copy
 import struct
@@ -92,6 +95,14 @@ SKIN_SATURATION = 0.15              # the least saturation (of the 8-bit colour)
 SPRING_MAGIC = b'\x40\xa0\x00\x00'  # how a spring file begins (5.0): the game's loader insists on it
 TEXTURE_CHECKS = 6                  # how many of a texture pack's files are held against their models (source_packs)
 SPRING_MATCH = 0.8                  # how well a spring pack's files must agree with their skeletons (spring_pack)
+GIRTH_BINS = 4                      # girth is measured in this many stretches of each bone of a limb's axis ...
+GIRTH_SECTORS = 6                   # ... and this many directions round it (a patch of skin is held against the same patch)
+GIRTH_SAMPLES = 4                   # vertices of each body a patch needs
+GIRTH_PATCHES = 6                   # patches a limb needs to be measured at all
+GIRTH_SPAN = (0.8, 1.5)             # a limb is made this much thinner or thicker at most
+GIRTH_SAME = 0.12                   # a limb within this of the source's keeps the source's girth
+GIRTH_SHARE = 0.7                   # the share of a vertex's weights on a limb's bones that makes it a sample of it
+GIRTH_END = 0.8                     # from here along a limb its girth eases toward the hand's or foot's (unchanged)
 HALVED = 2                          # texture format (BC3: normal and specular maps) stored at half size
 
 
@@ -332,9 +343,10 @@ def _moved(verts, shifts):
     return (shifts[bones] * w[..., None]).sum(1)
 
 
-def fit(model, shifts, neck=None):
+def fit(model, shifts, neck=None, girth=None):
     """`model` (a NUD's dict, changed in place) moved to the target's bind pose; `neck` also draws what lies near
-    the source head's rim to the target head's."""
+    the source head's rim to the target head's; `girth` (a Girth.of: per vertex array, how far its limb's girth
+    moves it) makes its limbs and trunk as thick as the fighter's."""
     for mesh in model['meshes']:
         points = []
         for poly in mesh['polys']:
@@ -343,6 +355,8 @@ def fit(model, shifts, neck=None):
                 continue
             old = v['pos'].astype(np.float64)
             new = old + _moved(v, shifts)
+            if girth is not None:
+                new += girth(v)
             if neck is not None:
                 new += neck.pull(old)
             v['pos'] = new
@@ -355,6 +369,208 @@ def fit(model, shifts, neck=None):
     if every:
         model['sphere'] = nudfile.bounding_sphere(np.concatenate(every))
     return model
+
+
+# ------------------------------------------------------------------------------------------------ girth
+def _short(name):
+    return name.split(':')[-1]
+
+
+def limbs(bon):
+    """The limbs girth is measured and changed on, of a body skeleton: {name: (kind, bone numbers, [3 points])}:
+    each arm (the joints from the shoulder to the wrist and their helper bones; the hand is not in it), each leg
+    (hip to ankle; not the foot) and the trunk (everything else but the neck, the head, the hands and the feet),
+    with the three joints its axis runs through. {} for a skeleton without those joints."""
+    names = [_short(n) for n in bon['names']]
+    where = {n: i for i, n in enumerate(names)}
+    parent = bon['parent']
+    wanted = ['KOSHI_jnt', 'MUNE2_jnt', 'KUBI_jnt'] + [n % s for s in 'RL' for n in (
+        'SAKOTSU_%s_jnt', 'KATA_%s_jnt', 'UDE_%s_jnt', 'TE_%s_jnt', 'MOMO_%s_jnt', 'HIZA_%s_jnt', 'ASHI_%s_jnt')]
+    if any(n not in where for n in wanted):
+        return {}
+    world = bonefile.world_matrices(bon)[:, :3, 3]
+
+    def under(root, stop=()):
+        out = set()
+        for i in range(len(names)):
+            j = i
+            while j >= 0 and names[j] not in stop:
+                if names[j] == root:
+                    out.add(i)
+                    break
+                j = parent[j]
+        return out
+    out, taken = {}, set()
+    for s in 'RL':
+        hand, foot = under('TE_%s_jnt' % s), under('ASHI_%s_jnt' % s)
+        # (the collar bone, the shoulder blade and the shoulder's front and back helpers are the trunk's)
+        arm = under('KATA_%s_jnt' % s, ('TE_%s_jnt' % s,)) | {i for i in under('SAKOTSU_%s_jnt' % s) - hand
+                                                               if names[i].startswith(('KATA_50', 'KATA_100', 'slide_'))}
+        leg = under('MOMO_%s_jnt' % s, ('ASHI_%s_jnt' % s,)) | {where[n] for n in ('MOMO_50_%s' % s,) if n in where}
+        out['arm ' + s] = ('arm', arm, world[[where[n % s] for n in ('KATA_%s_jnt', 'UDE_%s_jnt', 'TE_%s_jnt')]])
+        out['leg ' + s] = ('leg', leg, world[[where[n % s] for n in ('MOMO_%s_jnt', 'HIZA_%s_jnt', 'ASHI_%s_jnt')]])
+        taken |= arm | leg | hand | foot
+    taken |= under('KUBI_jnt') | under('KUBI_jnt_assist')
+    out['trunk'] = ('trunk', set(range(len(names))) - taken, world[[where[n] for n in ('KOSHI_jnt', 'MUNE2_jnt', 'KUBI_jnt')]])
+    return out
+
+
+def _round_axis(pos, points):
+    """Where each position is about a limb's axis (3 joints): (how far along it, 0..2: the joint it is past plus
+    the share of the way to the next; the vector from the axis to it; which of GIRTH_SECTORS directions round the
+    axis it lies in)."""
+    along = np.zeros(len(pos))
+    out = np.zeros((len(pos), 3))
+    sector = np.zeros(len(pos), np.int64)
+    first = points[1] - points[0]
+    past = (pos - points[1]) @ first > 0
+    for k in range(2):
+        d = points[k + 1] - points[k]
+        length = max(float(np.linalg.norm(d)), 1e-6)
+        d = d / length
+        pick = past if k else ~past
+        t = (pos[pick] - points[k]) @ d
+        r = pos[pick] - points[k] - t[:, None] * d
+        ref = np.array((0.0, 0.0, 1.0)) if abs(d[2]) < 0.9 else np.array((0.0, 1.0, 0.0))
+        u = ref - (ref @ d) * d
+        u /= np.linalg.norm(u)
+        angle = np.arctan2(r @ np.cross(d, u), r @ u)
+        along[pick] = k + np.clip(t / length, 0.0, 1.0)
+        out[pick] = r
+        sector[pick] = np.minimum(((angle + np.pi) / (2 * np.pi) * GIRTH_SECTORS).astype(np.int64), GIRTH_SECTORS - 1)
+    return along, out, sector
+
+
+def _weights(v):
+    w = v['w'].astype(np.float64)
+    return w / np.maximum(w.sum(1, keepdims=True), 1e-9)
+
+
+def skin_patches(meshes, bon):
+    """The bare skin of a body in patches: {(limb, stretch along it, direction round it): [sum of the distances
+    from the limb's axis, vertices]} over the skin polygons of `meshes` (bound through skeleton `bon`)."""
+    out = {}
+    parts = limbs(bon)
+    for mesh in meshes:
+        for poly in mesh['polys']:
+            v = poly['verts']
+            if 'bones' not in v.dtype.names or not poly['materials'] or poly['materials'][0]['flags'] != SKIN_FLAGS:
+                continue
+            pos, w, bones = v['pos'].astype(np.float64), _weights(v), v['bones'].astype(np.int64)
+            for name, (_, mine, points) in parts.items():
+                pick = (w * np.isin(bones, list(mine))).sum(1) > GIRTH_SHARE
+                if not pick.any():
+                    continue
+                along, r, sector = _round_axis(pos[pick], points)
+                stretch = np.minimum((along * GIRTH_BINS).astype(np.int64), 2 * GIRTH_BINS - 1)
+                for key, dist in zip(zip(stretch.tolist(), sector.tolist()), np.linalg.norm(r, axis=1)):
+                    cell = out.setdefault((name,) + key, [0.0, 0])
+                    cell[0] += dist
+                    cell[1] += 1
+    return out
+
+
+def girth_of(source, target):
+    """How much thicker than the source's the fighter's arms, legs and trunk are: {kind: factor}, from the two
+    bodies' skin_patches (the fighter's: of every outfit it has). A patch of bare skin both show is held against
+    the same patch (a rolled sleeve shows one stretch of the arm); a limb's factor is the median over its patches.
+    An arm or a leg the fighter never bares takes the other's (a man with thin bare forearms has thin legs in his
+    trousers; 1 for one who bares neither). The trunk's factor is for its top, the shoulders, and is the mean of the
+    two (what a collar bares of a trunk is the neck's root more than the chest, and measures as anything); toward
+    the hips a trunk takes the legs' (Girth). Within GIRTH_SAME of the source a factor is 1 (the
+    source's girth as it is); kept within GIRTH_SPAN."""
+    ratios = {}
+    for key, (total, count) in target.items():
+        theirs = source.get(key)
+        if theirs is not None and count >= GIRTH_SAMPLES and theirs[1] >= GIRTH_SAMPLES and theirs[0] > 0:
+            ratios.setdefault(key[0].split(' ')[0], []).append((total / count) / (theirs[0] / theirs[1]))
+    seen = {kind: float(np.median(ratios[kind])) for kind in ('arm', 'leg') if len(ratios.get(kind, ())) >= GIRTH_PATCHES}
+    rest = float(np.mean(list(seen.values()))) if seen else 1.0
+    raw = {kind: seen.get(kind, rest) for kind in ('arm', 'leg')}
+    raw['trunk'] = (raw['arm'] + raw['leg']) / 2
+    out = {}
+    for kind, f in raw.items():
+        f = float(np.clip(f, *GIRTH_SPAN))
+        out[kind] = 1.0 if abs(f - 1.0) < GIRTH_SAME else f
+    return out
+
+
+def own_skin(body, code, bon):
+    """skin_patches of a fighter's own outfit in a body model (every `<code>_bd..` mesh, whole or in pieces)."""
+    return skin_patches([m for m in body['meshes'] if m['name'].startswith(code + '_bd')], bon)
+
+
+def pack_girth(archives, code, source_code, bodies):
+    """girth_of a fighter against its wardrobe's source, over all its bodies ([(model bytes, skeleton bytes)]: an
+    arm one outfit covers is bare in another), or None when the game has no such source."""
+    if not archives.has(key_of(source_code + '.nud')) or not archives.has(key_of(source_code + '.bon')):
+        return None
+    source = nudfile.read(archives.read_name(source_code + '.nud'))
+    theirs = skin_patches([m for m in source['meshes'] if is_cut(m['name'])],
+                          bonefile.read(archives.read_name(source_code + '.bon')))
+    ours = {}
+    for model, skeleton in bodies:
+        for key, (total, count) in own_skin(nudfile.read(model), code, bonefile.read(skeleton)).items():
+            cell = ours.setdefault(key, [0.0, 0])
+            cell[0] += total
+            cell[1] += count
+    return girth_of(theirs, ours)
+
+
+class Girth:
+    """Makes the source's bare body and garments as thick as the fighter (factors: girth_of): each vertex moves
+    away from (or toward) its limb's axis in the source's bind pose, by the limb's factor times the share of its
+    weights on the limb's bones, so a limb's girth runs out smoothly into the hand, the foot and the neck, which
+    keep the source's. The trunk goes from the legs' factor at the hips to its own at the shoulders. Toward an
+    arm's or a leg's far end (GIRTH_END) the factor eases to its square root: a thick forearm
+    narrows to the wrist of a hand that is not made thicker."""
+
+    def __init__(self, source_bon, factors):
+        self.source = source_bon
+        self.factors = factors
+        self.parts = limbs(source_bon) if any(f != 1.0 for f in factors.values()) else {}
+        self.known = {_short(n) for n in source_bon['names']}
+        self.kind = {}                  # bone name -> limb (the hands', the feet's, the neck's and the head's: none)
+        for name, (_, mine, _) in self.parts.items():
+            for i in mine:
+                self.kind[_short(source_bon['names'][i])] = name
+
+    def of(self, part_bon=None):
+        """The mover for models bound through skeleton `part_bon` (default: the source's): a garment's own bones
+        belong to the limb of their nearest ancestor the body has. -> f(verts) -> how far each moves, or None
+        when nothing changes."""
+        if not self.parts:
+            return None
+        bon = self.source if part_bon is None else part_bon
+        member = []
+        for i in range(len(bon['names'])):
+            j = i
+            while j >= 0 and _short(bon['names'][j]) not in self.known:
+                j = bon['parent'][j]
+            member.append(self.kind.get(_short(bon['names'][j])) if j >= 0 else None)
+
+        def moved(v):
+            pos, w = v['pos'].astype(np.float64), _weights(v)
+            bones = v['bones'].astype(np.int64)
+            out = np.zeros((len(pos), 3))
+            for name, (kind, _, points) in self.parts.items():
+                f = self.factors[kind]
+                if f == 1.0 and (kind != 'trunk' or self.factors['leg'] == 1.0):
+                    continue
+                mine = [i for i, m in enumerate(member) if m == name]
+                share = (w * np.isin(bones, mine)).sum(1)
+                pick = share > 0
+                if not pick.any():
+                    continue
+                along, r, _ = _round_axis(pos[pick], points)
+                if kind == 'trunk':             # (the legs' girth at the hips, its own at the shoulders)
+                    factor = self.factors['leg'] + (f - self.factors['leg']) * along / 2.0
+                else:
+                    ease = np.clip((along / 2.0 - GIRTH_END) / (1.0 - GIRTH_END), 0.0, 1.0)
+                    factor = f + (np.sqrt(f) - f) * ease
+                out[pick] += r * ((factor - 1.0) * share[pick])[:, None]
+            return out
+        return moved
 
 
 # ------------------------------------------------------------------------------------------------ the neck
@@ -754,7 +970,10 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
     source_code = source_of(d)
     if source_code is None:
         return {}
-    out = build(archives, d.CODE, source_code, {s: contents[s] for s in ('.nud', '.nut', '.bon', '.xml')}, log=log)
+    girth = pack_girth(archives, d.CODE, source_code, [(contents[c + '.nud'], contents[c + '.bon'])
+                                                       for c in ('',) + tuple(outfit_codes)])
+    out = build(archives, d.CODE, source_code, {s: contents[s] for s in ('.nud', '.nut', '.bon', '.xml')}, log=log,
+                girth=girth)
     if not out:
         return {}
     base = min(t['gidx'] for t in nutfile.read(contents['.nut'])['textures']) & ~0xFFF
@@ -762,7 +981,7 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
         files = {s: contents[code + s] for s in ('.nud', '.nut', '.bon', '.xml')}
         # (the garments' own skin names the copied skin textures by id: every body holds them under the first's)
         more = build(archives, d.CODE, source_code, files, own_first=OWN_FIRST + OWN_STEP * (k + 1),
-                     log=lambda s: None, texture_base=base)
+                     log=lambda s: None, texture_base=base, girth=girth)
         if not more:
             log('wardrobe: preset %s keeps its body whole (no outfits on it)' % code)
             continue
@@ -782,14 +1001,16 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
     return out
 
 
-def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, log=print, texture_base=None):
+def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, log=print, texture_base=None,
+          girth=None):
     """Fits the source fighter's outfits to the added fighter.
 
     files: the body's {'.nud', '.nut', '.bon', '.xml'} (bytes, as the importer made them);
     texture_base: the copied skin textures are numbered from texture_base + FIRST_TEXTURE (default: the id range
     the body's own textures are in);
     own_first: the first own-pack member number for its own outfit pieces;
-    labels: the shop rows to fit (default: outfit_rows of the source).
+    labels: the shop rows to fit (default: outfit_rows of the source);
+    girth: how much thicker than the source the fighter is (girth_of; default: measured on this body alone).
     -> {file name: bytes} to add to the pack's files (the four changed, and `parts/...`), or {} when it cannot be
     done for this fighter (said through log)."""
     labels = outfit_rows(archives, source_code) if labels is None else labels
@@ -860,6 +1081,10 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         wanted += [i for i in insts if i not in wanted]
 
     neck = Neck(source_face, face, shifts)
+    if girth is None:
+        girth = girth_of(skin_patches([m for m in source['meshes'] if is_cut(m['name'])], source_bon),
+                         own_skin(body, code, target_bon))
+    thick = Girth(source_bon, girth)
     # skin: the textures the cuts draw, and the garments' own skin, copied with the fighter's tone
     base_ids = {t['gidx'] for t in source_nut['textures']}
     cuts = [m for m in source['meshes'] if is_cut(m['name'])]
@@ -897,10 +1122,13 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         '%.2f %.2f %.2f; %d skin textures, %.1f MB' % (source_code, len(rows), np.abs(shifts).max(), neck.worst,
                                                      gain[0], gain[1], gain[2], len(textures),
                                                      sum(len(m) for t in textures for m in t['mips']) / 2 ** 20))
+    log('wardrobe: girth against %s: arms %.2f, legs %.2f, trunk %.2f' % (source_code, girth['arm'], girth['leg'],
+                                                                         girth['trunk']))
 
     out = {}
     # the body: the fighter's own pieces leave it, the cuts join it
-    cut_model = renumber(fit(dict(meshes=copy.deepcopy(cuts), sphere=source['sphere']), shifts, neck), ids)
+    cut_model = renumber(fit(dict(meshes=copy.deepcopy(cuts), sphere=source['sphere']), shifts, neck, thick.of()),
+                         ids)
     moved = [m for ms in pieces.values() for m in ms]
     body['meshes'] = [m for m in body['meshes'] if not any(m is x for x in moved)] + cut_model['meshes']
     body['bone_first'] = body['bone_last'] = None
@@ -936,7 +1164,7 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         s = shifts if part is None else joint_shifts(source_bon, target_bon, part)
         if part is None and nudfile.used_bones(model)[1] >= len(shifts):
             s = np.concatenate([shifts, np.zeros((nudfile.used_bones(model)[1] + 1 - len(shifts), 3))])
-        out['parts/model/%d.nud' % index] = nudfile.write(renumber(fit(model, s, neck), ids))
+        out['parts/model/%d.nud' % index] = nudfile.write(renumber(fit(model, s, neck, thick.of(part)), ids))
     for inst in wanted:
         for g in itemdb.groups(inst):
             a = _attrs(g)

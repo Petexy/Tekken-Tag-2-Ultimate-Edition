@@ -218,6 +218,84 @@ class Fitting(unittest.TestCase):
         self.assertIs(made[3], part['textures'][3])               # a base texture no fitted polygon names
 
 
+def limbed(arm=700.0):
+    """A skeleton with the joints girth is measured about: arms along X (the wrist `arm` out), legs and trunk along Y."""
+    joints = [('KOSHI_jnt', -1, (0, 1000, 0)), ('MUNE2_jnt', 0, (0, 1200, 0)), ('KUBI_jnt', 1, (0, 1400, 0)),
+              ('ATAMA_jnt', 2, (0, 1500, 0))]
+    for s, x in (('R', -1.0), ('L', 1.0)):
+        base = len(joints)
+        joints += [('SAKOTSU_%s_jnt' % s, 1, (x * 100, 1400, 0)), ('KATA_%s_jnt' % s, base, (x * 200, 1400, 0)),
+                   ('UDE_%s_jnt' % s, base + 1, (x * 450, 1400, 0)), ('TE_%s_jnt' % s, base + 2, (x * arm, 1400, 0)),
+                   ('MOMO_%s_jnt' % s, 0, (x * 100, 900, 0)), ('HIZA_%s_jnt' % s, base + 4, (x * 100, 500, 0)),
+                   ('ASHI_%s_jnt' % s, base + 5, (x * 100, 100, 0))]
+    return skeleton(joints)
+
+
+def sleeve(name, radius, bon, joint='KATA_R_jnt', xs=(-250, -300, -350, -400, -500, -550, -600, -650), n=48, flags=wardrobe.SKIN_FLAGS):
+    """Rings round the right arm's axis, all bound to one joint."""
+    a = np.arange(n) * 2 * np.pi / n
+    points = np.concatenate([np.stack([np.full(n, float(x)), 1400 + radius * np.sin(a), radius * np.cos(a)], 1) for x in xs])
+    bone = [m.split(':')[-1] for m in bon['names']].index(joint)
+    return mesh(name, points, [(0, 1, 2)], bone, flags=flags)
+
+
+class Girth(unittest.TestCase):
+    def test_limbs_are_the_arms_without_hands_the_legs_without_feet_and_the_trunk(self):
+        bon = limbed()
+        names = [n.split(':')[-1] for n in bon['names']]
+        parts = wardrobe.limbs(bon)
+        self.assertEqual({names[i] for i in parts['arm R'][1]}, {'KATA_R_jnt', 'UDE_R_jnt'})
+        self.assertEqual({names[i] for i in parts['leg L'][1]}, {'MOMO_L_jnt', 'HIZA_L_jnt'})
+        self.assertEqual({names[i] for i in parts['trunk'][1]}, {'KOSHI_jnt', 'MUNE2_jnt', 'SAKOTSU_R_jnt', 'SAKOTSU_L_jnt'})
+        self.assertEqual(wardrobe.limbs(SOURCE), {})
+
+    def test_a_thicker_bare_arm_is_measured_and_the_trunk_is_the_mean_of_the_limbs(self):
+        theirs = wardrobe.skin_patches([sleeve('ude_A_O_OBJ', 50.0, limbed())], limbed())
+        ours = wardrobe.skin_patches([sleeve('abc_bdu', 70.0, limbed())], limbed())
+        g = wardrobe.girth_of(theirs, ours)
+        self.assertAlmostEqual(g['arm'], 1.4, places=3)
+        self.assertAlmostEqual(g['leg'], 1.4, places=3)         # (never bared: as the arm)
+        self.assertAlmostEqual(g['trunk'], 1.4, places=3)
+
+    def test_cloth_is_not_measured_and_a_like_limb_keeps_the_sources_girth(self):
+        theirs = wardrobe.skin_patches([sleeve('ude_A_O_OBJ', 50.0, limbed())], limbed())
+        cloth = wardrobe.skin_patches([sleeve('abc_bdu', 90.0, limbed(), flags=0x24400099)], limbed())
+        self.assertEqual(wardrobe.girth_of(theirs, cloth), dict(arm=1.0, leg=1.0, trunk=1.0))
+        near = wardrobe.skin_patches([sleeve('abc_bdu', 53.0, limbed())], limbed())
+        self.assertEqual(wardrobe.girth_of(theirs, near), dict(arm=1.0, leg=1.0, trunk=1.0))
+        huge = wardrobe.skin_patches([sleeve('abc_bdu', 150.0, limbed())], limbed())
+        self.assertEqual(wardrobe.girth_of(theirs, huge)['arm'], wardrobe.GIRTH_SPAN[1])
+
+    def test_a_longer_arm_is_not_a_thicker_one(self):
+        long = limbed(arm=800.0)
+        theirs = wardrobe.skin_patches([sleeve('ude_A_O_OBJ', 50.0, limbed())], limbed())
+        ours = wardrobe.skin_patches([sleeve('abc_bdu', 50.0, long, xs=(-250, -310, -370, -430, -500, -580, -660, -740))], long)
+        self.assertEqual(wardrobe.girth_of(theirs, ours)['arm'], 1.0)
+
+    def test_an_arm_swells_about_its_axis_and_the_hand_and_the_wrist_do_not(self):
+        bon = limbed()
+        thick = wardrobe.Girth(bon, dict(arm=1.4, leg=1.0, trunk=1.0))
+        arm = sleeve('ude_A_O_OBJ', 50.0, bon, xs=(-300, -700))
+        hand = sleeve('ude_A_O_OBJ', 50.0, bon, joint='TE_R_jnt', xs=(-750,))
+        model = wardrobe.fit(dict(meshes=[arm, hand]), np.zeros((len(bon['names']), 3)), girth=thick.of())
+        r = np.linalg.norm(model['meshes'][0]['polys'][0]['verts']['pos'][:, 1:] - (1400.0, 0.0), axis=1)
+        np.testing.assert_allclose(r[:48], 70.0, atol=0.01)                 # the upper arm: 1.4 times
+        np.testing.assert_allclose(r[48:], 50.0 * 1.4 ** 0.5, atol=0.1)     # at the wrist: eased
+        np.testing.assert_allclose(model['meshes'][0]['polys'][0]['verts']['pos'][:48, 0], -300.0, atol=1e-3)
+        np.testing.assert_allclose(np.linalg.norm(model['meshes'][1]['polys'][0]['verts']['pos'][:, 1:] - (1400.0, 0.0), axis=1), 50.0, atol=1e-3)
+
+    def test_a_garments_own_bone_swells_with_the_limb_that_holds_it(self):
+        bon = limbed()
+        part = skeleton([('UDE_R_jnt', -1, (-450, 1400, 0)), ('OPT300_cuff', 0, (-500, 1400, 0)), ('OPT301_tail', -1, (0, 0, 0))])
+        thick = wardrobe.Girth(bon, dict(arm=1.2, leg=1.0, trunk=1.0))
+        cuff = sleeve('cuff', 60.0, part, joint='OPT300_cuff', xs=(-300,))
+        loose = sleeve('cuff', 60.0, part, joint='OPT301_tail', xs=(-300,))
+        move = thick.of(part)
+        np.testing.assert_allclose(np.linalg.norm(move(cuff['polys'][0]['verts']), axis=1), 12.0, atol=1e-3)
+        np.testing.assert_allclose(move(loose['polys'][0]['verts']), 0.0, atol=1e-9)
+        self.assertIsNone(wardrobe.Girth(bon, dict(arm=1.0, leg=1.0, trunk=1.0)).of())
+
+
 class Pieces(unittest.TestCase):
     def test_cut_names(self):
         self.assertTrue(all(wardrobe.is_cut(n) for n in ('kubiA_O_OBJ', 'ude_AB_O_OBJ', 'asi_E_O_OBJ', 'hara_O_OBJ')))
