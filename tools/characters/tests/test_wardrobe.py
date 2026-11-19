@@ -154,6 +154,23 @@ class Fitting(unittest.TestCase):
         np.testing.assert_allclose(np.hypot(top[:, 0], top[:, 2] - 6.0), 44 - inward, atol=1.0)
         np.testing.assert_allclose(bottom, ring(50, 1380), atol=1e-3)      # beyond the reach: only its joint's move
 
+    def test_the_necks_top_ring_is_bound_as_the_fighters_rim_is(self):
+        shifts = wardrobe.joint_shifts(SOURCE, TARGET)
+        source_face = cap('cha:kao_O_OBJ', 50, 1490, 2)
+        target_face = cap('abc_fac', 44, 1516, 2, centre=(0.0, 6.0))
+        v = target_face['polys'][0]['verts']
+        v['bones'][:12, 1] = 1                      # this head's rim follows the head by 0.7, the neck by 0.3
+        v['w'][:12] = (0.7, 0.3, 0, 0)
+        cut = wardrobe.fit(dict(meshes=[tube('kubiA_O_OBJ', 50, 1490, 1400, 2, 1)]), shifts,
+                           wardrobe.Neck(source_face, target_face, shifts))
+        verts = cut['meshes'][0]['polys'][0]['verts']
+        for top in verts[:12]:
+            self.assertEqual(top['bones'][:2].tolist(), [2, 1])
+            np.testing.assert_allclose(top['w'], (0.7, 0.3, 0, 0), atol=1e-6)
+        for below in verts[12:]:                    # the rest of the neck keeps its own
+            self.assertEqual(int(below['bones'][0]), 1)
+            np.testing.assert_allclose(below['w'], (1, 0, 0, 0))
+
     def test_skin_takes_the_tone_of_the_fighters_plain_face_skin(self):
         source_face, target_face = cap('cha:kao_O_OBJ', 50, 1490, 2, ), cap('abc_fac', 50, 1510, 2)
         target_face['polys'][0]['materials'][0]['textures'][0]['id'] = 6

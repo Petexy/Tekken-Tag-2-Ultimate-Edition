@@ -28,12 +28,6 @@ PRESETS = (
 DONOR = 'lar'                 # Lars Alexandersson: a slim male skeleton
 DONOR_ROW = 38
 
-# No Tekken Tag Tournament 2 wardrobe for him yet (convert/wardrobe.py: its bare body takes the tone of the face
-# texture, and the importer's skin for him (convert/skin.py's gain, about 2) is much lighter than his Tekken 7
-# portrait: under his coat only a bearded face and the hands show it, a bare chest shows a fair-skinned man with
-# his head). Take this line out when his skin tone is right.
-WARDROBE = False
-
 _ITEM = '/Game/Character/Item'
 TEKKEN7 = {
     'costume': _ITEM + '/Sets/NSB/CS_NSB_DefaultCos1P',

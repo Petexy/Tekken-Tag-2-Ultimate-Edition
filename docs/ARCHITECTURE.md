@@ -1214,15 +1214,14 @@ dresses the upper or the lower body, read from the player's game; there is
 no list of garments or of fighters), re-posed to the fighter's joints, with
 the donor's bare body cut the ways garments leave it showing, its skin
 textures in the tone of the fighter's own face, the neck drawn into the
-fighter's own head, and arms, legs and trunk made as thick as the fighter's
+fighter's own head and its top ring bound to the bones as that head's rim is
+(or the seam opens when the head bows), and arms, legs and trunk made as thick as the fighter's
 where its own outfits bare enough skin to measure that (Akuma's arms are
 half again as thick as Lars's, Noctis's a sixth thinner; a limb within an
 eighth of the donor's is left as it is). The fighter's own outfit becomes
 the default items' parts, so a garment in a slot replaces that half of it.
 A definition's one option is `WARDROBE = False`: no wardrobe, and so no
-shop list, for that fighter (Leroy Smith: the importer's skin for him is
-much lighter than his Tekken 7 portrait, which a bare chest shows as his
-coat never did). The rules leave out the rest by themselves: a fighter not
+shop list, for that fighter (no definition sets it now). The rules leave out the rest by themselves: a fighter not
 of the donor's size (a joint more than 200 mm from the donor's: Gigas,
 Fahkumram), one whose body is not an upper piece, a lower piece and a face
 (a preset outfit in one piece keeps its body whole and shows as it is), a

@@ -87,6 +87,7 @@ HUMAN_REACH = 200.0                 # mm a joint may lie from the source's for t
 BODY_SLOTS = (8, 12)                 # the record's slots of the upper-body and the lower-body garment
 NECK_REACH = 45.0                   # mm from the head's rim over which the neck is drawn toward it
 NECK_TUCK = (2.0, 1.5)              # mm the neck's top ring goes up and inward of the rim
+NECK_RING = 1.0                     # mm from the source head's rim within which a vertex is the neck's top ring
 GAIN_SPAN = (0.1, 2.5)              # the skin gain is kept within this
 LUMA = np.array([0.2126, 0.7152, 0.0722])
 GAIN_KNEE = 0.6                     # linear level above which a brightened skin texture is eased toward white
@@ -359,6 +360,7 @@ def fit(model, shifts, neck=None, girth=None):
                 new += girth(v)
             if neck is not None:
                 new += neck.pull(old)
+                neck.bind(old, v)
             v['pos'] = new
             points.append(new)
         if points:
@@ -653,7 +655,11 @@ class Neck:
     with an open rim where the neck joins; shifts: joint_shifts of the source's skeleton. The source's neck cuts end
     on the source rim; after the fit they would end where that rim lands on the fighter's joints, which is not
     where the fighter's head ends (another head). pull() moves what lies within NECK_REACH of the source rim by the
-    rim's own error, fading with distance, so the cuts' top ring lands on the fighter's rim, NECK_TUCK inside it."""
+    rim's own error, fading with distance, so the cuts' top ring lands on the fighter's rim, NECK_TUCK inside it.
+    bind() gives that top ring the bone weights of the fighter's rim where it lands: the source's neck follows the
+    head by half at its top as the source's head does at its rim; another head's rim follows it by more or less
+    (a Tekken 7 head: by 0.6 to 0.75), and with the head bowed or turned the seam opened by that difference (a
+    bright sliver under the jaw of a fighter who stands with his head down)."""
 
     def __init__(self, source_face, target_face, shifts):
         pts, idx = neck_loop(source_face)
@@ -665,6 +671,19 @@ class Neck:
         self.source = _Ring(pts)
         target_pts, self.target_index = neck_loop(target_face)
         self.target = _Ring(target_pts)
+        _, _, target_owner = _mesh_points(target_face)
+        rim = [target_face['polys'][k]['verts'][v] for k, v in (target_owner[i] for i in self.target_index)]
+        self.bones = sorted({int(b) for x in rim for b, w in zip(x['bones'], x['w']) if w > 0})
+        table = np.zeros((len(rim), len(self.bones)))
+        for n, x in enumerate(rim):
+            for b, w in zip(x['bones'], x['w']):
+                if w > 0:
+                    table[n, self.bones.index(int(b))] += float(w)
+        self.weights = _Ring.__new__(_Ring)             # the rim's weights by the angle about the rim's centre
+        at = self.target.angle_of(target_pts)
+        order = np.argsort(at)
+        self.weights.angle = np.concatenate([at[order][-1:] - 2 * np.pi, at[order], at[order][:1] + 2 * np.pi])
+        self.weights.points = np.concatenate([table[order][-1:], table[order], table[order][:1]])
         up, inward = NECK_TUCK
         angle = self.source.angle_of(pts)
         # the same place on the two rims: the same angle about each rim's own centre
@@ -695,6 +714,29 @@ class Neck:
         f = f * f * (3 - 2 * f)
         out[near] = self.error.at(angle) * f[:, None]
         return out
+
+    def bind(self, points, verts):
+        """The neck's top ring (source-pose `points` of `verts` within NECK_RING of the source rim) bound as the
+        fighter's rim is where it lands: verts' bones and weights changed in place (the heaviest, as many as a
+        vertex holds). -> how many vertices."""
+        near = np.abs(points - self.source.centre).max(1) < NECK_REACH * 4
+        if not near.any() or not self.bones:
+            return 0
+        where = np.flatnonzero(near)
+        angle = self.source.angle_of(points[where])
+        ring = np.linalg.norm(points[where] - self.source.at(angle), axis=1) < NECK_RING
+        slots = verts['bones'].shape[1]
+        for i, a in zip(where[ring], angle[ring]):
+            w = np.array([np.interp(a, self.weights.angle, self.weights.points[:, k]) for k in range(len(self.bones))])
+            keep = np.argsort(-w)[:slots]
+            keep = keep[w[keep] > 0]
+            bones = np.full(slots, verts['bones'][i][0] if not len(keep) else self.bones[keep[0]])
+            weights = np.zeros(slots)
+            bones[:len(keep)] = [self.bones[k] for k in keep]
+            weights[:len(keep)] = w[keep] / w[keep].sum()
+            verts['bones'][i] = bones
+            verts['w'][i] = weights
+        return int(ring.sum())
 
 
 # ------------------------------------------------------------------------------------------------ skin tone

@@ -359,7 +359,9 @@ def bake_albedo(eff, textures, grey=False):
     Hair (pass 1): lo = sat(BaseLowerContrast); s = (min(Up, 0) + min(Lo, 0) + 1) / (1 - (sat(Up) + sat(Lo)));
         albedo = sat((T - lo) s - min(Lo, 0)) * Color01; Noctis's (HairTipsAdd, a fixed gradient texture G):
         albedo = sat(T + HairTipsAdd G) * Color01.
-    Skin: lerp(D, luma(D), Desaturation) * Multiply (the view-dependent terms left out).
+    Skin (every M_CH_skin_wet* base: _SSP, _SSP_metallic, _ao_SSP and the plain one share these terms):
+        lerp(D, luma(D), Desaturation) * Multiply (the view-dependent terms left out). Multiply is how Tekken 7
+        makes a skin dark (Leroy 0.18, Master Raven 0.2, Akuma 0.4 on textures about as light as Lars's).
     Anything else: its colour texture as it is.
     grey: a colour-customisable material's colour texture taken by its brightness alone (D's luma), its colours giving
     the hue (a definition's GREY: Noctis's outfit, blue-grey in Tekken 7 where its textures are mauve)."""
@@ -399,7 +401,7 @@ def bake_albedo(eff, textures, grey=False):
             G, _ = textures.linear(tips[0])
             T = np.clip(T + s['HairTipsAdd'] * _resize_to(G, T.shape[:2]), 0, 1)
         return T * _col(v['Color01']), Ta
-    if base == 'M_CH_skin_wet_SSP':
+    if base.startswith('M_CH_skin_wet'):
         D, Da = textures.linear(t['Diffuse'])
         luma = (D * np.array([0.3, 0.59, 0.11], np.float32)).sum(-1, keepdims=True)
         out = (D + s.get('Desaturation', 0.0) * (luma - D)) * s.get('Multiply', 1.0)
