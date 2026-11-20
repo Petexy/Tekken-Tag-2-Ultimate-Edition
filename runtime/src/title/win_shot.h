@@ -35,22 +35,27 @@ constexpr float kAcross = 0.45f;   // this far across the picture's half width
 constexpr float kUp = 0.75f;       // and up its half height
 
 // Whether a move films one fighter in its pose, by its name (an added fighter's moveset keeps its donor's:
-// `ju_wem_1`): the winner's part of a team's win `_wem_1`, the partner's `_wes_2`, the other form's `_wnm_` / `_wns_`
-// moves and, for a fighter `alone`, the hold after its pose (`_wem_3`). Not the waits (`_wem_2`, `_wes_1`: the
-// fighter is put away) nor a team's last part (`_wem_3`, `_wes_3`: the title stands the two side by side, and its
-// shot of them is right as it is).
+// `ju_wem_1`): the winner's part of a team's win `_wem_1`, the partner's `_wes_2`, the other form's poses `_wnm_1` /
+// `_wns_1` and, for a fighter `alone`, the hold after its pose (`_wem_3`). Not the waits (`_wem_2`, `_wes_1`: the
+// fighter is put away), a team's last part (`_wem_3`, `_wes_3`: the title stands the two side by side, and its
+// shot of them is right as it is) nor the other form's poses for two (`_wnm_13_2`, `_wns_sp91_2`: a shot of both).
 constexpr bool films_one(std::string_view name, bool alone) {
     const auto has = [&](std::string_view s) { return name.find(s) != std::string_view::npos; };
-    return has("_wem_1") || has("_wes_2") || has("_wnm_") || has("_wns_") || (alone && has("_wem_3"));
+    const auto ends = [&](std::string_view s) { return name.size() >= s.size() && name.substr(name.size() - s.size()) == s; };
+    return has("_wem_1") || has("_wes_2") || ends("_wnm_1") || ends("_wns_1") || (alone && has("_wem_3"));
 }
 
-// Whether `head` can be the head of a fighter whose pose started at the place a man's head `expected` stands over:
-// within kReach of it (a fighter's body spheres are still where the fight left them when the scene starts).
+// Whether `head` can be the head of a fighter whose pose started at the place a man's head `expected` stands over
+// and whose head was last seen at `last` (`expected` until one is): within kReach of the place, or no more than a
+// frame's kStride from where it was. A fighter's body spheres are still where the fight left them when the scene
+// starts (seen 10 m away), so a far head counts only when the fighter went there: one pose runs 7.6 m off and leaps.
 constexpr float kReach = 5000;
-inline bool plausible(const float expected[3], const float head[3]) {
+constexpr float kStride = 600;
+inline bool plausible(const float expected[3], const float last[3], const float head[3]) {
     for (int k = 0; k < 3; ++k)
         if (!std::isfinite(head[k])) return false;
-    return std::hypot(head[0] - expected[0], head[1] - expected[1], head[2] - expected[2]) <= kReach;
+    return std::hypot(head[0] - expected[0], head[1] - expected[1], head[2] - expected[2]) <= kReach ||
+           std::hypot(head[0] - last[0], head[1] - last[1], head[2] - last[2]) <= kStride;
 }
 
 // The shot moved by as far as `subject` is from `reference`.

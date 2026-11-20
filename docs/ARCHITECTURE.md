@@ -1481,7 +1481,8 @@ runtime moves each shot of one added fighter by as far as his head is from
 where a man's head would stand over the pose's place, and turns a shot
 that still looks past him until his head is inside the picture
 (`title/win_shot.h`: the shot showed the floor the donor would have walked
-to, or the fighter's legs at its edge). The command
+to, or the fighter's legs at its edge; a pose that runs off is followed
+as far as it goes, a stride a frame). The command
 list is converted from Tekken 7's (both games keep an MVLT
 file of names, commands in nine languages and demos given as pad inputs).
 The voice is decoded from Tekken 7's Wwise banks (IMA ADPCM), re-encoded as

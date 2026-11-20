@@ -436,6 +436,7 @@ struct Motion {
     float shot[6] = {};
     bool scaled = false;
     uint32_t move = 0; // (win_scene)
+    float seen[3] = {}; // (win_scene) his head as last read
 };
 std::map<uint32_t, Motion> g_motions; // by camera
 
@@ -472,7 +473,9 @@ bool win_scene(uint8_t* base, uint32_t camera, uint32_t player) {
     const float expected[3] = {ldf(base, player), ldf(base, player + kPlayerFloor) + win_shot::kManHead, ldf(base, player + 8)};
     const uint32_t at = player + kBodySpheres + kBodySphereSize * kHeadSphere;
     float head[3] = {ldf(base, at), ldf(base, at + 4), ldf(base, at + 8)};
-    if (!win_shot::plausible(expected, head)) std::copy(expected, expected + 3, head);
+    if (starts) std::copy(expected, expected + 3, m.seen);
+    if (win_shot::plausible(expected, m.seen, head)) std::copy(head, head + 3, m.seen);
+    else std::copy(expected, expected + 3, head);
     for (int k = 0; k < 3; ++k) m.head[k] = starts ? expected[k] : m.head[k] + kHeadEase * (head[k] - m.head[k]);
     for (int k = 0; k < 3; ++k) {
         m.shot[k] = ldf(base, camera + kMotionShot + 4 * k);
@@ -485,7 +488,8 @@ bool win_scene(uint8_t* base, uint32_t camera, uint32_t player) {
     std::copy(m.shot + 3, m.shot + 6, target);
     const float fov = ldf(base, camera + kMotionFov);
     win_shot::follow(eye, target, expected, m.head);
-    const bool turned = win_shot::keep(eye, target, m.head, fov, picture_aspect(base));
+    // (his head as it is, not as the shot's move has eased it: a pose that runs leaves the eased one behind)
+    const bool turned = win_shot::keep(eye, target, head, fov, picture_aspect(base));
     for (int k = 0; k < 3; ++k) {
         stf(base, camera + kMotionShot + 4 * k, eye[k]);
         stf(base, camera + kMotionTarget + 4 * k, target[k]);

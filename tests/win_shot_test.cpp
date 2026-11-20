@@ -1,5 +1,6 @@
 #include "title/win_shot.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -33,8 +34,11 @@ bool near(float a, float b, float within = 0.01f) { return std::fabs(a - b) <= w
 int main() {
     // The moves that film one fighter in its pose, by the names a moveset keeps from its donor (made-up codes).
     check(win_shot::films_one("ab_wem_1", false) && win_shot::films_one("ab_wes_2", false) &&
-              win_shot::films_one("ab_wnm_1", false) && win_shot::films_one("xy_wnm_sp12_cd_2", true),
+              win_shot::films_one("ab_wnm_1", false) && win_shot::films_one("ab_wns_1", true),
           "the poses");
+    check(!win_shot::films_one("xy_wnm_sp12_cd_2", false) && !win_shot::films_one("ab_wnm_13_2", false) &&
+              !win_shot::films_one("ab_wns_01_2", false),
+          "not the poses for two");
     check(!win_shot::films_one("ab_wem_2", false) && !win_shot::films_one("ab_wes_1", false), "not the waits");
     check(!win_shot::films_one("ab_wem_3", false) && !win_shot::films_one("ab_wes_3", false), "not a team's last part");
     check(win_shot::films_one("ab_wem_3", true), "a fighter alone holds its pose in the last part");
@@ -44,8 +48,22 @@ int main() {
     // A head the pose can have reached, and one the fight left 10 m away.
     const float over[3] = {0, win_shot::kManHead, 0};
     const float walked[3] = {150, 1100, -2200}, left[3] = {1400, 1450, 10200}, broken[3] = {0, NAN, 0};
-    check(win_shot::plausible(over, walked) && !win_shot::plausible(over, left) && !win_shot::plausible(over, broken),
+    check(win_shot::plausible(over, over, walked) && !win_shot::plausible(over, over, left) &&
+              !win_shot::plausible(over, over, broken),
           "plausible heads");
+    // A pose that runs 7.6 m off and leaps: its head stays the fighter's all the way, a stride a frame.
+    {
+        float last[3] = {over[0], over[1], over[2]};
+        bool all = true;
+        for (int frame = 1; frame <= 100; ++frame) {
+            const float head[3] = {500, 1620 + 20.0f * frame, 90.0f * frame - 1400};
+            all = all && win_shot::plausible(over, last, head);
+            std::copy(head, head + 3, last);
+        }
+        check(all && last[2] > 7000, "a head that runs far off is followed");
+        const float jumped[3] = {last[0], last[1], last[2] + 3000};
+        check(!win_shot::plausible(over, last, jumped), "but not one that is far and elsewhere at once");
+    }
 
     const float fov = 50, aspect = 16.0f / 9;
     // A shot of a man standing at the origin, from 3 m: the fighter has walked 2.2 m and crouched; the shot moved
