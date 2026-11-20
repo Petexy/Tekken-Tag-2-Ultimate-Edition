@@ -347,6 +347,7 @@ void watch_entry_reads(std::function<void(uint32_t)> reader) {
 }
 
 bool set_archive_entries(const std::string& archive, std::map<uint32_t, ArchiveEntry> added) {
+    {
     std::lock_guard lock(g_mutex);
     const auto ofs = read_underlying(archive + ".ofs", UINT64_MAX);
     const auto header = read_underlying(archive + ".bin", title::archive::kPayload);
@@ -368,6 +369,12 @@ bool set_archive_entries(const std::string& archive, std::map<uint32_t, ArchiveE
     if (!rebuilt) return false;
     g_overlay_entries[lower(archive)] = std::move(entries);
     g_overlays[lower(archive)] = std::make_shared<const title::archive::Rebuilt>(std::move(*rebuilt));
+    }
+    // The made entries kept are found by their address: one replaced just now
+    // may be freed and its address given to another. (After g_mutex: making an
+    // entry takes the two the other way round.)
+    std::lock_guard lock(g_made_mutex);
+    g_made.clear();
     return true;
 }
 
