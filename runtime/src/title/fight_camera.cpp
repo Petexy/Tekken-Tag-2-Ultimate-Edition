@@ -54,6 +54,10 @@
 // Azazel stoops, his head 2.2 to 2.4 m up as he stands, and comes down from
 // the sky in his intro.)
 //
+// An added fighter of a man's size has the win poses' camera animations go
+// with him (title/win_shot.h, win_scene() below): the donor's shot is made
+// for the donor's pose, and his own goes elsewhere.
+//
 // The KO's slow motion and replays (tcb_camera_replay_t) and the throws'
 // camera (tcb_camera_throw_t) frame a man from a man's distance: with a
 // giant in the fight their shots go up and back until both fighters are in
@@ -69,6 +73,7 @@
 
 #include "title/giant_body.h"
 #include "title/roster.h"
+#include "title/win_shot.h"
 
 #include "cafe/ppc_ops.h"
 
@@ -78,6 +83,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <string_view>
 #include <vector>
 
 namespace cafe::title::fight_camera {
@@ -429,6 +435,8 @@ struct Motion {
     float centre[3] = {}, head[3] = {};
     float shot[6] = {};
     bool scaled = false;
+    uint32_t move = 0; // (win_scene)
+    float seen[3] = {}; // (win_scene) his head as last read
 };
 std::map<uint32_t, Motion> g_motions; // by camera
 
@@ -442,11 +450,65 @@ void motion_before(uint8_t* base, uint32_t camera) {
     it->second.scaled = false;
 }
 
+// The win scene's shot of an added fighter of a man's size (title/win_shot.h): the donor's camera animation, made
+// for the donor's pose, goes with the fighter's own. -> whether the camera's shot is such a one (its Motion is then
+// kept: motion_before puts the animation's shot back before the camera's next frame).
+constexpr uint32_t kPlayerAlone = 1012; // nonzero: no team (+172 is set all the same)
+constexpr uint32_t kHeadSphere = 8;     // of a fighter's 14: its head's
+
+bool win_scene(uint8_t* base, uint32_t camera, uint32_t player) {
+    if (!is_player(base, player) || added_slot(player) < 0) return false;
+    const uint32_t move = ppc::ld32(base, player + kPlayerMove), name = move ? ppc::ld32(base, move) : 0;
+    if (!name) return false;
+    const char* text = reinterpret_cast<const char*>(base + name);
+    if (!win_shot::films_one(std::string_view(text, strnlen(text, 64)), ppc::ld32(base, player + kPlayerAlone) != 0))
+        return false;
+
+    Motion& m = g_motions[camera];
+    const uint32_t frame = ppc::ld32(base, camera + kMotionFrame);
+    const bool starts = m.player != player || m.move != move || frame < m.frame;
+    m.player = player, m.move = move, m.frame = frame, m.scaled = false;
+    // Where the shot expects a head (a man's, over the fighter's place: its pose leaves that where it is) and where
+    // his is (his place's, until his body's spheres are his pose's: they are the last scene's for a frame).
+    const float expected[3] = {ldf(base, player), ldf(base, player + kPlayerFloor) + win_shot::kManHead, ldf(base, player + 8)};
+    const uint32_t at = player + kBodySpheres + kBodySphereSize * kHeadSphere;
+    float head[3] = {ldf(base, at), ldf(base, at + 4), ldf(base, at + 8)};
+    if (starts) std::copy(expected, expected + 3, m.seen);
+    if (win_shot::plausible(expected, m.seen, head)) std::copy(head, head + 3, m.seen);
+    else std::copy(expected, expected + 3, head);
+    for (int k = 0; k < 3; ++k) m.head[k] = starts ? expected[k] : m.head[k] + kHeadEase * (head[k] - m.head[k]);
+    for (int k = 0; k < 3; ++k) {
+        m.shot[k] = ldf(base, camera + kMotionShot + 4 * k);
+        m.shot[3 + k] = ldf(base, camera + kMotionTarget + 4 * k);
+    }
+    for (float v : m.shot)
+        if (!std::isfinite(v)) return true;
+    float eye[3], target[3];
+    std::copy(m.shot, m.shot + 3, eye);
+    std::copy(m.shot + 3, m.shot + 6, target);
+    const float fov = ldf(base, camera + kMotionFov);
+    win_shot::follow(eye, target, expected, m.head);
+    // (his head as it is, not as the shot's move has eased it: a pose that runs leaves the eased one behind)
+    const bool turned = win_shot::keep(eye, target, head, fov, picture_aspect(base));
+    for (int k = 0; k < 3; ++k) {
+        stf(base, camera + kMotionShot + 4 * k, eye[k]);
+        stf(base, camera + kMotionTarget + 4 * k, target[k]);
+    }
+    m.scaled = true;
+    if (trace() && (trace() >= 2 || starts || frame % 10 == 0))
+        std::fprintf(stderr, "ttt2: camera: win shot for sid %u frame %u%s: head %.0f %.0f %.0f, expected %.0f %.0f %.0f%s, fov %.1f: eye %.0f %.0f %.0f target %.0f %.0f %.0f -> eye %.0f %.0f %.0f target %.0f %.0f %.0f\n",
+                     ppc::ld32(base, player + kPlayerSelectId), frame, starts ? " (starts)" : "", m.head[0], m.head[1],
+                     m.head[2], expected[0], expected[1], expected[2], turned ? ", turned" : "", fov, m.shot[0],
+                     m.shot[1], m.shot[2], m.shot[3], m.shot[4], m.shot[5], eye[0], eye[1], eye[2], target[0],
+                     target[1], target[2]);
+    return true;
+}
+
 void motion_after(uint8_t* base, uint32_t camera) {
     const uint32_t player = ppc::ld32(base, camera + kMotionPlayer);
     const float height = is_player(base, player) ? height_of(player) : 0;
     if (height <= 0) {
-        g_motions.erase(camera);
+        if (!win_scene(base, camera, player)) g_motions.erase(camera);
         return;
     }
     Motion& m = g_motions[camera];

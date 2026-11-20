@@ -1468,7 +1468,21 @@ Arts and Drives, power crush armour, screws) are left out, and the moves
 that bound are the definition's (Tekken 7's after the Tekken 7 Bound Mod):
 they get TTT2's bound entry and Tag Assault twins.
 The donor's intros and win poses stay (their camera animations end the
-intro and the win screen) and play the fighter's animations. The command
+intro and the win screen) and play the fighter's animations. A tag team's
+win is played in parts the two movesets hand to each other (the winner's
+pose, the partner's, both together), each part handing over with a move
+property at the frame the donor's pose ended; an added fighter's pose is
+several times longer, so the runtime ends its part at the hand-over, as
+the donor's ended, and holds the hand-over until the move is left
+(`title/win_pose.h`: handed over mid-pose, the answer came before the
+winner waited for it and the win screen never ended). The win poses'
+camera animations are the donor's too, made for the donor's pose: the
+runtime moves each shot of one added fighter by as far as his head is from
+where a man's head would stand over the pose's place, and turns a shot
+that still looks past him until his head is inside the picture
+(`title/win_shot.h`: the shot showed the floor the donor would have walked
+to, or the fighter's legs at its edge; a pose that runs off is followed
+as far as it goes, a stride a frame). The command
 list is converted from Tekken 7's (both games keep an MVLT
 file of names, commands in nine languages and demos given as pad inputs).
 The voice is decoded from Tekken 7's Wwise banks (IMA ADPCM), re-encoded as
