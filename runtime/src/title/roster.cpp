@@ -605,6 +605,95 @@ std::optional<std::vector<uint8_t>> read_file(const fs::path& path) {
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
 }
 
+// ------------------------------------------------------------------ entries made when they are read
+//
+// The packs' files are not read when the game starts: with every fighter's
+// preset outfits and wardrobe a set of packs is gigabytes, and held as
+// archive entries (as they were, compressed, each alo/ file once more per
+// outfit) it took more memory than a PC may have free. An entry only
+// promises its size, which the index needs, and reads its file when the
+// title reads the entry; it is stored uncompressed (archive::store), since
+// only then does its size follow from the file's.
+
+using Flags = std::array<uint8_t, 8>;
+constexpr const char* kUpdateArchive = "content/hdd/data100";
+
+// A file as an entry: its contents behind an NRCZ header with `flags`.
+vfs::ArchiveEntry file_entry(const fs::path& path, uint64_t size, uint32_t key, const Flags& flags) {
+    vfs::ArchiveEntry entry;
+    entry.size = archive::stored_size(size);
+    entry.make = [path, size, key, flags]() -> std::optional<std::vector<uint8_t>> {
+        const auto contents = read_file(path);
+        if (!contents || contents->size() != size) return std::nullopt;
+        uint8_t raw[8];
+        std::copy(flags.begin(), flags.end(), raw);
+        return archive::store(*contents, key, raw);
+    };
+    return entry;
+}
+
+// A file as a raw entry (a sound bank).
+vfs::ArchiveEntry raw_file_entry(const fs::path& path, uint64_t size) {
+    vfs::ArchiveEntry entry;
+    entry.size = size;
+    entry.make = [path]() { return read_file(path); };
+    return entry;
+}
+
+// The size of a regular file, if it is one.
+std::optional<uint64_t> pack_file_size(const fs::path& path) {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return std::nullopt;
+    const uint64_t size = fs::file_size(path, ec);
+    if (ec) return std::nullopt;
+    return size;
+}
+
+// The first bytes of a stored entry of the title.
+std::vector<uint8_t> read_stored_start(const Located& at, size_t size) {
+    int32_t handle = 0;
+    if (vfs::open_file("/vol/" + at.archive + ".bin", "r", handle) != vfs::kOk) return {};
+    std::vector<uint8_t> stored(std::min<uint64_t>(at.entry.size, size));
+    uint64_t transferred = 0;
+    vfs::read_file(handle, stored.data(), stored.size(), archive::kPayload + at.entry.offset, transferred);
+    vfs::close_file(handle);
+    stored.resize(transferred);
+    return stored;
+}
+
+// What a title's entry says of itself without being read whole: the size of
+// its contents and its NRCZ flags (zero if it is stored as it is).
+struct Described {
+    uint64_t size = 0;
+    Flags flags{};
+};
+std::optional<Described> describe_entry(const std::map<uint32_t, Located>& located, uint32_t key) {
+    const auto it = located.find(key);
+    if (it == located.end()) return std::nullopt;
+    std::vector<uint8_t> start = read_stored_start(it->second, 16);
+    if (start.size() != std::min<uint64_t>(it->second.entry.size, 16)) return std::nullopt;
+    archive::scramble(start.data(), start.size(), key);
+    Described d;
+    d.size = it->second.entry.size;
+    if (start.size() == 16 && std::memcmp(start.data(), "NRCZ", 4) == 0) {
+        d.size = uint32_t{start[4]} << 24 | uint32_t{start[5]} << 16 | uint32_t{start[6]} << 8 | start[7];
+        std::copy(start.begin() + 8, start.end(), d.flags.begin());
+    }
+    return d;
+}
+
+// The contents of the entry `key` of the title's archive `archive_name`, found
+// by the archive's index as it is now (other entries of it may have been
+// replaced since the game started, which moves the ones behind them).
+std::optional<std::vector<uint8_t>> read_title_contents(const std::string& archive_name, uint32_t key) {
+    const auto ofs = vfs::read_whole("/vol/" + archive_name + ".ofs");
+    const auto index = ofs ? archive::parse_index(*ofs) : std::nullopt;
+    const archive::Entry* e = index ? index->find(key) : nullptr;
+    if (!e) return std::nullopt;
+    auto stored = read_stored(Located{archive_name, *e});
+    return stored ? archive::unpack(std::move(*stored), key) : std::nullopt;
+}
+
 // A texture container (NTP3: "NTP3", u16 version, u16 count at 6, then the
 // textures from 16 on, each starting with its u32 total size) with the
 // textures of `add`, another one, after its own. The 2D layouts take their
@@ -667,20 +756,6 @@ std::optional<uint32_t> motion_row(uint32_t id) {
     return std::nullopt;
 }
 
-// An entry of the title's archives (data100 last), stored, with its NRCZ flags.
-using Stored = std::pair<std::vector<uint8_t>, std::array<uint8_t, 8>>;
-std::optional<Stored> title_entry(const std::map<uint32_t, Located>& located, uint32_t key) {
-    const auto it = located.find(key);
-    if (it == located.end()) return std::nullopt;
-    auto stored = read_stored(it->second);
-    if (!stored) return std::nullopt;
-    std::array<uint8_t, 8> flags{};
-    uint8_t raw[8];
-    archive::stored_flags(*stored, key, raw);
-    std::copy(std::begin(raw), std::end(raw), flags.begin());
-    return std::make_pair(std::move(*stored), flags);
-}
-
 bool has_suffix(const std::string& name, const char* suffix) {
     const size_t n = std::strlen(suffix);
     return name.size() >= n && name.compare(name.size() - n, n, suffix) == 0;
@@ -691,32 +766,53 @@ bool has_suffix(const std::string& name, const char* suffix) {
 // with_textures) as entries: stored ones into `entries`, raw ones (a changed
 // sound bank) into `raw` by archive. False if it does not fit.
 bool add_title_copy(const std::map<uint32_t, Located>& located, const std::string& name, uint32_t key,
-                    const std::vector<uint8_t>& contents, std::map<uint32_t, std::vector<uint8_t>>& entries,
-                    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>>& raw) {
+                    const fs::path& path, std::map<uint32_t, vfs::ArchiveEntry>& entries,
+                    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>>& raw) {
+    const auto size = pack_file_size(path);
+    if (!size) return false;
+    const auto original = located.find(key);
     if (has_suffix(name, ".add")) {
-        const auto original = title_entry(located, key);
-        auto unpacked = original ? archive::unpack(original->first, key) : std::nullopt;
-        auto joined = unpacked ? with_textures(std::move(*unpacked), contents) : std::nullopt;
+        // The title's container with the file's textures: joined now, to learn its size, and again when it is read.
+        if (original == located.end()) return false;
+        const std::string from = original->second.archive;
+        const auto described = describe_entry(located, key);
+        auto join = [from, key, path]() -> std::optional<std::vector<uint8_t>> {
+            auto unpacked = read_title_contents(from, key);
+            const auto contents = unpacked ? read_file(path) : std::nullopt;
+            return contents ? with_textures(std::move(*unpacked), *contents) : std::nullopt;
+        };
+        const auto joined = described ? join() : std::nullopt;
         if (!joined) return false;
-        uint8_t flags[8];
-        std::copy(original->second.begin(), original->second.end(), flags);
-        entries[key] = archive::pack(*joined, key, flags);
+        uint8_t raw_flags[8];
+        std::copy(described->flags.begin(), described->flags.end(), raw_flags);
+        if (from == kUpdateArchive) { // (it replaces the entry it is made from: made once, kept)
+            entries[key].stored = archive::pack(*joined, key, raw_flags);
+            return true;
+        }
+        vfs::ArchiveEntry entry;
+        entry.size = archive::stored_size(joined->size());
+        entry.make = [join, key, flags = described->flags]() -> std::optional<std::vector<uint8_t>> {
+            const auto contents = join();
+            if (!contents) return std::nullopt;
+            uint8_t raw_flags[8];
+            std::copy(flags.begin(), flags.end(), raw_flags);
+            return archive::store(*contents, key, raw_flags);
+        };
+        entries[key] = std::move(entry);
         return true;
     }
     // A changed copy of a raw entry (a sound bank) stays raw, in the original's archive.
-    const auto original = located.find(key);
     if (original != located.end() && raw_archive(original->second.archive)) {
-        raw[original->second.archive][key] = contents;
+        raw[original->second.archive][key] = raw_file_entry(path, *size);
         return true;
     }
-    uint8_t flags[8] = {};
-    if (const auto title = title_entry(located, key)) std::copy(title->second.begin(), title->second.end(), flags);
-    entries[key] = archive::pack(contents, key, flags);
+    const auto described = describe_entry(located, key);
+    entries[key] = file_entry(path, *size, key, described ? described->flags : Flags{});
     return true;
 }
 
 // Raw entries into their archives; -> the archives they could not be added to.
-std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>>& raw,
+std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>>& raw,
                                    const fs::path& from) {
     std::vector<std::string> failed;
     for (const auto& [name, map] : raw) {
@@ -750,20 +846,33 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     files.push_back({pack.code + kMotionName, key_of(pack.code + kMotionName), load(kMotionRows + 12 * donor_row)});
     files.push_back({pack.code + kMovesetName, key_of(pack.code + kMovesetName), load(kMotionRows + 12 * donor_row + 4)});
 
-    std::map<uint32_t, std::vector<uint8_t>> entries;
+    std::map<uint32_t, vfs::ArchiveEntry> entries;
     size_t own = 0;
     for (const File& f : files) {
-        const auto donor = title_entry(located, f.donor_key);
+        const auto donor = describe_entry(located, f.donor_key);
         const uint32_t key = f.key;
-        uint8_t flags[8] = {};
-        if (donor) std::copy(donor->second.begin(), donor->second.end(), flags);
-        if (const auto contents = read_file(pack.directory / f.name)) {
-            entries[key] = archive::pack(*contents, key, flags);
+        const Flags flags = donor ? donor->flags : Flags{};
+        if (const auto size = pack_file_size(pack.directory / f.name)) {
+            entries[key] = file_entry(pack.directory / f.name, *size, key, flags);
             ++own;
         } else if (donor) {
-            auto contents = archive::unpack(donor->first, f.donor_key);
-            if (!contents) return false;
-            entries[key] = archive::pack(*contents, key, flags);
+            const std::string from = located.at(f.donor_key).archive;
+            const uint32_t donor_key = f.donor_key;
+            auto make = [from, donor_key, key, flags]() -> std::optional<std::vector<uint8_t>> {
+                const auto contents = read_title_contents(from, donor_key);
+                if (!contents) return std::nullopt;
+                uint8_t raw_flags[8];
+                std::copy(flags.begin(), flags.end(), raw_flags);
+                return archive::store(*contents, key, raw_flags);
+            };
+            if (from == kUpdateArchive) { // (the archive the copy goes to: made once, kept)
+                auto stored = make();
+                if (!stored) return false;
+                entries[key].stored = std::move(*stored);
+            } else {
+                entries[key].size = archive::stored_size(donor->size);
+                entries[key].make = std::move(make);
+            }
         } else if (f.name.size() < 4 ||
                    (f.name.compare(f.name.size() - 4, 4, ".mop") != 0 &&
                     (f.name.size() < 10 || f.name.compare(f.name.size() - 10, 10, ".havok.xml") != 0))) {
@@ -773,7 +882,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         }
     }
     // Its own sound banks: raw entries of a sound archive.
-    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> raw; // archive -> raw entries
+    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>> raw; // archive -> raw entries
     std::vector<std::string> bank_files;
     voice.chr_tones = pack.chr_tones;
     voice.extra = pack.voice_extra;
@@ -781,10 +890,12 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     for (size_t b = 0; b < std::size(kVoiceBanks); ++b) {
         if (b == 1) continue; // win quotes: in se_Chr_ (an older pack's own se_Dwi_ is not played)
         const std::string name = std::string(kVoiceBanks[b]) + pack.code + ".nus3bank";
-        auto contents = read_file(pack.directory / name);
-        if (!contents || contents->size() < 4 || std::memcmp(contents->data(), "NUS3", 4) != 0) continue;
+        const auto size = pack_file_size(pack.directory / name);
+        std::ifstream bank(pack.directory / name, std::ios::binary);
+        char magic[4] = {};
+        if (!size || !bank.read(magic, 4) || std::memcmp(magic, "NUS3", 4) != 0) continue;
         voice.keys[b] = key_of(name);
-        raw[kSoundArchive][voice.keys[b]] = std::move(*contents);
+        raw[kSoundArchive][voice.keys[b]] = raw_file_entry(pack.directory / name, *size);
         bank_files.push_back(name);
         ++own;
     }
@@ -804,29 +915,28 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
                            std::any_of(files.begin(), files.end(), [&](const File& f) { return f.name == name; }) ||
                            std::find(bank_files.begin(), bank_files.end(), name) != bank_files.end();
         if (known || name.compare(0, 5, "keys/") == 0 || name.compare(0, 7, "source/") == 0) continue;
-        auto contents = read_file(item.path());
-        if (!contents) continue;
+        const auto size = pack_file_size(item.path());
+        if (!size) continue;
         ++own;
         const bool own = name.compare(0, 4, "art/") == 0 || name.compare(0, 4, "alo/") == 0;
         const std::string entry = own ? pack.code + "/" + name : name;
         const uint32_t key = part_key(name, pack.code).value_or(key_of(entry));
-        uint8_t flags[8] = {};
-        entries[key] = archive::pack(*contents, key, flags);
+        entries[key] = file_entry(item.path(), *size, key, Flags{});
         if (name.compare(0, 4, "alo/") == 0) {
             for (const auto& outfit : pack.outfits) {
                 const uint32_t alias_key = key_of(outfit + "/" + name);
-                entries[alias_key] = archive::pack(*contents, alias_key, flags);
+                entries[alias_key] = file_entry(item.path(), *size, alias_key, Flags{});
             }
         }
     }
-    if (!vfs::set_archive_entries("content/hdd/data100", entries)) return false;
+    const size_t count = entries.size();
+    if (!vfs::set_archive_entries(kUpdateArchive, std::move(entries))) return false;
     for (const std::string& failed : serve_raw(raw, pack.directory)) {
         if (failed == kSoundArchive) std::fill(std::begin(voice.keys), std::end(voice.keys), 0u);
     }
     if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: %s (donor %s, id %u): %zu entries, %zu from the pack\n",
-                     pack.code.c_str(), pack.donor.c_str(), kFirstAddedId + static_cast<uint32_t>(slot), entries.size(),
-                     own);
+                     pack.code.c_str(), pack.donor.c_str(), kFirstAddedId + static_cast<uint32_t>(slot), count, own);
     }
     return true;
 }
@@ -839,19 +949,18 @@ void add_shared(const fs::path& directory) {
     std::error_code ec;
     if (!fs::is_directory(directory / "keys", ec)) return;
     const auto located = locate_entries();
-    std::map<uint32_t, std::vector<uint8_t>> entries;
-    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> raw;
+    std::map<uint32_t, vfs::ArchiveEntry> entries;
+    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>> raw;
     for (const auto& item : fs::directory_iterator(directory / "keys", ec)) {
         const std::string name = "keys/" + item.path().filename().string();
         const auto key = named_key(name);
-        const auto contents = key ? read_file(item.path()) : std::nullopt;
-        if (!contents) continue;
-        if (!add_title_copy(located, name, *key, *contents, entries, raw)) {
+        if (!key || !pack_file_size(item.path())) continue;
+        if (!add_title_copy(located, name, *key, item.path(), entries, raw)) {
             std::fprintf(stderr, "ttt2: warning: %s: %s does not fit the title's entry; left out\n",
                          directory.string().c_str(), name.c_str());
         }
     }
-    if (!vfs::set_archive_entries("content/hdd/data100", entries)) {
+    if (!vfs::set_archive_entries(kUpdateArchive, std::move(entries))) {
         std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.string().c_str());
         return;
     }
