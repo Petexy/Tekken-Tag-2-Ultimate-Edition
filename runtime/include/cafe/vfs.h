@@ -47,11 +47,23 @@ struct DirEntry {
 void open_game(const std::filesystem::path& source);
 void set_save_root(const std::filesystem::path& root);
 
+// An archive entry to serve, as stored (see title/archive.h): its bytes,
+// held, or `size` and a function making them when the title reads the entry
+// (on the reading thread; it may read other archives). What it makes is
+// dropped again soon after: a fighter pack's files cost no memory while no
+// fight uses them.
+struct ArchiveEntry {
+    uint64_t size = 0;
+    std::vector<uint8_t> stored;
+    std::function<std::optional<std::vector<uint8_t>>()> make;
+};
+
 // The title's archive `archive` ("content/hdd/data003": its .ofs and .bin
 // files) with the entries named in `stored` (by name hash, as stored: see
 // title/archive.h): ones it holds replaced, others added. Calls add up, a
 // later one winning for the same entry. Call before the title runs; false
-// if the archive cannot take them.
+// if the archive cannot take them (then it is served as before the call).
+bool set_archive_entries(const std::string& archive, std::map<uint32_t, ArchiveEntry> entries);
 bool set_archive_entries(const std::string& archive, const std::map<uint32_t, std::vector<uint8_t>>& stored);
 
 // Calls `reader` with the name hash of each archive entry the title reads

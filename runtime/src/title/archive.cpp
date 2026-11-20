@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <unordered_set>
 
 namespace cafe::title::archive {
 namespace {
@@ -160,8 +161,54 @@ std::vector<uint8_t> pack(const std::vector<uint8_t>& contents, uint32_t hash, c
     return stored;
 }
 
+// A zlib stream of stored blocks: the two header bytes, the contents in
+// blocks of up to 65535 bytes behind five bytes each (at least one block),
+// and the contents' Adler-32 sum.
+constexpr uint64_t kStoredBlock = 65535;
+
+uint64_t stored_size(uint64_t contents_size) {
+    const uint64_t blocks = std::max<uint64_t>(1, (contents_size + kStoredBlock - 1) / kStoredBlock);
+    return 16 + 2 + 5 * blocks + contents_size + 4;
+}
+
+std::vector<uint8_t> store(const std::vector<uint8_t>& contents, uint32_t hash, const uint8_t (&flags)[8]) {
+    std::vector<uint8_t> stored(stored_size(contents.size()));
+    std::memcpy(stored.data(), "NRCZ", 4);
+    put_be32(&stored[4], static_cast<uint32_t>(contents.size()));
+    std::memcpy(&stored[8], flags, 8);
+    size_t at = 16;
+    stored[at++] = 0x78;
+    stored[at++] = 0x01;
+    size_t done = 0;
+    do {
+        const size_t n = std::min<size_t>(kStoredBlock, contents.size() - done);
+        stored[at++] = done + n == contents.size() ? 1 : 0;
+        stored[at++] = static_cast<uint8_t>(n);
+        stored[at++] = static_cast<uint8_t>(n >> 8);
+        stored[at++] = static_cast<uint8_t>(~n);
+        stored[at++] = static_cast<uint8_t>(~n >> 8);
+        if (n != 0) std::memcpy(&stored[at], &contents[done], n);
+        at += n;
+        done += n;
+    } while (done < contents.size());
+    uLong sum = adler32(0L, Z_NULL, 0);
+    for (size_t i = 0; i < contents.size(); i += size_t{1} << 30) {
+        sum = adler32(sum, contents.data() + i, static_cast<uInt>(std::min<size_t>(size_t{1} << 30, contents.size() - i)));
+    }
+    put_be32(&stored[at], static_cast<uint32_t>(sum));
+    scramble(stored.data(), stored.size(), hash);
+    return stored;
+}
+
+Source held(std::vector<uint8_t> stored) {
+    Source source;
+    source.size = stored.size();
+    source.data = std::make_shared<const std::vector<uint8_t>>(std::move(stored));
+    return source;
+}
+
 std::optional<Rebuilt> rebuild(const std::vector<uint8_t>& ofs, const std::vector<uint8_t>& bin_header,
-                               const std::map<uint32_t, std::vector<uint8_t>>& entries) {
+                               const std::map<uint32_t, std::shared_ptr<const Source>>& entries) {
     const auto l = layout(ofs);
     if (!l || bin_header.size() < kPayload || std::memcmp(&bin_header[kPayload - 4], "imge", 4) != 0) {
         return std::nullopt;
@@ -169,7 +216,12 @@ std::optional<Rebuilt> rebuild(const std::vector<uint8_t>& ofs, const std::vecto
     std::vector<uint8_t> names, offsets; // the new "ofsi" and "ofsd" payloads
     Rebuilt out;
     auto header = std::make_shared<std::vector<uint8_t>>(bin_header.begin(), bin_header.begin() + kPayload);
-    out.bin.push_back(Piece{0, kPayload, 0, header});
+    {
+        auto first = std::make_shared<Source>();
+        first->size = kPayload;
+        first->data = header;
+        out.bin.push_back(Piece{0, kPayload, 0, std::move(first)});
+    }
     uint64_t at = 0; // in the new payload
     auto put = [&](uint32_t hash, uint32_t word, uint32_t tail) {
         const size_t n = names.size();
@@ -179,12 +231,10 @@ std::optional<Rebuilt> rebuild(const std::vector<uint8_t>& ofs, const std::vecto
         offsets.resize(offsets.size() + 4);
         put_be32(&offsets[offsets.size() - 4], static_cast<uint32_t>(at) | tail);
     };
-    auto put_new = [&](uint32_t hash, uint32_t word, const std::vector<uint8_t>& stored) {
-        auto data = std::make_shared<std::vector<uint8_t>>(stored);
-        put(hash, word, static_cast<uint32_t>(data->size() % 16));
-        data->resize(align16(data->size()));
-        const uint64_t padded = data->size();
-        out.bin.push_back(Piece{kPayload + at, padded, 0, std::move(data)});
+    auto put_new = [&](uint32_t hash, uint32_t word, const std::shared_ptr<const Source>& entry) {
+        put(hash, word, static_cast<uint32_t>(entry->size % 16));
+        const uint64_t padded = align16(entry->size);
+        out.bin.push_back(Piece{kPayload + at, padded, 0, entry});
         at += padded;
     };
     const auto names_at = find_chunk(ofs, "ofsi");
@@ -199,7 +249,7 @@ std::optional<Rebuilt> rebuild(const std::vector<uint8_t>& ofs, const std::vecto
         put(l->hashes[i], word, l->offsets[i] & 0xF);
         if (end != start) {
             Piece& last = out.bin.back();
-            if (!last.data && last.source + last.size == kPayload + start) {
+            if (!last.entry && last.source + last.size == kPayload + start) {
                 last.size += end - start;
             } else {
                 out.bin.push_back(Piece{kPayload + at, end - start, kPayload + start, nullptr});
@@ -208,9 +258,11 @@ std::optional<Rebuilt> rebuild(const std::vector<uint8_t>& ofs, const std::vecto
         at += end - start;
     }
     // Entries the archive does not hold go after its last one.
-    for (const auto& [hash, stored] : entries) {
-        if (std::find(l->hashes.begin(), l->hashes.end(), hash) == l->hashes.end()) put_new(hash, 0, stored);
+    const std::unordered_set<uint32_t> own(l->hashes.begin(), l->hashes.end());
+    for (const auto& [hash, entry] : entries) {
+        if (own.count(hash) == 0) put_new(hash, 0, entry);
     }
+    if (at > 0xFFFFFFF0u - kPayload) return std::nullopt; // (the index's offsets are 32 bits wide)
     offsets.resize(offsets.size() + 4);
     put_be32(&offsets[offsets.size() - 4], static_cast<uint32_t>(at));
     put_be32(&(*header)[kPayload - 8], static_cast<uint32_t>(at + 8));
