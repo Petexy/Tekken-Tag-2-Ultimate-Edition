@@ -88,6 +88,7 @@ LOWER_ROOT = 'KOSHI_jnt'            # the joint the lower body hangs from (a pie
 PIECE_SIDE = 0.75                   # the share of a piece's weights on one half of the body that makes it that half's
 PIECE_WELD = 1                      # decimals of a mm within which two vertices of a piece are one point (split_piece)
 PIECE_COVER = 0.98                  # the share of a polygon's vertices lying on another's that makes it drawn over it
+WAIST_SECTORS = 24                  # directions round the hips in which the lower body's cloth's top is taken (_waistline)
 HUMAN_REACH = 200.0                 # mm a joint may lie from the source's for the source's clothes to be fitted
                                     # (the human-sized fighters' joints: up to about 130; the giants': 250 and more)
 BODY_SLOTS = (8, 12)                 # the record's slots of the upper-body and the lower-body garment
@@ -111,6 +112,18 @@ GIRTH_SPAN = (0.8, 1.5)             # a limb is made this much thinner or thicke
 GIRTH_SAME = 0.12                   # a limb within this of the source's keeps the source's girth
 GIRTH_SHARE = 0.7                   # the share of a vertex's weights on a limb's bones that makes it a sample of it
 GIRTH_END = 0.8                     # from here along a limb its girth eases toward the hand's or foot's (unchanged)
+WAIST = ('MOMO_R_jnt', 'MUNE2_jnt')  # the joints between whose heights a bare waist is measured (Waist)
+WAIST_ARMS = ('SAKOTSU_R_jnt', 'SAKOTSU_L_jnt')     # ... what hangs from these is not the waist's (an arm beside it)
+WAIST_SHARE = 0.3                   # the most of a vertex's weights on an arm for it to be a sample of the waist
+WAIST_ROUND = (12, 25.0, 0.75)      # directions round the waist; a ring's height, mm; the share of a ring's
+                                    # directions that must be bare for the waist to count as bare (Waist)
+WAIST_TURNS = 48                    # directions the blended differences are kept in
+WAIST_NEAR = 40.0                   # mm within which the source's skin must lie from a sample of the fighter's
+WAIST_SMOOTH = 20.0                 # mm over which the measured differences are blended (and fade where none is)
+WAIST_MOST = 40.0                   # mm the waist is moved at most
+WAIST_TOP = 'KUBI_jnt'              # the joint at whose height the waist's shape has run out, going up
+WAIST_BELOW = 120.0                 # mm under the lowest bare skin over which it runs out, going down
+WAIST_STEP = 10.0                   # mm between the heights the blended differences are kept at
 HALVED = 2                          # texture format (BC3: normal and specular maps) stored at half size
 
 
@@ -600,6 +613,138 @@ class Girth:
         return moved
 
 
+class Waist:
+    """Makes the source's bare body and garments follow the fighter's own waist where the fighter's own outfit
+    bares it all the way round (a bare midriff: girth_of's factors are one number for a whole trunk, and hips a
+    centimetre wider than the source's show through the hem of a top or the waist of trousers of the source's
+    worn with the fighter's own other half). Between the heights of WAIST's joints, each point of the fighter's
+    bare skin is held against the source's fitted bare body in the same direction from the upright through the
+    hips' joint, at the same height; the differences, blended (WAIST_SMOOTH) and running out evenly above and
+    below where they were measured, move every vertex of a cut or a garment toward or away from that upright.
+    `found` is False when the fighter has no such waist: nothing moves."""
+
+    def __init__(self, bon, skin, cuts):
+        """bon: the fighter's body skeleton; skin: [(positions, each one's share of weights on an arm)] of the
+        fighter's own bare skin; cuts: the same of the source's bare body as fitted to the fighter."""
+        names = [_short(n) for n in bon['names']]
+        self.found = False
+        if LOWER_ROOT not in names or any(n not in names for n in WAIST):
+            return
+        world = bonefile.world_matrices(bon)[:, :3, 3]
+        self.centre = world[names.index(LOWER_ROOT)]
+        low, high = sorted(float(world[names.index(n)][1]) for n in WAIST)
+        sectors, ring, share = WAIST_ROUND
+
+        def samples(parts, margin):
+            pos = [p[(a < WAIST_SHARE) & (p[:, 1] >= low - margin) & (p[:, 1] <= high + margin)] for p, a in parts]
+            pos = np.concatenate(pos) if pos else np.zeros((0, 3))
+            angle, radius = self._round(pos)
+            return angle, pos[:, 1], radius
+        angle, height, radius = samples(skin, 0.0)
+        theirs = samples(cuts, WAIST_NEAR)
+        if not len(angle) or not len(theirs[0]):
+            return
+        # bare all the way round at some height?
+        rows = np.floor((height - low) / ring).astype(np.int64)
+        cells = np.floor(angle / (2 * np.pi) * sectors).astype(np.int64) % sectors
+        if max(len(set(cells[rows == r].tolist())) for r in set(rows.tolist())) < share * sectors:
+            return
+        # the source's skin in each sample's direction and height: its nearest three points
+        mean = float(np.median(radius))
+        diff, keep = np.zeros(len(angle)), np.zeros(len(angle), bool)
+        for i in range(len(angle)):
+            turn = (theirs[0] - angle[i] + np.pi) % (2 * np.pi) - np.pi
+            d = np.hypot(turn * mean, theirs[1] - height[i])
+            near = np.argsort(d)[:3]
+            if d[near[0]] > WAIST_NEAR:
+                continue
+            w = 1.0 / (d[near] + 1.0)
+            diff[i] = radius[i] - float((theirs[2][near] * w).sum() / w.sum())
+            keep[i] = True
+        if not keep.any():
+            return
+        angle, height, diff = angle[keep], height[keep], np.clip(diff[keep], -WAIST_MOST, WAIST_MOST)
+        # blended onto a grid of directions and heights; above and below where it was measured the waist's shape
+        # runs out evenly, to nothing at the neck's root and WAIST_BELOW under the lowest bare skin (a body moved
+        # at the waist alone would be kinked there)
+        first, last = float(height.min()), float(height.max())
+        top = float(world[names.index(WAIST_TOP)][1]) if WAIST_TOP in names else high
+        top = max(top, last + WAIST_STEP)
+        self.heights = np.arange(first - WAIST_BELOW, top + WAIST_STEP, WAIST_STEP)
+        turns = (np.arange(WAIST_TURNS) + 0.5) * 2 * np.pi / WAIST_TURNS
+        turn = (turns[:, None, None] - angle[None, None, :] + np.pi) % (2 * np.pi) - np.pi
+        d2 = (turn * mean) ** 2 + (self.heights[None, :, None] - height[None, None, :]) ** 2
+        g = np.exp(-d2 / (2 * WAIST_SMOOTH ** 2))
+        total = g.sum(2)
+        ease = np.clip(np.minimum((self.heights - (first - WAIST_BELOW)) / WAIST_BELOW,
+                                  (top - self.heights) / (top - last)), 0.0, 1.0)
+        self.grid = (g * diff).sum(2) / np.maximum(total, 1e-12) * ease[None, :]
+        self.found = True
+
+    def _round(self, pos):
+        off = pos[:, [0, 2]] - self.centre[[0, 2]]
+        return (np.arctan2(off[:, 1], off[:, 0]) + 2 * np.pi) % (2 * np.pi), np.hypot(off[:, 0], off[:, 1])
+
+    def moves(self, pos, arm):
+        """How far each position moves (arm: its share of weights on an arm: that much of it stays)."""
+        sectors = self.grid.shape[0]
+        angle, radius = self._round(pos)
+        a = angle / (2 * np.pi) * sectors - 0.5
+        a0 = np.floor(a).astype(np.int64)
+        fa = a - a0
+        h = np.clip((pos[:, 1] - self.heights[0]) / WAIST_STEP, 0.0, len(self.heights) - 1.0)
+        h0 = np.minimum(np.floor(h).astype(np.int64), len(self.heights) - 2)
+        fh = h - h0
+        inside = (pos[:, 1] >= self.heights[0]) & (pos[:, 1] <= self.heights[-1])
+        g = self.grid
+        value = (g[a0 % sectors, h0] * (1 - fa) + g[(a0 + 1) % sectors, h0] * fa) * (1 - fh) + \
+                (g[a0 % sectors, h0 + 1] * (1 - fa) + g[(a0 + 1) % sectors, h0 + 1] * fa) * fh
+        value = value * inside * (1.0 - np.clip(arm, 0.0, 1.0))
+        out = np.zeros((len(pos), 3))
+        off = pos[:, [0, 2]] - self.centre[[0, 2]]
+        out[:, [0, 2]] = off / np.maximum(radius, 1e-6)[:, None] * value[:, None]
+        return out
+
+    def fit(self, model, bon):
+        """`model` (changed in place; bound through skeleton `bon`) with its waist the fighter's."""
+        if not self.found:
+            return model
+        for mesh in model['meshes']:
+            for pos, arm, poly in waist_points([mesh], bon, polys=True):
+                poly['verts']['pos'] = pos + self.moves(pos, arm)
+            points = [p['verts']['pos'] for p in mesh['polys']]
+            if points:
+                mesh['sphere'] = nudfile.bounding_sphere(np.concatenate(points))
+                mesh['center'] = mesh['sphere'][:3]
+        every = [p['verts']['pos'] for m in model['meshes'] for p in m['polys']]
+        if every:
+            model['sphere'] = nudfile.bounding_sphere(np.concatenate(every))
+        return model
+
+
+def waist_points(meshes, bon, skin=False, polys=False):
+    """[(positions, each one's share of weights on an arm)] of meshes bound through skeleton `bon` (Waist), a pair
+    per skinned polygon (skin: of the body-skin material only; polys: the polygon with each pair). A bone is an
+    arm's when it hangs from WAIST_ARMS (a garment's own bone: by its ancestors)."""
+    names = [_short(n) for n in bon['names']]
+    arm = np.zeros(len(names) + 1, bool)
+    for i in range(len(names)):
+        j = i
+        while j >= 0 and names[j] not in WAIST_ARMS:
+            j = bon['parent'][j]
+        arm[i] = j >= 0
+    out = []
+    for mesh in meshes:
+        for poly in mesh['polys']:
+            v = poly['verts']
+            if 'bones' not in v.dtype.names or (skin and not (poly['materials'] and
+                                                              poly['materials'][0]['flags'] == SKIN_FLAGS)):
+                continue
+            share = (_weights(v) * arm[np.minimum(v['bones'].astype(np.int64), len(arm) - 1)]).sum(1)
+            out.append((v['pos'].astype(np.float64), share) + ((poly,) if polys else ()))
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ the neck
 def _mesh_points(mesh):
     """(positions, triangles, the polygon and the vertex within it of each position) of a mesh."""
@@ -1035,6 +1180,26 @@ def _islands(points, tris):
     return np.array([find(x) for x in point.tolist()], np.int64)
 
 
+def _waistline(points, bon):
+    """Where the lower body's cloth ends, from its vertices `points` (bind pose) and the body's skeleton: a function
+    of positions -> whether each lies above it. The height the cloth reaches is taken per direction round the
+    upright through the hips' joint (WAIST_SECTORS: a waistband dips in front), a direction without cloth taking
+    its nearest neighbours'."""
+    names = [n.split(':')[-1] for n in bon['names']]
+    centre = bonefile.world_matrices(bon)[names.index(LOWER_ROOT), :3, 3]
+
+    def sector(p):
+        angle = np.arctan2(p[:, 2] - centre[2], p[:, 0] - centre[0])
+        return np.floor((angle + np.pi) / (2 * np.pi) * WAIST_SECTORS).astype(np.int64) % WAIST_SECTORS
+    tops = np.full(WAIST_SECTORS, -np.inf)
+    np.maximum.at(tops, sector(points), points[:, 1])
+    have = np.flatnonzero(np.isfinite(tops))
+    for i in np.flatnonzero(~np.isfinite(tops)):
+        away = np.minimum((have - i) % WAIST_SECTORS, (i - have) % WAIST_SECTORS)
+        tops[i] = tops[have[away == away.min()]].max()
+    return lambda p: p[:, 1] > tops[sector(p)]
+
+
 def split_piece(mesh, bon):
     """A piece of the fighter's own outfit that covers both halves of the body (a Tekken 8 costume is one mesh:
     jacket, trousers, boots and the skin they leave bare), as an upper and a lower piece: (upper mesh, lower mesh),
@@ -1046,11 +1211,14 @@ def split_piece(mesh, bon):
     hips. Only bare skin that runs through the waist (an island of the skin material with between 1 - PIECE_SIDE and
     PIECE_SIDE of its weights below) is parted, triangle by triangle, where its weights pass from the trunk to the
     hips: a bare midriff is the top's above and the trousers' below, as the game's own outfits carry it.
+    Where the piece has cloth of the lower body, the skin of the hips is the lower piece's only up to where that
+    cloth ends (_waistline): the hips' weights reach the navel, and a bare belly left with the trousers shows
+    through the hem of any other top worn over them. What is above the waistband is the top's.
     A polygon drawn over another's triangles (PIECE_COVER of its vertices lie on the other's: a 2P colour layer
     over its cloth) goes, triangle by triangle, where what it is drawn over went."""
     from . import strips
     below = _below(bon)
-    plans = []                      # per polygon: (triangles, which are the lower body's, each vertex's half, points)
+    found = []                      # per polygon: (triangles, each vertex's share below, its island, whether skin)
     for poly in mesh['polys']:
         v = poly['verts']
         tris = np.array(nudfile.strip_to_tris(poly['indices']), np.int64).reshape(-1, 3)
@@ -1060,6 +1228,16 @@ def split_piece(mesh, bon):
             share = np.zeros(len(v))
         island = _islands(v['pos'].astype(np.float64), tris)
         skin = bool(poly['materials']) and poly['materials'][0]['flags'] == SKIN_FLAGS
+        found.append((tris, share, island, skin))
+    # the lower body's cloth first: where it ends is where the bare skin above it is the top's
+    cloth = [poly['verts']['pos'][island == i].astype(np.float64)
+             for poly, (_, share, island, skin) in zip(mesh['polys'], found) if not skin
+             for i in np.unique(island) if float(share[island == i].mean()) >= 0.5]
+    waist = _waistline(np.concatenate(cloth), bon) if cloth else None
+    plans = []                      # per polygon: (triangles, which are the lower body's, each point's half)
+    for poly, (tris, share, island, skin) in zip(mesh['polys'], found):
+        v = poly['verts']
+        pos = v['pos'].astype(np.float64)
         low, parted = np.zeros(len(v), bool), np.zeros(len(v), bool)
         for i in np.unique(island):
             pick = island == i
@@ -1068,11 +1246,17 @@ def split_piece(mesh, bon):
                 low[pick], parted[pick] = share[pick] >= 0.5, True
             else:
                 low[pick] = mean >= 0.5
+            if skin and waist is not None and mean > 1 - PIECE_SIDE:
+                low[pick], parted[pick] = low[pick] & ~waist(pos[pick]), True
         lower = low[tris[:, 0]] if len(tris) else np.zeros(0, bool)
         if len(tris):
-            lower = np.where(parted[tris[:, 0]], share[tris].mean(1) >= 0.5, lower)
+            mine = share[tris].mean(1) >= 0.5
+            if waist is not None:           # (a triangle is the half its three corners agree on, or its middle's)
+                mine = np.where(low[tris].all(1), True, np.where(~low[tris].any(1), False,
+                                                                 mine & ~waist(pos[tris].mean(1))))
+            lower = np.where(parted[tris[:, 0]], mine, lower)
         where = {}
-        for key, side in zip(map(tuple, np.round(v['pos'].astype(np.float64), PIECE_WELD).tolist()), low.tolist()):
+        for key, side in zip(map(tuple, np.round(pos, PIECE_WELD).tolist()), low.tolist()):
             where.setdefault(key, side)
         plans.append([tris, lower, where])
     # what is drawn over another polygon goes with it
@@ -1333,6 +1517,18 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     # the body: the fighter's own pieces leave it, the cuts join it
     cut_model = renumber(fit(dict(meshes=copy.deepcopy(cuts), sphere=source['sphere']), shifts, neck, thick.of()),
                          ids)
+    # a body made two pieces at a bare waist: the source's body and garments take that waist's shape (either
+    # piece is worn with garments fitted to the source's hips)
+    waist = None
+    if split:
+        waist = Waist(target_bon, waist_points(own_meshes, target_bon, skin=True),
+                      waist_points(cut_model['meshes'], source_bon))
+        if waist.found:
+            log('wardrobe: %s\'s bare waist followed (up to %.0f mm from %s\'s)' % (code, np.abs(waist.grid).max(),
+                                                                                  source_code))
+            waist.fit(cut_model, source_bon)
+        else:
+            waist = None
     moved = outfit_meshes(body, code, target_bon)       # (as they are in the body: a piece made two is new meshes)
     body['meshes'] = [m for m in body['meshes'] if not any(m is x for x in moved)] + cut_model['meshes']
     body['bone_first'] = body['bone_last'] = None
@@ -1368,7 +1564,10 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         s = shifts if part is None else joint_shifts(source_bon, target_bon, part)
         if part is None and nudfile.used_bones(model)[1] >= len(shifts):
             s = np.concatenate([shifts, np.zeros((nudfile.used_bones(model)[1] + 1 - len(shifts), 3))])
-        out['parts/model/%d.nud' % index] = nudfile.write(renumber(fit(model, s, neck, thick.of(part)), ids))
+        model = fit(model, s, neck, thick.of(part))
+        if waist is not None:
+            waist.fit(model, source_bon if part is None else part)
+        out['parts/model/%d.nud' % index] = nudfile.write(renumber(model, ids))
     for inst in wanted:
         for g in itemdb.groups(inst):
             a = _attrs(g)

@@ -418,6 +418,69 @@ class Pieces(unittest.TestCase):
         self.assertEqual(self.triangles(upper), 4 * n)
         self.assertIsNone(lower)
 
+    def test_bare_skin_above_the_waistband_is_the_tops(self):
+        bon = skeleton(self.BODY)
+        # a bare belly bound to the hips from 900 to 1100, over shorts that end at 1000 (lower in front: 960)
+        n = 8
+        heights = (1100, 1050, 1000, 950, 900)
+        points = np.concatenate([ring(100, y, n) for y in heights])
+        tris = []
+        for row in range(len(heights) - 1):
+            for i in range(n):
+                j = (i + 1) % n
+                tris += [(row * n + i, row * n + j, row * n + n + i), (row * n + j, row * n + n + j, row * n + n + i)]
+        body = mesh('abc_bdf_1p', points, tris, [2] * len(points))
+        band = ring(110, 1000, n)
+        band[0, 1] = 960                                           # (ring: its first point is in front)
+        shorts = np.concatenate([band, ring(110, 800, n)])
+        cloth = [(i, (i + 1) % n, n + i) for i in range(n)] + [((i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+        body['polys'].append(mesh('x', shorts, cloth, [2] * n + [3] * n, flags=0x24600099)['polys'][0])
+        upper, lower = wardrobe.split_piece(body, bon)
+        self.assertEqual([p['materials'][0]['flags'] for p in upper['polys']], [wardrobe.SKIN_FLAGS])
+        up, low = upper['polys'][0]['verts']['pos'], lower['polys'][0]['verts']['pos']
+        self.assertEqual(self.triangles(upper) + self.triangles(lower), len(tris) + len(cloth))
+        self.assertEqual(up[:, 1].min(), 950)                      # (in front down to under the dip, no further)
+        self.assertEqual(up[up[:, 2] < 0][:, 1].min(), 1000)       # ... and behind to the band
+        self.assertLessEqual(low[:, 1].max(), 1000)                # none of the lower piece's skin above the band
+        # without cloth of the lower body the hips' skin stays the lower piece's, whole
+        bare = mesh('abc_bdf_1p', points, tris, [2] * len(points))
+        upper, lower = wardrobe.split_piece(bare, bon)
+        self.assertIsNone(upper)
+        self.assertEqual(self.triangles(lower), len(tris))
+
+    def test_the_sources_body_and_garments_follow_a_bare_waist(self):
+        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('KOSHI_jnt', 0, (0, 1100, 0)), ('MOMO_R_jnt', 1, (-90, 950, 0)),
+                        ('MUNE2_jnt', 0, (0, 1250, 0)), ('KUBI_jnt', 3, (0, 1450, 0)),
+                        ('SAKOTSU_R_jnt', 3, (-90, 1440, 0)), ('KATA_R_jnt', 5, (-150, 1430, 0))])
+
+        def tube(radius, heights, centre=(0.0, 0.0), n=24):
+            return np.concatenate([ring(radius, y, n, centre) for y in heights])
+        heights = range(1000, 1241, 20)
+        # the fighter's bare waist: 10 mm thicker than the source's and 20 mm further forward
+        own = [(tube(110, heights, (0.0, 20.0)), np.zeros(24 * len(heights)))]
+        cut = [(tube(100, range(900, 1500, 20)), np.zeros(24 * 30))]
+        waist = wardrobe.Waist(bon, own, cut)
+        self.assertTrue(waist.found)
+        front, back, side = np.array([[0.0, 1100, 105]]), np.array([[0.0, 1100, -105]]), np.array([[105.0, 1100, 0]])
+        np.testing.assert_allclose(waist.moves(front, np.zeros(1))[0], (0, 0, 30), atol=3)   # (a garment 5 mm off the
+        np.testing.assert_allclose(waist.moves(back, np.zeros(1))[0], (0, 0, 10), atol=3)    #  skin stays 5 mm off it)
+        self.assertAlmostEqual(waist.moves(side, np.zeros(1))[0][0], np.sqrt(110 ** 2 - 20 ** 2) - 100, delta=3)
+        # an arm beside the waist stays; the shape has run out at the neck's root and well under the bare skin
+        np.testing.assert_allclose(waist.moves(front, np.ones(1))[0], (0, 0, 0), atol=1e-9)
+        for y in (1450, 1500, 880, 800):
+            np.testing.assert_allclose(waist.moves(np.array([[0.0, y, 105]]), np.zeros(1))[0], (0, 0, 0), atol=1e-9)
+        half = waist.moves(np.array([[0.0, 1345, 105]]), np.zeros(1))[0][2]
+        self.assertTrue(10 < half < 20)                                         # ... evenly: half way, half of it
+        # a model is moved through its own skeleton's arms
+        shirt = mesh('shirt', [(0, 1100, 105), (0, 1100, -105), (-200, 1100, 0)], [(0, 1, 2)], [1, 1, 6])
+        waist.fit(dict(meshes=[shirt], sphere=(0, 0, 0, 1)), bon)
+        np.testing.assert_allclose(shirt['polys'][0]['verts']['pos'][:, 2], (135, -95, 0), atol=3)
+        np.testing.assert_allclose(shirt['polys'][0]['verts']['pos'][2], (-200, 1100, 0), atol=1e-4)
+        # skin bared in front only (an open jacket) is no waist to follow
+        open_front = [(p[p[:, 2] > 100], a[p[:, 2] > 100]) for p, a in own]
+        self.assertFalse(wardrobe.Waist(bon, open_front, cut).found)
+        self.assertFalse(wardrobe.Waist(bon, [], cut).found)
+
     def test_a_coat_keeps_its_tails_and_a_layer_goes_with_what_it_is_drawn_over(self):
         bon = skeleton(self.BODY)
         # a coat: chest (the trunk's) with a tail on a bone of its own under the trunk and a hem bound to the hips

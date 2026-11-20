@@ -1231,7 +1231,15 @@ wardrobe step makes it two (`split_piece`): each polygon's islands (a
 jacket, a boot, a buckle, an arm's skin) go whole to the half of the body
 that holds most of their weights, a coat with its tails to the chest, a belt
 to the hips; only bare skin that runs through the waist is cut, and a 2P
-colour layer goes where the cloth under it went. The head, hair, worn
+colour layer goes where the cloth under it went. The lower piece's skin ends
+where its own cloth ends (`_waistline`): the hips' weights reach the navel,
+and a belly left with the trousers showed through the hem of a top worn over
+them. A Tekken 8 torso also lies some 3 cm further forward on its joints than
+the title's, so where the fighter's own outfit bares the waist all the way
+round, the source's bare body and garments are moved onto that waist
+(`Waist`: the difference measured direction by direction, running out to
+nothing at the neck's root and under the hips); otherwise a garment worn with
+the fighter's own other half is cut through by the bare belly. The head, hair, worn
 head items, weapons and summoned things stay in the body model, so they
 show with any garment. Azazel is left out by the size rule (a joint two
 metres from Lars's). Two things had to give way for this: Miary Zo's snake
