@@ -448,6 +448,7 @@ void GuestMemory::init(Context& c) {
                      r.base, r.base + size - 1, mai.memoryTypeIndex, props.memoryTypeBits & req.memoryTypeBits,
                      type.propertyFlags, type.heapIndex, heap.flags, static_cast<unsigned long long>(heap.size >> 20));
         regions_.push_back(region);
+        keep_guest_memory_fast(r.base, size);
     }
 }
 

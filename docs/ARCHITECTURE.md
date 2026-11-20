@@ -52,6 +52,15 @@ the reachability bound sound.
   took the "gpu" thread from 7 % to 44 % of a core in the kernel during a
   fight. Unasked, a kernel set to "madvise" (SteamOS) gives it none and one
   set to "always" only while whole 2 MiB blocks are free (after a boot).
+  A PC short of free memory takes the huge pages away again: the GPU's reads
+  are no use the kernel sees, so it splits them to swap the memory out and
+  each submission reads it back as 4 KiB pages. At 240 Hz the presentation
+  thread (a submission per refresh) then went from 13 % to 45-63 % of a core,
+  the extra frames were skipped and the title ran at 52-55 frames/s. A
+  thread ("memory", `keep_guest_memory_fast`) therefore reads a byte of
+  every page of the imported ranges once a second and, every four seconds,
+  gives the blocks that lost their huge page a new one (`MADV_COLLAPSE`,
+  Linux 6.1); it logs when it finds them missing.
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
@@ -2010,6 +2019,8 @@ debugging:
 | `TTT2_DISPLAY_HZ=<hz>` | report this refresh rate for the window's display (tests the rate check) |
 | `TTT2_FULLSCREEN=1` | start fullscreen (another value: windowed; over display.ini) |
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
+| `TTT2_KEEP_MEMORY=0` | leave the memory the GPU reads to the kernel (no "memory" thread) |
+| `TTT2_TRACE_MEMORY=1` | the "memory" thread's passes: time, blocks, megabytes on huge pages |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
 | `TTT2_EVICT=0` | keep the textures and render targets the title stopped using (freed after 30 s otherwise) |
