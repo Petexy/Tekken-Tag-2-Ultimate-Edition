@@ -54,6 +54,17 @@ inline constexpr uint32_t kRetryExpiryNextFrame = 1;
 inline bool holds_sessions(bool supported_fighter, bool started_assault) {
     return supported_fighter && !started_assault;
 }
+// The title decodes the pad for a fighter while the next stage loads too,
+// and then its move still points into the moveset of the fight before, which
+// is freed and written over by the files being loaded. Nothing of a move may
+// be read unless it is a row of the moves table of the moveset the fighter
+// has now: `magic` is that moveset's +4 ("COM"), `moves` and `count` its
+// moves table (+0x1A0, +0x1A4; rows of 0x70 bytes).
+inline constexpr uint32_t kMovesetMagic = 0x434F4D00, kMovesetMoves = 0x1A0, kMoveSize = 0x70;
+inline bool move_of_moveset(uint32_t magic, uint32_t moves, uint32_t count, uint32_t move) {
+    return magic == kMovesetMagic && moves && move >= moves &&
+           (move - moves) % kMoveSize == 0 && (move - moves) / kMoveSize < count;
+}
 // Installed input-only captures use 0x2800 and write the special buffer.
 // Ordinary finite string inputs use 0x182/0x183. Neither automatic hit
 // transitions nor a move's neutral-recovery row extend control.

@@ -4683,13 +4683,22 @@ std::map<uint32_t, uint32_t> g_special_assist_returns;
 // player+7820: this fighter's bound started the current Tag Assault (see
 // eliza_assist::holds_sessions).
 constexpr uint32_t kPlayerAssaultStarter = 0x1e8c;
+// The fighter's move is a move of the moveset it uses now (eliza_assist::move_of_moveset).
+bool live_move(uint32_t player) {
+    const uint32_t moveset = load(player + kPlayerMovesetInUse), move = load(player + kPlayerMove);
+    return moveset && move && eliza_assist::move_of_moveset(load(moveset + 4),
+        load(moveset + eliza_assist::kMovesetMoves), load(moveset + eliza_assist::kMovesetMoves + 4), move);
+}
 bool special_assist_sequence(uint32_t player) {
     static std::map<uint32_t, eliza_assist::Session> sequences;
     if (!player) return false;
     const int slot = slot_of_id(load(player + kPlayerSelectId));
     const bool supported = slot >= 0 && eliza_assist::holds_sessions(
         eliza_assist::supported(g_added[slot].code), load(player + kPlayerAssaultStarter) != 0);
-    if (!supported) {
+    // No session without a Tag Assault, a human and a partner (update_window
+    // says the same), and none on a move that is not of the moveset in use.
+    if (!supported || load(player + 0x408) != 0 || load(player + 0x1e88) != 1 ||
+        !load(player + 0xac) || !live_move(player)) {
         sequences.erase(player);
         return false;
     }
