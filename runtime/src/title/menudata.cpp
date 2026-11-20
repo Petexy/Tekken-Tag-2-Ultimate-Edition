@@ -1,6 +1,8 @@
 #include "title/menudata.h"
 
+#include <array>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -284,6 +286,107 @@ std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t
     put_be32(&out[8], moved);
     put_be32(&out[12], moved + (attributes - tags));
     return out;
+}
+
+namespace {
+
+// A menus' file read into its elements, and written again (the name tables as they were).
+struct File {
+    std::vector<Element> roots;
+    uint32_t tags = 0, attributes = 0;
+};
+
+std::optional<File> read_file(const std::vector<uint8_t>& file) {
+    if (file.size() < kHeader + 4 || std::memcmp(file.data(), "BX01", 4) != 0) return std::nullopt;
+    File f;
+    f.tags = be32(&file[8]);
+    f.attributes = be32(&file[12]);
+    if (f.tags > file.size() || f.attributes < f.tags || f.attributes > file.size()) return std::nullopt;
+    Reader reader{file, kRoots};
+    const uint32_t count = reader.u32();
+    f.roots.resize(reader.ok && count <= file.size() / 16 ? count : 0);
+    for (Element& root : f.roots) {
+        if (!reader.element(root, 0)) return std::nullopt;
+    }
+    if (f.roots.empty() || reader.at != f.tags) return std::nullopt;
+    return f;
+}
+
+std::vector<uint8_t> write_file(const std::vector<uint8_t>& file, const File& f) {
+    std::vector<uint8_t> out(file.begin(), file.begin() + kHeader);
+    append_be32(out, static_cast<uint32_t>(f.roots.size()));
+    for (const Element& root : f.roots) write(out, root);
+    const uint32_t moved = static_cast<uint32_t>(out.size());
+    out.insert(out.end(), file.begin() + f.tags, file.end());
+    put_be32(&out[8], moved);
+    put_be32(&out[12], moved + (f.attributes - f.tags));
+    return out;
+}
+
+Element* find_named(Element& e, std::string_view name, uint32_t name_attribute) {
+    for (const auto& [id, value] : e.attributes) {
+        if (id == name_attribute && as_text(value) == name) return &e;
+    }
+    for (Element& child : e.children) {
+        if (Element* found = find_named(child, name, name_attribute)) return found;
+    }
+    return nullptr;
+}
+
+void set_text(Element& e, std::string_view text) {
+    e.text.assign(text.begin(), text.end());
+    e.text.push_back(0);
+}
+
+} // namespace
+
+std::optional<std::vector<uint8_t>> with_cursor_script(
+    const std::vector<uint8_t>& file, const std::function<std::optional<std::string>(std::string_view)>& edit) {
+    auto f = read_file(file);
+    const auto name = f ? number_of(file, f->attributes, "name") : std::nullopt;
+    const auto script = f ? number_of(file, f->tags, "script") : std::nullopt;
+    if (!name || !script) return std::nullopt;
+    Element* interface = nullptr;
+    for (Element& root : f->roots) {
+        if (!interface) interface = find_named(root, kSelectInterface, *name);
+    }
+    Element* cursor = interface ? find_named(*interface, kCursorScript, *name) : nullptr;
+    if (!cursor || cursor->tag != *script) return std::nullopt;
+    const auto changed = edit(as_text(cursor->text));
+    if (!changed) return std::nullopt;
+    set_text(*cursor, *changed);
+    return write_file(file, *f);
+}
+
+std::optional<std::vector<uint8_t>> with_select_handlers(const std::vector<uint8_t>& file,
+                                                         const std::array<std::string, 4>& sources) {
+    static constexpr const char* kHandlers[4] = {"OnLeft", "OnRight", "OnUp", "OnDown"};
+    auto f = read_file(file);
+    const auto name = f ? number_of(file, f->attributes, "name") : std::nullopt;
+    if (!name) return std::nullopt;
+    Element* frame = nullptr;
+    for (Element& root : f->roots) {
+        if (!frame) frame = find_named(root, kSelectFrame, *name);
+    }
+    Element* menu = frame ? find_named(*frame, kSelectMenu, *name) : nullptr;
+    if (!menu) return std::nullopt;
+    for (size_t i = 0; i < 4; ++i) {
+        const auto tag = number_of(file, f->tags, kHandlers[i]);
+        Element* handler = nullptr;
+        size_t count = 0;
+        for (Element& child : menu->children) {
+            if (tag && child.tag == *tag) {
+                handler = &child;
+                ++count;
+            }
+        }
+        // (the title's handler: one, a compiled script)
+        if (count != 1 || handler->text.size() < 4 || std::memcmp(handler->text.data(), "xtal", 4) != 0) {
+            return std::nullopt;
+        }
+        set_text(*handler, sources[i]);
+    }
+    return write_file(file, *f);
 }
 
 } // namespace cafe::title::menudata

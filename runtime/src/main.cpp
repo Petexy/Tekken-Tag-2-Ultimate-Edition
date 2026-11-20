@@ -116,6 +116,7 @@ int main(int argc, char** argv) {
     title::prepare_controllers();
     title::prepare_roster();
     title::prepare_solo_ghost_battle();
+    title::prepare_customize_select();
     std::fprintf(stderr, "ttt2: loaded image, entry 0x%08X, %zu/%zu guest entries compiled\n",
                  image.entry_point, cafe_program_info.compiled_entries,
                  cafe_program_info.total_entries);

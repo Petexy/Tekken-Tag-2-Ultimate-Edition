@@ -1052,7 +1052,9 @@ under the grid, stretches the '?' panel over four rows and drops the
 show the background); `shared/grid.ini` (`grid = rows`) tells the port,
 which then moves the '?' cell up, the cursor's row 1 down 65
 (`0x10531388`) and the button guide (one object every menu shares, placed
-by `sub_04DC6A48`) down 40 while the grid is on screen. Every row is a
+by `sub_04DC6A48`) down 40 while the grid is on screen (the fights' select,
+and the menus' grids that are scripts, known by the menus' current frame:
+`script_grid_shown`). Every row is a
 ring left and right and every column a ring up and down, in column and
 row order, as the title's own cells are
 (rebuilt from the cells' columns and rows, this reproduces the title's
@@ -1183,10 +1185,156 @@ key nobody requested makes the chooser assert. The added fighter has one
 costume: the list function reads its row (the donor's costume 1) in the
 place of Paul's, its pictures (the pack's `art/costumes.nut`, else the
 donor's) have their key lent to that place only while the chooser's
-functions run, and the chooser leaves out the customisation slots (made per
-fighter in a mode the added fighter is not in). Opening the chooser notes the
-fighter under the cursor (`sub_02669380`, which asserts an id below 63): an
-added fighter is noted as its donor.
+functions run. Opening the chooser loads the fighter's saved customizations
+(`sub_02669380`, which asserts an id below 63: the title's save has one
+file per select id, 63 of them, in a full directory). An added fighter's are
+the port's own file, `<save folder>/customize/<code>.bin`, in the title's
+layout (ten 4096-byte records and the slots' pictures, 256,400 bytes;
+`title/customize_store.h`), named by the pack's code because select ids move
+when packs are added or removed: the load request never reaches the save, the
+buffer's update (`sub_02669BAC`) fills the buffer from that file or leaves it
+empty, and the save (`sub_02669264`) of a buffer that holds an added fighter
+writes that file, a temporary file renamed over it, and nothing else. The
+donor's file is not involved. The chooser's builder (`sub_033E3460`) then
+lists, after the costumes, the slots that file has filled (the title lists
+all five, filled or not), each with the slot's picture or, for a slot without one
+(written by `tools/characters/customize_slot.py`, a developer's tool), the
+fighter's first costume picture; confirming one goes the title's own way
+(`sub_033E3208`: the record into the match set-up, which the fight's loader
+hands to the character manager), on the fighter's first body. The developer
+switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
+record into a slot and makes the title's save call once, for testing the
+saving before a menu calls it.
+
+**Its wardrobe.** A human-sized fighter, from Tekken 7 or Tekken 8, is given the title's own
+Customize outfits at import (`convert/wardrobe.py`, whose opening text says
+how the title dresses a fighter and what is done to follow it): the outfits
+of its donor (women Jun's, men Lars's: every shop row of the donor that
+dresses the upper or the lower body, read from the player's game; there is
+no list of garments or of fighters), re-posed to the fighter's joints, with
+the donor's bare body cut the ways garments leave it showing, its skin
+textures in the tone of the fighter's own face, the neck drawn into the
+fighter's own head and its top ring bound to the bones as that head's rim is
+(or the seam opens when the head bows), and arms, legs and trunk made as thick as the fighter's
+where its own outfits bare enough skin to measure that (Akuma's arms are
+half again as thick as Lars's, Noctis's a sixth thinner; a limb within an
+eighth of the donor's is left as it is). The fighter's own outfit becomes
+the default items' parts, so a garment in a slot replaces that half of it.
+A definition's one option is `WARDROBE = False`: no wardrobe, and so no
+shop list, for that fighter (no definition sets it now). The rules leave out the rest by themselves: a fighter not
+of the donor's size (a joint more than 200 mm from the donor's: Gigas,
+Fahkumram), one whose body is not an upper piece, a lower piece and a face
+(a Tekken 7 preset outfit in one piece keeps its body whole and shows as it is),
+a fighter imported on its stand-in, a garment whose own bones are numbered
+like bones of the fighter's body. A Tekken 8 costume is one mesh, so the
+wardrobe step makes it two (`split_piece`): each polygon's islands (a
+jacket, a boot, a buckle, an arm's skin) go whole to the half of the body
+that holds most of their weights, a coat with its tails to the chest, a belt
+to the hips; only bare skin that runs through the waist is cut, and a 2P
+colour layer goes where the cloth under it went. The lower piece's skin ends
+where its own cloth ends (`_waistline`): the hips' weights reach the navel,
+and a belly left with the trousers showed through the hem of a top worn over
+them. A Tekken 8 torso also lies some 3 cm further forward on its joints than
+the title's, so where the fighter's own outfit bares the waist all the way
+round, the source's bare body and garments are moved onto that waist
+(`Waist`: the difference measured direction by direction, running out to
+nothing at the neck's root and under the hips); otherwise a garment worn with
+the fighter's own other half is cut through by the bare belly. The head, hair, worn
+head items, weapons and summoned things stay in the body model, so they
+show with any garment. Azazel is left out by the size rule (a joint two
+metres from Lars's). Two things had to give way for this: Miary Zo's snake
+parent bone is numbered 597, not 599 (598 and 599 are the swaying bust bones
+of the women's tops), and a texture file's textures now end on 16 bytes when
+another follows (the title walks the file rounding up; a 4 x 4 texture
+before the copied skin textures stopped the fight from loading). A pack without a shop list cannot be
+entered in CUSTOMIZE: the cursor passes its cell and the importer draws its
+face grey in that grid (in `shared/`, which every import makes again). The
+pack also gets `wardrobe.txt`, one line per shop row with the row's record
+text (its items by equip slot and its default colours), for the developer's
+tools below; the game does not read it. Every pack's item database,
+a giant's too, keeps the donor's worn items that need only the title's
+common packs (`itemdb.ITEMS`: a pair of glasses now), under the donor's
+indices. All of this is in `pack.REVISION` 9: every pack made before is
+offered for an update.
+
+**Its CUSTOMIZE mode.** The mode's character select is not the fights'
+select screen: its grid is an Xtal script in the interfaces' file (entry
+`B43EB78F`, class `CharacterSelectCursor`: a table of 3 x 22 fighters, a
+"may the cursor stop here" test, the cursor's place) and four direction
+handlers (compiled Xtal) in the menus' file. The shared layouts draw an
+added fighter's face in that grid too, and move the grid a row down when it
+has the new top row, which the script knew nothing of: the faces could not
+be picked, and with the new row the cursor was drawn a row above the cell it
+was on. At start-up (`prepare_customize_select`, `title/customize_grid.h`)
+the class's four methods are renamed and new ones answer for the added
+fighters' cells first (a fighter whose pack has a shop list can be entered;
+the others' cells are passed by the cursor), and the frame's handlers are
+replaced by source text that steps through the grid's own columns and rows.
+A pack's shop list (`shop.bxml`, the title's format, written by
+`convert/wardrobe.py`) holds the rows of the fighter its wardrobe was fitted
+from whose items the pack's item database has, under that fighter's item
+ids. Inside the mode (`sub_02A86B80`, `sub_02A8F5DC`) the added fighter is
+that fighter's select id with its own body code (its first preset outfit's
+when it has presets, the body a saved slot is worn on): every table by id is
+read in bounds, names, prices, owned and unlocked items are that fighter's
+(an item bought for one is bought for both), and the shop list's parser
+(`sub_026466F0`) gets the pack's list in place of the title's. The costume
+panel lists the five slots of the added fighter's own file only (its
+costumes are whole bodies, not records), and the mode's save writes that
+file, with the slot's picture.
+The title's save call has no failure of its own, so a save the disk refuses
+is said on the screen by the port (`framedata::notice`: a box in the title's
+fonts over the picture, the overlay Practice's panels use), and again when
+a later try has written it. The mode's two other screens with a character
+grid, REGISTER TAG and TOUCH SELECT, are the title's own code with the
+fights' grid, where the cursor stands on an added fighter's cell as on any
+other; both keep their picks in the title's save by select id and read
+tables of 63 fighters by it (the tag screen's costume panel never finished
+loading for an added fighter and took no more input). A confirm on an added
+fighter's cell is taken out of the screen's events there (`sub_0267499C`,
+`sub_02675C18`, `sub_0239C4B8`) and the notice says why. The other screens
+that place their cursor through the class (the profile's character
+information, the gallery's ending movies) keep handlers of their own over
+the title's 3 x 22 cells: no added cell can be reached there, and the class
+now draws their cursor a row down with the new top row, as the layouts do.
+
+**Testing its wardrobe.** Three developer switches, off unless set, none of
+them a player's option: `TTT2_TEST_CUSTOMIZE=<code or #id>:<record text>`
+(`title/test_record.h`) puts items and colours into that fighter's working
+record on the select screen when its costume is confirmed through the
+chooser, so a fight in a garment needs no menu and no save (the text of a
+row of the pack's `wardrobe.txt` after the fighter's default items);
+`TTT2_TEST_SAVE_SLOT` (above) stores a record into a saved slot through the
+title's save call; `tools/characters/customize_slot.py` writes a slot into
+the port's file of a copied save. There is no switch that gives gold: the
+mode sells at the title's prices, so a path through BUY ITEM starts from a
+save that has gold (earned in the title's own modes) or that owns the items
+already. What a change here must still show, on a hidden run with frames
+looked at: the mode's grid (the cursor on an added fighter's cell in each
+row, past the grey ones), an item bought, worn, coloured and saved, the slot
+in the fights' costume chooser with its picture, a fight in it, and the
+donor's own save file unchanged; for the importer a garment upper alone and
+a garment lower alone on the fighter's own other half, not only whole sets.
+Known flaws: item pictures, names and prices are the donor's, and the
+fighter's own pieces carry the title's generic names; a slot is worn on the
+fighter's first body whichever outfit it was made on; with the new top row
+the grid's outermost columns touch the screen's edges; a man without bare
+skin to measure keeps Lars's build under a garment (Victor, Clive); only the
+waist of a Tekken 8 body is followed, not its chest; garments with bones
+numbered like the fighter's own are missing from its list (three of Leroy's
+tops); a fighter's summoned things were not looked at beside every garment.
+
+**Its colours and the colour grid.** The title's costume colours are cells
+of one grid (entry `05ADD6D5`, 32 x 64 cells), and CUSTOMIZE's colour picker
+and the items' default colours use every cell of it. The importer gives each
+added fighter's player 1 and player 2 colours cells of a copy of that grid
+(`shared/keys/05add6d5.bin`) and names them in the palettes under the
+fighter's select id. The port does not put that copy in the title's place
+(with twenty fighters it changed hundreds of the picker's colours, for the
+title's own fighters too: a garment went white or black as its hue was
+turned): it keeps the copy, marks the colour numbers of the added fighters'
+palette rows as they are read (`sub_06839C28`) and answers a marked number
+from the copy where the title turns a number into a colour (`sub_06321C7C`).
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
@@ -1197,7 +1345,8 @@ Outfits boxes; all by default); the preset of the fighter's own costume is its o
 the only one with 2P colour layers (palette entries go by select id, which
 outfits share). The chooser then lists the donor's costume 1 once per outfit
 and the pick (`sub_033E265C`) chooses the body; 14 entries is the chooser's
-room (its customisation rows stop there, `033E379C`). Each outfit is
+room (its customisation rows stop there, `033E379C`: with 9 outfits all five
+saved slots fit, with 10 to 13 the first 4 to 1 filled ones, with 14 none). Each outfit is
 registered as a body of its own (registry and chara master) under a private
 32-bit key from 0x10000, never a select id: the chara master's lookup by code
 (`sub_0209506C`) gives back the fighter's id, the loader (`sub_044BE1EC`) asks
@@ -2009,8 +2158,10 @@ debugging:
 | `TTT2_CAPTURE_SEQUENCE=<n>` | with `TTT2_CAPTURE`, also every image shown for the next n frames after each capture, in order (`seq_<capture>_<frame>_<n>.png`, the real image last) |
 | `TTT2_TRACE_AT=<s>`, `TTT2_TRACE_FRAME=<n>` | log every command of one frame; with `TTT2_CAPTURE`, save all its render targets |
 | `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run) |
+| `TTT2_TRACE_INPUT=1` | log when each scripted press begins (seconds after start-up, as `TTT2_CAPTURE_START` counts) |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
+| `TTT2_TEST_CUSTOMIZE=<code>:<record>`, `TTT2_TEST_SAVE_SLOT=<slot>=<code>:<record>` | an added fighter's customization record worn without CUSTOMIZE mode, or stored into a saved slot (Added fighters, testing its wardrobe) |
 | `TTT2_DUMP_SHADERS=<dir>` | shader binaries, draw registers and generated GLSL |
 | `TTT2_DUMP_TEXTURES=<dir>` | every texture loaded from memory, as PNG |
 | `TTT2_TRACE_TARGETS=1`, `TTT2_WATCH=<hex address>` | render target creation; writes and loads touching an address |

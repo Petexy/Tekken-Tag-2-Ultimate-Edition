@@ -4,6 +4,8 @@
 // bottom of the screen (title/framedata.cpp).
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace cafe::title::framedata {
 
@@ -25,5 +27,9 @@ float history_right();
 // The line the panels stand on (on the TV image), above the title's hints
 // and DAMAGE INFO 2's bars (title/gauge.cpp's gauges keep above it too).
 constexpr float kPanelsBottom = 634;
+// A message of the port's own in a box at the top of the screen, in the title's fonts, for `seconds`: for what the
+// title has no message of its own for (a customization save the disk refused). From a guest thread, in any mode
+// (Practice's panels, which share the layer, replace it).
+void notice(const std::vector<std::string>& lines, double seconds);
 
 } // namespace cafe::title::framedata

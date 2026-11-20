@@ -59,6 +59,10 @@ LAYOUTS = 'data007'               # the 2D layouts (LMB), each followed by its t
 GRID_BESIDE = 'vio'
 PITCH_FROM = ('rog', 'rav')       # grid row 1, columns 0 and 1
 ROW_PITCH_FROM = ('rog', 'mok')   # column 0, grid rows 1 and 2
+SCRIPT_GRID = 'chara_sentaku_p1_red'    # the cursor of the grids the menus' scripts drive (CUSTOMIZE mode's character
+                                  # select and the galleries'): only the layout of those grids has it. The fights'
+                                  # select screens have layouts of their own.
+GREY_LEVEL = 0.8                  # greyed(): the grey's brightness
 # The select grid with a new top row (when a fighter's place is past pack.CELLS): grid row -1 for added fighters where
 # the title's top row is, under the team bars (its empty cells show the background); the title's three rows move down
 # a row into the space under the grid (ROWS_DOWN; roster.cpp kRowsCursorRow: the cursor's row 1 follows them), and
@@ -422,6 +426,14 @@ GRADES = {'tekken8': {'bust': warmed}}
 BUST_FRAME = {'tekken8': (1.25, 0.1)}
 
 
+def greyed(picture):
+    """The picture (h, w, 4 floats) without its colours, a little darker: how the script grids (SCRIPT_GRID) show a
+    fighter that cannot be picked there."""
+    out = picture.copy()
+    out[..., :3] = (picture[..., :3] @ np.array([0.2126, 0.7152, 0.0722], picture.dtype))[..., None] * GREY_LEVEL
+    return out
+
+
 def compose(others, picture, fade=None):
     """A picture like `others` (N, h, w, 4 floats: every fighter's picture for the place) with `picture` (h, w, 4)
     in it: where all of them agree (a frame, a background they share) theirs, elsewhere `picture` cut to the area
@@ -678,6 +690,7 @@ class Layout:
         self.decoded = {}
         self.new = []                  # (shape id, Paul's shape, picture): pictures waiting for a page
         self.changed = False
+        self.grey = False              # the grid cell's picture without its colours (a fighter CUSTOMIZE is closed to)
 
     # -- the title's pictures
     def atlas(self, aid):
@@ -815,6 +828,8 @@ class Layout:
             if isinstance(shape, lmb.Shape) and shape.id not in theirs and shape.id not in char_map:
                 pic, size = self.shape_picture(shape)
                 mine = self.sources.framed(face_place(*size), size[0], size[1])
+                if self.grey:
+                    mine = greyed(mine)
                 ok = stack is not None and stack.shape[1:3] == (size[1], size[0])
                 char_map[shape.id] = self.new_shape(shape, compose(stack, mine) if ok else mine)
         xs = [_place_xy(lm, p[0][2])[0] for p in pitch]
@@ -1275,12 +1290,14 @@ def pack_files(source, archives, rpx, d, slot, log=None):
     return files
 
 
-def shared_files(source, archives, rpx, fighters, log=None, new_row=False):
+def shared_files(source, archives, rpx, fighters, log=None, new_row=False, closed=()):
     """What the added fighters share, for fighters [(slot, definition)]: the 2D layouts with every fighter's labels
     and grid cell, the big portraits' container with two frames per place, the HUD's pictures by place.
     -> {file name: bytes}. source: the fighters' picture source (one for all, by slot or code, or by definition:
     source_of; or Tekken 7's paks); rpx: the title's executable (ttt2.rpx); new_row: the select grid with a new top
-    row (four_rows), for fighters past pack.CELLS."""
+    row (four_rows), for fighters past pack.CELLS; closed: the codes of the fighters CUSTOMIZE mode cannot be entered
+    with (no wardrobe: their packs have no shop list): their faces are grey in the script grids' layout, every one
+    of them the same way wherever its cell is, and the cursor passes them (the port: title/customize_grid.h)."""
     fighters = sorted(fighters, key=lambda f: f[0])
     files = {}
     # the game's fighters' codes: from every layout's labels `face_<code>` and `face_panel_<code>`
@@ -1333,6 +1350,7 @@ def shared_files(source, archives, rpx, fighters, log=None, new_row=False):
             if not any(code_label(s, d.CODE) for s in lm.symbols) and 'face_panel_' + cell['anchor'] not in lm.symbols:
                 continue
             layout = Layout(lm, textures, sources[slot], d.CODE, codes, cell)
+            layout.grey = d.CODE in closed and SCRIPT_GRID in lm.symbols
             layout.add_labels()
             layout.add_cell()
             if not layout.changed:

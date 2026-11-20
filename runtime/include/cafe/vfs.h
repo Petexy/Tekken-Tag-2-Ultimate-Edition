@@ -46,6 +46,8 @@ struct DirEntry {
 // `source` is a .wua file or a directory holding code/, content/, meta/.
 void open_game(const std::filesystem::path& source);
 void set_save_root(const std::filesystem::path& root);
+// The host folder of the saves (the title's own under it; the port's own files beside them).
+const std::filesystem::path& save_root();
 
 // An archive entry to serve, as stored (see title/archive.h): its bytes,
 // held, or `size` and a function making them when the title reads the entry

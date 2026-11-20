@@ -18,7 +18,7 @@ import types
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
-    movelist_rows, moveset, outfits, particles, prefabs8, snakes8, sounds, summons8, tagsystem, tiger, voice, weapons
+    movelist_rows, moveset, outfits, particles, prefabs8, snakes8, sounds, summons8, tagsystem, tiger, voice, wardrobe, weapons
 from .tekken7 import tkmvst
 from .tekken8 import sounds as sounds8
 from .tekken7.autodump import FILES, unread
@@ -450,6 +450,9 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                    (nud, nut, bon, mop), standing=standing,
                                    log=lambda s: log('         ' + s.strip()), reference_bon=bon))
         outfit_codes = [c for c in outfits.codes(d) if c + '.nud' in contents]     # (but presets left out)
+    if wardrobe.source_of(d) is not None:
+        step('wardrobe: the Customize outfits of Tekken Tag Tournament 2 fitted to %s' % d.NAME)
+        contents.update(wardrobe.for_pack(archives, d, contents, outfit_codes, log=lambda s: log('         ' + s)))
     gauge_sound = effects.number(gauge.full_sound(d)) if effects and gauge.full_sound(d) else None
     target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra, sound_extra=sound_extra,
                         gauge_sound=gauge_sound,

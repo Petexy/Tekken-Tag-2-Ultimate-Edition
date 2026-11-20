@@ -157,6 +157,21 @@ class SkinMatch(unittest.TestCase):
         self.assertIs(art.skin_matched(bust, face, body, body_face), bust)
 
 
+class ClosedFaces(unittest.TestCase):
+    """The grid face of a fighter CUSTOMIZE mode is closed to (art.greyed)."""
+
+    def test_a_closed_fighters_face_has_no_colour_and_keeps_its_shape(self):
+        picture = np.zeros((2, 2, 4), np.float32)
+        picture[0, 0] = (1.0, 0.0, 0.0, 1.0)
+        picture[0, 1] = (0.2, 0.6, 0.4, 0.5)
+        grey = art.greyed(picture)
+        np.testing.assert_allclose(grey[..., 3], picture[..., 3])                 # the cut-out is the same
+        np.testing.assert_allclose(grey[..., 0], grey[..., 1])
+        np.testing.assert_allclose(grey[..., 1], grey[..., 2])
+        np.testing.assert_allclose(grey[0, 0, 0], 0.2126 * art.GREY_LEVEL, rtol=1e-5)
+        self.assertEqual(picture[0, 0, 1], 0.0)                                   # (the picture given is left as it was)
+
+
 class Pictures(unittest.TestCase):
     """Sources() takes its pictures from a picture source and takes the glows of that source's game off."""
 

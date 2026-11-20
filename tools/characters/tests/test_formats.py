@@ -88,6 +88,20 @@ class Textures(unittest.TestCase):
         plain = np.asarray(nut.decode(nut.make_texture(img, 1, 2, mips=2)))[..., 3].astype(int)
         self.assertLess(plain[0, 0], 110)
 
+    def test_a_texture_another_follows_ends_on_16_bytes(self):
+        """The game walks the file rounding each texture's end up to 16: a 4 x 4 texture with its smaller levels
+        (24 bytes) is filled up when another comes after it, and left as it is when it is the last."""
+        small = nut.make_texture(np.full((4, 4, 4), 90, np.uint8), 1, 0, mips=3)
+        self.assertEqual(sum(len(m) for m in small['mips']) % 16, 8)
+        big = nut.make_texture(np.full((8, 8, 4), 200, np.uint8), 2, 0, mips=1)
+        alone, pair = nut.write([small]), nut.write([small, big])
+        self.assertEqual(len(alone) % 16, 8)
+        self.assertEqual((len(pair) - len(nut.write([big])) + 16) % 16, 0)       # the small one's record: whole 16s
+        back = nut.read(pair)
+        self.assertEqual([t['gidx'] for t in back['textures']], [1, 2])
+        self.assertEqual(back['textures'][1]['mips'], big['mips'])
+        self.assertEqual(nut.write(back), pair)                                    # (read and written again: the same)
+
 
 class Skeleton(unittest.TestCase):
     def test_round_trip(self):
@@ -621,6 +635,25 @@ class Materials(unittest.TestCase):
         self.assertIsNone(alpha)
         prop['textures'] = {'Diffuse': '/Game/T_D', 'Normal': '/Game/T_X', 'Normal_Map': '/Game/T_N'}
         self.assertEqual(mats.effective('/Game/MI_CH_x.MI_CH_x')['textures']['Normal'], '/Game/T_X')   # its own kept
+
+    def test_every_skin_material_takes_its_multiply(self):
+        """Tekken 7's skin materials have several bases with the same colour terms (M_CH_skin_wet_SSP, its _metallic
+        one, M_CH_skin_wet, M_CH_skin_wet_ao_SSP): a dark fighter's skin is a light texture times a small Multiply,
+        whichever the base (baked as the texture alone he came out fair)."""
+        from ttt2char.convert.model import bake_albedo
+
+        class Textures:
+            @staticmethod
+            def exists(path):
+                return True
+
+            @staticmethod
+            def linear(path):
+                return np.full((4, 4, 3), (0.4, 0.2, 0.1), np.float32), None
+        for base in ('M_CH_skin_wet_SSP', 'M_CH_skin_wet_SSP_metallic', 'M_CH_skin_wet', 'M_CH_skin_wet_ao_SSP'):
+            eff = {'base': base, 'textures': {'Diffuse': '/Game/T_D'}, 'vectors': {},
+                   'scalars': {'Multiply': 0.25, 'Desaturation': 0.0}}
+            np.testing.assert_allclose(bake_albedo(eff, Textures())[0][0, 0], (0.1, 0.05, 0.025), atol=1e-6)
 
     def test_texture_budget(self):
         from ttt2char.convert.model import TextureBank

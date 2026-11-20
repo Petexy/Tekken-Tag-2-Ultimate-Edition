@@ -65,7 +65,7 @@ def write(nut):
         nut = dict(version=0x0100, textures=nut, trailer=b'')
     texs = nut['textures']
     out = bytearray(b'NTP3' + struct.pack('>HH', nut.get('version', 0x0100), len(texs)) + bytes(8))
-    for t in texs:
+    for k, t in enumerate(texs):
         mips = t['mips']
         n = len(mips)
         mt = b''
@@ -77,10 +77,16 @@ def write(nut):
             ext = _ext(t['gidx'])
         hsize = 0x30 + len(mt) + len(ext)
         data = b''.join(mips) + t.get('tail', b'')
-        total = hsize + len(data) + t.get('total_extra', 0)
+        extra = t.get('total_extra', 0)
+        # the game finds a texture's header by walking the file, rounding each texture's end up to 16 bytes
+        # (sub_0242C148): a texture whose data is not a multiple of 16 (a 4 x 4 one with its smaller levels: 24
+        # bytes) must be filled up when another follows it, or every texture after it is read from the wrong place
+        if k + 1 < len(texs):
+            extra += (-(hsize + len(data) + extra)) % 16
+        total = hsize + len(data) + extra
         out += struct.pack('>IIIHH4B2H', total, t.get('pal', 0), len(data) - len(t.get('tail', b'')), hsize,
                            t.get('z0', 0), t.get('b10', 0), n, t.get('b12', 0), t['fmt'], t['w'], t['h'])
-        out += t.get('r18', bytes(24)) + mt + ext + data + bytes(t.get('total_extra', 0))
+        out += t.get('r18', bytes(24)) + mt + ext + data + bytes(extra)
     out += nut.get('trailer', b'')
     return bytes(out)
 
