@@ -1274,8 +1274,7 @@ read in bounds, names, prices, owned and unlocked items are that fighter's
 (`sub_026466F0`) gets the pack's list in place of the title's. The costume
 panel lists the five slots of the added fighter's own file only (its
 costumes are whole bodies, not records), and the mode's save writes that
-file, with the slot's picture. `TTT2_TEST_MONEY=<gold>` (a developer switch)
-adds gold once when the mode first asks for it, for making a test save.
+file, with the slot's picture.
 The title's save call has no failure of its own, so a save the disk refuses
 is said on the screen by the port (`framedata::notice`: a box in the title's
 fonts over the picture, the overlay Practice's panels use), and again when

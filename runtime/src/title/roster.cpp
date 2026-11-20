@@ -3770,25 +3770,6 @@ NO_ADDED_PICK(sub_02675C18, kTagScreenEvents, 136)
 NO_ADDED_PICK(sub_0239C4B8, kTouchScreenEvents, 112)
 #undef NO_ADDED_PICK
 
-// Developer switch TTT2_TEST_MONEY=<gold> (off unless set): once, when CUSTOMIZE mode first asks how much gold the
-// player has (the script native getMoney), that much is added through the title's own addMoney: for making a test
-// save that can buy items.
-PPC_FUNC(sub_0230BBBC); // addMoney(gold r3)
-PPC_FUNC(sub_0230BB28_orig);
-PPC_FUNC(sub_0230BB28) {
-    static bool done = false;
-    if (!done) {
-        done = true;
-        const char* text = std::getenv("TTT2_TEST_MONEY");
-        const uint32_t gold = text ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 0;
-        if (gold > 0 && gold < 1000000000) {
-            guest_call(ctx, base, sub_0230BBBC, {gold});
-            std::fprintf(stderr, "ttt2: TTT2_TEST_MONEY: %u G added\n", gold);
-        }
-    }
-    sub_0230BB28_orig(ctx, base);
-}
-
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)
 
 PPC_FUNC(sub_06A5C5FC); // a bone record (container r3, number r4), 0 if the model has no such bone
