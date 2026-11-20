@@ -6,6 +6,7 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
+#include "title/win_pose.h"
 #include "title/unblurred.h"
 #include "gpu/still_draws.h"
 #include "title/damage_scaling.h"
@@ -1815,9 +1816,11 @@ PPC_FUNC(sub_033D5108) {
 constexpr uint32_t kPlayerRecord = 88, kPlayerRow = 80;
 constexpr uint32_t kPlayerLookYawMax = 1060, kPlayerLookYawMin = 1064; // degrees, the neck's and the head's each
 constexpr float kAddedLookYaw = 60.0f;                                  // TTT2's fighters: 30
+win_pose::Handovers g_handovers; // (a team's won match: held_handover, below)
 PPC_FUNC(sub_033D5BBC_orig);
 PPC_FUNC(sub_033D5BBC) {
     const uint32_t player = ctx.r[3];
+    g_handovers.clear(); // (a new fight owes the last one's scene nothing: title/win_pose.h)
     const int k = slot_of_record(load(player + kPlayerRecord));
     if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: player %08X set up: select id %u, record %08X (slot %d), row %u\n", player,
@@ -4382,12 +4385,42 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
         store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
 }
 
+// A team's won match (title/win_pose.h): the hand-over of an added fighter's part (its move property 0x80A2, which
+// the title would write into the partner's signal word at once) ends that part there, as it ended the donor's, and
+// is held until the fighter has left the move. -> whether it was held (the title's own write is then left out).
+constexpr uint32_t kPlayerPartner = 172; // the other member of its tag team (0: a solo fighter)
+constexpr uint32_t kPlayerOutOfPlay = 132; // (nonzero: the title's own hand-over does nothing)
+constexpr uint32_t kPlayerAlone = 1012;    // nonzero: no team (requirement 485 tests it; +172 is set all the same)
+constexpr uint32_t kSignalRequirement = 313; // "my signal word is <param>"
+
+bool held_handover(uint32_t player, uint32_t value) {
+    if (!player || added_slot(player) < 0 || load(player + kPlayerOutOfPlay) != 0) return false;
+    // (a fighter alone plays the winner's first part too and leaves it by a cancel of its own at the same frame)
+    if (load(player + kPlayerAlone) != 0) return false;
+    const uint32_t partner = load(player + kPlayerPartner), move = load(player + kPlayerMove);
+    const uint32_t name = move ? load(move) : 0;
+    if (!partner || !name || !win_pose::is_part(reinterpret_cast<const char*>(guest_pointer(name)))) return false;
+    g_handovers.hold(player, move, partner, value);
+    set_frame(player, win_pose::kPastTheEnd); // (its part ends here, as the donor's pose did)
+    return true;
+}
+
+// The held hand-overs whose part is over, given: before a waiting move tests its signal.
+void give_handovers() {
+    if (g_handovers.empty()) return;
+    g_handovers.deliver([](uint32_t sender) { return load(sender + kPlayerMove); }, [](uint32_t receiver, uint32_t value) {
+        store(receiver + win_pose::kSignal, value);
+        if (traces().roster) std::fprintf(stderr, "ttt2: roster: team win: player %08X is handed %u\n", receiver, value);
+    });
+}
+
 void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player); // (level effects, below)
 uint32_t g_property_player = 0; // the player whose move property runs (level effects, below: an effect's owner)
 
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
+    if (id == win_pose::kHandoverProperty && held_handover(player, load(ctx.r[4] + 4))) return;
     // (each property comes twice, pass 1 then 0: acted on once)
     if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd ||
          id == gauge::kStop) &&
@@ -4436,6 +4469,7 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
+    if (kind == kSignalRequirement) give_handovers();
     if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow || kind == gauge::kMaxOn) &&
                      gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {
         ctx.r[3] = result;

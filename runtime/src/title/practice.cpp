@@ -549,6 +549,19 @@ uint32_t added_slots(uint32_t id) {
     return table + 4 * ((id - kEasyInputFighters) % kAddedSlots);
 }
 
+// Developer switch TTT2_TEST_WEAK=<side>[:<select id>] (off unless set): the fighter that side (0: 1P's, 1: 2P's) has
+// in play is left one point of health, so the next hit knocks it out; with an id, only while the other side's fighter
+// in play is the one with that select id (so that a chosen member of a tag team lands the last hit). For test routes
+// that must win, or lose, a match.
+void weaken(uint8_t* base, const uint32_t fighters[2]) {
+    static const char* const text = std::getenv("TTT2_TEST_WEAK");
+    if (!text || (text[0] != '0' && text[0] != '1')) return;
+    const uint32_t side = static_cast<uint32_t>(text[0] - '0');
+    if (!fighters[0] || !fighters[1]) return;
+    if (text[1] == ':' && load(base, fighters[1 - side] + 84) != std::strtoul(text + 2, nullptr, 10)) return;
+    if (static_cast<int16_t>(ppc::ld16(base, fighters[side] + 96)) > 1) ppc::st16(base, fighters[side] + 96, 1);
+}
+
 } // namespace
 
 PPC_FUNC(sub_039C2DB0); // the situation set-up (r3: the situation)
@@ -570,6 +583,7 @@ PPC_FUNC(sub_03ADB118) {
     close_submenu(ctx, base); // (left by closing the pause menu)
     update_texts(base, in_practice);
     const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
+    weaken(base, fighters);
     title::gauge::fighters_frame(ctx, base, fighters, in_practice);
     title::warp::fighters_frame(base);
     if (in_practice) title::framedata::fighters_frame(base, fighters);
