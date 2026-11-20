@@ -143,6 +143,19 @@ target_compile_features(memory_model_test PRIVATE cxx_std_20)
 target_compile_options(memory_model_test PRIVATE -O2 -march=x86-64-v3 -Wno-unused-label)
 add_test(NAME memory_model_test COMMAND memory_model_test)
 
+# The thread keeping the memory the GPU reads on huge pages leaves its
+# contents alone (Linux: the memory module's own program, six seconds).
+if(NOT WIN32)
+    add_executable(guest_memory_keeper_test guest_memory_keeper_test.cpp
+        ${CMAKE_SOURCE_DIR}/runtime/src/memory.cpp)
+    target_include_directories(guest_memory_keeper_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)
+    target_compile_features(guest_memory_keeper_test PRIVATE cxx_std_20)
+    target_compile_options(guest_memory_keeper_test PRIVATE -O2 -Wall -Wextra -Wpedantic)
+    find_package(Threads REQUIRED)
+    target_link_libraries(guest_memory_keeper_test PRIVATE Threads::Threads)
+    add_test(NAME guest_memory_keeper_test COMMAND guest_memory_keeper_test)
+endif()
+
 # The character importer's formats (tools/characters; synthetic data, no game
 # files). Needs Python 3 with numpy and Pillow.
 find_package(Python3 COMPONENTS Interpreter QUIET)

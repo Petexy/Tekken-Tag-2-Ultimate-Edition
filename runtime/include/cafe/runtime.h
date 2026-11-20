@@ -20,6 +20,10 @@ uint8_t* guest_base();
 void reserve_guest_memory();
 void commit_guest_memory(uint32_t address, uint32_t size);
 bool guest_memory_committed(uint32_t address, uint32_t size);
+// A committed range the GPU reads through the driver (imported memory): it
+// is kept in use and on huge pages, which a PC short of free memory would
+// take away (Linux; see memory.cpp).
+void keep_guest_memory_fast(uint32_t address, uint32_t size);
 
 inline uint8_t* guest_pointer(uint32_t address) { return guest_base() + address; }
 
