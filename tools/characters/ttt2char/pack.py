@@ -72,7 +72,9 @@ REVISION = 9                    # what packs made before lack, for every fighter
                                 # cane, the opponent's move by its own id; the Tag Assault's incoming partner
                                 # attacks with its own d/f+1, a string's continued bound move can Tag Assault;
                                 # 8: a group cancel row counts its own group's rows, not the source's;
-                                # 9: the item database keeps worn items of the common packs: itemdb.ITEMS)
+                                # 9: the item database keeps worn items of the common packs: itemdb.ITEMS;
+                                # the game's wardrobe fitted to the human-sized fighters, their shop list for
+                                # CUSTOMIZE mode: convert/wardrobe.py; Tekken 7's skin as dark as its materials say)
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24), then (ROW_CELLS) a new top row

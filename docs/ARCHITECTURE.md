@@ -1248,7 +1248,14 @@ of the women's tops), and a texture file's textures now end on 16 bytes when
 another follows (the title walks the file rounding up; a 4 x 4 texture
 before the copied skin textures stopped the fight from loading). A pack without a shop list cannot be
 entered in CUSTOMIZE: the cursor passes its cell and the importer draws its
-face grey in that grid.
+face grey in that grid (in `shared/`, which every import makes again). The
+pack also gets `wardrobe.txt`, one line per shop row with the row's record
+text (its items by equip slot and its default colours), for the developer's
+tools below; the game does not read it. Every pack's item database,
+a giant's too, keeps the donor's worn items that need only the title's
+common packs (`itemdb.ITEMS`: a pair of glasses now), under the donor's
+indices. All of this is in `pack.REVISION` 9: every pack made before is
+offered for an update.
 
 **Its CUSTOMIZE mode.** The mode's character select is not the fights'
 select screen: its grid is an Xtal script in the interfaces' file (entry
@@ -1290,6 +1297,32 @@ that place their cursor through the class (the profile's character
 information, the gallery's ending movies) keep handlers of their own over
 the title's 3 x 22 cells: no added cell can be reached there, and the class
 now draws their cursor a row down with the new top row, as the layouts do.
+
+**Testing its wardrobe.** Three developer switches, off unless set, none of
+them a player's option: `TTT2_TEST_CUSTOMIZE=<code or #id>:<record text>`
+(`title/test_record.h`) puts items and colours into that fighter's working
+record on the select screen when its costume is confirmed through the
+chooser, so a fight in a garment needs no menu and no save (the text of a
+row of the pack's `wardrobe.txt` after the fighter's default items);
+`TTT2_TEST_SAVE_SLOT` (above) stores a record into a saved slot through the
+title's save call; `tools/characters/customize_slot.py` writes a slot into
+the port's file of a copied save. There is no switch that gives gold: the
+mode sells at the title's prices, so a path through BUY ITEM starts from a
+save that has gold (earned in the title's own modes) or that owns the items
+already. What a change here must still show, on a hidden run with frames
+looked at: the mode's grid (the cursor on an added fighter's cell in each
+row, past the grey ones), an item bought, worn, coloured and saved, the slot
+in the fights' costume chooser with its picture, a fight in it, and the
+donor's own save file unchanged; for the importer a garment upper alone and
+a garment lower alone on the fighter's own other half, not only whole sets.
+Known flaws: item pictures, names and prices are the donor's, and the
+fighter's own pieces carry the title's generic names; a slot is worn on the
+fighter's first body whichever outfit it was made on; with the new top row
+the grid's outermost columns touch the screen's edges; a man without bare
+skin to measure keeps Lars's build under a garment (Victor, Clive); only the
+waist of a Tekken 8 body is followed, not its chest; garments with bones
+numbered like the fighter's own are missing from its list (three of Leroy's
+tops); a fighter's summoned things were not looked at beside every garment.
 
 **Its colours and the colour grid.** The title's costume colours are cells
 of one grid (entry `05ADD6D5`, 32 x 64 cells), and CUSTOMIZE's colour picker
@@ -2114,6 +2147,7 @@ debugging:
 | `TTT2_TRACE_INPUT=1` | log when each scripted press begins (seconds after start-up, as `TTT2_CAPTURE_START` counts) |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
+| `TTT2_TEST_CUSTOMIZE=<code>:<record>`, `TTT2_TEST_SAVE_SLOT=<slot>=<code>:<record>` | an added fighter's customization record worn without CUSTOMIZE mode, or stored into a saved slot (Added fighters, testing its wardrobe) |
 | `TTT2_DUMP_SHADERS=<dir>` | shader binaries, draw registers and generated GLSL |
 | `TTT2_DUMP_TEXTURES=<dir>` | every texture loaded from memory, as PNG |
 | `TTT2_TRACE_TARGETS=1`, `TTT2_WATCH=<hex address>` | render target creation; writes and loads touching an address |
