@@ -196,3 +196,9 @@ target_include_directories(win_pose_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src
 target_compile_features(win_pose_test PRIVATE cxx_std_20)
 target_compile_options(win_pose_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME win_pose_test COMMAND win_pose_test)
+
+add_executable(win_shot_test win_shot_test.cpp)
+target_include_directories(win_shot_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(win_shot_test PRIVATE cxx_std_20)
+target_compile_options(win_shot_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME win_shot_test COMMAND win_shot_test)
