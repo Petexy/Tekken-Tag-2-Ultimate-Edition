@@ -155,11 +155,14 @@ bool guest_memory_committed(uint32_t address, uint32_t size) {
 // then each is given back right before a block of the ranges is made over,
 // which then takes a millisecond. A burst makes up to 64 MB within 0.1 s, so
 // the mapping changes once for all of them; then the game has a second to
-// itself. While the kernel makes none (no memory for them), the wait grows to
-// 8 s; once all blocks have one, a look every four seconds (and the reserve
-// goes back to the PC). A block the kernel keeps turning down is left alone:
-// a driver that pins the memory it imports makes every call on it fail as
-// busy, for as long as the game runs (the rule: memory_keeper.h). Without
+// itself. While the kernel makes none, or says it has no memory for them, the
+// wait grows to 8 s: each such answer cost a round of compaction and reclaim
+// that takes the coldest pages of the PC, the game's own among them. Once all
+// blocks have one, a look every four seconds (and the reserve goes back to
+// the PC). A block the kernel keeps turning down is left alone, and looked at
+// again now and then: a driver that pins the memory it imports makes every
+// call on it fail as busy, for as long as the game runs (the rule:
+// memory_keeper.h). Without
 // the page map (a kernel before 6.7) the blocks are asked in turn, 0.1 s of
 // calls a second, a block with its huge page returning at once.
 
@@ -346,7 +349,7 @@ void keeper_main() {
             return plan.answer(block, answer, call_ms);
         };
         if (known) {
-            const std::vector<uintptr_t>& to_try = plan.begin(blocks);
+            const std::vector<uintptr_t>& to_try = plan.begin(blocks, ms_since(begun));
             // The reserve's blocks get their huge pages (up to a second), as many as the blocks asked with one.
             const auto want = static_cast<size_t>(
                 std::count_if(to_try.begin(), to_try.end(), [&](uintptr_t b) { return plan.reserve_for(b); }));
@@ -382,7 +385,7 @@ void keeper_main() {
             }
         } else {
             // In turn, 0.1 s of calls, the blocks left alone skipped.
-            plan.begin_blind();
+            plan.begin_blind(ms_since(begun));
             const Clock::time_point burst = Clock::now();
             size_t visited = 0;
             while (visited < all && ms_since(burst) < kBurstMs) {
@@ -430,12 +433,13 @@ void keeper_main() {
         made_since += plan.made();
         if (trace) {
             std::fprintf(stderr,
-                         "memory: read %.1f ms; %zu of %zu blocks %s, %zu left alone; reserve %zu made in %.1f ms; %zu tried in "
-                         "%.1f ms (%zu made, %zu busy, %zu over the limit, %zu no memory, %zu refused; longest %.1f ms); %llu of "
-                         "%llu MB on huge pages; next pass in %.0f ms, %s the reserve\n",
-                         read_ms, known ? missing : all, all, known ? "missing" : "(no page map)", plan.left(), filled, fill_ms,
-                         plan.tried(), pass_ms - fill_ms, plan.made(), plan.busy(), plan.limit(), plan.no_memory(), plan.refused(),
-                         longest_ms, mb(huge), mb(resident), delay, plan.with_reserve() ? "with" : "without");
+                         "memory: read %.1f ms; %zu of %zu blocks %s, %zu left alone (%zu looked at again%s); reserve %zu made in "
+                         "%.1f ms; %zu tried in %.1f ms (%zu made, %zu busy, %zu over the limit, %zu no memory, %zu refused; "
+                         "longest %.1f ms); %llu of %llu MB on huge pages; next pass in %.0f ms%s, %s the reserve\n",
+                         read_ms, known ? missing : all, all, known ? "missing" : "(no page map)", plan.left(), plan.looked_at(),
+                         plan.fresh_start() ? ", fresh start" : "", filled, fill_ms, plan.tried(), pass_ms - fill_ms, plan.made(),
+                         plan.busy(), plan.limit(), plan.no_memory(), plan.refused(), longest_ms, mb(huge), mb(resident), delay,
+                         plan.strained() ? " (strained)" : "", plan.with_reserve() ? "with" : "without");
         }
         // Said: how the memory stands at the start; when huge pages go
         // missing, every ten seconds while more come back, and when they are
@@ -448,8 +452,15 @@ void keeper_main() {
         if (short_now && (!said || !short_of)) {
             const uint64_t short_kb =
                 !said && known ? std::min<uint64_t>(kept_kb, uint64_t{missing} * (kHugePage >> 10)) : resident - huge;
-            say(mb_text(short_kb) + of_all +
-                " are not on huge pages (the PC is short of free memory?): the game may stutter until they are; putting them back");
+            // Why, from this pass's answers: calls all turned down as busy (and
+            // the kernel not short), pages held in place; blocks left alone let
+            // go; otherwise the PC had no whole 2 MiB blocks to give.
+            const bool held = plan.made() == 0 && plan.busy() > 0 && plan.no_memory() == 0 && plan.limit() == 0;
+            const char* why = plan.fresh_start() ? " (pages held in place before were let go)"
+                              : held             ? " (pages held in place by the graphics driver?)"
+                                                 : " (the PC is short of free memory?)";
+            say(mb_text(short_kb) + of_all + " are not on huge pages" + why +
+                ": the game may stutter until they are; putting them back");
             short_since = last_said = pass;
             made_since = 0;
         } else if (short_now && made_since > 0 && ms_since(last_said) >= 10000) {
