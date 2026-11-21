@@ -17,6 +17,10 @@
 #endif
 
 #include <algorithm>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -148,6 +152,92 @@ std::mutex g_tracked_mutex;
 std::vector<TrackedThread> g_tracked;
 std::chrono::steady_clock::time_point g_last_report = std::chrono::steady_clock::now();
 
+#ifdef _WIN32
+// ------------------------------------------------------ sampling profiler
+// TTT2_PROFILE_CPU=1: every millisecond each tracked thread that used CPU
+// since the last look is stopped for a moment and where it is noted, with
+// the functions it was called from (unwound with the executable's unwind
+// tables). profile_report() names the functions the samples of the last
+// seconds were in: by itself (the innermost one) and with what it called.
+// Addresses are the executable's (its preferred base): llvm-symbolizer
+// --obj=<exe> names them (sub_XXXXXXXX: the game's function at XXXXXXXX).
+constexpr int kDepth = 12;
+constexpr uint32_t kOutside = 0xFFFFFFFFu; // a function of another module (driver, system)
+struct Sample {
+    double time;
+    uint32_t guest; // 0: a runtime thread
+    uint8_t depth;
+    uint32_t function[kDepth]; // the executable's function starts (RVA), innermost first
+};
+constexpr size_t kSamples = size_t{1} << 18;
+Sample* g_samples = nullptr;
+std::atomic<uint64_t> g_sample_count{0};
+const bool g_profiling = [] {
+    const char* e = std::getenv("TTT2_PROFILE_CPU");
+    return e != nullptr && *e != '\0' && *e != '0';
+}();
+
+double steady_seconds() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void profiler_main() {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    const auto exe = reinterpret_cast<DWORD64>(GetModuleHandleW(nullptr));
+    std::unordered_map<HANDLE, ULONG64> cycles;
+    for (;;) {
+        Sleep(1);
+        std::lock_guard lock(g_tracked_mutex);
+        for (const TrackedThread& t : g_tracked) {
+            ULONG64 c = 0;
+            if (!QueryThreadCycleTime(t.handle, &c)) continue;
+            ULONG64& last = cycles[t.handle];
+            // Only a thread that ran for a good part of the last millisecond
+            // (1M cycles: a quarter of it at 4 GHz); a thread waking from a
+            // wait for a moment would fill the profile with waits.
+            const bool ran = last != 0 && c - last >= 1000000;
+            last = c;
+            if (!ran) continue;
+            // Nothing below allocates while the thread is stopped (it may hold the heap's lock).
+            Sample s{};
+            if (SuspendThread(t.handle) == static_cast<DWORD>(-1)) continue;
+            CONTEXT ctx{};
+            ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+            if (GetThreadContext(t.handle, &ctx)) {
+                for (int d = 0; d < kDepth && ctx.Rip != 0; ++d) {
+                    DWORD64 image = 0;
+                    PRUNTIME_FUNCTION f = RtlLookupFunctionEntry(ctx.Rip, &image, nullptr);
+                    s.function[d] = (f != nullptr && image == exe) ? f->BeginAddress : kOutside;
+                    s.depth = static_cast<uint8_t>(d + 1);
+                    if (f == nullptr) { // a leaf without a frame: its return address on top
+                        if (image != 0 || ctx.Rsp == 0) break;
+                        ctx.Rip = *reinterpret_cast<const DWORD64*>(ctx.Rsp);
+                        ctx.Rsp += 8;
+                        continue;
+                    }
+                    PVOID handler_data = nullptr;
+                    DWORD64 frame = 0;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, ctx.Rip, f, &ctx, &handler_data, &frame, nullptr);
+                }
+            }
+            ResumeThread(t.handle);
+            if (s.depth == 0) continue;
+            s.time = steady_seconds();
+            s.guest = t.guest;
+            const uint64_t n = g_sample_count.load(std::memory_order_relaxed);
+            g_samples[n % kSamples] = s;
+            g_sample_count.store(n + 1, std::memory_order_release);
+        }
+    }
+}
+
+uint64_t preferred_base() {
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(GetModuleHandleW(nullptr));
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(reinterpret_cast<const uint8_t*>(dos) + dos->e_lfanew);
+    return nt->OptionalHeader.ImageBase;
+}
+#endif
+
 // User and kernel time together; negative when it cannot be read.
 double cpu_seconds(const TrackedThread& t) {
 #ifdef _WIN32
@@ -184,8 +274,19 @@ void track_thread_cpu(const char* name, uint32_t guest_thread) {
         t.name = address;
     }
 #ifdef _WIN32
-    t.handle = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
+    t.handle = OpenThread(THREAD_QUERY_LIMITED_INFORMATION | THREAD_QUERY_INFORMATION | THREAD_SUSPEND_RESUME |
+                              THREAD_GET_CONTEXT,
+                          FALSE, GetCurrentThreadId());
+    if (t.handle == nullptr) t.handle = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, GetCurrentThreadId());
     if (t.handle == nullptr) return;
+    if (g_profiling) {
+        static std::once_flag started;
+        std::call_once(started, [] {
+            g_samples = new Sample[kSamples];
+            std::thread(profiler_main).detach();
+            std::fprintf(stderr, "ttt2: profile: sampling the tracked threads every millisecond (TTT2_PROFILE_CPU)\n");
+        });
+    }
 #else
     if (pthread_getcpuclockid(pthread_self(), &t.clock) != 0) return;
 #endif
@@ -234,6 +335,67 @@ std::string thread_cpu_report() {
         out += item;
     }
     return out;
+}
+
+void profile_report(double seconds, const char* label) {
+#ifdef _WIN32
+    if (!g_profiling || g_samples == nullptr) return;
+    const double now = steady_seconds();
+    const uint64_t count = g_sample_count.load(std::memory_order_acquire);
+    std::unordered_map<uint32_t, uint32_t> self, inclusive, threads;
+    uint32_t total = 0;
+    for (uint64_t i = count; i > 0 && count - i < kSamples; --i) {
+        const Sample& s = g_samples[(i - 1) % kSamples];
+        if (now - s.time > seconds) break;
+        ++total;
+        ++self[s.function[0]];
+        ++threads[s.guest];
+        uint32_t seen[kDepth];
+        int distinct = 0;
+        for (int d = 0; d < s.depth; ++d) {
+            const uint32_t f = s.function[d];
+            if (std::find(seen, seen + distinct, f) != seen + distinct) continue;
+            seen[distinct++] = f;
+            ++inclusive[f];
+        }
+    }
+    if (total == 0) return;
+    const uint64_t base = 0x140000000ull; // (the linker's default base: llvm-symbolizer --obj=<exe> takes these)
+    (void)preferred_base;
+    const auto sorted = [](const std::unordered_map<uint32_t, uint32_t>& m) {
+        std::vector<std::pair<uint32_t, uint32_t>> v(m.begin(), m.end());
+        std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+        return v;
+    };
+    const auto top = [&](const std::unordered_map<uint32_t, uint32_t>& m, size_t n, const char* what) {
+        const auto v = sorted(m);
+        std::string out;
+        char item[64];
+        for (size_t i = 0; i < v.size() && i < n; ++i) {
+            if (v[i].first == kOutside) std::snprintf(item, sizeof item, " other-module:%u%%", v[i].second * 100 / total);
+            else std::snprintf(item, sizeof item, " 0x%llx:%u%%", static_cast<unsigned long long>(base + v[i].first),
+                               v[i].second * 100 / total);
+            out += item;
+        }
+        std::fprintf(stderr, "ttt2: profile: %s %s:%s\n", label, what, out.c_str());
+    };
+    std::fprintf(stderr, "ttt2: profile: %s: %u samples in %.0f ms\n", label, total, seconds * 1000.0);
+    {
+        const auto v = sorted(threads);
+        std::string out;
+        char item[64];
+        for (size_t i = 0; i < v.size() && i < 6; ++i) {
+            std::snprintf(item, sizeof item, " %08X:%u%%", v[i].first, v[i].second * 100 / total);
+            out += item;
+        }
+        std::fprintf(stderr, "ttt2: profile: %s threads (guest OSThread; 00000000: the runtime's):%s\n", label, out.c_str());
+    }
+    top(self, 12, "self");
+    top(inclusive, 25, "inclusive");
+#else
+    (void)seconds;
+    (void)label;
+#endif
 }
 
 void install_fault_handler() {

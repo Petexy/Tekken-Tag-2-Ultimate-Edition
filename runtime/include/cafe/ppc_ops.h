@@ -522,9 +522,14 @@ inline T quantize(double ps, uint32_t scale) {
     return static_cast<T>(v);
 }
 
+// psq_l / psq_st: the quantized types (4-7) out of line, the float type
+// (0, and the reserved 1-3 treated as float) inline at every use. The game
+// almost always runs with GQR0 = float, and with the switch the compiler
+// kept the whole function out of line: a call per paired-single load or
+// store, a fifth of the CPU time in some of the title's scene changes.
 template <bool W>
-inline void psq_load(PPCContext& ctx, const uint8_t* base, uint32_t frd,
-                     uint32_t ea, uint32_t gqr) {
+[[gnu::noinline]] void psq_load_quantized(PPCContext& ctx, const uint8_t* base, uint32_t frd,
+                                          uint32_t ea, uint32_t gqr) {
     const uint32_t type = (gqr >> 16) & 7;
     const float scale = kDequantize[(gqr >> 24) & 0x3F];
     double ps0, ps1 = 1.0;
@@ -555,8 +560,21 @@ inline void psq_load(PPCContext& ctx, const uint8_t* base, uint32_t frd,
 }
 
 template <bool W>
-inline void psq_store(const PPCContext& ctx, uint8_t* base, uint32_t frs,
-                      uint32_t ea, uint32_t gqr) {
+[[gnu::always_inline]] inline void psq_load(PPCContext& ctx, const uint8_t* base, uint32_t frd,
+                                            uint32_t ea, uint32_t gqr) {
+    if (((gqr >> 16) & 4) == 0) [[likely]] { // float
+        const double ps0 = load_single(ld32(base, ea));
+        const double ps1 = W ? 1.0 : load_single(ld32(base, ea + 4));
+        ctx.f[frd].ps0 = ps0;
+        ctx.f[frd].ps1 = ps1;
+        return;
+    }
+    psq_load_quantized<W>(ctx, base, frd, ea, gqr);
+}
+
+template <bool W>
+[[gnu::noinline]] void psq_store_quantized(const PPCContext& ctx, uint8_t* base, uint32_t frs,
+                                           uint32_t ea, uint32_t gqr) {
     const uint32_t type = gqr & 7;
     const uint32_t scale = (gqr >> 8) & 0x3F;
     const double ps0 = ctx.f[frs].ps0;
@@ -583,6 +601,17 @@ inline void psq_store(const PPCContext& ctx, uint8_t* base, uint32_t frs,
         if (!W) st32(base, ea + 4, store_single_ftz(ps1));
         break;
     }
+}
+
+template <bool W>
+[[gnu::always_inline]] inline void psq_store(const PPCContext& ctx, uint8_t* base, uint32_t frs,
+                                             uint32_t ea, uint32_t gqr) {
+    if ((gqr & 4) == 0) [[likely]] { // float
+        st32(base, ea, store_single_ftz(ctx.f[frs].ps0));
+        if (!W) st32(base, ea + 4, store_single_ftz(ctx.f[frs].ps1));
+        return;
+    }
+    psq_store_quantized<W>(ctx, base, frs, ea, gqr);
 }
 
 } // namespace cafe::ppc

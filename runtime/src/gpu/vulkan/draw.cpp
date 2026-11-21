@@ -9,17 +9,26 @@
 #include "gx2/types.h"
 
 #include "cafe/runtime.h"
+#include "host/perf.h"
+#include "host/timed_wait.h"
 
 #include <shaderc/shaderc.h>
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <unordered_map>
+#include <string>
+#include <thread>
 #include <type_traits>
 
 namespace cafe::gpu::vk {
@@ -32,6 +41,13 @@ uint64_t fnv(const void* data, size_t size, uint64_t h = 0xCBF29CE484222325ull) 
     for (size_t i = 0; i < size; ++i) h = (h ^ p[i]) * 0x100000001B3ull;
     return h;
 }
+
+// Adds the time of its scope to `total` (seconds): the slow-frame breakdown.
+struct Timed {
+    double& total;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ~Timed() { total += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
+};
 
 void report_once(const char* what, uint32_t value) {
     static std::vector<std::pair<std::string, uint32_t>> seen;
@@ -131,12 +147,9 @@ std::filesystem::path cache_directory() {
     return dir;
 }
 
-std::vector<uint32_t> load_cached_spirv(uint64_t key) {
+std::vector<uint32_t> read_spirv_file(const std::filesystem::path& path) {
     std::vector<uint32_t> code;
-    if (cache_directory().empty()) return code;
-    char name[32];
-    std::snprintf(name, sizeof(name), "%016llx.spv", static_cast<unsigned long long>(key));
-    std::ifstream in(cache_directory() / "spirv" / name, std::ios::binary | std::ios::ate);
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) return code;
     const std::streamsize size = in.tellg();
     if (size <= 0 || size % 4) return code;
@@ -147,8 +160,60 @@ std::vector<uint32_t> load_cached_spirv(uint64_t key) {
     return code;
 }
 
+// The SPIR-V cache in memory, read by a thread of its own at start-up:
+// opening one small file per shader on the command processor's thread cost
+// a quarter of a 190 ms scene change (a file open on Windows takes
+// milliseconds, more with a virus scanner looking), and so did every open
+// of a file that is not there. Once it has read the folder, a shader it
+// does not hold is not on disk.
+struct SpirvMemory {
+    std::mutex mutex;
+    std::unordered_map<uint64_t, std::vector<uint32_t>> code;
+    bool complete = false;
+};
+SpirvMemory& spirv_memory() {
+    static SpirvMemory memory;
+    return memory;
+}
+
+void preload_spirv() {
+    if (cache_directory().empty()) return;
+    std::thread([] {
+        host::lower_thread_priority();
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(cache_directory() / "spirv", ec)) {
+            const std::wstring name = entry.path().filename().wstring();
+            if (name.size() != 20 || entry.path().extension() != ".spv") continue;
+            const uint64_t key = std::wcstoull(name.substr(0, 16).c_str(), nullptr, 16);
+            std::vector<uint32_t> code = read_spirv_file(entry.path());
+            if (code.empty()) continue;
+            std::lock_guard lock(spirv_memory().mutex);
+            spirv_memory().code.try_emplace(key, std::move(code));
+        }
+        std::lock_guard lock(spirv_memory().mutex);
+        spirv_memory().complete = !ec;
+    }).detach();
+}
+
+std::vector<uint32_t> load_cached_spirv(uint64_t key) {
+    if (cache_directory().empty()) return {};
+    {
+        SpirvMemory& memory = spirv_memory();
+        std::lock_guard lock(memory.mutex);
+        if (const auto it = memory.code.find(key); it != memory.code.end()) return it->second;
+        if (memory.complete) return {};
+    }
+    char name[32];
+    std::snprintf(name, sizeof(name), "%016llx.spv", static_cast<unsigned long long>(key));
+    return read_spirv_file(cache_directory() / "spirv" / name);
+}
+
 void store_cached_spirv(uint64_t key, const std::vector<uint32_t>& code) {
     if (cache_directory().empty()) return;
+    {
+        std::lock_guard lock(spirv_memory().mutex);
+        spirv_memory().code.insert_or_assign(key, code);
+    }
     char name[32];
     std::snprintf(name, sizeof(name), "%016llx.spv", static_cast<unsigned long long>(key));
     const std::filesystem::path path = cache_directory() / "spirv" / name;
@@ -164,6 +229,193 @@ const char* dump_directory() {
         return (d != nullptr && *d != '\0') ? d : nullptr;
     }();
     return dir;
+}
+
+} // namespace
+
+// ------------------------------------------------------- background builds
+//
+// Compiling a shader (shaderc) or creating a pipeline (the driver compiles
+// it for the GPU) takes milliseconds to tens of milliseconds, and a scene's
+// first frame can need dozens: done in the draw, the first fight stalled for
+// seconds (15 frames/s over ten seconds on an RTX 5070 laptop GPU). They are
+// built on a few worker threads instead. A draw that needs one waits for it
+// within a budget per title frame (TTT2_BUILD_BUDGET_MS, 6 ms); past that it
+// is skipped until the build lands, a frame or two later, rather than
+// holding the game. Stream-out draws (the fighters' skinning, whose output
+// later frames read) always wait. TTT2_ASYNC_BUILDS=0: every draw waits.
+
+void BuildQueue::start() {
+    started_ = true; // (under mutex_)
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const unsigned threads = std::clamp(cores / 3, 1u, 8u);
+    for (unsigned i = 0; i < threads; ++i) {
+        std::thread([this] {
+            for (;;) {
+                std::function<void()> job;
+                {
+                    std::unique_lock lock(mutex_);
+                    jobs_cv_.wait(lock, [&] { return !jobs_.empty(); });
+                    job = std::move(jobs_.front());
+                    jobs_.pop_front();
+                }
+                job();
+            }
+        }).detach();
+    }
+}
+
+void BuildQueue::push(std::function<void()> job) {
+    {
+        std::lock_guard lock(mutex_);
+        if (!started_) start();
+        jobs_.push_back(std::move(job));
+    }
+    jobs_cv_.notify_one();
+}
+
+void BuildQueue::finished(std::atomic<int>& state, int value) {
+    {
+        std::lock_guard lock(mutex_);
+        state.store(value, std::memory_order_release);
+    }
+    done_cv_.notify_all();
+}
+
+bool BuildQueue::await(const std::atomic<int>& state, std::chrono::nanoseconds* budget) {
+    if (state.load(std::memory_order_acquire) != 0) return true;
+    std::unique_lock lock(mutex_);
+    const auto ready = [&] { return state.load(std::memory_order_acquire) != 0; };
+    if (budget == nullptr) {
+        done_cv_.wait(lock, ready);
+        return true;
+    }
+    if (budget->count() <= 0) return ready();
+    const auto start = std::chrono::steady_clock::now();
+    const bool done = host::timed_wait(done_cv_, lock, *budget, ready);
+    *budget -= std::chrono::steady_clock::now() - start;
+    return done;
+}
+
+namespace {
+
+// Whether two translations are the same shader: the same GLSL (by hash) and
+// the same interface.
+bool same_translation(const TranslatedShader& a, uint64_t a_hash, const TranslatedShader& b, uint64_t b_hash) {
+    return a_hash == b_hash && a.texture_mask == b.texture_mask && a.shadow_mask == b.shadow_mask &&
+           a.uses_registers == b.uses_registers && a.constant_bank_mask == b.constant_bank_mask &&
+           std::equal(std::begin(a.constant_bank_extent), std::end(a.constant_bank_extent), std::begin(b.constant_bank_extent)) &&
+           a.buffer_mask == b.buffer_mask && std::equal(std::begin(a.vb_extent), std::end(a.vb_extent), std::begin(b.vb_extent)) &&
+           a.stream_out_complete == b.stream_out_complete;
+}
+
+constexpr uint32_t kWarmMagic = 0x31575454; // "TTW1"
+// What warm.bin's records are valid for: the shader translator's sources
+// (CMake hashes them), else this executable.
+#ifndef TTT2_TRANSLATOR_HASH
+#define TTT2_TRANSLATOR_HASH 0
+#endif
+uint64_t warm_stamp() {
+    return TTT2_TRANSLATOR_HASH != 0 ? static_cast<uint64_t>(TTT2_TRANSLATOR_HASH) : host::executable_stamp();
+}
+constexpr uint32_t kWarmVersion = 1;
+struct WarmHeader {
+    uint32_t magic, version;
+    uint64_t stamp;
+    uint32_t shaders, pipelines;
+};
+
+void write_file(const std::filesystem::path& path, const void* data, size_t size) {
+    {
+        std::ofstream out(path.string() + ".tmp", std::ios::binary);
+        out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+        if (!out) return;
+    }
+    std::error_code ec;
+    std::filesystem::rename(path.string() + ".tmp", path, ec);
+}
+
+// The graphics pipeline `k` describes, with its shaders and layout.
+VkResult create_pipeline(VkDevice device, VkPipelineCache cache, const PipelineKey& k, VkPipelineLayout layout,
+                         VkPipeline* out) {
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = k.vs->module;
+    stages[0].pName = "main";
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = k.ps->module;
+    stages[1].pName = "main";
+    VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+    ia.topology = k.topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+                  : k.topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+                                          : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    rs.polygonMode = k.polygon_mode == 0 ? VK_POLYGON_MODE_POINT : k.polygon_mode == 1 ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+    rs.depthClampEnable = k.depth_clamp ? VK_TRUE : VK_FALSE;
+    rs.lineWidth = 1.0f;
+    VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    VkPipelineColorBlendAttachmentState attachments[8]{};
+    for (uint32_t i = 0; i < k.color_count; ++i) {
+        VkPipelineColorBlendAttachmentState& a = attachments[i];
+        a.colorWriteMask = k.colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
+        if (k.blend[i]) {
+            const uint32_t b = k.blend[i];
+            a.blendEnable = VK_TRUE;
+            a.srcColorBlendFactor = blend_factor(b & 0x1F);
+            a.colorBlendOp = blend_op((b >> 5) & 7);
+            a.dstColorBlendFactor = blend_factor((b >> 8) & 0x1F);
+            if ((b >> 29) & 1) {
+                a.srcAlphaBlendFactor = blend_factor((b >> 16) & 0x1F);
+                a.alphaBlendOp = blend_op((b >> 21) & 7);
+                a.dstAlphaBlendFactor = blend_factor((b >> 24) & 0x1F);
+            } else {
+                a.srcAlphaBlendFactor = a.srcColorBlendFactor;
+                a.alphaBlendOp = a.colorBlendOp;
+                a.dstAlphaBlendFactor = a.dstColorBlendFactor;
+            }
+        }
+    }
+    VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+    cb.attachmentCount = k.color_count;
+    cb.pAttachments = attachments;
+    static const VkDynamicState kDynamic[] = {
+        VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_DEPTH_BIAS,
+        VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+        VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_CULL_MODE, VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP, VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
+        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_OP, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
+    };
+    VkPipelineDynamicStateCreateInfo dyn{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    dyn.dynamicStateCount = static_cast<uint32_t>(std::size(kDynamic));
+    dyn.pDynamicStates = kDynamic;
+    VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    ri.colorAttachmentCount = k.color_count;
+    ri.pColorAttachmentFormats = k.colors;
+    ri.depthAttachmentFormat = k.depth;
+    ri.stencilAttachmentFormat = has_stencil(k.depth) ? k.depth : VK_FORMAT_UNDEFINED;
+    VkGraphicsPipelineCreateInfo gci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    gci.pNext = &ri;
+    gci.stageCount = 2;
+    gci.pStages = stages;
+    gci.pVertexInputState = &vi;
+    gci.pInputAssemblyState = &ia;
+    gci.pViewportState = &vp;
+    gci.pRasterizationState = &rs;
+    gci.pMultisampleState = &ms;
+    gci.pDepthStencilState = &ds;
+    gci.pColorBlendState = &cb;
+    gci.pDynamicState = &dyn;
+    gci.layout = layout;
+    return vkCreateGraphicsPipelines(device, cache, 1, &gci, nullptr, out);
 }
 
 } // namespace
@@ -188,19 +440,166 @@ void Renderer::load_pipeline_cache() {
         pci.pInitialData = nullptr;
         VK_CHECK(vkCreatePipelineCache(ctx_.device, &pci, nullptr, &pipeline_cache_));
     }
+    preload_spirv();
+    if (const char* e = std::getenv("TTT2_ASYNC_BUILDS"); e && std::strcmp(e, "0") == 0) async_builds_ = false;
+    if (const char* e = std::getenv("TTT2_BUILD_BUDGET_MS"); e && *e) {
+        build_budget_frame_ = std::chrono::microseconds(static_cast<int64_t>(std::max(0.0, std::atof(e)) * 1000.0));
+    }
+    build_budget_ = build_budget_frame_;
 }
 
+// pipelines.bin (the driver's compiled pipelines, tens of MB) and warm.bin
+// (what to create at the next start), written by a thread of their own: on
+// the command processor's thread the save held a frame every ten seconds
+// while pipelines were still being made.
 void Renderer::save_pipeline_cache() {
-    if (new_pipelines_ == 0 || cache_directory().empty()) return;
+    if ((new_pipelines_ == 0 && !records_dirty_) || cache_directory().empty()) return;
+    if (saving_cache_.exchange(true)) return; // the last save still runs: the next one gets these
     new_pipelines_ = 0;
-    size_t size = 0;
-    if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
-    std::vector<char> data(size);
-    if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, data.data()) != VK_SUCCESS) return;
-    const std::filesystem::path path = cache_directory() / "pipelines.bin";
-    std::ofstream(path.string() + ".tmp", std::ios::binary).write(data.data(), static_cast<std::streamsize>(size));
-    std::error_code ec;
-    std::filesystem::rename(path.string() + ".tmp", path, ec);
+    records_dirty_ = false;
+    auto shaders = std::make_shared<std::vector<ShaderRecord>>(shader_records_);
+    auto pipelines = std::make_shared<std::vector<PipelineRecord>>(pipeline_records_);
+    std::thread([this, shaders, pipelines] {
+        host::lower_thread_priority();
+        size_t size = 0;
+        if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, nullptr) == VK_SUCCESS && size != 0) {
+            std::vector<char> data(size);
+            if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, data.data()) == VK_SUCCESS) {
+                write_file(cache_directory() / "pipelines.bin", data.data(), size);
+            }
+        }
+        if (const uint64_t stamp = warm_stamp()) {
+            WarmHeader h{kWarmMagic, kWarmVersion, stamp, static_cast<uint32_t>(shaders->size()),
+                         static_cast<uint32_t>(pipelines->size())};
+            std::vector<char> data(sizeof h + shaders->size() * sizeof(ShaderRecord) +
+                                   pipelines->size() * sizeof(PipelineRecord));
+            char* p = data.data();
+            std::memcpy(p, &h, sizeof h);
+            p += sizeof h;
+            if (!shaders->empty()) std::memcpy(p, shaders->data(), shaders->size() * sizeof(ShaderRecord));
+            p += shaders->size() * sizeof(ShaderRecord);
+            if (!pipelines->empty()) std::memcpy(p, pipelines->data(), pipelines->size() * sizeof(PipelineRecord));
+            write_file(cache_directory() / "warm.bin", data.data(), data.size());
+        }
+        saving_cache_.store(false);
+    }).detach();
+}
+
+// ---------------------------------------------------------------- warm-up
+
+// What earlier runs of this build translated and created, made again before
+// the title draws: the in-game builds then find them ready. SPIR-V comes
+// from the disk cache and the driver's work from pipelines.bin, so this
+// takes a fraction of a second; the pipelines are created on several
+// threads. Records from another build (another translator) are ignored, as
+// the shaders they name may translate differently now. TTT2_WARM_UP=0: off.
+void Renderer::warm_up() {
+    if (cache_directory().empty()) return;
+    if (const char* e = std::getenv("TTT2_WARM_UP"); e && std::strcmp(e, "0") == 0) return;
+    std::ifstream in(cache_directory() / "warm.bin", std::ios::binary);
+    if (!in) return;
+    WarmHeader h{};
+    in.read(reinterpret_cast<char*>(&h), sizeof h);
+    const uint64_t stamp = warm_stamp();
+    if (!in || h.magic != kWarmMagic || h.version != kWarmVersion || h.shaders > (1u << 20) || h.pipelines > (1u << 20)) return;
+    if (stamp == 0 || h.stamp != stamp) {
+        std::fprintf(stderr, "ttt2: gpu: warm-up: the records are from another build of the game; they are made again\n");
+        return;
+    }
+    std::vector<ShaderRecord> shaders(h.shaders);
+    std::vector<PipelineRecord> pipelines(h.pipelines);
+    in.read(reinterpret_cast<char*>(shaders.data()), static_cast<std::streamsize>(shaders.size() * sizeof(ShaderRecord)));
+    in.read(reinterpret_cast<char*>(pipelines.data()), static_cast<std::streamsize>(pipelines.size() * sizeof(PipelineRecord)));
+    if (!in) return;
+    const auto start = std::chrono::steady_clock::now();
+
+    // Shaders: one module per translation, every shader key that used it.
+    std::unordered_map<uint64_t, const ShaderModule*> by_translation;
+    uint32_t missing = 0;
+    for (const ShaderRecord& s : shaders) {
+        if (shaders_.count(s.key)) continue;
+        const uint64_t translation = fnv(&s.glsl_hash, sizeof(ShaderRecord) - offsetof(ShaderRecord, glsl_hash));
+        const ShaderModule* m = nullptr;
+        if (auto it = by_translation.find(translation); it != by_translation.end()) {
+            m = it->second;
+        } else {
+            std::vector<uint32_t> spirv = load_cached_spirv(s.glsl_hash);
+            if (spirv.empty()) {
+                ++missing;
+                continue;
+            }
+            TranslatedShader info;
+            info.texture_mask = s.texture_mask;
+            info.shadow_mask = s.shadow_mask;
+            info.uses_registers = s.uses_registers != 0;
+            info.constant_bank_mask = s.constant_bank_mask;
+            info.buffer_mask = s.buffer_mask;
+            info.stream_out_complete = static_cast<uint8_t>(s.stream_out_complete);
+            std::copy(std::begin(s.constant_bank_extent), std::end(s.constant_bank_extent), std::begin(info.constant_bank_extent));
+            std::copy(std::begin(s.vb_extent), std::end(s.vb_extent), std::begin(info.vb_extent));
+            m = add_module(std::move(info), s.glsl_hash, spirv);
+            by_translation.emplace(translation, m);
+        }
+        shaders_[s.key] = m;
+        record_shader(s.key, m);
+    }
+
+    // Pipelines, created on several threads.
+    struct Job {
+        PipelineKey k;
+        Pipeline* p;
+    };
+    std::vector<Job> jobs;
+    for (const PipelineRecord& r : pipelines) {
+        const auto vs = shaders_.find(r.vs_key), ps = shaders_.find(r.ps_key);
+        if (vs == shaders_.end() || ps == shaders_.end() || vs->second == nullptr || ps->second == nullptr) continue;
+        PipelineKey k;
+        std::memset(&k, 0, sizeof(k));
+        k.vs = vs->second;
+        k.ps = ps->second;
+        for (int i = 0; i < 8; ++i) {
+            k.colors[i] = static_cast<VkFormat>(r.colors[i]);
+            k.blend[i] = r.blend[i];
+        }
+        k.depth = static_cast<VkFormat>(r.depth);
+        k.color_count = std::min<uint32_t>(r.color_count, 8);
+        k.write_mask = r.write_mask;
+        k.polygon_mode = r.polygon_mode;
+        k.topology_class = r.topology_class;
+        k.depth_clamp = r.depth_clamp;
+        auto& entry = pipelines_[fnv(&k, sizeof(k))];
+        if (entry) continue;
+        entry = std::make_unique<Pipeline>();
+        entry->vs = k.vs;
+        entry->ps = k.ps;
+        entry->layout = pipeline_layout(k.vs->info.texture_mask, k.ps->info.texture_mask, k.vs->info.uses_registers,
+                                        k.ps->info.uses_registers);
+        jobs.push_back({k, entry.get()});
+        pipeline_records_.push_back(r);
+    }
+    std::atomic<size_t> next{0};
+    std::atomic<uint32_t> failed{0};
+    const auto worker = [&] {
+        for (size_t i; (i = next++) < jobs.size();) {
+            Job& j = jobs[i];
+            const bool ok = create_pipeline(ctx_.device, pipeline_cache_, j.k, j.p->layout, &j.p->pipeline) == VK_SUCCESS;
+            if (!ok) {
+                j.p->pipeline = VK_NULL_HANDLE;
+                ++failed;
+            }
+            j.p->state.store(ok ? 1 : 2, std::memory_order_release);
+        }
+    };
+    const unsigned threads = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
+    std::vector<std::thread> pool;
+    for (unsigned i = 1; i < threads && i < jobs.size(); ++i) pool.emplace_back(worker);
+    worker();
+    for (std::thread& t : pool) t.join();
+    records_dirty_ = missing != 0 || failed != 0;
+    std::fprintf(stderr, "ttt2: gpu: warm-up: %zu shaders (%zu translations), %zu pipelines ready in %.0f ms on %u threads (%u missing, %u failed)\n",
+                 shaders_.size(), modules_.size(), jobs.size(),
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(), threads,
+                 missing, failed.load());
 }
 
 // ---------------------------------------------------------------- shaders
@@ -230,8 +629,66 @@ const Program* Renderer::program(uint32_t address, uint32_t size, uint64_t& hash
     return it->second.ok ? &it->second.program : nullptr;
 }
 
+const ShaderModule* Renderer::add_module(TranslatedShader&& info, uint64_t glsl_hash, const std::vector<uint32_t>& spirv) {
+    auto module = std::make_unique<ShaderModule>();
+    module->info = std::move(info);
+    module->glsl_hash = glsl_hash;
+    VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    mci.codeSize = spirv.size() * 4;
+    mci.pCode = spirv.data();
+    VK_CHECK(vkCreateShaderModule(ctx_.device, &mci, nullptr, &module->module));
+    uint64_t code = glsl_hash;
+    while (modules_.count(code)) ++code;
+    const ShaderModule* m = module.get();
+    modules_.emplace(code, std::move(module));
+    return m;
+}
+
+void Renderer::record_shader(uint64_t key, const ShaderModule* m) {
+    auto* module = const_cast<ShaderModule*>(m);
+    if (module->record_key == 0) module->record_key = key;
+    ShaderRecord r;
+    std::memset(&r, 0, sizeof r);
+    r.key = key;
+    r.glsl_hash = m->glsl_hash;
+    r.texture_mask = m->info.texture_mask;
+    r.shadow_mask = m->info.shadow_mask;
+    r.uses_registers = m->info.uses_registers;
+    r.constant_bank_mask = m->info.constant_bank_mask;
+    r.buffer_mask = m->info.buffer_mask;
+    r.stream_out_complete = m->info.stream_out_complete;
+    std::copy(std::begin(m->info.constant_bank_extent), std::end(m->info.constant_bank_extent), std::begin(r.constant_bank_extent));
+    std::copy(std::begin(m->info.vb_extent), std::end(m->info.vb_extent), std::begin(r.vb_extent));
+    shader_records_.push_back(r);
+    records_dirty_ = true;
+}
+
+// A background compile finished: its module (made once per translation)
+// for shader `key`. (The caller holds a reference to `p`.)
+const ShaderModule* Renderer::adopt_pending(uint64_t key, PendingModule& p) {
+    pending_shaders_.erase(key);
+    const auto forget = [&] {
+        if (auto it = pending_modules_.find(p.glsl_hash); it != pending_modules_.end() && it->second.get() == &p) {
+            pending_modules_.erase(it);
+        }
+    };
+    if (p.state.load(std::memory_order_acquire) != 1) {
+        forget();
+        shaders_[key] = nullptr;
+        return nullptr;
+    }
+    if (p.module == nullptr) {
+        forget();
+        p.module = add_module(std::move(p.info), p.glsl_hash, p.spirv);
+        std::vector<uint32_t>().swap(p.spirv);
+    }
+    shaders_[key] = p.module;
+    record_shader(key, p.module);
+    return p.module;
+}
+
 const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t size, uint32_t fetch_address,
-                                     uint32_t fetch_size, const ShaderEnvironment& env) {
+                                     uint32_t fetch_size, const ShaderEnvironment& env, bool* pending) {
     uint64_t program_hash = 0, fetch_hash = 0;
     const Program* p = program(address, size, program_hash);
     if (p == nullptr) return nullptr;
@@ -240,13 +697,29 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     const uint64_t keys[3] = {program_hash, fetch_hash, environment_key(env)};
     const uint64_t key = fnv(keys, sizeof(keys));
     if (auto it = shaders_.find(key); it != shaders_.end()) return it->second;
-    const ShaderModule*& entry = shaders_[key]; // stays null if the shader fails
+    // Its compile runs: wait within the budget (all of it without `pending`).
+    const auto await = [&](std::shared_ptr<PendingModule> pm) -> const ShaderModule* {
+        Timed timed{frame_build_wait_};
+        if (!builds_.await(pm->state, pending ? &build_budget_ : nullptr)) {
+            *pending = true;
+            return nullptr;
+        }
+        return adopt_pending(key, *pm);
+    };
+    if (auto it = pending_shaders_.find(key); it != pending_shaders_.end()) return await(it->second);
+
     const char* kind = stage == Stage::kVertex ? "vs" : "ps";
     TranslatedShader info;
     std::string error;
-    if (!translate(*p, fetch, env, info, error)) {
+    bool translated;
+    {
+        Timed timed{frame_translate_};
+        translated = translate(*p, fetch, env, info, error);
+    }
+    if (!translated) {
         std::fprintf(stderr, "ttt2: gpu: cannot translate %s %016llx: %s\n", kind,
                      static_cast<unsigned long long>(program_hash), error.c_str());
+        shaders_[key] = nullptr; // (not translated again)
         return nullptr;
     }
     if (const char* dir = dump_directory()) {
@@ -259,50 +732,61 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     // the key also covers state a shader does not depend on (textures the
     // title left bound to slots it does not sample, other stages' links).
     const uint64_t glsl_hash = fnv(info.glsl.data(), info.glsl.size());
-    const auto same = [&](const TranslatedShader& o) {
-        return o.glsl == info.glsl && o.texture_mask == info.texture_mask && o.shadow_mask == info.shadow_mask &&
-               o.uses_registers == info.uses_registers && o.constant_bank_mask == info.constant_bank_mask &&
-               std::equal(std::begin(o.constant_bank_extent), std::end(o.constant_bank_extent),
-                          std::begin(info.constant_bank_extent)) &&
-               o.buffer_mask == info.buffer_mask &&
-               std::equal(std::begin(o.vb_extent), std::end(o.vb_extent), std::begin(info.vb_extent)) &&
-               o.stream_out_complete == info.stream_out_complete;
-    };
-    uint64_t code = glsl_hash;
-    for (auto it = modules_.find(code); it != modules_.end(); it = modules_.find(++code)) {
-        if (same(it->second->info)) return entry = it->second.get();
+    for (uint64_t code = glsl_hash;; ++code) {
+        const auto it = modules_.find(code);
+        if (it == modules_.end()) break;
+        if (same_translation(it->second->info, it->second->glsl_hash, info, glsl_hash)) {
+            const ShaderModule* m = it->second.get();
+            shaders_[key] = m;
+            record_shader(key, m);
+            return m;
+        }
+    }
+    if (auto it = pending_modules_.find(glsl_hash);
+        it != pending_modules_.end() && same_translation(it->second->info, it->second->glsl_hash, info, glsl_hash)) {
+        pending_shaders_[key] = it->second;
+        return await(it->second);
     }
     // SPIR-V is cached on disk by the GLSL it came from.
     std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash);
-    if (spirv.empty()) {
+    if (!spirv.empty()) {
+        const ShaderModule* m = add_module(std::move(info), glsl_hash, spirv);
+        shaders_[key] = m;
+        record_shader(key, m);
+        return m;
+    }
+    auto pm = std::make_shared<PendingModule>();
+    pm->info = std::move(info);
+    pm->glsl_hash = glsl_hash;
+    pm->vertex = stage == Stage::kVertex;
+    builds_.push([this, pm, program_hash] {
+        thread_local shaderc_compiler_t compiler = shaderc_compiler_initialize();
+        const char* kind = pm->vertex ? "vs" : "ps";
         shaderc_compile_options_t options = shaderc_compile_options_initialize();
         shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
         // The driver optimises; SPIR-V optimisation only costs compile time.
         shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_zero);
         shaderc_compilation_result_t result = shaderc_compile_into_spv(
-            compiler_, info.glsl.data(), info.glsl.size(),
-            stage == Stage::kVertex ? shaderc_vertex_shader : shaderc_fragment_shader, kind, "main", options);
+            compiler, pm->info.glsl.data(), pm->info.glsl.size(),
+            pm->vertex ? shaderc_vertex_shader : shaderc_fragment_shader, kind, "main", options);
         shaderc_compile_options_release(options);
         if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
             std::fprintf(stderr, "ttt2: gpu: cannot compile %s %016llx:\n%s\n", kind,
                          static_cast<unsigned long long>(program_hash), shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            return nullptr;
+            builds_.finished(pm->state, 2);
+            return;
         }
         const auto* bytes = reinterpret_cast<const uint32_t*>(shaderc_result_get_bytes(result));
-        spirv.assign(bytes, bytes + shaderc_result_get_length(result) / 4);
+        pm->spirv.assign(bytes, bytes + shaderc_result_get_length(result) / 4);
         shaderc_result_release(result);
-        store_cached_spirv(glsl_hash, spirv);
-    }
-    auto module = std::make_unique<ShaderModule>();
-    module->info = std::move(info);
-    VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    mci.codeSize = spirv.size() * 4;
-    mci.pCode = spirv.data();
-    VK_CHECK(vkCreateShaderModule(ctx_.device, &mci, nullptr, &module->module));
-    entry = module.get();
-    modules_.emplace(code, std::move(module));
-    return entry;
+        store_cached_spirv(pm->glsl_hash, pm->spirv);
+        ++builds_.built_shaders;
+        builds_.finished(pm->state, 1);
+    });
+    pending_modules_[glsl_hash] = pm;
+    pending_shaders_[key] = pm;
+    return await(pm);
 }
 
 // -------------------------------------------------------------- pipelines
@@ -341,7 +825,8 @@ VkPipelineLayout Renderer::pipeline_layout(uint32_t vs_textures, uint32_t ps_tex
 }
 
 const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
-                                   const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class) {
+                                   const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class,
+                                   bool* pending) {
     PipelineKey k;
     std::memset(&k, 0, sizeof(k));
     k.vs = vs;
@@ -369,98 +854,47 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
 
     const uint64_t key = fnv(&k, sizeof(k));
     auto& entry = pipelines_[key];
-    if (entry) return entry->pipeline ? entry.get() : nullptr;
-    entry = std::make_unique<Pipeline>();
-    entry->vs = vs;
-    entry->ps = ps;
-    entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
-                                    ps->info.uses_registers);
-
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vs->module;
-    stages[0].pName = "main";
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = ps->module;
-    stages[1].pName = "main";
-    VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-                  : topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
-                                        : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    rs.polygonMode = k.polygon_mode == 0 ? VK_POLYGON_MODE_POINT : k.polygon_mode == 1 ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-    rs.depthClampEnable = k.depth_clamp ? VK_TRUE : VK_FALSE;
-    rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    VkPipelineColorBlendAttachmentState attachments[8]{};
-    for (uint32_t i = 0; i < color_count; ++i) {
-        VkPipelineColorBlendAttachmentState& a = attachments[i];
-        a.colorWriteMask = colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
-        if (k.blend[i]) {
-            const uint32_t b = k.blend[i];
-            a.blendEnable = VK_TRUE;
-            a.srcColorBlendFactor = blend_factor(b & 0x1F);
-            a.colorBlendOp = blend_op((b >> 5) & 7);
-            a.dstColorBlendFactor = blend_factor((b >> 8) & 0x1F);
-            if ((b >> 29) & 1) {
-                a.srcAlphaBlendFactor = blend_factor((b >> 16) & 0x1F);
-                a.alphaBlendOp = blend_op((b >> 21) & 7);
-                a.dstAlphaBlendFactor = blend_factor((b >> 24) & 0x1F);
-            } else {
-                a.srcAlphaBlendFactor = a.srcColorBlendFactor;
-                a.alphaBlendOp = a.colorBlendOp;
-                a.dstAlphaBlendFactor = a.dstColorBlendFactor;
-            }
+    if (!entry) {
+        entry = std::make_unique<Pipeline>();
+        entry->vs = vs;
+        entry->ps = ps;
+        entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
+                                        ps->info.uses_registers);
+        PipelineRecord r;
+        std::memset(&r, 0, sizeof r);
+        r.vs_key = vs->record_key;
+        r.ps_key = ps->record_key;
+        for (int i = 0; i < 8; ++i) {
+            r.colors[i] = static_cast<uint32_t>(k.colors[i]);
+            r.blend[i] = k.blend[i];
         }
+        r.depth = static_cast<uint32_t>(k.depth);
+        r.color_count = k.color_count;
+        r.write_mask = k.write_mask;
+        r.polygon_mode = k.polygon_mode;
+        r.topology_class = k.topology_class;
+        r.depth_clamp = k.depth_clamp;
+        pipeline_records_.push_back(r);
+        records_dirty_ = true;
+        ++new_pipelines_;
+        Pipeline* p = entry.get();
+        builds_.push([this, k, p] {
+            const VkResult r = create_pipeline(ctx_.device, pipeline_cache_, k, p->layout, &p->pipeline);
+            if (r != VK_SUCCESS) {
+                std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
+                p->pipeline = VK_NULL_HANDLE;
+            }
+            ++builds_.built_pipelines;
+            builds_.finished(p->state, r == VK_SUCCESS ? 1 : 2);
+        });
     }
-    VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = color_count;
-    cb.pAttachments = attachments;
-    static const VkDynamicState kDynamic[] = {
-        VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_DEPTH_BIAS,
-        VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
-        VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_CULL_MODE, VK_DYNAMIC_STATE_FRONT_FACE,
-        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
-        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP, VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
-        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_OP, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
-        VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
-    };
-    VkPipelineDynamicStateCreateInfo dyn{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dyn.dynamicStateCount = static_cast<uint32_t>(std::size(kDynamic));
-    dyn.pDynamicStates = kDynamic;
-    VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    ri.colorAttachmentCount = color_count;
-    ri.pColorAttachmentFormats = colors;
-    ri.depthAttachmentFormat = depth;
-    ri.stencilAttachmentFormat = has_stencil(depth) ? depth : VK_FORMAT_UNDEFINED;
-    VkGraphicsPipelineCreateInfo gci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    gci.pNext = &ri;
-    gci.stageCount = 2;
-    gci.pStages = stages;
-    gci.pVertexInputState = &vi;
-    gci.pInputAssemblyState = &ia;
-    gci.pViewportState = &vp;
-    gci.pRasterizationState = &rs;
-    gci.pMultisampleState = &ms;
-    gci.pDepthStencilState = &ds;
-    gci.pColorBlendState = &cb;
-    gci.pDynamicState = &dyn;
-    gci.layout = entry->layout;
-    const VkResult r = vkCreateGraphicsPipelines(ctx_.device, pipeline_cache_, 1, &gci, nullptr, &entry->pipeline);
-    ++new_pipelines_;
-    if (r != VK_SUCCESS) {
-        std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
-        entry->pipeline = VK_NULL_HANDLE;
+    Pipeline* p = entry.get();
+    Timed timed{frame_build_wait_};
+    if (!builds_.await(p->state, pending ? &build_budget_ : nullptr)) {
+        *pending = true;
         return nullptr;
     }
-    return entry.get();
+    return p->state.load(std::memory_order_acquire) == 1 ? p : nullptr;
 }
 
 // ----------------------------------------------------------------- draws
@@ -612,12 +1046,14 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     for (uint32_t t = 0; t < 8; ++t) {
         const uint32_t info = r(reg::CB_COLOR0_INFO + t * 4), base = r(reg::CB_COLOR0_BASE + t * 4);
         if (((target_mask >> (4 * t)) & 0xF) == 0 || ((info >> 2) & 0x3F) == 0 || base == 0) continue;
+        Timed timed{frame_targets_};
         colors[t] = color_target(base, r(reg::CB_COLOR0_SIZE + t * 4), info);
         if (colors[t]) color_count = t + 1;
     }
     const uint32_t depth_control = r(reg::DB_DEPTH_CONTROL);
     const Target* depth = nullptr;
     if ((depth_control & 7) != 0 && (r(reg::DB_DEPTH_INFO) & 7) != 0 && r(reg::DB_DEPTH_BASE) != 0) {
+        Timed timed{frame_targets_};
         depth = depth_target(r(reg::DB_DEPTH_BASE), r(reg::DB_DEPTH_SIZE), r(reg::DB_DEPTH_INFO));
     }
     const bool rasterizer_discard = (r(reg::PA_CL_CLIP_CNTL) >> 22) & 1;
@@ -635,12 +1071,22 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     ShaderEnvironment vs_env, ps_env;
     build_environment(regs.value, Stage::kVertex, vs_env);
     build_environment(regs.value, Stage::kPixel, ps_env);
+    // (A draw whose shader or pipeline is still being built in the background
+    // is skipped, except stream-out draws: later frames read their output.)
+    bool build_pending = false;
+    bool* const defer = async_builds_ && !stream_out ? &build_pending : nullptr;
     const ShaderModule* vs = shader(Stage::kVertex, r(reg::SQ_PGM_START_VS) << 8, r(reg::SQ_PGM_START_VS + 4) << 3,
-                                    r(reg::SQ_PGM_START_FS) << 8, r(reg::SQ_PGM_START_FS + 4) << 3, vs_env);
+                                    r(reg::SQ_PGM_START_FS) << 8, r(reg::SQ_PGM_START_FS + 4) << 3, vs_env, defer);
     uint32_t look = 0;
     if (vs != nullptr && (looks::active() || replaying_)) ps_env.fighter_look = fighter_look(regs, vs, draw_index, look);
-    const ShaderModule* ps = shader(Stage::kPixel, r(reg::SQ_PGM_START_PS) << 8, r(reg::SQ_PGM_START_PS + 4) << 3, 0, 0,
-                                    ps_env);
+    const ShaderModule* ps = build_pending ? nullptr
+                                           : shader(Stage::kPixel, r(reg::SQ_PGM_START_PS) << 8,
+                                                    r(reg::SQ_PGM_START_PS + 4) << 3, 0, 0, ps_env, defer);
+    if (build_pending) {
+        ++build_skipped_draws_;
+        ++skipped_draws_;
+        return;
+    }
     if (vs == nullptr || ps == nullptr) {
         report_once(vs == nullptr ? "draw skipped: vertex shader failed, at" : "draw skipped: pixel shader failed, at",
                     vs == nullptr ? r(reg::SQ_PGM_START_VS) << 8 : r(reg::SQ_PGM_START_PS) << 8);
@@ -674,7 +1120,11 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
                 out[slot] = {null_texture().view, sampler(sampler_words, border, (s->info.shadow_mask >> slot) & 1), false};
                 continue;
             }
-            const Texture* t = texture(words);
+            const Texture* t;
+            {
+                Timed timed{frame_textures_};
+                t = texture(words);
+            }
             if (t == nullptr) {
                 report_once("draw skipped: texture could not be created, format", words[1] >> 26);
                 return false;
@@ -692,7 +1142,12 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     VkFormat formats[8]{};
     for (uint32_t i = 0; i < color_count; ++i) formats[i] = colors[i] ? colors[i]->image.format : VK_FORMAT_UNDEFINED;
     const VkFormat depth_format = depth ? depth->image.format : VK_FORMAT_UNDEFINED;
-    const Pipeline* pipe = pipeline(regs, vs, ps, formats, color_count, depth_format, topology_class);
+    const Pipeline* pipe = pipeline(regs, vs, ps, formats, color_count, depth_format, topology_class, defer);
+    if (build_pending) {
+        ++build_skipped_draws_;
+        ++skipped_draws_;
+        return;
+    }
     if (pipe == nullptr) {
         report_once("draw skipped: pipeline could not be created", 0);
         ++skipped_draws_;

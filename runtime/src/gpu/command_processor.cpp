@@ -410,8 +410,13 @@ void execute_packet(uint32_t opcode, uint32_t payload, uint32_t count, uint32_t 
         const uint32_t function = arg(0) & 7;
         if (!(arg(0) & (1u << 4))) break; // register space: nothing to wait for
         const uint32_t target = arg(1) & ~3u;
+        // Yield for the first 0.25 ms, then sleep: a sleep lasts at least a
+        // millisecond on Windows (up to 15.6 ms without a raised timer
+        // resolution), and the waits are usually far shorter.
+        const auto spin_until = std::chrono::steady_clock::now() + std::chrono::microseconds(250);
         while (!compare(function, rd32(target) & arg(4), arg(3))) {
-            std::this_thread::sleep_for(std::chrono::microseconds(20));
+            if (std::chrono::steady_clock::now() < spin_until) std::this_thread::yield();
+            else std::this_thread::sleep_for(std::chrono::microseconds(20));
         }
         break;
     }

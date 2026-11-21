@@ -41,6 +41,12 @@ Renderer::Renderer() {
     ring_.init(ctx_, kRingSize);
     init_shadows();
     if (const char* e = std::getenv("TTT2_EVICT")) evict_ = *e != '0';
+    // (Textures made again after an eviction are uploaded and detiled on the
+    // command processor's thread: with video memory to spare a longer time
+    // keeps scene changes from making dozens again at once.)
+    if (const char* e = std::getenv("TTT2_EVICT_SECONDS"); e && std::atoi(e) > 0) {
+        unused_frames_ = static_cast<uint64_t>(std::atoi(e)) * 60;
+    }
     VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     VK_CHECK(vkCreateSemaphore(ctx_.device, &sci, nullptr, &acquired_));
 
@@ -80,6 +86,7 @@ Renderer::Renderer() {
                  static_cast<double>(scale_));
     compiler_ = shaderc_compiler_initialize();
     load_pipeline_cache();
+    warm_up();
     surface_ = host::create_vulkan_surface(ctx_.instance);
     init_interpolation();
     start_presenter();
@@ -537,6 +544,26 @@ void Renderer::swap() {
     look_vertices_.clear();
     ++frame_number_;
     ++frames_;
+    build_budget_ = build_budget_frame_; // (a new title frame: its own time to wait for builds)
+    {
+        // A title frame over 40 ms between swaps: where this thread's time went.
+        // What the four leave unexplained is the title's own work (loading,
+        // its CPU threads) or waiting for the GPU.
+        const double swap_time = now_seconds();
+        const double frame = swap_time - last_swap_time_;
+        if (last_swap_time_ > 0 && frame > 0.040 && frame < 5.0 && slow_frames_logged_ < 400) {
+            ++slow_frames_logged_;
+            std::fprintf(stderr, "ttt2: gpu: slow frame %llu: %.0f ms between swaps; translating shaders %.1f ms, waiting for builds %.1f ms, textures %.1f ms, render targets %.1f ms; the rest (%.0f ms) the title's own work or the GPU\n",
+                         static_cast<unsigned long long>(frame_number_), frame * 1000.0, frame_translate_ * 1000.0,
+                         frame_build_wait_ * 1000.0, frame_textures_ * 1000.0, frame_targets_ * 1000.0,
+                         std::max(0.0, frame - frame_translate_ - frame_build_wait_ - frame_textures_ - frame_targets_) * 1000.0);
+            char label[48];
+            std::snprintf(label, sizeof label, "slow frame %llu", static_cast<unsigned long long>(frame_number_));
+            ::cafe::profile_report(frame, label);
+        }
+        last_swap_time_ = swap_time;
+        frame_translate_ = frame_build_wait_ = frame_textures_ = frame_targets_ = 0;
+    }
     const double t = now_seconds();
     if (t - window_start_ >= 10.0) {
         save_pipeline_cache();
@@ -553,8 +580,23 @@ void Renderer::swap() {
                      frame_records_[current_record_ ^ 1].used / 1e6,
                      replay_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1), match_seconds_ * 1000.0 / std::max<uint64_t>(frames_, 1),
                      100.0 * std::max(0.0, 1.0 - idle_seconds_ / (t - window_start_)));
+        {
+            // Shaders and pipelines built in the background since the last line.
+            static uint64_t shown_shaders = 0, shown_pipelines = 0, shown_skips = 0;
+            const uint64_t shaders = builds_.built_shaders.load(), pipelines = builds_.built_pipelines.load();
+            if (shaders != shown_shaders || pipelines != shown_pipelines || build_skipped_draws_ != shown_skips) {
+                std::fprintf(stderr, "ttt2: gpu: builds: %llu shaders compiled, %llu pipelines created in the background; %llu draws skipped while they ran\n",
+                             static_cast<unsigned long long>(shaders - shown_shaders),
+                             static_cast<unsigned long long>(pipelines - shown_pipelines),
+                             static_cast<unsigned long long>(build_skipped_draws_ - shown_skips));
+                shown_shaders = shaders;
+                shown_pipelines = pipelines;
+                shown_skips = build_skipped_draws_;
+            }
+        }
         // (CPU-bound or GPU-bound: the threads' CPU over the same time)
         std::fprintf(stderr, "ttt2: cpu: %s\n", thread_cpu_report().c_str());
+        ::cafe::profile_report(t - window_start_, "last 10 s");
         if (shadows_on_) print_shadow_statistics(frames_);
         if (!swap_delays_.empty()) {
             std::sort(swap_delays_.begin(), swap_delays_.end());

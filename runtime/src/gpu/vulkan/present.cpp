@@ -878,6 +878,20 @@ void Renderer::create_swapchain(VkFormat image_format, const char* why) {
                 if (m == VK_PRESENT_MODE_IMMEDIATE_KHR) mode = m;
             }
         }
+        // TTT2_PRESENT_MODE=fifo|mailbox|immediate: that mode, when the
+        // surface has it. FIFO is the one variable refresh (G-SYNC,
+        // FreeSync) follows: on a display whose rate is not a multiple of
+        // 60 (165 Hz) the frames presented at their times are then shown
+        // as they come, evenly, instead of at the nearest refresh.
+        static const char* const forced = std::getenv("TTT2_PRESENT_MODE");
+        if (forced != nullptr && *forced != '\0') {
+            const std::string_view f = forced;
+            const VkPresentModeKHR want = f == "fifo"        ? VK_PRESENT_MODE_FIFO_KHR
+                                          : f == "immediate" ? VK_PRESENT_MODE_IMMEDIATE_KHR
+                                          : f == "mailbox"   ? VK_PRESENT_MODE_MAILBOX_KHR
+                                                             : mode;
+            if (std::find(modes.begin(), modes.end(), want) != modes.end()) mode = want;
+        }
     }
     uint32_t width, height;
     host::drawable_size(width, height);

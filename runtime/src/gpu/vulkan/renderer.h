@@ -42,6 +42,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <memory>
@@ -129,7 +130,9 @@ struct Texture {
 
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
-    latte::TranslatedShader info;
+    latte::TranslatedShader info; // (info.glsl is empty for a module the start-up warm-up made)
+    uint64_t glsl_hash = 0;       // the translation's, which names its SPIR-V in the cache
+    uint64_t record_key = 0;      // a shader key that translates to it (the warm-up records name it)
 };
 
 struct Pipeline {
@@ -137,6 +140,35 @@ struct Pipeline {
     VkPipelineLayout layout = VK_NULL_HANDLE;
     const ShaderModule* vs = nullptr;
     const ShaderModule* ps = nullptr;
+    std::atomic<int> state{0}; // 0: a background thread is creating it, 1: ready, 2: failed
+};
+
+// A translation whose SPIR-V a background thread compiles (draw.cpp).
+struct PendingModule {
+    latte::TranslatedShader info;
+    uint64_t glsl_hash = 0;
+    bool vertex = false;
+    std::vector<uint32_t> spirv;   // set by the build thread before `state`
+    std::atomic<int> state{0};     // 0 compiling, 1 compiled, 2 failed
+    const ShaderModule* module = nullptr; // made on the command processor thread once compiled
+};
+
+// Background shader and pipeline builds (draw.cpp): a few worker threads.
+class BuildQueue {
+public:
+    void push(std::function<void()> job);
+    // Waits until state != 0, at most `budget` (all of it when negative);
+    // `budget` is reduced by the time waited. True when state != 0.
+    bool await(const std::atomic<int>& state, std::chrono::nanoseconds* budget);
+    void finished(std::atomic<int>& state, int value); // sets it and wakes waiters
+    std::atomic<uint64_t> built_shaders{0}, built_pipelines{0};
+
+private:
+    void start();
+    std::mutex mutex_;
+    std::condition_variable jobs_cv_, done_cv_;
+    std::deque<std::function<void()>> jobs_;
+    bool started_ = false;
 };
 
 class Renderer final : public Backend {
@@ -239,7 +271,7 @@ private:
     // and targets not used for as long whose memory holds newer data are
     // freed once the GPU finished with them; a texture bound again is made
     // again. TTT2_EVICT=0 keeps everything.
-    static constexpr uint64_t kUnusedFrames = 1800; // 30 s
+    uint64_t unused_frames_ = 1800; // 30 s; TTT2_EVICT_SECONDS sets another time
     template <typename T>
     void note_used(T& x) {
         x.used_frame = frame_number_;
@@ -251,8 +283,14 @@ private:
     uint64_t evicted_targets_ = 0, evicted_textures_ = 0; // (statistics)
 
     // ---------------------------------------------------- draws (draw.cpp)
+    // `pending` non-null: a shader or pipeline not built yet may be built in
+    // the background (past this frame's waiting budget): null is returned
+    // with *pending set, and the draw is skipped until it is ready.
     const ShaderModule* shader(latte::Stage stage, uint32_t address, uint32_t size, uint32_t fetch_address,
-                               uint32_t fetch_size, const latte::ShaderEnvironment& env);
+                               uint32_t fetch_size, const latte::ShaderEnvironment& env, bool* pending = nullptr);
+    const ShaderModule* add_module(latte::TranslatedShader&& info, uint64_t glsl_hash, const std::vector<uint32_t>& spirv);
+    void record_shader(uint64_t key, const ShaderModule* module);
+    const ShaderModule* adopt_pending(uint64_t key, PendingModule& p);
     const latte::Program* program(uint32_t address, uint32_t size, uint64_t& hash);
     // A draw of a polygon the title registered as still (gpu/still_draws.h): its pass's last-frame slot reads this frame's.
     bool keep_still(const Registers& regs, const Draw& d, latte::abi::DrawConstants& dc, uint32_t* vb_address);
@@ -260,7 +298,8 @@ private:
     VkPipelineLayout pipeline_layout(uint32_t vs_textures, uint32_t ps_textures, bool vs_registers,
                                      bool ps_registers);
     const Pipeline* pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
-                             const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class);
+                             const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class,
+                             bool* pending = nullptr);
     latte::abi::Buffer buffer_descriptor(uint32_t address, uint32_t size, uint32_t stride) const;
     uint8_t fighter_look(const Registers& regs, const ShaderModule* vs, uint32_t draw_index, uint32_t& look);
     // This frame's draws with a look by their first two vertex buffers (high, low word): the look.
@@ -606,6 +645,9 @@ private:
     // ------------------------------------------------------ misc (renderer.cpp)
     void load_pipeline_cache();
     void save_pipeline_cache();
+    // Start-up warm-up (draw.cpp): the shaders and pipelines earlier runs of
+    // this build made, read from warm.bin and created before the title draws.
+    void warm_up();
     void capture();
     void save_image(const Image& image, const std::string& path);
     int64_t captured_frame_ = -1; // TTT2_CAPTURE: frame number and index of the last capture
@@ -674,6 +716,33 @@ private:
     std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> pipelines_;
     VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
     uint32_t new_pipelines_ = 0;
+    std::atomic<bool> saving_cache_{false}; // a background thread writes pipelines.bin and warm.bin
+
+    // Background builds, and what the next start's warm-up recreates.
+    BuildQueue builds_;
+    bool async_builds_ = true;                   // TTT2_ASYNC_BUILDS=0: build every shader and pipeline in place
+    std::chrono::nanoseconds build_budget_frame_{std::chrono::milliseconds(6)}; // TTT2_BUILD_BUDGET_MS
+    std::chrono::nanoseconds build_budget_{0};   // what is left of it this title frame
+    uint64_t build_skipped_draws_ = 0;           // (statistics) draws skipped while their build ran
+    // Where the command processor's thread spent a title frame (seconds), for
+    // the `slow frame` lines: a frame over 40 ms between swaps names them.
+    double frame_translate_ = 0, frame_build_wait_ = 0, frame_textures_ = 0, frame_targets_ = 0;
+    double last_swap_time_ = 0;
+    uint32_t slow_frames_logged_ = 0;
+    std::unordered_map<uint64_t, std::shared_ptr<PendingModule>> pending_shaders_; // by shader key
+    std::unordered_map<uint64_t, std::shared_ptr<PendingModule>> pending_modules_; // by GLSL hash
+    struct ShaderRecord {
+        uint64_t key, glsl_hash;
+        uint32_t texture_mask, shadow_mask, uses_registers, constant_bank_mask, buffer_mask, stream_out_complete;
+        uint32_t constant_bank_extent[16], vb_extent[16];
+    };
+    struct PipelineRecord {
+        uint64_t vs_key, ps_key;
+        uint32_t colors[8], depth, color_count, blend[8], write_mask, polygon_mode, topology_class, depth_clamp;
+    };
+    std::vector<ShaderRecord> shader_records_;
+    std::vector<PipelineRecord> pipeline_records_;
+    bool records_dirty_ = false;
 
     // Scan-out: the last frame copied to each scan buffer (TV, DRC).
     Image scan_[2];
