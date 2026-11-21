@@ -129,6 +129,25 @@ class Rig(unittest.TestCase):
         self.assertEqual(cloth.long_cloth_parents(chains_, [0, 1, 1], names, {'links': 4}), [0, 1, 1])
         self.assertEqual(cloth.long_cloth_parents(chains_, [0, 1, 1], names, {'links': 4, 'parent': 'CHEST'}), [0, 2, 1])
 
+    def test_hang_from_moves_long_chains_off_the_named_bones_only(self):
+        chains_ = [{'bones': [1, 2]}, {'bones': [3, 4, 5, 6]}, {'bones': [7, 8, 9, 10]}, {'bones': [11, 12, 13, 14]}]
+        names = ['cha:MUNE2_jnt', 'cha:KATA_0_R_jnt', 'cha:KATA_0_L_jnt', 'cha:UDE_R_jnt']
+        spec = {'links': 4, 'from': ('KATA_0_R_jnt', 'KATA_0_L_jnt'), 'parent': 'MUNE2_jnt'}
+        # the short chain on the arm's helper and the long one on the forearm stay; the long ones on the helper move
+        self.assertEqual(cloth.hang_from(chains_, [1, 1, 2, 3], names, None), [1, 1, 2, 3])
+        self.assertFalse(any(c.get('limb') for c in chains_))
+        self.assertEqual(cloth.hang_from(chains_, [1, 1, 2, 3], names, spec), [1, 0, 0, 3])
+        # (the moved ones keep an arm's treatment: not settled, no capsules, the template's limits)
+        self.assertEqual([bool(c.get('limb')) for c in chains_], [False, True, True, False])
+
+    def test_hair_last_keeps_each_kinds_order_and_renumbers_neighbours(self):
+        a, b, c, d = ({'bones': [1], 'hair': True, 'neighbours': {1}}, {'bones': [2], 'hair': True, 'neighbours': {0}},
+                      {'bones': [3], 'neighbours': {3}}, {'bones': [4], 'neighbours': {2}})
+        out = cloth.hair_last([a, b, c, d])
+        self.assertEqual([x['bones'] for x in out], [[3], [4], [1], [2]])
+        self.assertEqual([x['neighbours'] for x in out], [{1}, {0}, {3}, {2}])
+        self.assertIs(out[0], c)
+
     def test_swing_limits_follow_each_links_own_axes(self):
         spring = {'flags': 0x60, 'swing': {'back': (0.0, 0.0, -1.0), 'towards': 0.1, 'against': 0.04, 'across': 0.02}}
         # a link along -Y with its own Y facing back: back is its +Y, reached by a positive angle about Z

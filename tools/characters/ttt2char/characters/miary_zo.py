@@ -50,6 +50,9 @@ VERTEX_BUDGET = 56000
 # the waist cloths 34, the 12 strands at her shins 24), her weapons and points 21, her snakes 23
 SKELETON_BONES = 307
 CLOTH_BONES = 124
+# her hair's chains after the waist cloths': her lower wardrobe piece keeps the body's bones up to its last chain bone,
+# and with the hair's 58 first her stock outfit listed 255 extra bones, more than a fight loads (it was left whole)
+CLOTH_ORDER = 'hair_last'
 
 # ------------------------------------------------------------------------------------------------ summons
 # Her summoned objects (convert/summons8.py): Tekken 8 shows them with property 0x8410, value bit 1 << n = summon n,

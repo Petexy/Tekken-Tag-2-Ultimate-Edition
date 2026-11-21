@@ -1024,6 +1024,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
     else:
         cloth_chains = []
     cloth_chains = cloth_chains + bone_chains
+    if getattr(d, 'CLOTH_ORDER', None) == 'hair_last':
+        cloth_chains = cloth.hair_last(cloth_chains)
     skel = skeleton.build(k['bones'], donor)
     weight_maps = {tag: skeleton.weight_map(k['bones'], skel['names'], lambda i, tag=tag: tag)[0]
                    for tag, _ in worn}
@@ -1042,6 +1044,7 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         parents = [int(weight_maps[c['part']][c['parent']]) for c in cloth_chains]
         if (getattr(d, 'TEKKEN8', None) or {}).get('long_cloth'):
             parents = cloth.long_cloth_parents(cloth_chains, parents, skel['names'], d.TEKKEN8['long_cloth'])
+        parents = cloth.hang_from(cloth_chains, parents, skel['names'], getattr(d, 'CLOTH_PARENT', None))
         s0 = k['prims'][0]
         body = np.zeros(len(s0['pos']), bool)
         body[np.concatenate([p['tris'].reshape(-1) for p in k['prims']])] = True

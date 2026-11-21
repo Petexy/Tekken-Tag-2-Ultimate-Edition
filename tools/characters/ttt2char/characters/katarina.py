@@ -26,6 +26,10 @@ PRESETS = (
     ('sd_off', 'Sd off'),
 )
 
+# her coat's sides (two chains of 8 links, armpit to knee) hang from the chest: from the upper arm's helper they turned
+# with the arm and, her arms lowered in CUSTOMIZE, crossed her body and spread to both sides like wings
+CLOTH_PARENT = {'links': 4, 'from': ('KATA_0_R_jnt', 'KATA_0_L_jnt'), 'parent': 'MUNE2_jnt'}
+
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
 DONOR_ROW = 42
 

@@ -685,7 +685,7 @@ def settle(k, chains, skel, parents, still, body):
     before = world.copy()
     turned = 0
     for chain, parent in zip(chains, parents):
-        if any(x in names[parent] for x in LIMBS) or len(chain['neighbours']) < 2:
+        if chain.get('limb') or any(x in names[parent] for x in LIMBS) or len(chain['neighbours']) < 2:
             continue                                                 # (an opening's edge: a leg passes by it)
         to_pose = posed[parent] @ np.linalg.inv(bind[parent])        # (at rest on its parent)
         frames = [to_pose @ before[b] for b in chain['bones']]
@@ -739,6 +739,41 @@ def long_cloth_parents(chains, parents, names, spec):
         return parents
     at = list(names).index('cha:' + spec['parent'])
     return [at if len(c['bones']) >= spec['links'] and not c.get('spring') else p for c, p in zip(chains, parents)]
+
+
+def hang_from(chains, parents, names, spec):
+    """parents (one per chain) with a definition's chains of at least spec['links'] links hung from a bone of
+    spec['from'] hung from spec['parent'] instead (CLOTH_PARENT), their bind kept: a coat's side hung from the upper
+    arm's helper (KATA_0, which turns as far as the arm) turned with the arm, its tip a knee's height below; with the
+    arms lowered (CUSTOMIZE's pose: 69 degrees from the T-pose, the stance 32) it crossed the body and stood out on the
+    other side (Katarina). From the chest it hangs as the coat's back does; otherwise it stays as it was on the arm
+    (c['limb']: not settled, no capsules, the template's limits): kept off the legs, it was held out 25 cm from them
+    (the capsules grow to reach a chain at rest, springs())."""
+    if not spec:
+        return parents
+    away = {list(names).index('cha:' + x) for x in spec['from'] if 'cha:' + x in names}
+    at = list(names).index('cha:' + spec['parent'])
+    out = []
+    for c, p in zip(chains, parents):
+        if p in away and len(c['bones']) >= spec['links']:
+            c['limb'] = True
+            p = at
+        out.append(p)
+    return out
+
+
+def hair_last(chains):
+    """The chains with the hair's (rig 'hair') after the others, each kind's order kept and the neighbours (chain
+    numbers) renumbered; the dicts are the same. A wardrobe piece keeps every body bone up to its last extra bone, at
+    the body's indices (wardrobe.piece_skeleton), and the hair stays with the body: Miary Zo's waist cloths after her
+    hair's 58 bones made her lower piece list 105 extra bones and her stock outfit 255, over what a fight loads
+    (wardrobe.WORN_EXTRA: she was left whole, no wardrobe); before them, 47 and 197 (CLOTH_ORDER 'hair_last')."""
+    order = [i for i, c in enumerate(chains) if not c.get('hair')] + [i for i, c in enumerate(chains) if c.get('hair')]
+    new = {old: n for n, old in enumerate(order)}
+    for c in chains:
+        if 'neighbours' in c:
+            c['neighbours'] = {new[x] for x in c['neighbours']}
+    return [chains[i] for i in order]
 
 
 def _swing_limits(spring, frame, length=None):
@@ -796,7 +831,8 @@ def springs(skel, made, chains, body):
                                                                         BODY[:LEGS]] or inside(p, c) < TRUNK_REACH]
         return out
 
-    candidates = [x for bones, chain in zip(made, chains) if not chain.get('hair') for x in touches(bones)]
+    candidates = [x for bones, chain in zip(made, chains) if not chain.get('hair') and not chain.get('limb')
+                  for x in touches(bones)]
     hung = {b: chain['leg'] for bones, chain in zip(made, chains) if chain.get('leg') for b in bones}
     for c in range(len(caps)):                   # thickness: touching the nearest cloth bone at rest
         b, offset, size = caps[c]
@@ -837,7 +873,7 @@ def springs(skel, made, chains, body):
             number[i] = int(m.group(1))
     entries, pairs, links = [], [], []
     for c, (bones, chain) in enumerate(zip(made, chains)):
-        limits = None if any(x in names[skel['parent'][bones[0]]] for x in LIMBS) else (
+        limits = None if chain.get('limb') or any(x in names[skel['parent'][bones[0]]] for x in LIMBS) else (
             OUTWARD, DRAPED_INWARD if chain.get('draped') else None)
         if chain.get('spring'):
             limits = chain['spring']
