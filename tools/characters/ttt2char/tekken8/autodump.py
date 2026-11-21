@@ -130,6 +130,8 @@ HELPER_BUILDS = {
                  (0x1418acfb0, 16, 0xEF46830222BE4AC8), (0x141809d00, 16, 0x4C7611802A9CD63B)),
     '26155785': ((0x142cdc060, 16, 0x9A0F7237C356D9F4), (0x145a1a2f0, 16, 0xAD224657991D6490),
                  (0x1418b2f00, 16, 0xEF46830222BE4AC8), (0x14180dab0, 16, 0x4C7611802A9CD63B)),
+    '26651490': ((0x142cdc060, 16, 0x9A0F7237C356D9F4), (0x145a1a130, 16, 0xAD224657991D6490),
+                 (0x1418b2f00, 16, 0xEF46830222BE4AC8), (0x14180dab0, 16, 0x4C7611802A9CD63B)),
 }
 REFUSED = 'this Tekken 8 build is not the one the helper knows'       # (its attach's answer for another build)
 UNKNOWN_BUILD = ('this Tekken 8 build (Steam build %s, a game update) is not the one the helper knows: Tekken 8 is not '

@@ -125,6 +125,27 @@ class KnownBuild(unittest.TestCase):
                              dump8.PREFERRED_BASE + 0x2040: b'\x48\x89' * 8}))
             self.assertFalse(dump8.known_build(game))
 
+    def test_builds_that_share_functions(self):
+        # (an update may move one function alone: build 26651490 has request_file 0x1c0 below build 26155785's and
+        # the other three where 26155785 has them) either build is known; the three with neither's fourth are not
+        shared = {dump8.PREFERRED_BASE + 0x1010: bytes(range(16)), dump8.PREFERRED_BASE + 0x1800: b'\x40\x53' * 8}
+        moved = b'\x48\x89' * 8
+        builds = {build: tuple((address, 16, fnv1a(data))
+                               for address, data in sorted({**shared, dump8.PREFERRED_BASE + where: moved}.items()))
+                  for build, where in (('1', 0x2040), ('2', 0x2000))}
+        with tempfile.TemporaryDirectory() as game, mock.patch.object(dump8, 'HELPER_BUILDS', builds):
+            path = os.path.join(game, dump8.EXE)
+            for where in (0x2040, 0x2000):
+                write(path, exe({**shared, dump8.PREFERRED_BASE + where: moved}))
+                self.assertTrue(dump8.known_build(game))
+            for code in (shared, {**shared, dump8.PREFERRED_BASE + 0x2020: moved}):
+                write(path, exe(code))
+                self.assertFalse(dump8.known_build(game))
+
+    def test_older_builds_stay_known(self):
+        # (a game Steam has not updated yet keeps working: an update adds a build, never replaces one)
+        self.assertLessEqual({'25221600', '26155785', '26651490'}, set(dump8.HELPER_BUILDS))
+
 
 # ---------------------------------------------------------------- dumps that fail, updates
 

@@ -82,6 +82,9 @@ static const struct Build BUILDS[] = {
     {"26155785", {0x142cdc060ull, 16, 0x9A0F7237C356D9F4ull}, {0x145a1a2f0ull, 16, 0xAD224657991D6490ull},
      {0x1418b2f00ull, 16, 0xEF46830222BE4AC8ull}, {0x14180dab0ull, 16, 0x4C7611802A9CD63Bull},
      0x149bdc500ull, 0x1498d0700ull},
+    {"26651490", {0x142cdc060ull, 16, 0x9A0F7237C356D9F4ull}, {0x145a1a130ull, 16, 0xAD224657991D6490ull},
+     {0x1418b2f00ull, 16, 0xEF46830222BE4AC8ull}, {0x14180dab0ull, 16, 0x4C7611802A9CD63Bull},
+     0x149bdc500ull, 0x1498d0700ull},
 };
 enum {
     ARCHIVE_OPEN = 0x80,         /* u8: 1 once the moveset archive is open */
