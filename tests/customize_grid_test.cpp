@@ -123,6 +123,12 @@ int main() {
     auto cut = shop("Fighter", "42");
     cut.pop_back();
     check(!grid::shop_fighter(cut), "a cut file");
+
+    check(grid::paint_camera_fighter(std::nullopt, 42) == 42u, "no shop list: the donor's camera");
+    check(grid::paint_camera_fighter(40u, 42) == 40u, "the shop list's fighter before the donor");
+    check(grid::paint_camera_fighter(44u, 64) == 44u, "an added donor never reads past the table");
+    check(!grid::paint_camera_fighter(std::nullopt, 64) && !grid::paint_camera_fighter(59u, 42),
+          "no camera past the title's rows");
     std::puts("customize_grid_test: ok");
     return 0;
 }

@@ -194,4 +194,13 @@ inline std::optional<uint32_t> shop_fighter(const std::vector<uint8_t>& d) {
     return std::nullopt;
 }
 
+// The fighter whose camera PAINT first shows an added fighter's new paint with (title/roster.cpp): the title keeps
+// one camera per select id for it, for 0..58 only (59..62 zeros, then other data); an added fighter takes the
+// camera of the fighter its customization comes from, the shop list's fighter, else its donor; none past the rows.
+constexpr uint32_t kPaintCameraRows = 59;
+inline std::optional<uint32_t> paint_camera_fighter(std::optional<uint32_t> shop, uint32_t donor) {
+    const uint32_t fighter = shop ? *shop : donor;
+    return fighter < kPaintCameraRows ? std::optional<uint32_t>(fighter) : std::nullopt;
+}
+
 } // namespace cafe::title::customize_grid

@@ -3647,6 +3647,34 @@ PPC_FUNC(sub_033E3460) {
                      rows, g_added[k].code.c_str(), rows - kept);
 }
 
+// PAINT's first view of a new paint: sub_0255B718 gives the paint its camera (eye, target, up) from the title's
+// table of one camera per fighter (24 bytes per select id at 0x107AF448: eye xyz, target xyz; ids 0..58) through
+// sub_0244F8A8 (paint r3, eye r4, target r5, up r6; the paint's {select id, slot} at *(r3 + 48)). An added
+// fighter's id lies past the table, where other data reads as a camera at the origin: PAINT then opened on the
+// calves from behind (the fights seldom show that side, so the paint seemed missing there). It gets the camera
+// of the fighter its customization comes from (the shop list's fighter, else its donor). Saved paints keep theirs.
+constexpr uint32_t kPaintCameras = 0x107AF448, kPaintCameraSize = 24, kPaintCameraCall = 0x0255BA9C;
+PPC_FUNC(sub_0244F8A8_orig);
+PPC_FUNC(sub_0244F8A8) {
+    if (ctx.lr == kPaintCameraCall) {
+        const uint32_t key = load(ctx.r[3] + 48);
+        const int k = key ? slot_of_id(load(key)) : -1;
+        if (k >= 0) {
+            const auto source = customize_grid::paint_camera_fighter(
+                !g_added[k].shop.empty() ? std::optional<uint32_t>(g_added[k].shop_fighter) : std::nullopt,
+                g_added[k].donor);
+            if (source) {
+                ctx.r[4] = kPaintCameras + kPaintCameraSize * *source;
+                ctx.r[5] = kPaintCameras + kPaintCameraSize * *source + 12;
+                if (traces().roster)
+                    std::fprintf(stderr, "ttt2: paint: %s's first paint view from fighter %u's camera\n",
+                                 g_added[k].code.c_str(), *source);
+            }
+        }
+    }
+    sub_0244F8A8_orig(ctx, base);
+}
+
 // Developer switch TTT2_TEST_CUSTOMIZE (title/test_record.h; off unless set): a customization record for one
 // fighter, without Customize mode or a save. The title fills a player's working record (manager r3 = *0x107A71EC,
 // player r4, costume number r5, select id r6: manager + 96 + 4096 * player) when a costume is confirmed on the
