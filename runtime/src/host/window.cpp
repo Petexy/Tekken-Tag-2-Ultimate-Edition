@@ -104,6 +104,7 @@ bool g_controller_used = false; // a button or stick moved: added pads no longer
 std::function<void(Controller)> g_controller_callback;
 // A device: the keyboard (0: SDL's gamepad ids never are) or a gamepad.
 constexpr SDL_JoystickID kKeyboard = 0;
+constexpr SDL_JoystickID kScripted = ~SDL_JoystickID{0}; // TTT2_INPUT_SCRIPT's pad (update_input)
 SDL_JoystickID g_last_used = kKeyboard; // the device with the latest input
 
 Controller kind_of(SDL_JoystickID id) {
@@ -322,6 +323,129 @@ void assign(const std::vector<DeviceState>& devices) {
     update_devices();
 }
 
+// ------------------------------------------------------------ the touch screen
+
+std::function<TouchScreen()> g_touch_check;
+std::mutex g_picture_mutex;
+touch::Rect g_picture{};          // where the last image was shown (note_picture)
+int32_t g_extent_w = 0, g_extent_h = 0; // in a swapchain of this size; 0: none shown yet
+
+// The mouse over the window, from its events: where (window pixels) and
+// whether the left button is held.
+struct Mouse {
+    bool over = false, held = false;
+    float x = 0.0f, y = 0.0f;
+    bool moved = false; // since the last update
+};
+Mouse g_mouse;
+
+void note_mouse(const SDL_Event& event) {
+    const float density = g_window ? SDL_GetWindowPixelDensity(g_window) : 1.0f;
+    switch (event.type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        g_mouse.over = g_mouse.moved = true;
+        g_mouse.x = event.motion.x * density;
+        g_mouse.y = event.motion.y * density;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (event.button.button != SDL_BUTTON_LEFT) break;
+        g_mouse.held = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        g_mouse.over = g_mouse.moved = true;
+        g_mouse.x = event.button.x * density;
+        g_mouse.y = event.button.y * density;
+        break;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE: g_mouse.over = false; break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST: g_mouse.held = false; break;
+    default: break;
+    }
+}
+
+// The stick's cursor: in use from the stick's first move (or ZR) until the
+// mouse moves; on the picture, as touch points.
+struct Cursor {
+    TouchScreen state = TouchScreen::kOff; // as last updated
+    bool in_use = false;
+    touch::Point at{0.5f, 0.5f};
+    std::chrono::steady_clock::time_point last{};
+};
+Cursor g_cursor;
+std::mutex g_cursor_mutex;
+std::optional<TouchCursor> g_drawn_cursor;
+
+// The touch screen for this update, from the gamepads' states (their right
+// sticks and ZR taken while the cursor can be used) and the mouse.
+void update_touch(std::vector<DeviceState>& devices, const std::optional<std::array<float, 2>>& scripted_mouse) {
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = g_cursor.last == std::chrono::steady_clock::time_point{}
+                              ? 0.0f
+                              : std::chrono::duration<float>(now - g_cursor.last).count();
+    g_cursor.last = now;
+    const TouchScreen state = g_touch_check ? g_touch_check() : TouchScreen::kOff;
+    if (state != g_cursor.state) {
+        if (state == TouchScreen::kOff) g_cursor.at = {0.5f, 0.5f};
+        if (g_cursor.state == TouchScreen::kOff) g_mouse.moved = false;
+        // A drawing tool chosen by a player on a gamepad: the cursor at once.
+        g_cursor.in_use = state == TouchScreen::kCursor && g_last_used != kKeyboard && !g_mouse.moved;
+        g_cursor.state = state;
+    }
+    std::optional<TouchCursor> drawn;
+    os::TouchState touch{};
+    if (state != TouchScreen::kOff) {
+        float stick_x = 0.0f, stick_y = 0.0f;
+        bool zr = false;
+        if (state == TouchScreen::kCursor) {
+            for (DeviceState& d : devices) {
+                if (d.id == kKeyboard) continue; // no stick: its ZR stays the title's
+                stick_x += d.state.right_x;
+                stick_y += d.state.right_y;
+                zr = zr || (d.state.buttons & os::vpad::kZR);
+                d.state.right_x = d.state.right_y = 0.0f;
+                d.state.buttons &= ~os::vpad::kZR;
+            }
+            if (stick_x != 0.0f || stick_y != 0.0f || zr) g_cursor.in_use = true;
+        }
+        // The mouse: the window's, or the script's (fractions of the window).
+        Mouse mouse = g_mouse;
+        g_mouse.moved = false;
+        if (scripted_mouse) {
+            mouse.over = mouse.held = mouse.moved = true;
+            mouse.x = (*scripted_mouse)[0] * static_cast<float>(g_width.load());
+            mouse.y = (*scripted_mouse)[1] * static_cast<float>(g_height.load());
+        }
+        if (mouse.moved || mouse.held || state != TouchScreen::kCursor) g_cursor.in_use = false;
+        if (g_cursor.in_use) {
+            g_cursor.at = touch::move_cursor(g_cursor.at, stick_x, stick_y, seconds);
+            touch = {zr, g_cursor.at.x, g_cursor.at.y};
+            drawn = TouchCursor{g_cursor.at.x, g_cursor.at.y, zr};
+        } else if (mouse.over && mouse.held) {
+            touch::Rect picture;
+            int32_t extent_w, extent_h;
+            {
+                std::lock_guard lock(g_picture_mutex);
+                picture = g_picture;
+                extent_w = g_extent_w;
+                extent_h = g_extent_h;
+            }
+            if (extent_w == 0) { // nothing shown yet: as it would be
+                extent_w = static_cast<int32_t>(g_width.load());
+                extent_h = static_cast<int32_t>(g_height.load());
+                picture = touch::letterbox(extent_w, extent_h, 16, 9);
+            }
+            if (const std::optional<touch::Point> p =
+                    touch::picture_point(mouse.x, mouse.y, static_cast<float>(g_width.load()),
+                                         static_cast<float>(g_height.load()), extent_w, extent_h, picture)) {
+                touch = {true, p->x, p->y};
+            }
+        }
+    }
+    {
+        std::lock_guard lock(g_cursor_mutex);
+        g_drawn_cursor = drawn;
+    }
+    os::set_touch_state(touch);
+}
+
 void update_input() {
     std::vector<DeviceState> devices;
     os::GamepadState keyboard{};
@@ -352,6 +476,13 @@ void update_input() {
         devices.push_back({ids[i], state});
     }
     SDL_free(ids);
+    // TTT2_INPUT_SCRIPT's held buttons and right stick, as a gamepad's for
+    // the touch screen, then as the keyboard's; and its mouse.
+    const os::ScriptedHostInput scripted = os::scripted_host_input();
+    devices.push_back({kScripted, scripted.pad});
+    update_touch(devices, scripted.mouse);
+    merge(devices[0].state, devices.back().state);
+    devices.pop_back();
     assign(devices);
 }
 
@@ -463,6 +594,20 @@ void on_controller_devices_change(std::function<void()> callback) {
     if (g_devices_callback) g_devices_callback();
 }
 
+void on_touch_screen(std::function<TouchScreen()> state) { g_touch_check = std::move(state); }
+
+std::optional<TouchCursor> touch_cursor() {
+    std::lock_guard lock(g_cursor_mutex);
+    return g_drawn_cursor;
+}
+
+void note_picture(const touch::Rect& rect, int32_t extent_w, int32_t extent_h) {
+    std::lock_guard lock(g_picture_mutex);
+    g_picture = rect;
+    g_extent_w = extent_w;
+    g_extent_h = extent_h;
+}
+
 bool run_event_loop(const std::function<bool()>& finished) {
     using namespace std::chrono_literals;
     track_thread_cpu("window");
@@ -477,6 +622,7 @@ bool run_event_loop(const std::function<bool()>& finished) {
         while (SDL_PollEvent(&event)) {
             note_controller(event);
             note_key(event);
+            note_mouse(event);
             switch (event.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED: return false;

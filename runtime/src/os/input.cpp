@@ -15,6 +15,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -27,6 +28,7 @@ namespace {
 
 std::mutex g_input_mutex;
 GamepadState g_gamepad{};
+TouchState g_touch{};
 uint32_t g_previous_hold = 0;
 std::array<std::optional<GamepadState>, kProControllers> g_pro{};
 
@@ -61,6 +63,13 @@ constexpr auto kStepLasts = std::chrono::milliseconds(250);
 // entry with that name hash (the character select screen's layout, say): the
 // times after it count from then, and presses before it that have not come yet
 // are dropped, so a script does not drift with loading times.
+// Items that last a while: "40:touch/400/300/600/320/1.5" touches the
+// GamePad's screen at 400,300 of its picture (1280 x 720, as the TV's) and
+// draws a straight line to 600,320 in 1.5 s, then lifts (a tap: the same
+// point twice). For the host's own input (scripted_host_input):
+// "40:mouse/0.5/0.5/0.6/0.5/1" moves the mouse with its left button held
+// across the window (fractions of its size), "40:rstick/1/0/0.5" holds the
+// right stick, "40:hold/zr/2" holds a button.
 constexpr int kHeldReads = 4;
 constexpr int kReleasedReads = 4;
 
@@ -72,8 +81,17 @@ struct ScriptedPress {
     int reads = -1; // reads of the pad while held; -1: not pressed yet
 };
 
+struct ScriptedSpan {
+    enum Kind { kTouch, kMouse, kStick, kHold } kind;
+    double at, seconds;
+    float x0, y0, x1, y1; // kTouch: in the GamePad's picture, 1280 x 720; kMouse: of the window; kStick: x0, y0
+    uint32_t button;      // kHold
+    size_t segment;
+};
+
 struct Script {
     std::vector<ScriptedPress> presses;
+    std::vector<ScriptedSpan> spans;
     std::vector<uint32_t> anchors;
     std::mutex mutex;
     std::vector<double> starts; // each segment's start, after start-up; < 0 while waiting
@@ -111,6 +129,26 @@ Script& load_script() {
                 name.resize(hash);
             }
             if (port > 0) script.pro[port - 1] = true;
+            ScriptedSpan span{ScriptedSpan::kTouch, std::atof(item.substr(0, colon).c_str()), 0.0, 0, 0, 0, 0, 0,
+                              script.anchors.size()};
+            char held[16] = "";
+            if (std::sscanf(name.c_str(), "touch/%f/%f/%f/%f/%lf", &span.x0, &span.y0, &span.x1, &span.y1,
+                            &span.seconds) == 5) {
+                script.spans.push_back(span);
+            } else if (std::sscanf(name.c_str(), "mouse/%f/%f/%f/%f/%lf", &span.x0, &span.y0, &span.x1, &span.y1,
+                                   &span.seconds) == 5) {
+                span.kind = ScriptedSpan::kMouse;
+                script.spans.push_back(span);
+            } else if (std::sscanf(name.c_str(), "rstick/%f/%f/%lf", &span.x0, &span.y0, &span.seconds) == 3) {
+                span.kind = ScriptedSpan::kStick;
+                script.spans.push_back(span);
+            } else if (std::sscanf(name.c_str(), "hold/%15[a-z]/%lf", held, &span.seconds) == 2) {
+                span.kind = ScriptedSpan::kHold;
+                for (const auto& [n, bit] : kNames) {
+                    if (std::string(held) == n) span.button = bit;
+                }
+                if (span.button) script.spans.push_back(span);
+            }
             for (const auto& [n, bit] : kNames) {
                 if (name == n) {
                     script.presses.push_back(
@@ -173,6 +211,32 @@ uint32_t scripted_buttons(int port) {
         if (b >> 32 == uint64_t(port) && !(buttons & uint32_t(b)) && n < kReleasedReads) ++n;
     }
     return buttons;
+}
+
+// Calls `each(span, f)` for the script's spans of `kind` going on now (f:
+// how far into it, 0 to 1).
+template <typename F>
+void scripted_spans(ScriptedSpan::Kind kind, F each) {
+    Script& script = cafe::os::script();
+    if (script.spans.empty()) return;
+    const double t = seconds_since(script.start);
+    std::lock_guard lock(script.mutex);
+    for (const ScriptedSpan& s : script.spans) {
+        if (s.kind != kind) continue;
+        const double start = script.starts[s.segment];
+        const bool next_reached = s.segment + 1 < script.starts.size() && script.starts[s.segment + 1] >= 0.0;
+        if (start < 0.0 || next_reached || t < start + s.at || t > start + s.at + s.seconds) continue;
+        each(s, s.seconds > 0.0 ? static_cast<float>((t - start - s.at) / s.seconds) : 1.0f);
+    }
+}
+
+// The touch the script's strokes hold now, if one does.
+std::optional<TouchState> scripted_touch() {
+    std::optional<TouchState> touch;
+    scripted_spans(ScriptedSpan::kTouch, [&](const ScriptedSpan& s, float f) {
+        touch = TouchState{true, (s.x0 + (s.x1 - s.x0) * f) / 1280.0f, (s.y0 + (s.y1 - s.y0) * f) / 720.0f};
+    });
+    return touch;
 }
 
 // ------------------------------------------------------------ the - chord
@@ -332,6 +396,15 @@ int32_t VPADRead(int32_t channel, VPADStatus* status, uint32_t count, be<int32_t
     status->direction[0] = {1.0f, 0.0f, 0.0f};
     status->direction[1] = {0.0f, 1.0f, 0.0f};
     status->direction[2] = {0.0f, 0.0f, 1.0f};
+    // The touch screen, calibrated as VPADGetTPCalibratedPoint gives it (the
+    // GamePad's picture as 1280 x 720; the title reads no raw points).
+    if (const TouchState touch = scripted_touch().value_or(g_touch); touch.touched) {
+        const auto at = [](float f, int size) {
+            return static_cast<uint16_t>(std::clamp(static_cast<int>(f * size), 0, size - 1));
+        };
+        const TouchData data{at(touch.x, 1280), at(touch.y, 720), 1, 0};
+        status->touch = status->touch_processed1 = status->touch_processed2 = data;
+    }
     status->battery = 0xC0;
     status->volume = 0xFF;
     status->volume_ex = 0xFF;
@@ -469,6 +542,24 @@ void WPADClampTrigger(int32_t, uint32_t, uint32_t) {}
 void set_gamepad_state(const GamepadState& state) {
     std::lock_guard lock(g_input_mutex);
     g_gamepad = state;
+}
+
+ScriptedHostInput scripted_host_input() {
+    ScriptedHostInput input{};
+    scripted_spans(ScriptedSpan::kMouse, [&](const ScriptedSpan& s, float f) {
+        input.mouse = std::array<float, 2>{s.x0 + (s.x1 - s.x0) * f, s.y0 + (s.y1 - s.y0) * f};
+    });
+    scripted_spans(ScriptedSpan::kStick, [&](const ScriptedSpan& s, float) {
+        input.pad.right_x = s.x0;
+        input.pad.right_y = s.y0;
+    });
+    scripted_spans(ScriptedSpan::kHold, [&](const ScriptedSpan& s, float) { input.pad.buttons |= s.button; });
+    return input;
+}
+
+void set_touch_state(const TouchState& touch) {
+    std::lock_guard lock(g_input_mutex);
+    g_touch = touch;
 }
 
 void set_pro_controller_states(const std::array<std::optional<GamepadState>, kProControllers>& states) {

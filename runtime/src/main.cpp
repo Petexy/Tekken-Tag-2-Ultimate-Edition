@@ -9,6 +9,7 @@
 #include "host/window.h"
 #include "install.h"
 #include "title/controllers.h"
+#include "title/paint.h"
 #include "title/presentation.h"
 #include "title/roster.h"
 #include "title/solo_ghost.h"
@@ -114,6 +115,7 @@ int main(int argc, char** argv) {
     init_data_imports();
     title::prepare_presentation();
     title::prepare_controllers();
+    title::prepare_paint();
     title::prepare_roster();
     title::prepare_solo_ghost_battle();
     std::fprintf(stderr, "ttt2: loaded image, entry 0x%08X, %zu/%zu guest entries compiled\n",

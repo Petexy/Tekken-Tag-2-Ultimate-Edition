@@ -11,7 +11,7 @@ using Clock = std::chrono::steady_clock;
 
 std::mutex g_mutex;
 State g_state;
-Clock::time_point g_until, g_hud_until;
+Clock::time_point g_until, g_hud_until, g_pointer_until;
 std::deque<std::shared_ptr<const Window>> g_recent; // newest first
 constexpr size_t kRecent = 6;
 uint64_t g_generation = 0;
@@ -53,12 +53,25 @@ void show_hud(std::vector<Quad> quads, double seconds) {
     g_hud_until = Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
 }
 
+void set_pointer_atlas(std::shared_ptr<const Atlas> atlas) {
+    std::lock_guard lock(g_mutex);
+    g_state.pointer_atlas = std::move(atlas);
+}
+
+void show_pointer(std::vector<Quad> quads, double seconds) {
+    auto shared = quads.empty() ? nullptr : std::make_shared<const std::vector<Quad>>(std::move(quads));
+    std::lock_guard lock(g_mutex);
+    g_state.pointer_quads = std::move(shared);
+    g_pointer_until = Clock::now() + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
+}
+
 State current() {
     std::lock_guard lock(g_mutex);
     State s = g_state;
     const Clock::time_point now = Clock::now();
     if (now >= g_until) s.quads = nullptr, s.scene = nullptr, s.window = nullptr;
     if (now >= g_hud_until) s.hud_quads = nullptr;
+    if (now >= g_pointer_until) s.pointer_quads = nullptr;
     return s;
 }
 

@@ -30,6 +30,7 @@
 
 #include "gpu/gpu.h"
 #include "host/timed_wait.h"
+#include "host/touch_screen.h"
 #include "host/window.h"
 
 #include "cafe/runtime.h"
@@ -1021,17 +1022,16 @@ bool Renderer::present_image(uint32_t i, uint64_t ready, uint64_t present_id) {
         di.pImageMemoryBarriers = &ib;
         vkCmdPipelineBarrier2(present_cmd_, &di);
     };
-    // Letterboxed to the TV image's aspect ratio. A window within 2 pixels of
-    // the image shows it 1:1, centred, those pixels cut off or left black: at
-    // a fractional desktop scale a window of the chosen render size can come
-    // out a pixel smaller, and scaling by 0.999 would blur the whole picture.
+    // Letterboxed to the TV image's aspect ratio (host/touch_screen.h: 1:1
+    // within 2 pixels of the image). The window's mouse finds the picture
+    // where it was shown last (host::note_picture).
     const int32_t extent_w = static_cast<int32_t>(swapchain_extent_.width);
     const int32_t extent_h = static_cast<int32_t>(swapchain_extent_.height);
-    const bool one_to_one = std::abs(extent_w - static_cast<int32_t>(src.width)) <= 2 &&
-                            std::abs(extent_h - static_cast<int32_t>(src.height)) <= 2;
-    const double scale = one_to_one ? 1.0 : std::min(double(extent_w) / src.width, double(extent_h) / src.height);
-    const int32_t w = static_cast<int32_t>(src.width * scale), h = static_cast<int32_t>(src.height * scale);
-    const int32_t x = (extent_w - w) / 2, y = (extent_h - h) / 2; // -1 to 1 when 1:1
+    bool one_to_one = false;
+    const host::touch::Rect shown = host::touch::letterbox(extent_w, extent_h, static_cast<int32_t>(src.width),
+                                                           static_cast<int32_t>(src.height), &one_to_one);
+    const int32_t x = shown.x, y = shown.y, w = shown.w, h = shown.h; // x, y -1 to 1 when 1:1
+    host::note_picture(shown, extent_w, extent_h);
     if (compute_present_) {
         transition(VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
         vkCmdBindPipeline(present_cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, scale_pipeline_);

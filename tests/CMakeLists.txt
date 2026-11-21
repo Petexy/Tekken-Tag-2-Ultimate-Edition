@@ -101,6 +101,14 @@ target_link_libraries(title_test PRIVATE cafe_title)
 target_compile_options(title_test PRIVATE -Wall -Wextra)
 add_test(NAME title_test COMMAND title_test)
 
+# The GamePad's touch screen on a computer: window points as points of the
+# picture (letterboxing, scale), the stick's cursor (host/touch_screen.h).
+add_executable(touch_screen_test touch_screen_test.cpp)
+target_include_directories(touch_screen_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(touch_screen_test PRIVATE cxx_std_20)
+target_compile_options(touch_screen_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME touch_screen_test COMMAND touch_screen_test)
+
 add_executable(damage_scaling_test damage_scaling_test.cpp)
 target_include_directories(damage_scaling_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 target_compile_options(damage_scaling_test PRIVATE -Wall -Wextra)

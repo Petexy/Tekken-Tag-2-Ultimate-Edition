@@ -18,6 +18,7 @@
 #include "cafe/guest.h"
 #include "cafe/runtime.h"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -629,6 +630,14 @@ bool wait_timestamp(uint64_t timestamp, uint64_t timeout_ns) {
 }
 
 uint64_t clock() { return cafe_ppc_timebase(); }
+
+namespace {
+std::atomic<uint32_t> g_cpu_read_targets{0};
+} // namespace
+
+void set_cpu_read_targets(uint32_t bytes) { g_cpu_read_targets.store(bytes, std::memory_order_relaxed); }
+
+uint32_t cpu_read_targets() { return g_cpu_read_targets.load(std::memory_order_relaxed); }
 
 void cpu_wrote(uint32_t address, uint32_t size) {
     if (size == 0) return;
