@@ -59,12 +59,18 @@ the reachability bound sound.
   the extra frames were skipped and the title ran at 52-55 frames/s. A
   thread ("memory", `keep_guest_memory_fast`) therefore reads a byte of
   every page of the imported ranges once a second and gives the blocks
-  without a huge page one (`MADV_COLLAPSE`, Linux 6.1): without a pause
-  while any are missing (a game started on a PC short of memory may begin
-  with a tenth of that memory on huge pages), every four seconds once all
-  have one. The log's "memory:" lines say how the memory stands at the
-  start, when huge pages are missing, every ten seconds while they are, and
-  when it is whole again.
+  without a huge page one (`MADV_COLLAPSE`, Linux 6.1; the kernel's page map,
+  `PAGEMAP_SCAN` from Linux 6.7, says which). A block made over moves memory
+  under the GPU's mapping: the driver waits for the GPU and each submission
+  that overlaps the change starts again and maps the whole range anew. On a
+  PC short of memory the kernel also compacts memory for every block, so
+  blocks made one after another held the game at 3-10 frames/s while it
+  caught up, or stopped it. The compaction is therefore done first on a
+  64 MB reserve of the thread's own; its blocks are given back one at a time
+  right before a block of the ranges is made over, in bursts of up to 0.1 s
+  with a second between them. The log's "memory:" lines say how the memory
+  stands at the start, when huge pages are missing, every ten seconds while
+  they are, and when it is whole again.
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
