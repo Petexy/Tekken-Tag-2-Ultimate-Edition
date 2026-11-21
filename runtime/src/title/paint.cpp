@@ -93,9 +93,10 @@ std::shared_ptr<const gpu::overlay::Atlas> cursor_atlas() {
     return atlas;
 }
 
-void draw_cursor() {
+// On the window's thread, after each update (host::on_touch_screen): the
+// cursor of the touch the title was just given.
+void draw_cursor(const std::optional<host::TouchCursor>& cursor) {
     static bool drawn = false;
-    const std::optional<host::TouchCursor> cursor = host::touch_cursor();
     if (!cursor) {
         if (drawn) gpu::overlay::show_pointer({}, 0.0);
         drawn = false;
@@ -130,7 +131,6 @@ host::TouchScreen touch_screen() {
         traced_state = state;
         traced_tool = tool;
     }
-    draw_cursor();
     const bool open = state && *state > 1; // 0 none, 1 CUSTOMIZE's menus
     static bool reading = false;
     if (open != reading) gpu::set_cpu_read_targets(open ? kPaintTileBytes : 0);
@@ -141,6 +141,6 @@ host::TouchScreen touch_screen() {
 
 } // namespace
 
-void prepare_paint() { host::on_touch_screen(touch_screen); }
+void prepare_paint() { host::on_touch_screen(touch_screen, draw_cursor); }
 
 } // namespace cafe::title

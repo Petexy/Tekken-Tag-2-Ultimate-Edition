@@ -326,6 +326,7 @@ void assign(const std::vector<DeviceState>& devices) {
 // ------------------------------------------------------------ the touch screen
 
 std::function<TouchScreen()> g_touch_check;
+std::function<void(const std::optional<TouchCursor>&)> g_touch_cursor;
 std::mutex g_picture_mutex;
 touch::Rect g_picture{};          // where the last image was shown (note_picture)
 int32_t g_extent_w = 0, g_extent_h = 0; // in a swapchain of this size; 0: none shown yet
@@ -370,11 +371,10 @@ struct Cursor {
     std::chrono::steady_clock::time_point last{};
 };
 Cursor g_cursor;
-std::mutex g_cursor_mutex;
-std::optional<TouchCursor> g_drawn_cursor;
 
 // The touch screen for this update, from the gamepads' states (their right
-// sticks and ZR taken while the cursor can be used) and the mouse.
+// sticks and ZR taken while the cursor can be used, the keyboard's ZR too)
+// and the mouse.
 void update_touch(std::vector<DeviceState>& devices, const std::optional<std::array<float, 2>>& scripted_mouse) {
     const auto now = std::chrono::steady_clock::now();
     const float seconds = g_cursor.last == std::chrono::steady_clock::time_point{}
@@ -396,11 +396,14 @@ void update_touch(std::vector<DeviceState>& devices, const std::optional<std::ar
         bool zr = false;
         if (state == TouchScreen::kCursor) {
             for (DeviceState& d : devices) {
-                if (d.id == kKeyboard) continue; // no stick: its ZR stays the title's
-                stick_x += d.state.right_x;
-                stick_y += d.state.right_y;
-                zr = zr || (d.state.buttons & os::vpad::kZR);
-                d.state.right_x = d.state.right_y = 0.0f;
+                // The keyboard has no stick to move the cursor: its ZR
+                // touches nothing, and reaches the title no more either.
+                if (d.id != kKeyboard) {
+                    stick_x += d.state.right_x;
+                    stick_y += d.state.right_y;
+                    zr = zr || (d.state.buttons & os::vpad::kZR);
+                    d.state.right_x = d.state.right_y = 0.0f;
+                }
                 d.state.buttons &= ~os::vpad::kZR;
             }
             if (stick_x != 0.0f || stick_y != 0.0f || zr) g_cursor.in_use = true;
@@ -439,11 +442,8 @@ void update_touch(std::vector<DeviceState>& devices, const std::optional<std::ar
             }
         }
     }
-    {
-        std::lock_guard lock(g_cursor_mutex);
-        g_drawn_cursor = drawn;
-    }
     os::set_touch_state(touch);
+    if (g_touch_cursor) g_touch_cursor(drawn);
 }
 
 void update_input() {
@@ -594,11 +594,10 @@ void on_controller_devices_change(std::function<void()> callback) {
     if (g_devices_callback) g_devices_callback();
 }
 
-void on_touch_screen(std::function<TouchScreen()> state) { g_touch_check = std::move(state); }
-
-std::optional<TouchCursor> touch_cursor() {
-    std::lock_guard lock(g_cursor_mutex);
-    return g_drawn_cursor;
+void on_touch_screen(std::function<TouchScreen()> state,
+                     std::function<void(const std::optional<TouchCursor>&)> cursor) {
+    g_touch_check = std::move(state);
+    g_touch_cursor = std::move(cursor);
 }
 
 void note_picture(const touch::Rect& rect, int32_t extent_w, int32_t extent_h) {

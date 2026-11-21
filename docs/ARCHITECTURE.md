@@ -965,8 +965,10 @@ and at +68 the tool row (0 pen, 1 eraser, 2 history, 3 PAINT POSITION).
 In states 5 and 8 the mouse touches; the stick's cursor also needs a tool
 other than PAINT POSITION, where a touch draws nothing and the right stick
 turns the camera, so the title keeps the stick there. With a drawing tool,
-gamepads' right sticks and ZR reach the title no more (the keyboard's ZR
-still does). Elsewhere the mouse does nothing and the stick and ZR are the
+gamepads' right sticks and ZR reach the title no more, nor does the
+keyboard's ZR (it has no stick to move the cursor, so it touches nothing).
+The cursor is drawn where the touch just given to the title is (after the
+update that moves it, not one update behind). Elsewhere the mouse does nothing and the stick and ZR are the
 title's. Nothing is set: these inputs work only where the title would
 otherwise wait for a GamePad, so the launchers have no setting for them.
 `TTT2_TRACE_PAINT=1` logs the state and tool as they change.

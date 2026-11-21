@@ -66,17 +66,21 @@ void on_controller_devices_change(std::function<void()> callback);
 // points, its left button held (a touch screen's taps arrive as such clicks
 // too); kCursor, also a gamepad's right stick moves a cursor drawn over the
 // picture, which touches while ZR is held, and the right stick and ZR reach
-// the title no more. The cursor shows from the stick's first move (at once
-// when a gamepad was used last) until the mouse moves.
+// the title no more (nor does the keyboard's ZR). The cursor shows from the
+// stick's first move (at once when a gamepad was used last) until the mouse
+// moves.
 enum class TouchScreen { kOff, kMouse, kCursor };
-void on_touch_screen(std::function<TouchScreen()> state);
 // The stick's cursor, while it is to be drawn (on the picture, as
 // os::TouchState's points), and whether it touches.
 struct TouchCursor {
     float x = 0.0f, y = 0.0f;
     bool touching = false;
 };
-std::optional<TouchCursor> touch_cursor();
+// `cursor` is called after each update with the cursor of the touch just
+// given to the title (none while there is none to draw), on the same
+// thread, so it is drawn where that touch is.
+void on_touch_screen(std::function<TouchScreen()> state,
+                     std::function<void(const std::optional<TouchCursor>&)> cursor);
 
 // Runs the event loop until `finished` returns true or the window closes.
 // Returns false if the user closed the window.
