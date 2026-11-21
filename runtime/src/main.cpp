@@ -6,6 +6,7 @@
 #include "cafe/vfs.h"
 
 #include "host/audio.h"
+#include "host/perf.h"
 #include "host/window.h"
 #include "install.h"
 #include "title/controllers.h"
@@ -73,6 +74,7 @@ uint32_t guest_strdup(const char* text) {
 
 int main(int argc, char** argv) {
     using namespace cafe;
+    host::tune_process_timing();
     if (argc >= 2 && (std::strcmp(argv[1], "--install") == 0 || std::strcmp(argv[1], "--update") == 0)) {
         return install::run(std::vector<std::string>(argv + 1, argv + argc));
     }

@@ -65,5 +65,8 @@ void untrack_thread_cpu();
 // "gpu 40%, present 5%; guest threads 90%, busiest Main 60%": the CPU each
 // tracked thread used since the last report, in percent of one core.
 std::string thread_cpu_report();
+// TTT2_PROFILE_CPU=1: the functions the tracked threads' samples of the last
+// `seconds` were in, logged under `label` (Windows; nothing otherwise).
+void profile_report(double seconds, const char* label);
 
 } // namespace cafe

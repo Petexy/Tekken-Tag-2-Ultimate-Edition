@@ -645,7 +645,7 @@ void Renderer::evict_unused() {
     uint64_t done = 0;
     VK_CHECK(vkGetSemaphoreCounterValue(ctx_.device, timeline_, &done));
     const auto unused = [&](uint64_t frame, uint64_t value) {
-        return frame_number_ - frame >= kUnusedFrames && value <= done;
+        return frame_number_ - frame >= unused_frames_ && value <= done;
     };
     // Targets first: the textures copied from them forget them.
     std::vector<Target*> drop;

@@ -58,6 +58,7 @@ add_library(cafe_runtime OBJECT
     src/host/audio.cpp
     src/host/display_settings.cpp
     src/host/keymap.cpp
+    src/host/perf.cpp
     src/host/window.cpp
     src/gx2/cbpool.cpp
     src/gx2/display.cpp
@@ -82,6 +83,21 @@ add_library(cafe_runtime OBJECT
     src/title/warp.cpp)
 target_include_directories(cafe_runtime PUBLIC include PRIVATE src)
 target_compile_features(cafe_runtime PUBLIC cxx_std_20)
+# The shader translator's sources, hashed: the start-up warm-up's records
+# (warm.bin, gpu/vulkan/draw.cpp) stay valid while they are unchanged, across
+# rebuilds of everything else.
+file(GLOB TTT2_TRANSLATOR_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/latte/*)
+list(SORT TTT2_TRANSLATOR_FILES)
+set(TTT2_TRANSLATOR_HASHES "")
+foreach(translator_file ${TTT2_TRANSLATOR_FILES})
+    file(MD5 ${translator_file} translator_file_hash)
+    string(APPEND TTT2_TRANSLATOR_HASHES ${translator_file_hash})
+endforeach()
+string(MD5 TTT2_TRANSLATOR_HASH "${TTT2_TRANSLATOR_HASHES}")
+string(SUBSTRING ${TTT2_TRANSLATOR_HASH} 0 15 TTT2_TRANSLATOR_HASH)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${TTT2_TRANSLATOR_FILES})
+set_source_files_properties(src/gpu/vulkan/draw.cpp PROPERTIES
+    COMPILE_DEFINITIONS TTT2_TRANSLATOR_HASH=0x${TTT2_TRANSLATOR_HASH}ull)
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 # GLSL -> SPIR-V at run time.
