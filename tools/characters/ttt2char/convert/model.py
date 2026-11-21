@@ -1006,6 +1006,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         # cloth Tekken 7 simulates: chains of bones like Lars's coat tails (cloth.py); a definition's CLOTH = False:
         # none
         cloths = cloth.find(paks, k, worn, log) if getattr(d, 'CLOTH', True) else []
+        for c in cloths if getattr(d, 'CLOTH_SLEEVES', ()) else ():
+            c['sleeves'] = tuple(d.CLOTH_SLEEVES)    # (a coat's sleeves along these arm joints: not draped, cloth.rig)
     if cloths:                                   # (the room the other extra bones leave: weapons up to 4 each)
         from . import snakes8, prefabs8          # (a definition's own SKELETON_BONES: Miary Zo's, with her snakes')
         room = getattr(d, 'SKELETON_BONES', cloth.SKELETON) - len(donor['names']) - sum(

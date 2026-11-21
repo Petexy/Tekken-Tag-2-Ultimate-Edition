@@ -14,7 +14,9 @@ layout below). So for each clothing asset whose vertices may move at least FREE_
   chains whose vertices touch are neighbours;
 * chains tilted more than FLOWING from straight down, root to tip (cloth modelled flowing: Master Raven's ribbons,
   Shaheen's headscarf, Claudio's arm band) hang HANG from straight down, kept MARGIN outside the body; the vertices
-  follow (chains.drape); cloth modelled hanging (coats flaring out) keeps its shape;
+  follow (chains.drape); cloth modelled hanging (coats flaring out) keeps its shape, and so do a coat's sleeves
+  ('sleeves': the arm joints, by TTT2 name, whose chains are modelled along the arm: Katarina's forearms; hung
+  straight down in the T-pose they stood out sideways from her lowered arms);
 * the drawn section's vertices are skinned like Lars's coat: two neighbouring chains by distance, the two bones of
   the nearest link along them; over BLEND below the pinned line they keep some of their own weights;
 * posed in the fighter's standing pose, links reaching into a thigh or shin turn outward till they hang
@@ -349,8 +351,9 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     (`link` scales its link as it scales LINK); its 'body_parent' hangs its chains from body joints only (_body:
     Reina's jacket is skinned to her busts where it starts to swing), its 'leg_parent' a chain from the leg its
     vertices' own weights hold (_leg), its 'spring' goes with its chains (springs()), and 'leg_moves' marks those on a
-    leg (chain 'leg': its side; springs()). A vertex skinned to one arm or leg stays off a chain hung from another
-    (CROSSED).
+    leg (chain 'leg': its side; springs()); its 'sleeves' (TTT2 joint names) leaves its chains hung from those joints
+    as modelled (no drape).
+    A vertex skinned to one arm or leg stays off a chain hung from another (CROSSED).
     -> [{'part', 'bones' (k bone indices), 'neighbours' (chain numbers)}] in chain number order."""
     s0 = k['prims'][0]
     pos, nrm, joints, weights = s0['pos'], s0['nrm'], s0['joints'], s0['weights']
@@ -530,7 +533,8 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                     joints[vi, q] = j
                     weights[vi, q] = w / total
                 moved += 1
-        drapes += [(bones_of[m[0]], m[1], c.get('flowing', FLOWING), c.get('down')) for m in made if m is not None]
+        drapes += [(bones_of[m[0]], m[1], c.get('flowing', FLOWING), c.get('down')) for m in made if m is not None
+                   and skeleton.t7_weight_target(names[out[m[0]]['parent']], None) not in c.get('sleeves', ())]
         if not number:                               # (every chain too short: nothing hangs from it)
             continue
         log('  %s: %d chains (%s bones) hang from %s; %d vertices skinned to them' % (

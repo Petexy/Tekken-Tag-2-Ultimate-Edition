@@ -29,6 +29,10 @@ PRESETS = (
 # her coat's sides (two chains of 8 links, armpit to knee) hang from the chest: from the upper arm's helper they turned
 # with the arm and, her arms lowered in CUSTOMIZE, crossed her body and spread to both sides like wings
 CLOTH_PARENT = {'links': 4, 'from': ('KATA_0_R_jnt', 'KATA_0_L_jnt'), 'parent': 'MUNE2_jnt'}
+# her coat's sleeves (eight short chains on the forearms, modelled along them to the wrists) keep that shape: draped to
+# hang down from the elbows in the T-pose they stood out sideways as torn flaps with her arms lowered in CUSTOMIZE
+# and left her forearms bare in a fight (the Sd outfits' upper-arm cloth stays draped)
+CLOTH_SLEEVES = ('UDE_R_jnt', 'UDE_L_jnt')
 
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
 DONOR_ROW = 42

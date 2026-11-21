@@ -1237,7 +1237,12 @@ lower piece keeps 47 spring bones instead of 105, her stock outfit 197).
 A coat's side hung from the upper arm's
 helper turns with the arm and, with the arms lowered in CUSTOMIZE, crossed
 the body like wings; a definition can hang such chains from another bone
-(`CLOTH_PARENT`, bind kept: Katarina's from the chest). CUSTOMIZE fills a new
+(`CLOTH_PARENT`, bind kept: Katarina's from the chest). A coat's sleeves,
+short chains on the forearms modelled along them, draped to hang straight
+down in the T-pose stood out sideways as torn flaps from the lowered arms
+and left the forearms bare in a fight; a definition can keep the chains
+of the arm joints it names as modelled (`CLOTH_SLEEVES`: Katarina's
+forearms). CUSTOMIZE fills a new
 record with the colours of the fighter it lends its lists from (Lars,
 Jun), whose registers an added fighter's own colours also use, so while
 a record is applied to an added fighter a colour equal to that fighter's
