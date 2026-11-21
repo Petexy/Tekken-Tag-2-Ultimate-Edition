@@ -1226,7 +1226,12 @@ them), so each piece carries the body's spring entries for the chains it
 holds (its `pi` file), whole chains with the chains tied to them; and its
 skeleton keeps every bone at the body's index (all the body's bones up to
 the last spring bone it needs: a chain bone at another index is posed from
-the wrong bone, long needles out of Reina's jacket). CUSTOMIZE fills a new
+the wrong bone, long needles out of Reina's jacket). Such skeletons list
+many spring bones, and a body's skeleton and the parts worn on it may list
+216 of them in all at most (more crashed the fight while it loaded:
+Miary Zo's 255, Geese's Houou outfit's 257): a body that would go over keeps
+its outfit whole as before the wardrobe, and a shop row that would is left
+out (`wardrobe.WORN_EXTRA`). CUSTOMIZE fills a new
 record with the colours of the fighter it lends its lists from (Lars,
 Jun), whose registers an added fighter's own colours also use, so while
 a record is applied to an added fighter a colour equal to that fighter's
