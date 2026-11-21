@@ -457,6 +457,65 @@ class Drape(unittest.TestCase):
             p = p + np.linalg.norm(flowing[i + 1] - flowing[i]) * d
             self.assertGreater(p[2], cloth.MARGIN - 1)
 
+    def _sleeve(self, bone=4, **options):
+        """A made-up sleeve: a tube round the right forearm (T7 bone R_ForeArm, along -X 1300 mm up), pinned at the
+        elbow and modelled along the arm to the wrist, all of it skinned to bone (4: the forearm, 2: the chest);
+        -> rig()'s chains, k, the drawn vertices, their positions before, the log."""
+        rows, around = 6, 12
+        v, md = [], []
+        for r in range(rows):
+            for a in range(around):
+                t = 2 * np.pi * a / around
+                v.append((-30.0 - 6.0 * r, 6.0 * np.cos(t), 130.0 + 6.0 * np.sin(t)))
+                md.append(0.0 if r == 0 else 3.0 * r)
+        tris = []
+        for r in range(rows - 1):
+            for a in range(around):
+                i, j = r * around + a, r * around + (a + 1) % around
+                tris += [(i, j, i + around), (j, j + around, i + around)]
+        asset = types.SimpleNamespace(vertices=np.array(v), max_distance=np.array(md), triangles=np.array(tris),
+                                      bone_names=['R_ForeArm'], bones=np.zeros((len(v), 4), np.int64),
+                                      weights=np.tile([1.0, 0, 0, 0], (len(v), 1)))
+        k, drawn = model(asset)
+        world = np.tile(np.eye(4), (5, 1, 1))
+        world[1, :3, 3], world[2, :3, 3] = (0, 1100, 0), (0, 1400, 0)
+        world[3, :3, 3], world[4, :3, 3] = (-150, 1300, 0), (-300, 1300, 0)
+        k['bones'] = dict(names=['BASE', 'Hip', 'Spine2', 'R_Arm', 'R_ForeArm'], parents=[-1, 0, 1, 2, 3],
+                          world=world)
+        k['prims'][0]['joints'][drawn, 0] = bone
+        before = k['prims'][0]['pos'][drawn].copy()
+        lines = []
+        made = cloth.rig(k, [dict(part='bdu', asset=asset, vertices=drawn, name='coat', **options)], log=lines.append)
+        return made, k, drawn, before, lines
+
+    def test_sleeves_keep_the_shape_they_were_modelled_in(self):
+        """Katarina's coat sleeves: chains hung from a forearm, modelled along it. Draped (the default) they hang
+        down from the elbow in the T-pose and stand out sideways from arms lowered; 'sleeves' naming the forearm
+        leaves them along the arm, their vertices where they were."""
+        made, k, drawn, before, lines = self._sleeve()
+        self.assertEqual({c['parent'] for c in made}, {4})
+        self.assertTrue(any('cloth modelled flowing' in l for l in lines))
+        self.assertGreater(np.abs(k['prims'][0]['pos'][drawn] - before).max(), 50.0)
+        made, k, drawn, before, lines = self._sleeve(sleeves=('UDE_R_jnt',))
+        self.assertEqual({c['parent'] for c in made}, {4})
+        self.assertFalse(any('cloth modelled flowing' in l for l in lines))
+        np.testing.assert_array_equal(k['prims'][0]['pos'][drawn], before)
+        for c in made:                                                     # (each link along the arm, -X)
+            w = k['bones']['world'][c['bones']]
+            self.assertLess(np.abs(w[-1, 1, 3] - w[0, 1, 3]), 5.0)
+            self.assertLess(w[-1, 0, 3], w[0, 0, 3] - 20.0)
+
+    def test_sleeves_leave_cloth_hung_from_the_body_draped(self):
+        """'sleeves' is about chains hung from the joints it names: the same tube skinned to the chest, or to the
+        forearm with only the upper arm named, is draped as before."""
+        made, k, drawn, before, lines = self._sleeve(bone=2, sleeves=('UDE_R_jnt',))
+        self.assertEqual({c['parent'] for c in made}, {2})
+        self.assertTrue(any('cloth modelled flowing' in l for l in lines))
+        self.assertGreater(np.abs(k['prims'][0]['pos'][drawn] - before).max(), 50.0)
+        made, k, drawn, before, lines = self._sleeve(sleeves=('KATA_0_R_jnt',))
+        self.assertEqual({c['parent'] for c in made}, {4})
+        self.assertTrue(any('cloth modelled flowing' in l for l in lines))
+
 
 def skeleton():
     """A made-up TTT2 skeleton: the 22 body bones in the game's order, every local frame the world's but the legs'
