@@ -401,7 +401,9 @@ void keeper_main() {
         }
         // Said: how the memory stands at the start; when huge pages go
         // missing, and every ten seconds while they are; when it is whole.
-        const bool was_short = said ? short_of : known ? missing > 0 : !whole;
+        // A few blocks a pass puts back at once are not worth a line (two
+        // are missing at most starts, the PC not short of anything).
+        const bool was_short = said ? short_of : !whole;
         if ((!was_short && !whole) || (!said && was_short)) {
             const uint64_t short_kb =
                 !said && known ? std::min<uint64_t>(kept_kb, uint64_t{missing} * (kHugePage >> 10)) : resident - huge;
