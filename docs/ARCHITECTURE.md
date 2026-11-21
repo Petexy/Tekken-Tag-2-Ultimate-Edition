@@ -1231,7 +1231,10 @@ many spring bones, and a body's skeleton and the parts worn on it may list
 216 of them in all at most (more crashed the fight while it loaded:
 Miary Zo's 255, Geese's Houou outfit's 257): a body that would go over keeps
 its outfit whole as before the wardrobe, and a shop row that would is left
-out (`wardrobe.WORN_EXTRA`). A coat's side hung from the upper arm's
+out (`wardrobe.WORN_EXTRA`). The hair stays with the body, so a definition
+can list its hair's chains last (`CLOTH_ORDER = 'hair_last'`: Miary Zo's
+lower piece keeps 47 spring bones instead of 105, her stock outfit 197).
+A coat's side hung from the upper arm's
 helper turns with the arm and, with the arms lowered in CUSTOMIZE, crossed
 the body like wings; a definition can hang such chains from another bone
 (`CLOTH_PARENT`, bind kept: Katarina's from the chest). CUSTOMIZE fills a new

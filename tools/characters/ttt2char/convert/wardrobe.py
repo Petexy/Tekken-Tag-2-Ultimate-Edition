@@ -1116,7 +1116,8 @@ def piece_skeleton(bon, meshes, links=None):
     Akuma's Niou outfit 78 + 78 + 53 = 209, Clive 163 + 40 in his jacket with Lars's dougi trousers (13) = 216.
     Crashed: Miary Zo 149 + 1 + 105 = 255, Geese's Houou outfit 98 + 61 + 98 = 257, Miary Zo with more bones in a
     piece (283, 287, 294). The pieces alone do not tell it: 131 loads for Akuma, 106 crashes for Miary Zo. A body
-    that would go over stays whole, a row that would is left out (build: extra_bones, worn_extra)."""
+    that would go over stays whole, a row that would is left out (build: extra_bones, worn_extra). Miary Zo's chains
+    now list her waist cloths before her hair (cloth.hair_last): 149 + 1 + 47 = 197, her wardrobe back."""
     order = piece_bones(bon, meshes, links)
     new = {old: i for i, old in enumerate(order)}
     numbers = {_extra_number(bon['names'][i]) for i in order} - {None}

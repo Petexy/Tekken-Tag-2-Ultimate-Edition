@@ -1024,6 +1024,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
     else:
         cloth_chains = []
     cloth_chains = cloth_chains + bone_chains
+    if getattr(d, 'CLOTH_ORDER', None) == 'hair_last':
+        cloth_chains = cloth.hair_last(cloth_chains)
     skel = skeleton.build(k['bones'], donor)
     weight_maps = {tag: skeleton.weight_map(k['bones'], skel['names'], lambda i, tag=tag: tag)[0]
                    for tag, _ in worn}

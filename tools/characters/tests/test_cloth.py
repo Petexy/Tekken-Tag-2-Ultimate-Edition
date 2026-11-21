@@ -140,6 +140,14 @@ class Rig(unittest.TestCase):
         # (the moved ones keep an arm's treatment: not settled, no capsules, the template's limits)
         self.assertEqual([bool(c.get('limb')) for c in chains_], [False, True, True, False])
 
+    def test_hair_last_keeps_each_kinds_order_and_renumbers_neighbours(self):
+        a, b, c, d = ({'bones': [1], 'hair': True, 'neighbours': {1}}, {'bones': [2], 'hair': True, 'neighbours': {0}},
+                      {'bones': [3], 'neighbours': {3}}, {'bones': [4], 'neighbours': {2}})
+        out = cloth.hair_last([a, b, c, d])
+        self.assertEqual([x['bones'] for x in out], [[3], [4], [1], [2]])
+        self.assertEqual([x['neighbours'] for x in out], [{1}, {0}, {3}, {2}])
+        self.assertIs(out[0], c)
+
     def test_swing_limits_follow_each_links_own_axes(self):
         spring = {'flags': 0x60, 'swing': {'back': (0.0, 0.0, -1.0), 'towards': 0.1, 'against': 0.04, 'across': 0.02}}
         # a link along -Y with its own Y facing back: back is its +Y, reached by a positive angle about Z

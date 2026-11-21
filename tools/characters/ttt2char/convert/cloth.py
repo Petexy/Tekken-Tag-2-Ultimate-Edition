@@ -762,6 +762,20 @@ def hang_from(chains, parents, names, spec):
     return out
 
 
+def hair_last(chains):
+    """The chains with the hair's (rig 'hair') after the others, each kind's order kept and the neighbours (chain
+    numbers) renumbered; the dicts are the same. A wardrobe piece keeps every body bone up to its last extra bone, at
+    the body's indices (wardrobe.piece_skeleton), and the hair stays with the body: Miary Zo's waist cloths after her
+    hair's 58 bones made her lower piece list 105 extra bones and her stock outfit 255, over what a fight loads
+    (wardrobe.WORN_EXTRA: she was left whole, no wardrobe); before them, 47 and 197 (CLOTH_ORDER 'hair_last')."""
+    order = [i for i, c in enumerate(chains) if not c.get('hair')] + [i for i, c in enumerate(chains) if c.get('hair')]
+    new = {old: n for n, old in enumerate(order)}
+    for c in chains:
+        if 'neighbours' in c:
+            c['neighbours'] = {new[x] for x in c['neighbours']}
+    return [chains[i] for i in order]
+
+
 def _swing_limits(spring, frame, length=None):
     """A chain's spring with its limits for one link (frame: its bind matrix, world), from the spring's 'swing': {'back':
     a direction in the model, 'towards', 'against', 'across': per link, rad}: each chain may swing that far toward back,
