@@ -1092,8 +1092,8 @@ def spring_links(mop):
 
 def piece_skeleton(bon, meshes, links=None):
     """The skeleton of one of the fighter's own outfit pieces (a part's `bi`), made from the body's (`bon`, parsed):
-    the body's bones without the extra (OPT) bones the piece's `meshes` are not bound to; the meshes' bone numbers
-    are changed to match (in place). -> the skeleton.
+    the body's bones up to the last extra (OPT) bone the piece's `meshes` are bound to, each at its index in the
+    body; the meshes' bone numbers are changed to match (in place). -> the skeleton.
     links (spring_links of the body's spring file): the piece also holds every bone a bone it holds is linked to,
     and so on, with their parents: a chain moves with its neighbours, so a piece holding a coat's chains holds
     all the chains tied to them and they swing in the piece as they did in the body (a piece sharing a chain with
@@ -1103,8 +1103,11 @@ def piece_skeleton(bon, meshes, links=None):
     numbers) exactly the extra bones it holds (the body's whole skeleton with an empty list, or with a part of the
     list: the fight never finishes loading), and the parts worn together must not list too many (two pieces with
     the body's 86 cloth bones each: a null read under sub_0491B558 while the fight loads; 55 each, or 86 in one
-    piece and none in the other: fine). A part is bound through the body's skeleton by its bones' names, and the
-    body's springs move the bones, so a piece only needs the bones it uses."""
+    piece and none in the other: fine). Its extra bones are its own, moved by its own springs (piece_springs).
+    And they must sit at the body's indices (2026-11-21): a piece that left out extra bones before the ones it held
+    (Reina's hair chain, the body's first) had its chains posed from the wrong bones, and her jacket threw long black
+    needles in fights and in CUSTOMIZE; with every bone up to its last one the body's, nothing moves out of place.
+    (Every skeleton the importer makes has its 138 plain bones first and its extra bones after them.)"""
     def number(name):
         short = name.split(':')[-1]
         digits = short[3:].split('_')[0] if short.startswith('OPT') else ''
@@ -1138,6 +1141,9 @@ def piece_skeleton(bon, meshes, links=None):
         while 0 <= i < len(bon['names']) and i not in keep:
             keep.add(i)
             i = bon['parent'][i]
+    # every extra bone at the body's index: the piece holds all the body's bones up to the last one it needs
+    last = max((i for i in keep if number(bon['names'][i]) is not None), default=-1)
+    keep |= set(range(last + 1))
     order = sorted(keep)
     new = {old: i for i, old in enumerate(order)}
     numbers = {number(bon['names'][i]) for i in order} - {None}

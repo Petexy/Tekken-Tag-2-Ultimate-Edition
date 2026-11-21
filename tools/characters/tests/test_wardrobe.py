@@ -352,22 +352,25 @@ class Pieces(unittest.TestCase):
         self.assertEqual(wardrobe.own_pieces(dict(meshes=[whole, trousers]), 'abc', bon), {})
         self.assertEqual(wardrobe.own_pieces(dict(meshes=[jacket, trousers]), 'abc'), {})      # (no skeleton: names only)
 
-    def test_a_pieces_skeleton_holds_the_bodys_bones_and_only_its_own_extra_ones(self):
-        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('KUBI_jnt', 0, (0, 1400, 0)), ('OPT300_hair', 1, (0, 1450, -50)),
-                        ('KOSHI_jnt', 0, (0, 950, 0)), ('OPT400_hem', 3, (0, 700, 0)), ('OPT401_hem', 4, (0, 500, 0)),
-                        ('OPT800_weapon', 0, (300, 1000, 0))])
+    def test_a_pieces_skeleton_holds_the_bodys_bones_at_the_bodys_indices(self):
+        """A piece holds the body's bones up to the last extra bone it is bound to, every one at its index in the
+        body (an extra bone of a part at another index than the body's was posed from the wrong bone: Reina's
+        jacket threw long black needles), and lists exactly the extra bones it holds."""
+        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('KUBI_jnt', 0, (0, 1400, 0)), ('KOSHI_jnt', 0, (0, 950, 0)),
+                        ('OPT300_hair', 1, (0, 1450, -50)), ('OPT400_hem', 2, (0, 700, 0)),
+                        ('OPT401_hem', 4, (0, 500, 0)), ('OPT800_weapon', 0, (300, 1000, 0))])
         bon['opt'] = [300, 400, 401, 800]
         tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
-        skirt, shirt = mesh('abc_bdl', tri, [(0, 1, 2)], [3, 5, 5]), mesh('abc_bdu', tri, [(0, 1, 2)], [0, 1, 1])
+        skirt, shirt = mesh('abc_bdl', tri, [(0, 1, 2)], [2, 5, 5]), mesh('abc_bdu', tri, [(0, 1, 2)], [0, 1, 1])
         lower = wardrobe.piece_skeleton(bon, [skirt])
         self.assertEqual([n.split(':')[-1] for n in lower['names']],
-                         ['HARA', 'KUBI_jnt', 'KOSHI_jnt', 'OPT400_hem', 'OPT401_hem'])      # (401's parent with it)
-        self.assertEqual(lower['parent'], [-1, 0, 0, 2, 3])
-        self.assertEqual(lower['opt'], [400, 401])                 # exactly the extra bones it holds
-        self.assertEqual(skirt['polys'][0]['verts']['bones'][:, 0].tolist(), [2, 4, 4])
-        np.testing.assert_allclose(lower['t'][4], bon['t'][5])
+                         ['HARA', 'KUBI_jnt', 'KOSHI_jnt', 'OPT300_hair', 'OPT400_hem', 'OPT401_hem'])
+        self.assertEqual(lower['parent'], bon['parent'][:6])        # (the hair before its hem: same indices)
+        self.assertEqual(lower['opt'], [300, 400, 401])             # exactly the extra bones it holds
+        self.assertEqual(skirt['polys'][0]['verts']['bones'][:, 0].tolist(), [2, 5, 5])
+        np.testing.assert_allclose(lower['t'], bon['t'][:6])
         upper = wardrobe.piece_skeleton(bon, [shirt])
-        self.assertEqual(len(upper['names']), 3)
+        self.assertEqual(len(upper['names']), 3)                    # (no extra bone: the body's plain bones)
         self.assertEqual(upper['opt'], [])
         self.assertEqual(shirt['polys'][0]['verts']['bones'][:, 0].tolist(), [0, 1, 1])
         self.assertEqual(len(bon['names']), 7)                     # (the body's skeleton is left as it was)
