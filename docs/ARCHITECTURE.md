@@ -58,9 +58,13 @@ the reachability bound sound.
   thread (a submission per refresh) then went from 13 % to 45-63 % of a core,
   the extra frames were skipped and the title ran at 52-55 frames/s. A
   thread ("memory", `keep_guest_memory_fast`) therefore reads a byte of
-  every page of the imported ranges once a second and, every four seconds,
-  gives the blocks that lost their huge page a new one (`MADV_COLLAPSE`,
-  Linux 6.1); it logs when it finds them missing.
+  every page of the imported ranges once a second and gives the blocks
+  without a huge page one (`MADV_COLLAPSE`, Linux 6.1): without a pause
+  while any are missing (a game started on a PC short of memory may begin
+  with a tenth of that memory on huge pages), every four seconds once all
+  have one. The log's "memory:" lines say how the memory stands at the
+  start, when huge pages are missing, every ten seconds while they are, and
+  when it is whole again.
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
