@@ -636,24 +636,26 @@ class Materials(unittest.TestCase):
         prop['textures'] = {'Diffuse': '/Game/T_D', 'Normal': '/Game/T_X', 'Normal_Map': '/Game/T_N'}
         self.assertEqual(mats.effective('/Game/MI_CH_x.MI_CH_x')['textures']['Normal'], '/Game/T_X')   # its own kept
 
-    def test_every_skin_material_takes_its_multiply(self):
+    def test_only_the_ssp_skin_takes_its_multiply(self):
         """Tekken 7's skin materials have several bases with the same colour terms (M_CH_skin_wet_SSP, its _metallic
-        one, M_CH_skin_wet, M_CH_skin_wet_ao_SSP): a dark fighter's skin is a light texture times a small Multiply,
-        whichever the base (baked as the texture alone he came out fair)."""
+        one, M_CH_skin_wet, M_CH_skin_wet_ao_SSP). Released packs were baked with them for M_CH_skin_wet_SSP only;
+        an added fighter's own outfit must look as it did (taking them for the others tanned Noctis and darkened
+        Leroy and Akuma), so the others stay the texture alone."""
         from ttt2char.convert.model import bake_albedo
 
         class Textures:
             @staticmethod
             def exists(path):
-                return True
+                return path is not None
 
             @staticmethod
             def linear(path):
                 return np.full((4, 4, 3), (0.4, 0.2, 0.1), np.float32), None
-        for base in ('M_CH_skin_wet_SSP', 'M_CH_skin_wet_SSP_metallic', 'M_CH_skin_wet', 'M_CH_skin_wet_ao_SSP'):
+        for base, expected in (('M_CH_skin_wet_SSP', (0.1, 0.05, 0.025)), ('M_CH_skin_wet_SSP_metallic', (0.4, 0.2, 0.1)),
+                               ('M_CH_skin_wet', (0.4, 0.2, 0.1)), ('M_CH_skin_wet_ao_SSP', (0.4, 0.2, 0.1))):
             eff = {'base': base, 'textures': {'Diffuse': '/Game/T_D'}, 'vectors': {},
                    'scalars': {'Multiply': 0.25, 'Desaturation': 0.0}}
-            np.testing.assert_allclose(bake_albedo(eff, Textures())[0][0, 0], (0.1, 0.05, 0.025), atol=1e-6)
+            np.testing.assert_allclose(bake_albedo(eff, Textures())[0][0, 0], expected, atol=1e-6)
 
     def test_texture_budget(self):
         from ttt2char.convert.model import TextureBank
