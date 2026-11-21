@@ -1239,6 +1239,18 @@ where its own outfits bare enough skin to measure that (Akuma's arms are
 half again as thick as Lars's, Noctis's a sixth thinner; a limb within an
 eighth of the donor's is left as it is). The fighter's own outfit becomes
 the default items' parts, so a garment in a slot replaces that half of it.
+With nothing equipped the fighter must look and move as it did before the
+wardrobe: a part's spring bones are its own (the body's springs never move
+them), so each piece carries the body's spring entries for the chains it
+holds (its `pi` file), whole chains with the chains tied to them; and its
+skeleton keeps every bone at the body's index (all the body's bones up to
+the last spring bone it needs: a chain bone at another index is posed from
+the wrong bone, long needles out of Reina's jacket). CUSTOMIZE fills a new
+record with the colours of the fighter it lends its lists from (Lars,
+Jun), whose registers an added fighter's own colours also use, so while
+a record is applied to an added fighter a colour equal to that fighter's
+default for a register the added fighter has a colour of its own for is
+taken as the default (its own palette row; roster.cpp, `sub_065D2B0C`).
 A definition's one option is `WARDROBE = False`: no wardrobe, and so no
 shop list, for that fighter (no definition sets it now). The rules leave out the rest by themselves: a fighter not
 of the donor's size (a joint more than 200 mm from the donor's: Gigas,

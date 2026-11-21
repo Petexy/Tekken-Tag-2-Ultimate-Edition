@@ -1076,17 +1076,38 @@ def part_skeleton(part, target):
     return out
 
 
-def piece_skeleton(bon, meshes):
+def spring_links(mop):
+    """{OPT number: the OPT numbers its entry in the spring file `mop` is linked to} (neighbouring chains)."""
+    from . import cloth
+    entries, _, _, links, _ = cloth.parse(mop)
+    out, q = {}, 0
+    for e in entries:
+        number, = struct.unpack_from('>I', e)
+        n, = struct.unpack_from('>I', e, 0x38)
+        out.setdefault(number, set()).update(
+            struct.unpack_from('>I', links, cloth.MOP_LINK * k + 4)[0] for k in range(q, q + n))
+        q += n
+    return out
+
+
+def piece_skeleton(bon, meshes, links=None):
     """The skeleton of one of the fighter's own outfit pieces (a part's `bi`), made from the body's (`bon`, parsed):
-    the body's bones without the extra (OPT) bones the piece's `meshes` are not bound to; the meshes' bone numbers
-    are changed to match (in place). -> the skeleton.
+    the body's bones up to the last extra (OPT) bone the piece's `meshes` are bound to, each at its index in the
+    body; the meshes' bone numbers are changed to match (in place). -> the skeleton.
+    links (spring_links of the body's spring file): the piece also holds every bone a bone it holds is linked to,
+    and so on, with their parents: a chain moves with its neighbours, so a piece holding a coat's chains holds
+    all the chains tied to them and they swing in the piece as they did in the body (a piece sharing a chain with
+    the other piece then holds the same chains as that one: both move alike).
 
     What the game was seen to do with a part's skeleton (fights loaded or not, 2026-11-19): it must list (its `opt`
     numbers) exactly the extra bones it holds (the body's whole skeleton with an empty list, or with a part of the
     list: the fight never finishes loading), and the parts worn together must not list too many (two pieces with
     the body's 86 cloth bones each: a null read under sub_0491B558 while the fight loads; 55 each, or 86 in one
-    piece and none in the other: fine). A part is bound through the body's skeleton by its bones' names, and the
-    body's springs move the bones, so a piece only needs the bones it uses."""
+    piece and none in the other: fine). Its extra bones are its own, moved by its own springs (piece_springs).
+    And they must sit at the body's indices (2026-11-21): a piece that left out extra bones before the ones it held
+    (Reina's hair chain, the body's first) had its chains posed from the wrong bones, and her jacket threw long black
+    needles in fights and in CUSTOMIZE; with every bone up to its last one the body's, nothing moves out of place.
+    (Every skeleton the importer makes has its 138 plain bones first and its extra bones after them.)"""
     def number(name):
         short = name.split(':')[-1]
         digits = short[3:].split('_')[0] if short.startswith('OPT') else ''
@@ -1098,10 +1119,31 @@ def piece_skeleton(bon, meshes):
             if 'bones' in v.dtype.names:
                 used |= set(v['bones'][v['w'] > 0].tolist())
     keep = {i for i, name in enumerate(bon['names']) if number(name) is None}
+    if links is not None:           # (whole chains: the bones below a held one, its links' chains, theirs ..)
+        by_number = {number(name): i for i, name in enumerate(bon['names']) if number(name) is not None}
+        below = {}
+        for i, parent in enumerate(bon['parent']):
+            if number(bon['names'][i]) is not None:
+                below.setdefault(parent, []).append(i)
+        more = [i for i in used if 0 <= i < len(bon['names']) and number(bon['names'][i]) is not None]
+        tied = set()
+        while more:
+            i = more.pop()
+            if i in tied:
+                continue
+            tied.add(i)
+            more += below.get(i, []) + [by_number[m] for m in links.get(number(bon['names'][i]), ()) if m in by_number]
+            j = bon['parent'][i]
+            if 0 <= j < len(bon['names']) and number(bon['names'][j]) is not None:
+                more.append(j)
+        used = set(used) | tied
     for i in used:
         while 0 <= i < len(bon['names']) and i not in keep:
             keep.add(i)
             i = bon['parent'][i]
+    # every extra bone at the body's index: the piece holds all the body's bones up to the last one it needs
+    last = max((i for i in keep if number(bon['names'][i]) is not None), default=-1)
+    keep |= set(range(last + 1))
     order = sorted(keep)
     new = {old: i for i, old in enumerate(order)}
     numbers = {number(bon['names'][i]) for i in order} - {None}
@@ -1115,6 +1157,57 @@ def piece_skeleton(bon, meshes):
             if 'bones' in v.dtype.names:
                 v['bones'] = table[np.minimum(v['bones'].astype(np.int64), len(table) - 1)]
     return out
+
+
+def piece_springs(mop, bon, piece_bon):
+    """The spring file of one of the fighter's own outfit pieces (a part's `pi`), made from the body's (`mop`, its
+    skeleton `bon`, parsed): the body's entries for the extra bones the piece's skeleton `piece_bon` lists, the
+    capsules they touch (their bone numbers made the piece skeleton's, found by name) and their links to bones the
+    piece holds. -> the file, or None when no listed bone has an entry.
+
+    A part's extra bones are its own: the body's springs move the body's bones of the same numbers, not the part's
+    (a part listing a bone without an entry in its own spring file holds it still where its joint carries it: the
+    coat tails of Noctis's jacket hung stiff and stretched once the jacket was a part). So a piece carries the
+    entries the body's file had for its bones, and moves as it did in the body."""
+    from . import cloth
+    entries, capsules, pairs, links, rest = cloth.parse(mop)
+    keep = set(piece_bon['opt'])
+    where = {n.split(':')[-1]: i for i, n in enumerate(piece_bon['names'])}
+    found = {}                      # capsule number in the body's file -> in the piece's
+    kept_capsules = []
+    for i, c in enumerate(capsules):
+        b, = struct.unpack_from('>I', c, 4)
+        j = where.get(bon['names'][b].split(':')[-1]) if b < len(bon['names']) else None
+        if j is None:
+            continue
+        found[i] = len(kept_capsules)
+        c = bytearray(c)
+        struct.pack_into('>I', c, 4, j)
+        kept_capsules.append(bytes(c))
+    out, out_pairs, out_links = [], [], []
+    p = q = 0
+    for e in entries:
+        number, = struct.unpack_from('>I', e)
+        npairs, nlinks = struct.unpack_from('>II', e, 0x34)
+        mine = [pairs[cloth.MOP_PAIR * k:cloth.MOP_PAIR * (k + 1)] for k in range(p, p + npairs)]
+        tied = [links[cloth.MOP_LINK * k:cloth.MOP_LINK * (k + 1)] for k in range(q, q + nlinks)]
+        p, q = p + npairs, q + nlinks
+        if number not in keep:
+            continue
+        mine = [struct.pack('>II', number, found[struct.unpack_from('>I', x, 4)[0]]) + x[8:] for x in mine
+                if struct.unpack_from('>I', x, 4)[0] in found]
+        tied = [x for x in tied if struct.unpack_from('>I', x, 4)[0] in keep]
+        e = bytearray(e)
+        struct.pack_into('>II', e, 0x34, len(mine), len(tied))
+        out.append(bytes(e))
+        out_pairs += mine
+        out_links += tied
+    if not out:
+        return None
+    at = cloth.MOP_ENTRIES + cloth.MOP_ENTRY * len(entries)          # (the capsule count's 12 bytes after it)
+    return (mop[:cloth.MOP_COUNT] + struct.pack('>I', len(out)) + mop[cloth.MOP_COUNT + 4:cloth.MOP_ENTRIES]
+            + b''.join(out) + struct.pack('>I', len(kept_capsules)) + mop[at + 4:at + 16] + b''.join(kept_capsules)
+            + b''.join(out_pairs) + b''.join(out_links) + rest)
 
 
 def is_cut(name):
@@ -1359,13 +1452,14 @@ def for_pack(archives, d, contents, outfit_codes=(), log=print):
         return {}
     girth = pack_girth(archives, d.CODE, source_code, [(contents[c + '.nud'], contents[c + '.bon'])
                                                        for c in ('',) + tuple(outfit_codes)], rings=splits(d))
-    out = build(archives, d.CODE, source_code, {s: contents[s] for s in ('.nud', '.nut', '.bon', '.xml')}, log=log,
+    out = build(archives, d.CODE, source_code, {s: contents[s] for s in ('.nud', '.nut', '.bon', '.xml', '.mop')
+                                                if s in contents}, log=log,
                 girth=girth, split=splits(d))
     if not out:
         return {}
     base = min(t['gidx'] for t in nutfile.read(contents['.nut'])['textures']) & ~0xFFF
     for k, code in enumerate(outfit_codes):
-        files = {s: contents[code + s] for s in ('.nud', '.nut', '.bon', '.xml')}
+        files = {s: contents[code + s] for s in ('.nud', '.nut', '.bon', '.xml', '.mop') if code + s in contents}
         # (the garments' own skin names the copied skin textures by id: every body holds them under the first's)
         more = build(archives, d.CODE, source_code, files, own_first=OWN_FIRST + OWN_STEP * (k + 1),
                      log=lambda s: None, texture_base=base, girth=girth, split=splits(d))
@@ -1392,7 +1486,8 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
           girth=None, split=False):
     """Fits the source fighter's outfits to the added fighter.
 
-    files: the body's {'.nud', '.nut', '.bon', '.xml'} (bytes, as the importer made them);
+    files: the body's {'.nud', '.nut', '.bon', '.xml'} and its '.mop' when it has one (bytes, as the importer made
+    them: its own pieces carry the springs it had for their bones, piece_springs);
     texture_base: the copied skin textures are numbered from texture_base + FIRST_TEXTURE (default: the id range
     the body's own textures are in);
     own_first: the first own-pack member number for its own outfit pieces;
@@ -1418,6 +1513,7 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
             % (source_code, np.abs(shifts).max(), source_code))
         return {}
     pieces = own_pieces(body, code, target_bon, split)
+    links = spring_links(files['.mop']) if files.get('.mop') else None
     face = next((m for m in body['meshes'] if m['name'] == code + '_fac'), None)
     if not pieces or face is None:
         log('wardrobe: no outfits: the body is not an upper piece, a lower piece and a face')
@@ -1540,7 +1636,10 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     gone = set()
     for _, pos in OWN_PIECES:
         meshes = pieces[pos]
-        out['parts/bone/%d.bon' % number] = bonefile.write(piece_skeleton(target_bon, meshes))
+        skeleton = piece_skeleton(target_bon, meshes, links)
+        out['parts/bone/%d.bon' % number] = bonefile.write(skeleton)
+        # its springs: the body's entries for the bones it holds (a part's bones are its own: piece_springs)
+        springs = piece_springs(files['.mop'], target_bon, skeleton) if files.get('.mop') else None
         piece = dict(version=body.get('version', 0x0201), meshes=meshes,
                      sphere=nudfile.bounding_sphere(np.concatenate([p['verts']['pos'] for m in meshes for p in m['polys']])),
                      bone_first=None, bone_last=None)
@@ -1553,8 +1652,11 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
         if not mine:
             mine = sorted(own_nut['textures'], key=lambda t: sum(len(m) for m in t['mips']))[:1]
         out['parts/texture/%d.nut' % number] = nutfile.write(mine)
-        groups[pos] = [('mi', str(number)), ('ti', str(number)), ('bi', str(number)),
-                       ('Filename', '%s/%s.nud' % (code, meshes[0]['name']))]
+        groups[pos] = [('mi', str(number)), ('ti', str(number)), ('bi', str(number))]
+        if springs is not None:
+            out['parts/mop/%d.mop' % number] = springs
+            groups[pos].append(('pi', str(number)))
+        groups[pos].append(('Filename', '%s/%s.nud' % (code, meshes[0]['name'])))
         number += 1
     own_nut['textures'] = [t for t in own_nut['textures'] if t['gidx'] not in gone] + textures
     out['.nut'] = nutfile.write(own_nut)

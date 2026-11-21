@@ -3806,6 +3806,49 @@ PPC_FUNC(sub_0242F438) {
 int g_custom_subject = -1;
 uint32_t g_shop_copy = 0, g_shop_room = 0; // the subject's shop list in guest memory
 
+// An added fighter's colours under a customization record. The loader applies a record's colours to a model
+// with sub_065D2B0C(loader manager r3, slot r4, record r5): colour register 26 + 5 g + e takes the record's colour
+// of group g, entry e (at record + (g == 0 ? 636 : 576 + 60 * (g == 1 ? 0 : g)) + 12 e + 4); a colour of 0 or
+// 255 is "the default": the palette row of the model's select id for that register (sub_0683A59C(the palette
+// manager, id, register); an added fighter's rows hold its own colours, kColourGrid). CUSTOMIZE fills a fresh
+// record with explicit colours, those of the fighter it has the lists of (shop_fighter, the wardrobe's source:
+// Lars, Jun), and a slot saved there keeps them. The importer numbers an added fighter's own registers from 51,
+// as the title numbers its garments', so the source's default for such a register painted the fighter's own
+// outfit (Noctis red, Reina's purple jacket black). While a record is applied to an added fighter's model, a
+// colour equal to the source's default for a register the fighter has a colour of its own for counts as the
+// default: the fighter's own row. Colours the player chose (any other number) stay. (The title copies the record
+// as applied for slots 0..3, 0x107D00C8: that copy keeps the defaults as 0.)
+constexpr uint32_t kPaletteManager = 0x10872798, kLoaderSlotBytes = 3264, kLoaderSlotId = 56;
+PPC_FUNC(sub_0683A59C); // palette row (manager r3, select id r4, register r5) -> colour number, 0: none
+PPC_FUNC(sub_065D2B0C_orig);
+PPC_FUNC(sub_065D2B0C) {
+    const uint32_t slot = ctx.r[4], record = ctx.r[5];
+    const int k = record != 0 && slot < 6 ? slot_of_id(load(ctx.r[3] + kLoaderSlotBytes * slot + kLoaderSlotId)) : -1;
+    if (k < 0 || g_added[k].shop.empty()) {
+        sub_065D2B0C_orig(ctx, base);
+        return;
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> put_back; // (address, colour) of the record's colours taken out
+    for (uint32_t g = 0; g < 14; ++g) { // (the title's 14 groups)
+        const uint32_t group = record + (g == 0 ? 636 : 576 + 60 * (g == 1 ? 0 : g));
+        for (uint32_t e = 0; e < 5; ++e) {
+            const uint32_t at = group + 12 * e + 4, colour = load(at), reg = 26 + 5 * g + e;
+            if (colour == 0 || colour == 255) continue;
+            const PPCContext saved = ctx;
+            const uint32_t source = guest_call(ctx, base, sub_0683A59C, {kPaletteManager, g_added[k].shop_fighter, reg});
+            const uint32_t own = guest_call(ctx, base, sub_0683A59C, {kPaletteManager, g_added[k].id, reg});
+            ctx = saved;
+            if (own != 0 && colour == source) put_back.emplace_back(at, colour);
+        }
+    }
+    for (const auto& [at, colour] : put_back) store(at, 0);
+    if (traces().roster && !put_back.empty())
+        std::fprintf(stderr, "ttt2: colours: %s wears its own colours for %zu registers its record left at %u's\n",
+                     g_added[k].code.c_str(), put_back.size(), g_added[k].shop_fighter);
+    sub_065D2B0C_orig(ctx, base);
+    for (const auto& [at, colour] : put_back) store(at, colour);
+}
+
 PPC_FUNC(sub_02A86B80_orig);
 PPC_FUNC(sub_02A86B80) {
     const int k = slot_of_id(ctx.r[5]);
