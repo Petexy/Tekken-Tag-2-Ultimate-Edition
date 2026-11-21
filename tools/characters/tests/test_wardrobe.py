@@ -372,6 +372,62 @@ class Pieces(unittest.TestCase):
         self.assertEqual(shirt['polys'][0]['verts']['bones'][:, 0].tolist(), [0, 1, 1])
         self.assertEqual(len(bon['names']), 7)                     # (the body's skeleton is left as it was)
 
+    @staticmethod
+    def springs(entries, capsules, rest=b'REST'):
+        """A made-up spring file: entries [(OPT number, [capsule numbers], [linked OPT numbers])], capsules [bone]."""
+        head = struct.pack('>f', 5.0) + bytes(28) + struct.pack('>I', len(entries)) + bytes(12)
+        body = b''.join(struct.pack('>I', n) + bytes(0x30 - 4) + struct.pack('>III', 8, len(c), len(l)) + bytes(0x24)
+                        for n, c, l in entries)
+        caps = struct.pack('>I', len(capsules)) + bytes(12) + b''.join(struct.pack('>II', 1, b) + bytes(0x48)
+                                                                      for b in capsules)
+        pairs = b''.join(struct.pack('>II', n, k) + bytes(8) for n, c, _ in entries for k in c)
+        links = b''.join(struct.pack('>IIff', n, m, 0.8, 0.5) + bytes(36) for n, _, l in entries for m in l)
+        return head + body + caps + pairs + links + rest
+
+    CHAINS = [('HARA', -1, (0, 1000, 0)), ('KOSHI_jnt', 0, (0, 950, 0)), ('OPT400_tail', 1, (-50, 800, -60)),
+              ('OPT401_tail', 2, (-50, 600, -60)), ('OPT402_tail', 1, (50, 800, -60)), ('OPT500_hair', 0, (0, 1500, -50))]
+
+    def test_a_piece_holds_whole_chains_with_the_chains_tied_to_them(self):
+        bon = skeleton(self.CHAINS)
+        bon['opt'] = [400, 401, 402, 500]
+        mop = self.springs([(400, [0], [402]), (401, [], []), (402, [1], [400]), (500, [], [])], [1, 5])
+        self.assertEqual(wardrobe.spring_links(mop), {400: {402}, 401: set(), 402: {400}, 500: set()})
+        tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        # bound to the tail's lower bone only: its chain up to the hip and the chain tied to it come with it
+        alone = wardrobe.piece_skeleton(bon, [mesh('abc_bdf', tri, [(0, 1, 2)], 3)])
+        self.assertEqual(alone['opt'], [400, 401])
+        held = wardrobe.piece_skeleton(bon, [mesh('abc_bdf', tri, [(0, 1, 2)], 3)], wardrobe.spring_links(mop))
+        self.assertEqual(held['opt'], [400, 401, 402])           # (not the hair: nothing ties it to the tails)
+        self.assertEqual([n.split(':')[-1] for n in held['names']],
+                         ['HARA', 'KOSHI_jnt', 'OPT400_tail', 'OPT401_tail', 'OPT402_tail'])
+        # a chain's upper bone alone brings the bones below it
+        top = wardrobe.piece_skeleton(bon, [mesh('abc_bdf', tri, [(0, 1, 2)], 2)], {})
+        self.assertEqual(top['opt'], [400, 401])
+
+    def test_a_pieces_springs_are_the_bodys_entries_for_the_bones_it_holds(self):
+        from ttt2char.convert import cloth
+        bon = skeleton(self.CHAINS)
+        bon['opt'] = [400, 401, 402, 500]
+        mop = self.springs([(400, [0], [402]), (401, [], []), (402, [1, 0], [400]), (500, [1], [])], [1, 5])
+        tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        piece = wardrobe.piece_skeleton(bon, [mesh('abc_bdf', tri, [(0, 1, 2)], 3)], wardrobe.spring_links(mop))
+        out = wardrobe.piece_springs(mop, bon, piece)
+        entries, capsules, pairs, links, rest = cloth.parse(out)
+        self.assertEqual(out[:cloth.MOP_COUNT], mop[:cloth.MOP_COUNT])
+        self.assertEqual([struct.unpack_from('>I', e)[0] for e in entries], [400, 401, 402])
+        self.assertEqual([struct.unpack_from('>I', e, 0x30)[0] for e in entries], [8, 8, 8])   # (as they were)
+        # the capsule on the hip, its bone numbered as in the piece; the hair's capsule is not the piece's
+        self.assertEqual([struct.unpack_from('>II', c) for c in capsules], [(1, 1)])
+        self.assertEqual([struct.unpack_from('>II', pairs, 16 * k) for k in range(len(pairs) // 16)],
+                         [(400, 0), (402, 0)])
+        self.assertEqual([struct.unpack_from('>II', e, 0x34) for e in entries], [(1, 1), (0, 0), (1, 1)])
+        self.assertEqual([struct.unpack_from('>II', links, 52 * k) for k in range(len(links) // 52)],
+                         [(400, 402), (402, 400)])
+        self.assertEqual(rest, b'REST')
+        # a piece without extra bones has no spring file
+        bare = wardrobe.piece_skeleton(bon, [mesh('abc_dep0', tri, [(0, 1, 2)], 1)], wardrobe.spring_links(mop))
+        self.assertIsNone(wardrobe.piece_springs(mop, bon, bare))
+
     def test_whose_wardrobe(self):
         import types
         tekken7 = dict(TEKKEN7={}, DONOR='lar', CODE='abc', NAME='A')
