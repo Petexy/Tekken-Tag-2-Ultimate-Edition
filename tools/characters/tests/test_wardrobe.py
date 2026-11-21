@@ -375,6 +375,41 @@ class Pieces(unittest.TestCase):
         self.assertEqual(shirt['polys'][0]['verts']['bones'][:, 0].tolist(), [0, 1, 1])
         self.assertEqual(len(bon['names']), 7)                     # (the body's skeleton is left as it was)
 
+    def test_extra_bones_counts_what_the_pieces_skeleton_lists_and_leaves_the_meshes_alone(self):
+        """extra_bones (what the wardrobe checks against WORN_EXTRA before it makes anything) is the length of the
+        `opt` list piece_skeleton gives the piece, hair chain before the hem included, and changes no mesh."""
+        bon = skeleton([('HARA', -1, (0, 1000, 0)), ('KUBI_jnt', 0, (0, 1400, 0)), ('KOSHI_jnt', 0, (0, 950, 0)),
+                        ('OPT300_hair', 1, (0, 1450, -50)), ('OPT400_hem', 2, (0, 700, 0)),
+                        ('OPT401_hem', 4, (0, 500, 0)), ('OPT800_weapon', 0, (300, 1000, 0))])
+        bon['opt'] = [300, 400, 401, 800]
+        tri = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+        skirt, shirt = mesh('abc_bdl', tri, [(0, 1, 2)], [2, 5, 5]), mesh('abc_bdu', tri, [(0, 1, 2)], [0, 6, 6])
+        self.assertEqual(wardrobe.extra_bones(bon, [skirt]), 3)
+        self.assertEqual(wardrobe.extra_bones(bon, [shirt]), 4)       # (the weapon is the body's last bone)
+        self.assertEqual(skirt['polys'][0]['verts']['bones'][:, 0].tolist(), [2, 5, 5])
+        self.assertEqual(shirt['polys'][0]['verts']['bones'][:, 0].tolist(), [0, 6, 6])
+        self.assertEqual(len(wardrobe.piece_skeleton(bon, [skirt])['opt']), 3)
+        self.assertEqual(len(wardrobe.piece_skeleton(bon, [shirt])['opt']), 4)
+
+    def test_a_shop_row_counts_the_extra_bones_of_the_own_piece_it_is_worn_with(self):
+        """Worn, an upper-body row keeps the fighter's own lower piece on (and the other way round); a row that
+        dresses both halves keeps neither. The game's limit is on all the parts worn together."""
+        own = {wardrobe.UPPER: 1, wardrobe.LOWER: 105}
+        upper, lower = wardrobe.BODY_SLOTS
+        self.assertEqual(wardrobe.worn_extra({upper, upper + 1, upper + 2}, 21, own), 126)
+        self.assertEqual(wardrobe.worn_extra({lower, lower + 1}, 0, own), 1)
+        self.assertEqual(wardrobe.worn_extra({upper, lower}, 30, own), 30)
+        self.assertEqual(wardrobe.worn_extra(set(), 0, own), 106)      # (nothing of the body: both pieces)
+
+    def test_the_extra_bones_limit_sits_between_what_was_seen_to_load_and_to_crash(self):
+        """The body's extra bones count with its parts': fights loaded with 209 in all (Akuma's Niou outfit, 78 in
+        the body and 131 in its two pieces) and 216 (Clive, 163 + 40 + a garment's 13), and crashed with 255
+        (Miary Zo: 149 + 106)."""
+        self.assertLessEqual(78 + 78 + 53, wardrobe.WORN_EXTRA)
+        self.assertLessEqual(163 + 40 + 13, wardrobe.WORN_EXTRA)
+        self.assertGreater(149 + 1 + 105, wardrobe.WORN_EXTRA)
+        self.assertGreater(98 + 61 + 98, wardrobe.WORN_EXTRA)
+
     @staticmethod
     def springs(entries, capsules, rest=b'REST'):
         """A made-up spring file: entries [(OPT number, [capsule numbers], [linked OPT numbers])], capsules [bone]."""

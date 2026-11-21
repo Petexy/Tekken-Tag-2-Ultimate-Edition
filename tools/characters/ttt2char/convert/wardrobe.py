@@ -92,6 +92,8 @@ WAIST_SECTORS = 24                  # directions round the hips in which the low
 HUMAN_REACH = 200.0                 # mm a joint may lie from the source's for the source's clothes to be fitted
                                     # (the human-sized fighters' joints: up to about 130; the giants': 250 and more)
 BODY_SLOTS = (8, 12)                 # the record's slots of the upper-body and the lower-body garment
+WORN_EXTRA = 216                    # extra (OPT) bones a body's skeleton and the parts worn on it may list in all
+                                    # (piece_skeleton: 216 loads, 255 and more crash the fight while it loads)
 NECK_REACH = 45.0                   # mm from the head's rim over which the neck is drawn toward it
 NECK_TUCK = (2.0, 1.5)              # mm the neck's top ring goes up and inward of the rim
 NECK_RING = 1.0                     # mm from the source head's rim within which a vertex is the neck's top ring
@@ -1107,11 +1109,52 @@ def piece_skeleton(bon, meshes, links=None):
     And they must sit at the body's indices (2026-11-21): a piece that left out extra bones before the ones it held
     (Reina's hair chain, the body's first) had its chains posed from the wrong bones, and her jacket threw long black
     needles in fights and in CUSTOMIZE; with every bone up to its last one the body's, nothing moves out of place.
-    (Every skeleton the importer makes has its 138 plain bones first and its extra bones after them.)"""
-    def number(name):
-        short = name.split(':')[-1]
-        digits = short[3:].split('_')[0] if short.startswith('OPT') else ''
-        return int(digits) if digits.isdigit() else None
+    (Every skeleton the importer makes has its 138 plain bones first and its extra bones after them.)
+    Such a skeleton can list many extra bones that are not the piece's own, and a body's skeleton and the parts worn
+    on it must not list more than WORN_EXTRA extra bones in all (2026-11-21, fights of the pieces this makes; over
+    it, the same null read under sub_0491B558 every time). Loaded: Reina 67 + 63 + 53 = 183, Leroy 95 + 94 = 189,
+    Akuma's Niou outfit 78 + 78 + 53 = 209, Clive 163 + 40 in his jacket with Lars's dougi trousers (13) = 216.
+    Crashed: Miary Zo 149 + 1 + 105 = 255, Geese's Houou outfit 98 + 61 + 98 = 257, Miary Zo with more bones in a
+    piece (283, 287, 294). The pieces alone do not tell it: 131 loads for Akuma, 106 crashes for Miary Zo. A body
+    that would go over stays whole, a row that would is left out (build: extra_bones, worn_extra)."""
+    order = piece_bones(bon, meshes, links)
+    new = {old: i for i, old in enumerate(order)}
+    numbers = {_extra_number(bon['names'][i]) for i in order} - {None}
+    out = dict(bon, names=[bon['names'][i] for i in order], parent=[new.get(bon['parent'][i], -1) for i in order],
+               t=bon['t'][order], r=bon['r'][order], s=bon['s'][order], opt=[n for n in bon['opt'] if n in numbers])
+    out.pop('names_raw', None)
+    table = np.array([new.get(i, 0) for i in range(len(bon['names']))])
+    for mesh in meshes:
+        for poly in mesh['polys']:
+            v = poly['verts']
+            if 'bones' in v.dtype.names:
+                v['bones'] = table[np.minimum(v['bones'].astype(np.int64), len(table) - 1)]
+    return out
+
+
+def _extra_number(name):
+    """The number of an extra bone (`OPT<n>...`, any namespace before ':'), or None for a plain bone."""
+    short = name.split(':')[-1]
+    digits = short[3:].split('_')[0] if short.startswith('OPT') else ''
+    return int(digits) if digits.isdigit() else None
+
+
+def extra_bones(bon, meshes, links=None):
+    """How many extra bones the skeleton piece_skeleton makes for these meshes lists (the meshes are not changed)."""
+    numbers = {_extra_number(bon['names'][i]) for i in piece_bones(bon, meshes, links)} - {None}
+    return sum(1 for n in bon['opt'] if n in numbers)
+
+
+def worn_extra(slots, listed, own_extra):
+    """The extra bones a shop row lists when worn: its parts' (`listed`) and those of the fighter's own pieces
+    (own_extra {EquipPos: extra bones}) of the halves its `slots` leave (BODY_SLOTS: an upper-body row is worn with
+    the own lower piece)."""
+    return listed + sum(own_extra[pos] for slot, (_, pos) in zip(BODY_SLOTS, OWN_PIECES) if slot not in slots)
+
+
+def piece_bones(bon, meshes, links=None):
+    """The body's bones (indices, in order) that piece_skeleton keeps for a piece of these meshes."""
+    number = _extra_number
     used = set()
     for mesh in meshes:
         for poly in mesh['polys']:
@@ -1144,19 +1187,7 @@ def piece_skeleton(bon, meshes, links=None):
     # every extra bone at the body's index: the piece holds all the body's bones up to the last one it needs
     last = max((i for i in keep if number(bon['names'][i]) is not None), default=-1)
     keep |= set(range(last + 1))
-    order = sorted(keep)
-    new = {old: i for i, old in enumerate(order)}
-    numbers = {number(bon['names'][i]) for i in order} - {None}
-    out = dict(bon, names=[bon['names'][i] for i in order], parent=[new.get(bon['parent'][i], -1) for i in order],
-               t=bon['t'][order], r=bon['r'][order], s=bon['s'][order], opt=[n for n in bon['opt'] if n in numbers])
-    out.pop('names_raw', None)
-    table = np.array([new.get(i, 0) for i in range(len(bon['names']))])
-    for mesh in meshes:
-        for poly in mesh['polys']:
-            v = poly['verts']
-            if 'bones' in v.dtype.names:
-                v['bones'] = table[np.minimum(v['bones'].astype(np.int64), len(table) - 1)]
-    return out
+    return sorted(keep)
 
 
 def piece_springs(mop, bon, piece_bon):
@@ -1518,6 +1549,14 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     if not pieces or face is None:
         log('wardrobe: no outfits: the body is not an upper piece, a lower piece and a face')
         return {}
+    # the extra bones its pieces list (piece_skeleton): with the body's own, they must stay within WORN_EXTRA
+    body_extra = len(target_bon['opt'])
+    own_extra = {pos: extra_bones(target_bon, pieces[pos], links) for _, pos in OWN_PIECES}
+    if body_extra + sum(own_extra.values()) > WORN_EXTRA:
+        log('wardrobe: no outfits: the body and its own pieces would list %d extra bones (%d + %d + %d; the fight '
+            'loads with %d at most)' % (body_extra + sum(own_extra.values()), body_extra, own_extra[UPPER],
+                                        own_extra[LOWER], WORN_EXTRA))
+        return {}
     source_face = next((m for m in source['meshes'] if m['name'] == FACE_MESH), None)
     if source_face is None:
         log('wardrobe: no outfits: %s has no face mesh' % source_code)
@@ -1533,6 +1572,15 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
     # a garment's own bones are numbered (springs name them by number): one whose numbers the fighter's body already
     # uses for bones of its own (hair, cloth) cannot be worn with it
     taken = set(target_bon['opt']) - set(source_bon['opt'])
+
+    def listed(inst):               # the extra bones its parts' skeletons list
+        n = 0
+        for g in itemdb.groups(inst):
+            a = _attrs(g)
+            pack, index = (own_bone_pack, a.get('bi')) if 'bi' in a else (bone_pack, a.get('bci'))
+            if 'mi' in a and pack is not None and index is not None:
+                n += len(bonefile.read(archives.read(member_key(pack, int(index))))['opt'])
+        return n
 
     def clashes(inst):
         for g in itemdb.groups(inst):
@@ -1560,6 +1608,13 @@ def build(archives, code, source_code, files, own_first=OWN_FIRST, labels=None, 
             continue
         if any(clashes(i) for i in insts):
             log('wardrobe: %s left out (its own bones\' numbers are taken by bones of %s\'s body)' % (label, code))
+            rows.pop(label)
+            continue
+        worn = body_extra + worn_extra({slot for slot, _, _ in row['items']}, sum(listed(i) for i in insts),
+                                        own_extra)
+        if worn > WORN_EXTRA:
+            log('wardrobe: %s left out (worn on %s\'s body it lists %d extra bones; the fight loads with %d at most)'
+                % (label, code, worn, WORN_EXTRA))
             rows.pop(label)
             continue
         wanted += [i for i in insts if i not in wanted]
