@@ -1057,6 +1057,13 @@ ring left and right and every column a ring up and down, in column and
 row order, as the title's own cells are
 (rebuilt from the cells' columns and rows, this reproduces the title's
 links exactly). A slot with no fighter has a random cell nothing moves to;
+with the new row the title's top row has lost its '?' (the title knows its
+three '?' cells by their index, so there is none to add): the cell after
+the last added one stands in its place, joined like any other, and a
+cursor that moves onto it rests on the '?' above instead, remembering that
+it is at the lower place, from where it moves on along the title's top row
+(`select_grid.h`, `sub_033E4704`; on a '?' the cursor is one frame over
+the whole column);
 the grilles over the top row's ends are hidden where a cell sits.
 
 **Its files.** The pack's files reach the title as entries added to data100

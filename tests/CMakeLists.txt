@@ -177,6 +177,13 @@ target_compile_features(noctis_assault_test PRIVATE cxx_std_20)
 target_compile_options(noctis_assault_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME noctis_assault_test COMMAND noctis_assault_test)
 
+# The select grid's rings and the '?' two rows share; made-up grids.
+add_executable(select_grid_test select_grid_test.cpp)
+target_include_directories(select_grid_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(select_grid_test PRIVATE cxx_std_20)
+target_compile_options(select_grid_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME select_grid_test COMMAND select_grid_test)
+
 # Meshes the motion blur leaves out (title/unblurred.h); a made-up NUD.
 add_executable(unblurred_test unblurred_test.cpp)
 target_include_directories(unblurred_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
