@@ -1685,6 +1685,10 @@ int cafe::gpu::precompile_shaders() {
         work.push_back(w);
     }
 
+    // (What pipelines.bin held: the driver may find pipelines in a cache of
+    // its own as well, which this file then lacks.)
+    size_t held = 0;
+    vkGetPipelineCacheData(ctx.device, cache, &held, nullptr);
     std::atomic<size_t> next{0}, done{0}, there{0}, made{0}, failed{0};
     const auto worker = [&] {
         for (size_t i = next++; i < work.size(); i = next++) {
@@ -1718,7 +1722,9 @@ int cafe::gpu::precompile_shaders() {
         }
     }
     for (std::thread& t : threads) t.join();
-    if (made != 0) write_pipeline_cache(ctx.device, cache);
+    size_t holds = 0;
+    vkGetPipelineCacheData(ctx.device, cache, &holds, nullptr);
+    if (made != 0 || holds > held) write_pipeline_cache(ctx.device, cache);
     std::printf("@progress %zu %zu\n", work.size(), work.size());
     std::printf("Prepared in %.1f s on %u threads: %zu pipelines of %zu shaders (%zu made now, %zu were there%s); "
                 "left out: %zu whose shaders are not in the cache, %zu lines not understood, %zu the driver refused\n@done\n",
