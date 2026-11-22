@@ -126,6 +126,8 @@ def apply(c):
         move['first_active'], move['last_active'] = first, last
     for name, spec in c.defn.MOVESET.get('hit_grabs', {}).items():
         hit_grab(c, name, spec)
+    for name, spec in c.defn.MOVESET.get('hit_advantage', {}).items():
+        hit_advantage(c, name, spec)
     for name, reaction in c.defn.MOVESET.get('downed_reactions', {}).items():
         downed_reaction(c, name, reaction)
     for name, template in c.defn.MOVESET.get('air_reactions', {}).items():
@@ -202,6 +204,56 @@ def apply(c):
     for name in c.defn.MOVESET.get('direct_buffered_strings', ()):
         direct_buffered_string(c, name)
     normalize_buffered_strings(c)
+
+
+END_BLEND = 10                  # a move's clip goes on this long after its end row opens (the row of a Tekken 8
+                                # move is at its length - 10: he can act from the row on, the stance comes at the end)
+# a reaction list's moves a standing or crouching opponent is put in by a hit (not the guard half, a downed opponent's
+# or the wall's)
+GROUND_HITS = ('standing', 'default', 'crouch', 'ch', 'crouch_ch', 'left', 'crouch_left', 'right', 'crouch_right',
+               'back', 'crouch_back')
+REACTION_MOVES = GROUND_HITS + ('block', 'crouch_block', 'wallslump', 'downed')
+
+
+def hit_advantage(c, name, spec):
+    """The definition's MOVESET['hit_advantage'] {attack: {'reaction': move, 'frames': n}}: attack `name`'s hit leaves
+    him n frames ahead: the opponent hit standing or crouching (counter hit and from the sides or behind too: the
+    reaction lists' GROUND_HITS) can act n frames after he can. `reaction` is the one move his hit puts such an
+    opponent in (a hold of his own: Azazel's crystal prison holds for 170 frames, Tekken 8's boss stun, 120 frames
+    ahead of a move that hits at 80: the same move again and again); no other move may use it. He can act when his
+    move's end row opens (frame E); his hit lands on frame H (the frame after its projectile's row for a thrown one,
+    the definition's THROWN: a projectile hits the frame after it is spawned; else the first active frame), the
+    reaction's frame 1 is the frame after, so its frame k is his frame H + k: its end row opens at E - H + n (from
+    there the opponent acts) and a row of its own takes the opponent who does nothing to the end row's move END_BLEND
+    frames later, as a move that long would end; the rest of its clip is not played. Its damage, level, the
+    reactions of an opponent in the air, lying or at a wall, and the attack itself stay."""
+    frames, reaction = spec['frames'], c.newidx[c.kn[spec['reaction']]]
+    index = c.newidx[c.kn[name]]
+    move, held = c.T['moves'][index], c.T['moves'][reaction]
+    thrown = getattr(c, 'thrown', {}).get(name)
+    landed = thrown['frame'] + 1 if thrown else move['first_active']
+    free = TS.cancels(c.T, move['cancel'])[-1]['win_start']
+    if type(frames) is not int or landed <= 0 or free <= landed:
+        raise ValueError('no hit frame before its end row: ' + name)
+
+    def uses(m):
+        lists = [c.T['reactions'][h['reactions']] for h in TS.hits(c.T, m['hit_condition'])] \
+            if m.get('hit_condition') is not None else []
+        return [f for r in lists for f in REACTION_MOVES if r.get(f) == reaction]
+    if not set(uses(move)) & set(GROUND_HITS):
+        raise ValueError('%s puts no standing opponent in %s' % (name, spec['reaction']))
+    if any(uses(m) for k, m in enumerate(c.T['moves']) if k != index):
+        raise ValueError('another move uses the reaction too: ' + spec['reaction'])
+    rows = [dict(r) for r in TS.cancels(c.T, held['cancel'])]
+    end = rows[-1]
+    at = free - landed + frames
+    if not 0 < at < end['win_start'] or any(TS.is_automatic(r) for r in rows[:-1]):
+        raise ValueError('the reaction cannot end at frame %d: %s' % (at, spec['reaction']))
+    end.update(win_start=at, start_frame=at)
+    rows.insert(len(rows) - 1, dict(end, direction=0, button=0, win_start=at + END_BLEND, win_end=at + END_BLEND,
+                                    start_frame=1))
+    held['cancel'] = TS.write(c.T, 'cancels', rows)
+    c.stats['hit reactions ended for a set advantage (hit_advantage)'] += 1
 
 
 GUARDS = ('block', 'crouch_block', 'pb_block')      # a reaction list's guard half: the two guard moves, the pushback
