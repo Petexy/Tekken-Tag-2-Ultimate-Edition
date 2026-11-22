@@ -68,9 +68,21 @@ the reachability bound sound.
   caught up, or stopped it. The compaction is therefore done first on a
   64 MB reserve of the thread's own; its blocks are given back one at a time
   right before a block of the ranges is made over, in bursts of up to 0.1 s
-  with a second between them. The log's "memory:" lines say how the memory
-  stands at the start, when huge pages are missing, every ten seconds while
-  they are, and when it is whole again.
+  with a second between them. Passes that make none, or in which the
+  kernel says it has no memory (even if they make a few), wait 1, 2, 4,
+  then 8 s: each such answer costs a round of compaction and reclaim that
+  takes the coldest pages of the PC, and on a PC that short a pass a second
+  pushed the game's own code and data out of memory for minutes (27-55
+  frames/s, worse than without the thread). A block the kernel turns down
+  in three passes in a row (busy: a driver that pins the memory it imports;
+  or refused) is left alone, as asking again would fail every pass for as
+  long as the game runs; four of them, in turn, are asked again 30 s later,
+  then after 60, 120 and every 240 s, and one made gives all a fresh start
+  (`runtime/src/memory_keeper.h`, tested by `memory_keeper_test`). The log's
+  "memory:" lines say how the memory stands at the start, when huge pages
+  are missing, every ten seconds while more come back, and when it is whole
+  again; each kind of failure (no free memory, the memory limit, pinned or
+  refused blocks) once.
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait

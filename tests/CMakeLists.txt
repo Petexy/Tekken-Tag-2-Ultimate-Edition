@@ -156,6 +156,14 @@ if(NOT WIN32)
     add_test(NAME guest_memory_keeper_test COMMAND guest_memory_keeper_test)
 endif()
 
+# Its rule (which blocks it asks the kernel for, how long it waits, what it
+# tells the log) on made-up answers: no kernel needed.
+add_executable(memory_keeper_test memory_keeper_test.cpp)
+target_include_directories(memory_keeper_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(memory_keeper_test PRIVATE cxx_std_20)
+target_compile_options(memory_keeper_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME memory_keeper_test COMMAND memory_keeper_test)
+
 # The character importer's formats (tools/characters; synthetic data, no game
 # files). Needs Python 3 with numpy and Pillow.
 find_package(Python3 COMPONENTS Interpreter QUIET)
