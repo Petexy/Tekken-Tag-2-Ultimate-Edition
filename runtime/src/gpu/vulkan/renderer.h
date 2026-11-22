@@ -85,6 +85,7 @@ struct Target {
     bool depth = false;
     float scale = 1;        // image size over the title's size
     bool write_back = false; // copied to guest memory after the GPU writes it (see Renderer::retired)
+    uint32_t write_back_bytes = 0; // its size if it could be (gpu::cpu_read_targets), else 0
     bool write_back_queued = false;
     Image image;
     uint64_t written = 0;   // event stamp of the last GPU write
@@ -204,7 +205,9 @@ private:
     // the scene's average colour, rendered to one element of a 64x64
     // target and read two frames later). Small targets at the title's size
     // are copied to staging memory at the end of each submission that
-    // wrote them and tiled into guest memory once it finished (retired).
+    // wrote them and tiled into guest memory once it finished (retired);
+    // larger ones too while the title says it reads them
+    // (gpu::cpu_read_targets: the paint mode's 256 x 256 tiles).
     static constexpr uint64_t kWriteBackBytes = 64u << 10;
     void queue_write_back(Target* t);
     void copy_write_backs();
@@ -600,7 +603,7 @@ private:
     VkPipelineLayout overlay_layout_ = VK_NULL_HANDLE;
     VkSampler overlay_sampler_ = VK_NULL_HANDLE;
     std::map<std::pair<VkFormat, bool>, VkPipeline> overlay_pipelines_;
-    OverlayAtlas overlay_atlas_, overlay_hud_atlas_;
+    OverlayAtlas overlay_atlas_, overlay_hud_atlas_, overlay_pointer_atlas_;
     int64_t overlay_capture_ = -1; // TTT2_CAPTURE: the TV capture to save again with the overlay
 
     // ------------------------------------------------------ misc (renderer.cpp)

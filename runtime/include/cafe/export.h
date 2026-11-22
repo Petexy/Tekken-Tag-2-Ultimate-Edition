@@ -10,6 +10,9 @@
 // function's parameters and result are mapped onto the PowerPC EABI:
 // integers and guest pointers in r3..r10 (64-bit values in an odd-aligned
 // register pair), floating point in f1..f8, results in r3 (r3:r4) or f1.
+// Integers past r10 are in the caller's parameter area on the stack, from
+// r1 + 8 up (after the back chain and the LR save word; 64-bit values
+// 8-aligned), as for GX2InitBlendControlReg's alpha combine.
 // A `PPCContext&` parameter receives the caller's context and consumes no
 // register; `T*` parameters are guest pointers translated to host pointers
 // (null stays null); `GuestAddress` keeps the raw address.
@@ -51,27 +54,52 @@ const Export* first_export();
 
 namespace abi {
 
+constexpr int kLastArgGpr = 10;
+constexpr int kLastArgFpr = 8;
+constexpr uint32_t kStackArgs = 8; // the caller's parameter area: r1 + 8
+
 struct Cursor {
     int gpr = 3;
     int fpr = 1;
+    uint32_t stack = kStackArgs; // next stack word, from r1
 };
+
+inline uint32_t stack_word(PPCContext& ctx, Cursor& cursor) {
+    const uint32_t value = reinterpret_cast<const be<uint32_t>*>(guest_pointer(ctx.r[1] + cursor.stack))->value();
+    cursor.stack += 4;
+    return value;
+}
+
+// The next 32-bit integer argument: r3..r10, then the stack.
+inline uint32_t next_word(PPCContext& ctx, Cursor& cursor) {
+    if (cursor.gpr <= kLastArgGpr) return ctx.r[cursor.gpr++];
+    return stack_word(ctx, cursor);
+}
 
 template <typename T>
 T read_arg(PPCContext& ctx, Cursor& cursor) {
     if constexpr (std::is_same_v<T, GuestAddress>) {
-        return GuestAddress{ctx.r[cursor.gpr++]};
+        return GuestAddress{next_word(ctx, cursor)};
     } else if constexpr (std::is_pointer_v<T>) {
-        return guest<std::remove_pointer_t<T>>(ctx.r[cursor.gpr++]);
+        return guest<std::remove_pointer_t<T>>(next_word(ctx, cursor));
     } else if constexpr (std::is_floating_point_v<T>) {
         return static_cast<T>(ctx.f[cursor.fpr++].ps0);
     } else if constexpr (sizeof(T) == 8) {
         if ((cursor.gpr & 1) == 0) ++cursor.gpr;
-        const uint64_t v = (uint64_t{ctx.r[cursor.gpr]} << 32) | ctx.r[cursor.gpr + 1];
-        cursor.gpr += 2;
+        uint64_t v;
+        if (cursor.gpr < kLastArgGpr) {
+            v = (uint64_t{ctx.r[cursor.gpr]} << 32) | ctx.r[cursor.gpr + 1];
+            cursor.gpr += 2;
+        } else { // no register pair left: 8-aligned on the stack, and no later integer goes in a register
+            cursor.gpr = kLastArgGpr + 1;
+            cursor.stack = (cursor.stack + 7) & ~7u;
+            const uint64_t high = stack_word(ctx, cursor);
+            v = (high << 32) | stack_word(ctx, cursor);
+        }
         return static_cast<T>(v);
     } else {
         static_assert(std::is_integral_v<T> || std::is_enum_v<T>, "unsupported argument type");
-        return static_cast<T>(ctx.r[cursor.gpr++]);
+        return static_cast<T>(next_word(ctx, cursor));
     }
 }
 
@@ -113,6 +141,8 @@ struct Signature<R (*)(A...)> {
 
 template <auto Fn, typename R, typename... A>
 void invoke_impl(PPCContext& ctx, std::tuple<A...>*) {
+    static_assert((0 + ... + (std::is_floating_point_v<A> ? 1 : 0)) <= kLastArgFpr,
+                  "floating point arguments past f8 (on the stack) are not read");
     Cursor cursor;
     // Braced initialisation evaluates left to right, matching register order.
     std::tuple<A...> args{fetch<A>(ctx, cursor)...};

@@ -32,6 +32,27 @@ struct GamepadState {
 
 void set_gamepad_state(const GamepadState& state);
 
+// The GamePad's touch screen: touched or not, and where, as a point of the
+// GamePad's picture (0 to 1 from its left edge, 0 to 1 from its top edge).
+// The host sets it (host/window.cpp: the mouse over the window's picture,
+// or the cursor a gamepad's stick moves); TTT2_INPUT_SCRIPT's touch items
+// stand in for it while they last.
+struct TouchState {
+    bool touched = false;
+    float x = 0.0f, y = 0.0f;
+};
+void set_touch_state(const TouchState& touch);
+
+// TTT2_INPUT_SCRIPT's items for the host's own input, to test it end to
+// end: the mouse with its left button held at a point of the window
+// (fractions of its size), and a pad's buttons and right stick held. The
+// host takes them as it takes the keyboard's and the mouse's.
+struct ScriptedHostInput {
+    GamepadState pad{};
+    std::optional<std::array<float, 2>> mouse;
+};
+ScriptedHostInput scripted_host_input();
+
 // The Pro Controllers on KPAD's channels 0-3 (buttons by the GamePad's bits);
 // a channel without a state has none connected.
 constexpr int kProControllers = 4;

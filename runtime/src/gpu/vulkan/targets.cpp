@@ -4,6 +4,7 @@
 
 #include "gpu/vulkan/renderer.h"
 
+#include "gpu/gpu.h"
 #include "gpu/latte.h"
 #include "gpu/tiling.h"
 #include "gx2/internal.h"
@@ -14,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 
 namespace cafe::gpu::vk {
 namespace {
@@ -92,10 +94,15 @@ Target* Renderer::color_target(uint32_t base_reg, uint32_t size_reg, uint32_t in
     t->scale = upscaled_size(pitch, height) ? scale_ : 1;
     t->end = static_cast<uint32_t>(std::min<uint64_t>(uint64_t{address} + uint64_t{pitch} * height * std::max(1u, f.bytes), 0xFFFFFFFFu));
     // Written back if small, at the title's size and stored as in guest
-    // memory (no component swizzle).
+    // memory (no component swizzle); larger ones at the title's size while
+    // the title reads them (gpu::cpu_read_targets).
     const auto same = [](VkComponentSwizzle c) { return c == VK_COMPONENT_SWIZZLE_IDENTITY; };
-    t->write_back = t->scale == 1 && uint64_t{pitch} * height * f.bytes <= kWriteBackBytes && same(f.swizzle.r) &&
-                    same(f.swizzle.g) && same(f.swizzle.b) && same(f.swizzle.a);
+    const uint64_t bytes = uint64_t{pitch} * height * f.bytes;
+    if (t->scale == 1 && bytes <= 0xFFFFFFFFu && same(f.swizzle.r) && same(f.swizzle.g) && same(f.swizzle.b) &&
+        same(f.swizzle.a)) {
+        t->write_back_bytes = static_cast<uint32_t>(bytes);
+        t->write_back = bytes <= kWriteBackBytes;
+    }
     const uint32_t width = scaled(pitch, t->scale), rows = scaled(height, t->scale);
     t->image = create_image(f.format, VK_IMAGE_ASPECT_COLOR_BIT, width, rows, 1, 1,
                             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
@@ -381,7 +388,8 @@ void Renderer::convert_depth(const gx2::DepthBuffer& src, const gx2::Surface& ds
 // ------------------------------------------------------------ write-back
 
 void Renderer::queue_write_back(Target* t) {
-    if (!t->write_back || replaying_ || t->write_back_queued) return;
+    const bool read = t->write_back || (t->write_back_bytes != 0 && t->write_back_bytes <= cpu_read_targets());
+    if (!read || replaying_ || t->write_back_queued) return;
     t->write_back_queued = true;
     write_back_targets_.push_back(t);
     if (!shadows_.empty()) forget_written(t->address, t->end); // (the CPU writes it at retirement)
@@ -400,17 +408,22 @@ void Renderer::copy_write_backs() {
         if (!shadows_.empty()) forget_written(t->address, t->end);
         const uint32_t bytes = color_format(t->format).bytes;
         if (!guest_memory_committed(t->address, t->pitch * t->height * bytes)) continue;
-        if (write_back_free_.empty()) {
+        // A free staging buffer large enough, else a new one.
+        const uint64_t size = uint64_t{t->pitch} * t->height * bytes;
+        auto free = std::find_if(write_back_free_.rbegin(), write_back_free_.rend(),
+                                 [&](uint32_t i) { return write_back_staging_[i].size >= size; });
+        if (free == write_back_free_.rend()) {
             write_back_free_.push_back(static_cast<uint32_t>(write_back_staging_.size()));
+            free = write_back_free_.rbegin();
             // Cached where the driver has such memory: the retirement thread
             // reads it element by element (write-combined memory reads slowly).
             write_back_staging_.push_back(ctx_.create_buffer(
-                kWriteBackBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                std::max(kWriteBackBytes, size), VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT));
         }
-        const uint32_t staging = write_back_free_.back();
-        write_back_free_.pop_back();
+        const uint32_t staging = *free;
+        write_back_free_.erase(std::next(free).base());
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {t->pitch, t->height, 1};

@@ -101,6 +101,21 @@ target_link_libraries(title_test PRIVATE cafe_title)
 target_compile_options(title_test PRIVATE -Wall -Wextra)
 add_test(NAME title_test COMMAND title_test)
 
+# The GamePad's touch screen on a computer: window points as points of the
+# picture (letterboxing, scale), the stick's cursor (host/touch_screen.h).
+add_executable(touch_screen_test touch_screen_test.cpp)
+target_include_directories(touch_screen_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(touch_screen_test PRIVATE cxx_std_20)
+target_compile_options(touch_screen_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME touch_screen_test COMMAND touch_screen_test)
+
+# Exported Cafe OS functions' arguments past r10 come from the caller's stack (cafe/export.h).
+add_executable(export_abi_test export_abi_test.cpp)
+target_include_directories(export_abi_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)
+target_compile_features(export_abi_test PRIVATE cxx_std_20)
+target_compile_options(export_abi_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME export_abi_test COMMAND export_abi_test)
+
 add_executable(damage_scaling_test damage_scaling_test.cpp)
 target_include_directories(damage_scaling_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 target_compile_options(damage_scaling_test PRIVATE -Wall -Wextra)

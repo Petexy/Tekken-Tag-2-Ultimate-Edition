@@ -520,6 +520,7 @@ void Renderer::draw_overlay(const Image& target) {
         draw_overlay_image(target, view_image_, {q}, true);
         if (state.scene) draw_overlay_solids(target, state.scene.get(), w.view_projection, w.rect);
     }
+    draw_overlay_quads(target, overlay_pointer_atlas_, state.pointer_atlas, state.pointer_quads);
 }
 
 void Renderer::draw_overlay_quads(const Image& target, OverlayAtlas& cached,

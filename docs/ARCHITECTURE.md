@@ -331,7 +331,10 @@ attachment formats and blend state.
   tiled into guest memory by the retirement thread once it finished,
   before the CPU can see that it has. The staging memory is CPU-cached
   where the driver has such memory: read element by element from
-  write-combined memory, the tiling kept that thread ~12% busy.
+  write-combined memory, the tiling kept that thread ~12% busy. Larger
+  ones are copied back only while the title says it reads them
+  (`gpu::set_cpu_read_targets`): CUSTOMIZE > PAINT's 256 x 256 targets
+  (below, Paint without a GamePad).
 - Detiling (`gpu/tiling.cpp`) uses addrlib once per 8×8 micro tile: in
   thin single-sample modes every micro tile has the same internal layout
   (verified against per-element addrlib, `TTT2_CHECK_TILING=1`).
@@ -951,6 +954,66 @@ the buttons of the frame they are read in, and Practice's bars still
 delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
+
+## Paint without a GamePad
+
+CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
+stylus touches its screen; the pad's buttons only pick tools, and nothing
+else draws. The title's input library (`sub_08DCE6F4`, its touch pad
+`NU::InputTouchPadDrc`) reads `VPADRead(0, …, 16)` and puts each sample's
+`VPADGetTPCalibratedPoint` (the picture as 1280 x 720, y down) into its
+queue; the paint screen (`tk::CustomizeRealtimePaint`, the `DRC_paint_mc`
+layouts) draws a stroke along the touched points that fall on the model.
+The port reported a GamePad (VPADRead succeeds, `GX2GetSystemDRCMode` 1)
+whose touch screen was never touched, so the mode opened and drew nothing.
+In this mode the title draws the same picture on both screens (the
+captures' TV and GamePad images are identical, tool rows, pickers, the
+thumbnail shot and its questions included), so the window shows all there
+is to see and touch.
+
+The port gives it a touch screen from what a computer has
+(`title/paint.cpp`, `host/window.cpp`, `host/touch_screen.h`):
+
+- **The mouse**: its left button held over the window's picture touches
+  the picture's point under it (the window's points times the display's
+  pixel density, through the same letterbox as the present path, nothing
+  on the black bars). A touch screen's taps (a Steam Deck's) arrive as such
+  clicks.
+- **A gamepad**: the right stick moves a cursor drawn over the picture (the
+  overlay's pointer layer, a ring that fills while it touches) and ZR
+  touches. Full deflection crosses the picture's height in 1.25 s, the
+  speed growing with the square of the deflection for fine strokes. The
+  cursor shows from the stick's first move (at once when a drawing tool is
+  chosen and a gamepad was used last) until the mouse moves.
+
+Only while the paint screen is open: the customize manager
+(`**0x107A71EC`) holds the paint object at +0x6A7D8 (behind
+`getRealtimePaintStatus`, `begin/endRealtimePaint`: `sub_0250373C`,
+`sub_02503A78`, `sub_02503AB8`), whose word at +60 is the mode's state (1
+in CUSTOMIZE's menus, 4 the first question, 5 the paint screen, 8 a moment
+as the paint position is taken, 7 the thumbnail shot and its questions)
+and at +68 the tool row (0 pen, 1 eraser, 2 history, 3 PAINT POSITION).
+In states 5 and 8 the mouse touches; the stick's cursor also needs a tool
+other than PAINT POSITION, where a touch draws nothing and the right stick
+turns the camera, so the title keeps the stick there. With a drawing tool,
+gamepads' right sticks and ZR reach the title no more, nor does the
+keyboard's ZR (it has no stick to move the cursor, so it touches nothing).
+The cursor is drawn where the touch just given to the title is (after the
+update that moves it, not one update behind). Elsewhere the mouse does nothing and the stick and ZR are the
+title's. Nothing is set: these inputs work only where the title would
+otherwise wait for a GamePad, so the launchers have no setting for them.
+`TTT2_TRACE_PAINT=1` logs the state and tool as they change.
+
+The strokes are drawn on the GPU into 256 x 256 RGBA8 targets (256 KiB),
+which the title reads with the CPU to keep them on the model and save
+them. Larger than the renderer copies back by itself (64 KiB), they never
+reached guest memory, so the strokes vanished as the paint screen closed
+(the thumbnail shot, the menus and fights showed none). While the paint
+object's state is above 1 (from PAINT's first question to the thumbnail
+shot), `title/paint.cpp` asks the renderer to copy back colour targets at
+the title's size of up to 256 KiB too (`gpu::set_cpu_read_targets`);
+elsewhere nothing changes. The painted slot then saves with the rest of
+the customization (`08_NNN_0.BIN`) and shows in fights.
 
 ## Solo Ghost Battle
 
@@ -2051,7 +2114,8 @@ The window shows the TV image (F11 toggles fullscreen; display.ini, below,
 says how it starts). Keyboard, by default: W/A/S/D the D-pad up, left,
 down, right; face buttons by place, I top (the Wii U's X), J left (Y), K
 bottom (B), L right (A); H/`;` L/R, U/O ZL/ZR, Enter +, Backspace −, Home
-HOME, the arrows the left stick; SDL gamepads map by button position. Keys
+HOME, the arrows the left stick; SDL gamepads map by button position. The
+mouse is the GamePad's touch screen in CUSTOMIZE > PAINT only (above). Keys
 are SDL scancodes (USB HID usages: a key's place on the keyboard, whatever
 its layout prints on it), taken from `$XDG_CONFIG_HOME/ttt2/keyboard.ini`
 (`~/.config` when the variable is unset or not absolute) by
@@ -2216,8 +2280,9 @@ debugging:
 | `TTT2_CAPTURE=<dir>` | TV/GamePad images as PNG every `TTT2_CAPTURE_INTERVAL` seconds (default 5) |
 | `TTT2_CAPTURE_SEQUENCE=<n>` | with `TTT2_CAPTURE`, also every image shown for the next n frames after each capture, in order (`seq_<capture>_<frame>_<n>.png`, the real image last) |
 | `TTT2_TRACE_AT=<s>`, `TTT2_TRACE_FRAME=<n>` | log every command of one frame; with `TTT2_CAPTURE`, save all its render targets |
-| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run) |
+| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run). Items that last: `40:touch/400/300/600/320/1.5` touches the GamePad's screen at 400,300 of its 1280 x 720 picture and draws a line to 600,320 in 1.5 s; `40:mouse/0.5/0.5/0.6/0.5/1` moves the mouse with its left button held over the window (fractions of its size); `40:rstick/1/0/0.5` holds the right stick; `40:hold/zr/2` holds a button |
 | `TTT2_TRACE_INPUT=1` | log when each scripted press begins (seconds after start-up, as `TTT2_CAPTURE_START` counts) |
+| `TTT2_TRACE_PAINT=1` | CUSTOMIZE > PAINT's state and tool as they change, with times |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
 | `TTT2_TEST_CUSTOMIZE=<code>:<record>`, `TTT2_TEST_SAVE_SLOT=<slot>=<code>:<record>` | an added fighter's customization record worn without CUSTOMIZE mode, or stored into a saved slot (Added fighters, testing its wardrobe) |
