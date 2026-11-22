@@ -164,6 +164,13 @@ target_compile_features(outfit_menu_test PRIVATE cxx_std_20)
 target_compile_options(outfit_menu_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME outfit_menu_test COMMAND outfit_menu_test)
 
+# Which draws may be left out while their shader is made in the background (gpu/vulkan/leave_out.h).
+add_executable(leave_out_test leave_out_test.cpp)
+target_include_directories(leave_out_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(leave_out_test PRIVATE cxx_std_20)
+target_compile_options(leave_out_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME leave_out_test COMMAND leave_out_test)
+
 # Eliza's scoped native Tag Assault lifetime; no game assets required.
 add_executable(eliza_assist_test eliza_assist_test.cpp)
 target_include_directories(eliza_assist_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)

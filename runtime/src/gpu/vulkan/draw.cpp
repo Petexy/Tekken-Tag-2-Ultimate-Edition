@@ -887,9 +887,11 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     //    broken picture;
     //  - into targets the frame before drew into as well, so the next
     //    frames draw it again: a picture drawn once and kept (rendered to
-    //    a texture at a load) would stay without it.
-    // (A further case goes here: e.g. while the title reads rendered
-    // targets back.) Any other draw has what it needs made at once, on this
+    //    a texture at a load) would stay without it;
+    //  - into targets the title does not read: one written back to its
+    //    memory (targets.cpp) would hand it a picture without the draw.
+    // (gpu/vulkan/leave_out.h; its test names each case.)
+    // Any other draw has what it needs made at once, on this
     // thread, as without the setting. So has a draw that may be left out
     // once the frame has sent four new pipelines to the workers, or while
     // as many are in the making as two a worker: a new scene needs dozens
@@ -897,7 +899,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     // than its one late frame, which comes where the title changes scenes
     // anyway; what a fight brings up on the way (a hit's sparks, a move's
     // trail) comes in ones and twos.
-    bool redrawn = true, may_skip = false;
+    bool redrawn = true, may_skip = false, cpu_reads = false;
     const bool depth_tested = depth != nullptr && (depth_control & 2);
     if (async_shaders_ || trace_shaders_) {
         if (!replaying_) {
@@ -909,11 +911,13 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
                     t.drawn_frame = frame_number_;
                 }
                 redrawn = redrawn && t.redrawn;
+                cpu_reads = cpu_reads || t.write_back;
             };
             for (uint32_t i = 0; i < color_count; ++i) drawn(colors[i]);
             drawn(depth);
         }
-        may_skip = !stream_out && !replaying_ && depth_tested && redrawn;
+        may_skip = may_leave_out({.stream_out = stream_out, .replaying = replaying_, .depth_tested = depth_tested,
+                                  .redrawn = redrawn, .cpu_reads = cpu_reads});
     }
     compile_inline_ = !(async_shaders_ && may_skip && frame_late_pipelines_ < max_frame_late_pipelines_ &&
                         pipeline_jobs_.load() < max_late_pipelines_);

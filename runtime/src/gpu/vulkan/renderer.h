@@ -31,6 +31,7 @@
 #include "gpu/vulkan/context.h"
 #include "gpu/vulkan/formats.h"
 #include "gpu/vulkan/jobs.h"
+#include "gpu/vulkan/leave_out.h"
 #include "latte/program.h"
 #include "latte/shader_abi.h"
 #include "latte/translate.h"

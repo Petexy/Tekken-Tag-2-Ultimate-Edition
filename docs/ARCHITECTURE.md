@@ -477,12 +477,14 @@ attachment formats and blend state.
   that is not depth-tested (the passes that make or compose whole images:
   blur, glow, copies, the menus' and the HUD's layers); a draw into a
   target that the frame before did not draw into (a scene's first frame,
-  and pictures drawn once and kept, which would stay without it); and any
+  and pictures drawn once and kept, which would stay without it); a draw
+  into a target that is written back to the title's memory (the title
+  would read a picture without it); and any
   draw once its frame has sent four new pipelines to the workers, or
   while as many are in the making as two a worker (a new scene needs
   dozens at once, and shows its first frame late rather than mostly
-  empty). A rule of the same kind belongs there for a mode in which
-  the title reads rendered targets back. What is left for the workers is
+  empty). The rule is `may_leave_out` (`gpu/vulkan/leave_out.h`, with
+  its test). What is left for the workers is
   what comes up inside a scene; measured (a Practice fight from an empty
   cache, a 6-core desktop, also pinned to 4 cores) that was a few frames
   of 35 to 40 ms, while the long frames (a scene's first, 1.5 s; new
