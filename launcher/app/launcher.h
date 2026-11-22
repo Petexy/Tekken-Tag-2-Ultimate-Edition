@@ -363,6 +363,7 @@ private:
     GtkWidget* resolution_list_ = nullptr; // display::kResolutions, in that order
     GtkWidget* interpolation_switch_ = nullptr;
     GtkWidget* input_delay_switch_ = nullptr;
+    GtkWidget* async_shaders_switch_ = nullptr;
     GtkWidget* automatic_note_ = nullptr; // what Automatic draws at
     GtkWidget* refresh_note_ = nullptr;   // displays below 100 Hz: the game stays at 60 fps
     GtkWidget* display_error_ = nullptr;

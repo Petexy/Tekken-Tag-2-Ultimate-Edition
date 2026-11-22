@@ -80,11 +80,30 @@ Renderer::Renderer() {
                  static_cast<double>(scale_));
     compiler_ = shaderc_compiler_initialize();
     load_pipeline_cache();
+    trace_shaders_ = std::getenv("TTT2_TRACE_SHADERS") != nullptr;
+    async_shaders_ = host::display::active().async_shaders;
+    if (async_shaders_) {
+        // Few: the title's own threads and this one need the processor too.
+        unsigned workers = std::clamp((std::thread::hardware_concurrency() + 1) / 4, 1u, 4u);
+        if (const char* n = std::getenv("TTT2_SHADER_THREADS")) workers = std::clamp(std::atoi(n), 1, 16);
+        jobs_.start(workers);
+        max_late_pipelines_ = 2 * workers;
+        if (const char* n = std::getenv("TTT2_LATE_PIPELINES")) max_frame_late_pipelines_ = static_cast<uint32_t>(std::atoi(n));
+        std::fprintf(stderr, "ttt2: GPU: shaders compile in the background (%u threads%s)\n", workers,
+                     ctx_.pipeline_cache_control ? "" : "; the device cannot ask the pipeline cache what it has");
+    }
     surface_ = host::create_vulkan_surface(ctx_.instance);
     init_interpolation();
     start_presenter();
     window_start_ = now_seconds();
     thread_cpu_report(); // (the `ttt2: cpu:` line covers the same time as the statistics)
+}
+
+// (The game ends with the process: this is for a renderer that is taken
+// down before that. The workers stop before anything they use goes.)
+Renderer::~Renderer() {
+    jobs_.stop();
+    save_pipeline_cache();
 }
 
 // ------------------------------------------------------------- commands
@@ -532,6 +551,8 @@ void Renderer::swap() {
     if (trace_at >= 0 && trace_frame_ == UINT64_MAX && now_seconds() - started >= trace_at) {
         trace_frame_ = frame_number_ + 1;
     }
+    if (trace_shaders_) trace_shader_frame();
+    frame_late_pipelines_ = 0;
     update_shadows();
     evict_unused();
     look_vertices_.clear();

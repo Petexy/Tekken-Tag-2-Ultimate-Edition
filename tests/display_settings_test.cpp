@@ -48,14 +48,16 @@ std::string joined(const std::vector<std::string>& lines) {
 std::string text_of(const display::Settings& s) {
     return std::string(s.fullscreen ? "fullscreen" : "windowed") + ", " + std::string(display::name_of(s.resolution)) +
            (s.interpolation ? ", interpolation" : ", no interpolation") +
-           (s.input_delay ? ", input delay" : ", no input delay");
+           (s.input_delay ? ", input delay" : ", no input delay") +
+           (s.async_shaders ? ", shaders in the background" : "");
 }
 
 std::string text_of(const display::Active& a) {
-    char text[96];
-    std::snprintf(text, sizeof(text), "%s, scale %g, %u fps, input delay %s", a.fullscreen ? "fullscreen" : "windowed",
+    char text[128];
+    std::snprintf(text, sizeof(text), "%s, scale %g, %u fps, input delay %s%s", a.fullscreen ? "fullscreen" : "windowed",
                   static_cast<double>(a.scale), static_cast<unsigned>(a.fps),
-                  a.input_delay ? std::to_string(*a.input_delay).c_str() : "the game's");
+                  a.input_delay ? std::to_string(*a.input_delay).c_str() : "the game's",
+                  a.async_shaders ? ", shaders in the background" : "");
     return text;
 }
 
@@ -181,10 +183,11 @@ void test_parse_good() {
                                                   "\n"
                                                   "resolution=1920x1080   # comment\n"
                                                   "\tinterpolation\t=\tno\t\n"
-                                                  "input_delay = yes\n");
+                                                  "input_delay = yes\n"
+                                                  "async_shaders = yes\n");
     check(parsed.warnings.empty(), "good file: no warnings");
-    check(parsed.given == 4, "good file: 4 given");
-    check(parsed.settings == display::Settings{true, Resolution::k1080, false, true},
+    check(parsed.given == 5, "good file: 5 given");
+    check(parsed.settings == display::Settings{true, Resolution::k1080, false, true, true},
           "good file: " + text_of(parsed.settings));
 
     // Every value, in either case.
@@ -210,6 +213,10 @@ void test_parse_good() {
         check(delay.warnings.empty() && delay.given == 1 && delay.settings.input_delay == v.on &&
                   !delay.settings.fullscreen && delay.settings.interpolation,
               std::string("input_delay = ") + v.value);
+        const display::Parsed shaders = display::parse(std::string("async_shaders = ") + v.value + "\n");
+        check(shaders.warnings.empty() && shaders.given == 1 && shaders.settings.async_shaders == v.on &&
+                  !shaders.settings.fullscreen && shaders.settings.interpolation && !shaders.settings.input_delay,
+              std::string("async_shaders = ") + v.value);
     }
     for (const Resolution r : display::kResolutions) {
         std::string name(display::name_of(r));
@@ -334,8 +341,9 @@ void test_format() {
         start = end == std::string::npos ? text.size() : end + 1;
     }
     check(!text.empty() && text.back() == '\n', "the text ends with a newline");
-    check(lines.size() == 6, "a header of two lines and four settings: " + std::to_string(lines.size()) + " lines");
-    if (lines.size() == 6) {
+    check(lines.size() == 7, "a header of two lines and five settings: " + std::to_string(lines.size()) + " lines");
+    check(!display::Settings{}.async_shaders, "shaders compile as they are needed unless the player chooses otherwise");
+    if (lines.size() == 7) {
         check(lines[0].starts_with("# ") && lines[1].starts_with("# "), "the header is a comment");
         check(text.find("Tekken Tag Tournament 2") != std::string::npos && text.find("ttt2") == std::string::npos,
               "the header names the game as players know it");
@@ -343,6 +351,7 @@ void test_format() {
         check(lines[3].starts_with("resolution = auto  # "), "resolution line: " + lines[3]);
         check(lines[4].starts_with("interpolation = yes  # "), "interpolation line: " + lines[4]);
         check(lines[5].starts_with("input_delay = no  # "), "input delay line: " + lines[5]);
+        check(lines[6].starts_with("async_shaders = no  # "), "shaders line: " + lines[6]);
     }
 
     // Everything the launcher can write is read back as it was meant.
@@ -352,7 +361,7 @@ void test_format() {
                 for (const bool input_delay : {false, true}) {
                     const display::Settings settings{fullscreen, resolution, interpolation, input_delay};
                     const display::Parsed parsed = display::parse(display::format(settings));
-                    check(parsed.settings == settings && parsed.given == 4 && parsed.warnings.empty(),
+                    check(parsed.settings == settings && parsed.given == 5 && parsed.warnings.empty(),
                           "round trip of " + text_of(settings));
                 }
             }
@@ -384,7 +393,7 @@ void test_path(const fs::path& scratch) {
 void test_load(const fs::path& scratch) {
     const fs::path file = scratch / "display.ini";
     const std::string name = file.string();
-    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no";
+    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no, shaders in the background no";
     fs::remove(file);
     const display::Loaded missing = display::load(file);
     check(missing.settings == display::Settings{} && missing.error.empty(), "missing file: defaults, no error");
@@ -404,15 +413,15 @@ void test_load(const fs::path& scratch) {
           "file: " + text_of(loaded.settings));
     const std::vector<std::string> log{
         "display: " + name + ":2: unknown setting \"vsync\", line ignored",
-        "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no (from " + name + ")"};
+        "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no, shaders in the background no (from " + name + ")"};
     check(loaded.log == log, "file: log " + joined(loaded.log));
 
-    const display::Settings written{true, Resolution::k1080, false, true};
+    const display::Settings written{true, Resolution::k1080, false, true, true};
     write(file, display::format(written));
     const display::Loaded launcher = display::load(file);
     check(launcher.settings == written && launcher.error.empty() &&
               launcher.log == std::vector<std::string>{"display: fullscreen yes, resolution 1920x1080, "
-                                                       "interpolation no, input delay yes (from " + name + ")"},
+                                                       "interpolation no, input delay yes, shaders in the background yes (from " + name + ")"},
           "the launcher's file: " + joined(launcher.log));
 
     const fs::path link = scratch / "link.ini";
@@ -485,9 +494,9 @@ void test_resolve() {
     const display::Settings chosen{true, Resolution::k1080, false};
     std::vector<std::string> log;
     const auto resolved = [&](const display::Settings& s, const char* fullscreen, const char* scale, const char* fps,
-                              const char* input_delay = nullptr) {
+                              const char* input_delay = nullptr, const char* async_shaders = nullptr) {
         log.clear();
-        return display::resolve(s, fullscreen, scale, fps, input_delay, log);
+        return display::resolve(s, fullscreen, scale, fps, input_delay, async_shaders, log);
     };
 
     // The file's settings when the environment says nothing.
@@ -582,14 +591,33 @@ void test_resolve() {
                                             text_of(active));
     }
 
-    // All four, in that order in the log, after what it had.
+    // TTT2_ASYNC_SHADERS: 1 or 0, over async_shaders either way.
+    display::Settings background;
+    background.async_shaders = true;
+    active = resolved(background, nullptr, nullptr, nullptr);
+    check(active.async_shaders && log.empty(), "async_shaders = yes: " + text_of(active));
+    active = resolved(background, nullptr, nullptr, nullptr, nullptr, "0");
+    check(!active.async_shaders &&
+              log == std::vector<std::string>{"display: TTT2_ASYNC_SHADERS=0: shaders compile as they are needed"},
+          "TTT2_ASYNC_SHADERS=0 over async_shaders = yes: " + text_of(active) + ", " + joined(log));
+    active = resolved(windowed, nullptr, nullptr, nullptr, nullptr, "1");
+    check(active.async_shaders &&
+              log == std::vector<std::string>{"display: TTT2_ASYNC_SHADERS=1: shaders compile in the background"},
+          "TTT2_ASYNC_SHADERS=1 over async_shaders = no: " + text_of(active) + ", " + joined(log));
+    active = resolved(background, nullptr, nullptr, nullptr, nullptr, "yes");
+    check(active.async_shaders &&
+              log == std::vector<std::string>{"display: TTT2_ASYNC_SHADERS=yes is not 1 or 0, ignored"},
+          "TTT2_ASYNC_SHADERS=yes: " + text_of(active) + ", " + joined(log));
+
+    // All five, in that order in the log, after what it had.
     log = {"display: earlier"};
-    active = display::resolve({false, Resolution::k720, false, false}, "1", "3", "240", "1", log);
-    check(active == display::Active{true, 3.0f, 240, 1}, "all four: " + text_of(active));
+    active = display::resolve({false, Resolution::k720, false, false}, "1", "3", "240", "1", "1", log);
+    check(active == display::Active{true, 3.0f, 240, 1, true}, "all five: " + text_of(active));
     check(log == std::vector<std::string>{"display: earlier", "display: TTT2_FULLSCREEN=1: fullscreen",
                                           "display: TTT2_SCALE=3: 3840x2160", "display: TTT2_FPS=240",
-                                          "display: TTT2_INPUT_DELAY=1"},
-          "all four: log " + joined(log));
+                                          "display: TTT2_INPUT_DELAY=1",
+                                          "display: TTT2_ASYNC_SHADERS=1: shaders compile in the background"},
+          "all five: log " + joined(log));
     active = resolved({true, Resolution::k1080, true}, "0", "8", "fast", "slow");
     check(active == display::Active{false, 1.5f, 0} && log.size() == 4, "all four, three of them bad: " +
                                                                            text_of(active) + ", " + joined(log));

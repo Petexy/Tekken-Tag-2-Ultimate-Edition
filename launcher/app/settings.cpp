@@ -349,11 +349,18 @@ void Launcher::build_display() {
                 "Input Delay works either way.",
                 input_delay_switch_, "input-delay");
 
+    async_shaders_switch_ = gtk_switch_new();
+    setting_row(list, "Shaders in the background",
+                "The first time something is shown, it may appear a few frames late instead of the game stopping "
+                "for a moment while its shader is made.",
+                async_shaders_switch_, "async-shaders");
+
     const auto changed = +[](GObject*, GParamSpec*, gpointer data) { static_cast<Launcher*>(data)->display_changed(); };
     g_signal_connect(fullscreen_switch_, "notify::active", G_CALLBACK(changed), this);
     g_signal_connect(resolution_list_, "notify::selected", G_CALLBACK(changed), this);
     g_signal_connect(interpolation_switch_, "notify::active", G_CALLBACK(changed), this);
     g_signal_connect(input_delay_switch_, "notify::active", G_CALLBACK(changed), this);
+    g_signal_connect(async_shaders_switch_, "notify::active", G_CALLBACK(changed), this);
     gtk_box_append(GTK_BOX(card), list);
     gtk_box_append(GTK_BOX(settings_content_), card);
     show_display();
@@ -396,6 +403,7 @@ void Launcher::show_display() {
     gtk_drop_down_set_selected(GTK_DROP_DOWN(resolution_list_), resolution_index(display_.resolution));
     gtk_switch_set_active(GTK_SWITCH(interpolation_switch_), display_.interpolation);
     gtk_switch_set_active(GTK_SWITCH(input_delay_switch_), display_.input_delay);
+    gtk_switch_set_active(GTK_SWITCH(async_shaders_switch_), display_.async_shaders);
     showing_display_ = false;
 }
 
@@ -442,6 +450,7 @@ void Launcher::display_changed() {
     if (selected < std::size(display::kResolutions)) settings.resolution = display::kResolutions[selected];
     settings.interpolation = gtk_switch_get_active(GTK_SWITCH(interpolation_switch_));
     settings.input_delay = gtk_switch_get_active(GTK_SWITCH(input_delay_switch_));
+    settings.async_shaders = gtk_switch_get_active(GTK_SWITCH(async_shaders_switch_));
     // Nothing to save while the controls are set from display_, nor when
     // they show it: a control put back from inside its own handler (below)
     // notifies again once the handler returns (notify does not recurse), when

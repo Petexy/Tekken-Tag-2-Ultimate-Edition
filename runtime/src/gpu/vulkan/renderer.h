@@ -30,6 +30,7 @@
 #include "gpu/overlay.h"
 #include "gpu/vulkan/context.h"
 #include "gpu/vulkan/formats.h"
+#include "gpu/vulkan/jobs.h"
 #include "latte/program.h"
 #include "latte/shader_abi.h"
 #include "latte/translate.h"
@@ -102,6 +103,12 @@ struct Target {
     // Its last use (rendered into, copied, found for a texture): the title
     // frame and the submission recording it (Renderer::evict_unused).
     uint64_t used_frame = 0, used_value = 0;
+    // The last title frame a draw rendered into it, and whether the frame
+    // before that one did too: what is drawn anew every frame heals by
+    // itself after a draw was left out (Renderer::draw, shaders compiled
+    // in the background).
+    uint64_t drawn_frame = UINT64_MAX - 1;
+    bool redrawn = false;
 };
 
 struct Texture {
@@ -127,9 +134,15 @@ struct Texture {
     uint64_t used_frame = 0, used_value = 0; // last bound: the title frame, the submission recording it
 };
 
+// With shaders compiled in the background, `job` is what is still making
+// the module (or the pipeline): the gpu thread drops it once it has seen
+// the job done, and only then reads the handle. No job and no handle:
+// it failed.
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
     latte::TranslatedShader info;
+    bool cached = false; // its SPIR-V came from the disk cache
+    mutable JobPool::Ref job;
 };
 
 struct Pipeline {
@@ -137,11 +150,13 @@ struct Pipeline {
     VkPipelineLayout layout = VK_NULL_HANDLE;
     const ShaderModule* vs = nullptr;
     const ShaderModule* ps = nullptr;
+    mutable JobPool::Ref job;
 };
 
 class Renderer final : public Backend {
 public:
     Renderer();
+    ~Renderer() override;
     const char* name() const override { return "Vulkan"; }
     void draw(const Registers& regs, const Draw& draw) override;
     void clear_color(const Registers& regs, const gx2::ColorBuffer& buffer, const float rgba[4]) override;
@@ -398,6 +413,7 @@ public: // record types, shared with interpolate.cpp's helpers
         uint32_t first_index = 0, last_index = 0;
         uint32_t look = 0;      // a fighter's look (draw.cpp's fighter_look), for replays
         uint8_t look_kind = 0;
+        bool skipped = false;   // left out while its shaders compiled: replays leave it out too
     };
     // A frame's draws and the constant data they read, copied into
     // GPU-visible memory: the frame's own draws read it there too, so a
@@ -673,7 +689,34 @@ private:
     std::unordered_map<uint64_t, VkPipelineLayout> layouts_;
     std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> pipelines_;
     VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
-    uint32_t new_pipelines_ = 0;
+    std::atomic<uint32_t> new_pipelines_{0}; // (workers count too)
+
+    // Shaders compiled in the background (display.ini's async_shaders):
+    // the compiler and the driver's pipeline compile run on workers, and
+    // a draw whose pipeline is not ready yet is left out, unless leaving
+    // it out could do more than delay a part of the picture (draw.cpp).
+    bool async_shaders_ = false;
+    JobPool jobs_;
+    std::atomic<uint32_t> pipeline_jobs_{0}; // pipelines being made on workers
+    uint32_t max_late_pipelines_ = 0;        // new ones go to the workers only while there are fewer
+    uint32_t frame_late_pipelines_ = 0, max_frame_late_pipelines_ = 4; // and so many a title frame
+    // This draw's shaders and pipeline are made on the gpu thread, at once
+    // (always without the setting; with it, see draw()).
+    bool compile_inline_ = true;
+    // TTT2_TRACE_SHADERS=1: what first uses cost. This frame's, on the
+    // gpu thread (ms), and the totals; the workers' own time apart.
+    struct ShaderCosts {
+        uint32_t translated = 0, loaded = 0, compiled = 0, pipelines = 0, hits = 0, queued = 0, waits = 0, skipped = 0;
+        double translate_ms = 0, load_ms = 0, compile_ms = 0, pipeline_ms = 0, hit_ms = 0, wait_ms = 0;
+        void add(const ShaderCosts& o);
+        bool any() const { return translated || pipelines || hits || queued || waits || skipped; }
+    };
+    bool trace_shaders_ = false;
+    ShaderCosts frame_costs_, total_costs_;
+    double trace_last_swap_ = 0, longest_frame_ = 0;
+    uint64_t long_frames_[4] = {}, long_compile_frames_[4] = {}; // over 25, 33.4, 50, 100 ms; those with first-use work in them
+    std::atomic<uint64_t> worker_shaders_{0}, worker_pipelines_{0}, worker_shader_us_{0}, worker_pipeline_us_{0};
+    void trace_shader_frame();
 
     // Scan-out: the last frame copied to each scan buffer (TV, DRC).
     Image scan_[2];

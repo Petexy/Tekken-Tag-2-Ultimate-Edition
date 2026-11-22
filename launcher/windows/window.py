@@ -1131,7 +1131,8 @@ class Window:
         rows.configure(padding=px(4))
         rows.pack(fill='x')
         self.display_vars = {key: tk.BooleanVar(value=default) for key, default in
-                             (('fullscreen', True), ('interpolation', True), ('input_delay', False))}
+                             (('fullscreen', True), ('interpolation', True), ('input_delay', False),
+                              ('async_shaders', False))}
         self.resolution = tk.StringVar(value=RESOLUTIONS[0][1])
         def row(title, text, control, first=False):
             if not first: tk.Frame(rows, bg=look.ROW_LINE, height=1).pack(fill='x')
@@ -1153,6 +1154,9 @@ class Window:
             'and more.', switch('interpolation'))
         row('Input delay', 'Two frames between a button press and the game acting on it, as on the Wii U. Practice\'s '
             'own Input Delay works either way.', switch('input_delay'))
+        row('Shaders in the background', 'The first time something is shown, it may appear a few frames late instead '
+            'of the game stopping for a moment while its shader is made.',
+            switch('async_shaders'))
         row('Performance', '1280 × 720 without 120 fps: for a slower graphics card.',
             lambda parent: L.button(parent, 'Use', self.performance_preset))
         self.display_note = L.label(card, '', 'small', wrap=True)
