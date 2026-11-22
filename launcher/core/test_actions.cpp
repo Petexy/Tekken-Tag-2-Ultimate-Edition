@@ -84,7 +84,7 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
                 from = plus + 1;
             }
         } else if (a.name == "fullscreen" || a.name == "interpolation" || a.name == "input-delay" ||
-                   a.name == "async-shaders") {
+                   a.name == "async-shaders" || a.name == "precompile-shaders") {
             a.args = {rest};
             ok = rest == "yes" || rest == "no";
         } else if (a.name == "resolution") {

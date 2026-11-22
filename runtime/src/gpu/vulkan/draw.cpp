@@ -22,6 +22,8 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <type_traits>
 
 namespace cafe::gpu::vk {
@@ -273,6 +275,81 @@ void write_pipeline_cache(VkDevice device, VkPipelineCache cache) {
     std::filesystem::rename(path.string() + ".tmp", path, ec);
 }
 
+// The pipelines the game has needed on this computer, one a line in the
+// cache directory's pipelines.list: what it takes to make each again
+// without the game running (its shaders by the names of their SPIR-V in
+// the cache, the layout's bindings, the state it bakes in), so that
+// precompile_shaders() can make them all ahead. After a graphics driver
+// update the SPIR-V is still good and the driver's part is not: the list
+// is what brings that back before a fight needs it.
+constexpr size_t kListNumbers = 28;
+constexpr const char* kListTag = "p1";
+
+std::string list_line(const PipelineKey& k) {
+    std::string line = kListTag;
+    const auto put = [&](uint64_t v) {
+        char text[20];
+        std::snprintf(text, sizeof(text), " %llx", static_cast<unsigned long long>(v));
+        line += text;
+    };
+    put(k.vs->glsl_hash);
+    put(k.ps->glsl_hash);
+    put(k.vs->info.texture_mask);
+    put(k.ps->info.texture_mask);
+    put(k.vs->info.uses_registers);
+    put(k.ps->info.uses_registers);
+    put(k.color_count);
+    put(k.depth);
+    for (const VkFormat f : k.colors) put(f);
+    for (const uint32_t b : k.blend) put(b);
+    put(k.write_mask);
+    put(k.polygon_mode);
+    put(k.topology_class);
+    put(k.depth_clamp);
+    return line;
+}
+
+bool parse_list_line(const std::string& line, uint64_t numbers[kListNumbers]) {
+    const char* p = line.c_str();
+    if (line.compare(0, 3, std::string(kListTag) + " ") != 0) return false;
+    p += 2;
+    for (size_t i = 0; i < kListNumbers; ++i) {
+        char* end = nullptr;
+        numbers[i] = std::strtoull(p, &end, 16);
+        if (end == p) return false;
+        p = end;
+    }
+    while (*p == ' ' || *p == '\r') ++p;
+    return *p == '\0';
+}
+
+std::vector<std::string> read_pipeline_list() {
+    std::vector<std::string> lines;
+    if (cache_directory().empty()) return lines;
+    std::ifstream in(cache_directory() / "pipelines.list");
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty()) lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+// (The gpu thread's: a pipeline not in the list yet is added to it.)
+void note_pipeline(const PipelineKey& k) {
+    static std::unordered_set<std::string> seen = [] {
+        const std::vector<std::string> lines = read_pipeline_list();
+        return std::unordered_set<std::string>(lines.begin(), lines.end());
+    }();
+    if (cache_directory().empty() || k.vs->glsl_hash == 0 || k.ps->glsl_hash == 0) return;
+    std::string line = list_line(k);
+    if (!seen.insert(line).second) return;
+    line += '\n';
+    // (One write of a whole line, at once: the game ends without notice.)
+    if (std::FILE* f = std::fopen((cache_directory() / "pipelines.list").string().c_str(), "ab")) {
+        std::fwrite(line.data(), 1, line.size(), f);
+        std::fclose(f);
+    }
+}
+
 // `flags`: VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT asks
 // for the pipeline only if the cache has it (VK_PIPELINE_COMPILE_REQUIRED
 // otherwise, at once).
@@ -454,6 +531,7 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     }
     auto module = std::make_unique<ShaderModule>();
     module->info = std::move(info);
+    module->glsl_hash = glsl_hash;
     ShaderModule* const m = module.get();
     const bool vertex = stage == Stage::kVertex;
     const double start = trace_shaders_ ? now_ms() : 0;
@@ -544,6 +622,7 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
     entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
                                     ps->info.uses_registers);
     Pipeline* const p = entry.get();
+    note_pipeline(k);
     const double start = trace_shaders_ ? now_ms() : 0;
     if (compile_inline_) {
         // (Shaders an earlier draw left to the workers: needed now.)
@@ -1511,6 +1590,141 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         note_target_written(depth);
     }
 }
+
+} // namespace cafe::gpu::vk
+
+// `ttt2 --precompile`: every pipeline of the cache directory's list made
+// into the pipeline cache, on all processors but one, with no window and
+// no game: what the game then asks for is there already. On standard
+// output, the launchers' task lines (`@step`, `@progress done total`,
+// `@done`) and a summary.
+int cafe::gpu::precompile_shaders() {
+    using namespace vk;
+    const double begin = now_ms();
+    if (cache_directory().empty()) {
+        std::printf("@error There is no cache folder to keep shaders in\n");
+        return 1;
+    }
+    const std::vector<std::string> lines = read_pipeline_list();
+    if (lines.empty()) {
+        std::printf("Nothing to prepare yet: the game notes the shaders it uses as it is played on this computer.\n@done\n");
+        return 0;
+    }
+    std::printf("@step shaders Preparing shaders\n");
+    std::fflush(stdout);
+    Context ctx;
+    {
+        // (No window: the surface extension only because the device's
+        // swapchain extension, which the renderer's device has, wants it.)
+        uint32_t count = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available(count);
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+        std::vector<const char*> extensions;
+        for (const VkExtensionProperties& e : available) {
+            if (std::strcmp(e.extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0) extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+        }
+        ctx.init(extensions);
+    }
+    const VkPipelineCache cache = open_pipeline_cache(ctx.device);
+
+    struct Work {
+        PipelineKey key;
+        VkPipelineLayout layout;
+    };
+    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> modules; // by SPIR-V name; no handle: not in the cache
+    std::unordered_map<uint64_t, VkPipelineLayout> layouts;
+    std::vector<Work> work;
+    size_t unusable = 0, without_shaders = 0;
+    const auto module = [&](uint64_t hash) -> const ShaderModule* {
+        auto& m = modules[hash];
+        if (!m) {
+            m = std::make_unique<ShaderModule>();
+            if (const std::vector<uint32_t> spirv = load_cached_spirv(hash); !spirv.empty()) {
+                m->module = create_module(ctx.device, spirv);
+            }
+        }
+        return m->module != VK_NULL_HANDLE ? m.get() : nullptr;
+    };
+    std::unordered_set<std::string> seen;
+    for (const std::string& line : lines) {
+        uint64_t n[kListNumbers];
+        if (!parse_list_line(line, n) || n[6] > 8 || !seen.insert(line).second) {
+            ++unusable;
+            continue;
+        }
+        Work w;
+        std::memset(&w.key, 0, sizeof(w.key));
+        w.key.vs = module(n[0]);
+        w.key.ps = module(n[1]);
+        if (w.key.vs == nullptr || w.key.ps == nullptr) {
+            ++without_shaders;
+            continue;
+        }
+        const uint64_t layout_key = (n[2] & 0x3FFFF) | ((n[3] & 0x3FFFF) << 18) | ((n[4] & 1) << 36) | ((n[5] & 1) << 37);
+        auto [it, fresh] = layouts.try_emplace(layout_key, VK_NULL_HANDLE);
+        if (fresh) {
+            it->second = create_layout(ctx, static_cast<uint32_t>(n[2] & 0x3FFFF), static_cast<uint32_t>(n[3] & 0x3FFFF),
+                                       n[4] & 1, n[5] & 1);
+        }
+        w.layout = it->second;
+        w.key.color_count = static_cast<uint32_t>(n[6]);
+        w.key.depth = static_cast<VkFormat>(n[7]);
+        for (size_t i = 0; i < 8; ++i) {
+            w.key.colors[i] = static_cast<VkFormat>(n[8 + i]);
+            w.key.blend[i] = static_cast<uint32_t>(n[16 + i]);
+        }
+        w.key.write_mask = static_cast<uint32_t>(n[24]);
+        w.key.polygon_mode = static_cast<uint32_t>(n[25]);
+        w.key.topology_class = static_cast<uint32_t>(n[26]);
+        w.key.depth_clamp = static_cast<uint32_t>(n[27]);
+        work.push_back(w);
+    }
+
+    std::atomic<size_t> next{0}, done{0}, there{0}, made{0}, failed{0};
+    const auto worker = [&] {
+        for (size_t i = next++; i < work.size(); i = next++) {
+            const Work& w = work[i];
+            VkPipeline pipeline = VK_NULL_HANDLE;
+            VkResult r = VK_PIPELINE_COMPILE_REQUIRED;
+            if (ctx.pipeline_cache_control) {
+                r = create_pipeline(ctx.device, cache, w.key, w.layout, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT,
+                                    &pipeline);
+                if (r == VK_SUCCESS) ++there;
+            }
+            if (r == VK_PIPELINE_COMPILE_REQUIRED) {
+                r = create_pipeline(ctx.device, cache, w.key, w.layout, 0, &pipeline);
+                if (r == VK_SUCCESS) ++made;
+            }
+            if (r != VK_SUCCESS) ++failed;
+            else vkDestroyPipeline(ctx.device, pipeline, nullptr);
+            ++done;
+        }
+    };
+    unsigned count = std::max(std::thread::hardware_concurrency(), 2u) - 1;
+    if (const char* n = std::getenv("TTT2_SHADER_THREADS")) count = static_cast<unsigned>(std::clamp(std::atoi(n), 1, 64));
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < count; ++i) threads.emplace_back(worker);
+    for (size_t shown = SIZE_MAX; done < work.size();) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (const size_t now = done; now != shown) {
+            std::printf("@progress %zu %zu\n", now, work.size());
+            std::fflush(stdout);
+            shown = now;
+        }
+    }
+    for (std::thread& t : threads) t.join();
+    if (made != 0) write_pipeline_cache(ctx.device, cache);
+    std::printf("@progress %zu %zu\n", work.size(), work.size());
+    std::printf("Prepared in %.1f s on %u threads: %zu pipelines of %zu shaders (%zu made now, %zu were there%s); "
+                "left out: %zu whose shaders are not in the cache, %zu lines not understood, %zu the driver refused\n@done\n",
+                (now_ms() - begin) / 1000.0, count, work.size(), modules.size(), made.load(), there.load(),
+                ctx.pipeline_cache_control ? "" : ": the device cannot tell", without_shaders, unusable, failed.load());
+    std::fflush(stdout);
+    return 0;
+}
+
+namespace cafe::gpu::vk {
 
 void Renderer::ShaderCosts::add(const ShaderCosts& o) {
     translated += o.translated, loaded += o.loaded, compiled += o.compiled, pipelines += o.pipelines, hits += o.hits;

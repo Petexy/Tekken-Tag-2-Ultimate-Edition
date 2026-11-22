@@ -602,6 +602,8 @@ void Launcher::run_next_test() {
         else start_uninstall({.saves = a.args[0] == "all", .characters = a.args[0] == "all"});
     } else if (a.name == "play") {
         play();
+        // (Shaders are prepared first: that task's end reports, and starts the game.)
+        if (task_ && task_->kind == Kind::kShaders) return;
         if (!game_process_) {
             test_done(false, game_error_);
             return;
@@ -698,7 +700,7 @@ void Launcher::run_next_test() {
         restore_keys();
         test_done(keymap_.is_default(), keymap_.is_default() ? "the default keys" : "not restored");
     } else if (a.name == "fullscreen" || a.name == "resolution" || a.name == "interpolation" ||
-               a.name == "input-delay" || a.name == "async-shaders") {
+               a.name == "input-delay" || a.name == "async-shaders" || a.name == "precompile-shaders") {
         // The control set as a click sets it (its handler saves display.ini),
         // then the file read back as the game reads it.
         if (!in_settings()) {
@@ -718,6 +720,9 @@ void Launcher::run_next_test() {
         } else if (a.name == "async-shaders") {
             wanted.async_shaders = a.args[0] == "yes";
             gtk_switch_set_active(GTK_SWITCH(async_shaders_switch_), wanted.async_shaders);
+        } else if (a.name == "precompile-shaders") {
+            wanted.precompile_shaders = a.args[0] == "yes";
+            gtk_switch_set_active(GTK_SWITCH(precompile_switch_), wanted.precompile_shaders);
         } else {
             wanted.resolution = display::resolution_named(a.args[0]).value_or(display::Resolution::kAuto);
             const auto& all = display::kResolutions;
@@ -729,7 +734,8 @@ void Launcher::run_next_test() {
         std::string text = std::string("display.ini: fullscreen ") + (s.fullscreen ? "yes" : "no") + ", resolution " +
                            std::string(display::name_of(s.resolution)) + ", interpolation " +
                            (s.interpolation ? "yes" : "no") + ", input delay " + (s.input_delay ? "yes" : "no") +
-                           ", shaders in the background " + (s.async_shaders ? "yes" : "no");
+                           ", shaders in the background " + (s.async_shaders ? "yes" : "no") +
+                           ", shaders prepared " + (s.precompile_shaders ? "yes" : "no");
         if (!loaded.error.empty()) text = loaded.error;
         if (gtk_widget_get_visible(display_error_)) text = gtk_label_get_text(GTK_LABEL(display_error_));
         test_done(loaded.error.empty() && s == wanted && display_ == wanted, text);

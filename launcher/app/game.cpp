@@ -571,6 +571,21 @@ void Launcher::play() {
     // (Two would share the saves and the shader cache.)
     if (game_running()) return refuse("The game is running", "Only one can run at a time.");
     if (const std::string older = older_game(); !older.empty()) return refuse("Update the game first", older);
+    // Settings' "Prepare shaders before playing": the game program first
+    // makes the shaders it has used on this PC, then the game starts (from
+    // the task's end, task.cpp).
+    if (display_.precompile_shaders && !task_) {
+        game_error_.clear();
+        if (start_task(Kind::kShaders, "Preparing shaders", {(install_.folder / kProgramName).string(), "--precompile"},
+                       {}, nullptr)) {
+            return;
+        }
+    }
+    launch_game();
+}
+
+void Launcher::launch_game() {
+    if (game_running()) return;
     const fs::path program = install_.folder / kProgramName;
     game_error_.clear();
     // Its output goes into a log of this run (none left of the last one

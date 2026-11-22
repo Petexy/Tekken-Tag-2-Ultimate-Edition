@@ -17,6 +17,10 @@
 //                                seen for the first time may appear a few
 //                                frames late, in place of the game stopping
 //                                for a moment; no
+//   precompile_shaders = yes | no  the launcher, before it starts the game,
+//                                makes ready the shaders the game has used on
+//                                this computer (`ttt2 --precompile`); no.
+//                                The game itself does not use it.
 //
 // The environment's TTT2_FULLSCREEN, TTT2_SCALE, TTT2_FPS, TTT2_INPUT_DELAY
 // and TTT2_ASYNC_SHADERS still win.
@@ -44,6 +48,7 @@ struct Settings {
     bool interpolation = true;
     bool input_delay = false;
     bool async_shaders = false;
+    bool precompile_shaders = false; // (the launcher's: it runs `ttt2 --precompile` before the game)
     bool operator==(const Settings&) const = default;
 };
 

@@ -500,12 +500,14 @@ The launcher's **Settings** also choose how the game starts: fullscreen or
 in a window, the resolution it draws at (Automatic, the default, is enough
 to cover your main display), whether it shows 120 frames per second on
 displays of 100 Hz and more (on by default) and whether fighters wait the
-Wii U game's two frames before acting on a button (off by default).
-"Shaders in the background" is about the short stops the first time
-something is shown, while its shader is made for your graphics card (once
-per PC, and again after a graphics driver update): with it the game goes
-on meanwhile, so the new thing may appear a few frames late instead (off
-by default). They
+Wii U game's two frames before acting on a button (off by default). Two
+more are about the short stops the first time something is shown, while
+its shader is made for your graphics card (once per PC, and again after a
+graphics driver update): "Shaders in the background" lets the game go on
+meanwhile, so the new thing may appear a few frames late instead, and
+"Prepare shaders before playing" makes Play first prepare every shader the
+game has already used on this PC (it cannot know the ones it has never
+shown). Both are off by default. They
 are kept in `~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which
 can be edited by hand too:
 
@@ -515,6 +517,7 @@ resolution = auto           # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or
 interpolation = yes         # yes or no (no: 60 frames per second)
 input_delay = no            # yes: two frames between a button press and the game acting on it, as on the Wii U
 async_shaders = no          # yes: shaders compile in the background; new things may appear a few frames late
+precompile_shaders = no     # yes: the launcher prepares the shaders seen on this PC before the game starts
 ```
 
 The game reads it when it starts, so a change applies the next time. The

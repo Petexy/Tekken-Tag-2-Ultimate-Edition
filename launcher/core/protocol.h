@@ -29,7 +29,7 @@ Line parse_line(std::string_view line);
 // are its text, and its progress in bytes ("1.2 of 2.6 MB").
 class Progress {
 public:
-    enum class Kind { kBuild, kImport, kDownload };
+    enum class Kind { kBuild, kImport, kDownload, kCount }; // (kCount: a step's text and "412 of 1,203")
     explicit Progress(Kind kind) : kind_(kind) {}
 
     // Fighters' names as the user sees them ("kazumi" -> "Kazumi Mishima").

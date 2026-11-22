@@ -100,6 +100,10 @@ std::unique_ptr<Backend> make_null_backend();
 // The Vulkan renderer, presenting in the window (host/window.h).
 std::unique_ptr<Backend> make_vulkan_backend();
 
+// `ttt2 --precompile` (vulkan/draw.cpp): makes every pipeline the game
+// has needed on this computer, ahead of the game. The process's result.
+int precompile_shaders();
+
 // TTT2_DUMP_SHADERS support (shader_dump.cpp): records the shaders of a draw.
 void dump_shaders(const Registers& regs);
 

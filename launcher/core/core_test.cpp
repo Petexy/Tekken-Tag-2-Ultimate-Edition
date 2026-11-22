@@ -629,7 +629,7 @@ void test_actions() {
                             "bind:zl:64+", "bind:zl:+64", "bind:zl:64++23", "bind:zl:64+x", "bind:zl:-1",
                             "fullscreen", "fullscreen:", "fullscreen:on", "fullscreen:YES", "interpolation",
                             "interpolation:1", "input-delay", "input-delay:2", "input_delay:yes", "async-shaders",
-                            "async-shaders:1", "async_shaders:yes", "resolution",
+                            "async-shaders:1", "async_shaders:yes", "precompile-shaders", "precompile-shaders:on", "resolution",
                             "resolution:", "resolution:1920", "resolution:1366x768",
                             "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all",
                             "get-packages:numpy"}) {

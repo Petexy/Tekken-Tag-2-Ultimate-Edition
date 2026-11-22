@@ -123,6 +123,7 @@ private:
     static void uninstall_confirmed(GtkWidget* button, gpointer self);
     void start_uninstall(UninstallOptions options);
     void play();
+    void launch_game(); // (play(), after the shaders were prepared when Settings say so)
     void resume();
     // Shows why something cannot be done (as a task's result).
     void refuse(const std::string& title, const std::string& why);
@@ -267,7 +268,7 @@ private:
     void open_release_page();
 
     // ------------------------------------------------ task.cpp
-    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate, kPackages };
+    enum class Kind { kInstall, kUpdate, kImport, kRemove, kUninstall, kLauncherUpdate, kPackages, kShaders };
     struct Task {
         Kind kind;
         std::string title;
@@ -364,6 +365,7 @@ private:
     GtkWidget* interpolation_switch_ = nullptr;
     GtkWidget* input_delay_switch_ = nullptr;
     GtkWidget* async_shaders_switch_ = nullptr;
+    GtkWidget* precompile_switch_ = nullptr;
     GtkWidget* automatic_note_ = nullptr; // what Automatic draws at
     GtkWidget* refresh_note_ = nullptr;   // displays below 100 Hz: the game stays at 60 fps
     GtkWidget* display_error_ = nullptr;

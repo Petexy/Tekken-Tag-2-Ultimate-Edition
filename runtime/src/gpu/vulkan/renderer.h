@@ -142,6 +142,7 @@ struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
     latte::TranslatedShader info;
     bool cached = false; // its SPIR-V came from the disk cache
+    uint64_t glsl_hash = 0; // of its GLSL: the name of its SPIR-V in the disk cache
     mutable JobPool::Ref job;
 };
 

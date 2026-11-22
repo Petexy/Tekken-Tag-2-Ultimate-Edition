@@ -49,7 +49,8 @@ std::string text_of(const display::Settings& s) {
     return std::string(s.fullscreen ? "fullscreen" : "windowed") + ", " + std::string(display::name_of(s.resolution)) +
            (s.interpolation ? ", interpolation" : ", no interpolation") +
            (s.input_delay ? ", input delay" : ", no input delay") +
-           (s.async_shaders ? ", shaders in the background" : "");
+           (s.async_shaders ? ", shaders in the background" : "") +
+           (s.precompile_shaders ? ", shaders prepared" : "");
 }
 
 std::string text_of(const display::Active& a) {
@@ -184,10 +185,11 @@ void test_parse_good() {
                                                   "resolution=1920x1080   # comment\n"
                                                   "\tinterpolation\t=\tno\t\n"
                                                   "input_delay = yes\n"
-                                                  "async_shaders = yes\n");
+                                                  "async_shaders = yes\n"
+                                                  "precompile_shaders = yes\n");
     check(parsed.warnings.empty(), "good file: no warnings");
-    check(parsed.given == 5, "good file: 5 given");
-    check(parsed.settings == display::Settings{true, Resolution::k1080, false, true, true},
+    check(parsed.given == 6, "good file: 6 given");
+    check(parsed.settings == display::Settings{true, Resolution::k1080, false, true, true, true},
           "good file: " + text_of(parsed.settings));
 
     // Every value, in either case.
@@ -217,6 +219,10 @@ void test_parse_good() {
         check(shaders.warnings.empty() && shaders.given == 1 && shaders.settings.async_shaders == v.on &&
                   !shaders.settings.fullscreen && shaders.settings.interpolation && !shaders.settings.input_delay,
               std::string("async_shaders = ") + v.value);
+        const display::Parsed prepared = display::parse(std::string("precompile_shaders = ") + v.value + "\n");
+        check(prepared.warnings.empty() && prepared.given == 1 && prepared.settings.precompile_shaders == v.on &&
+                  !prepared.settings.async_shaders && prepared.settings.interpolation,
+              std::string("precompile_shaders = ") + v.value);
     }
     for (const Resolution r : display::kResolutions) {
         std::string name(display::name_of(r));
@@ -341,9 +347,10 @@ void test_format() {
         start = end == std::string::npos ? text.size() : end + 1;
     }
     check(!text.empty() && text.back() == '\n', "the text ends with a newline");
-    check(lines.size() == 7, "a header of two lines and five settings: " + std::to_string(lines.size()) + " lines");
+    check(lines.size() == 8, "a header of two lines and six settings: " + std::to_string(lines.size()) + " lines");
+    check(!display::Settings{}.precompile_shaders, "the launcher prepares no shaders unless the player chooses so");
     check(!display::Settings{}.async_shaders, "shaders compile as they are needed unless the player chooses otherwise");
-    if (lines.size() == 7) {
+    if (lines.size() == 8) {
         check(lines[0].starts_with("# ") && lines[1].starts_with("# "), "the header is a comment");
         check(text.find("Tekken Tag Tournament 2") != std::string::npos && text.find("ttt2") == std::string::npos,
               "the header names the game as players know it");
@@ -352,6 +359,7 @@ void test_format() {
         check(lines[4].starts_with("interpolation = yes  # "), "interpolation line: " + lines[4]);
         check(lines[5].starts_with("input_delay = no  # "), "input delay line: " + lines[5]);
         check(lines[6].starts_with("async_shaders = no  # "), "shaders line: " + lines[6]);
+        check(lines[7].starts_with("precompile_shaders = no  # "), "prepared shaders line: " + lines[7]);
     }
 
     // Everything the launcher can write is read back as it was meant.
@@ -361,7 +369,7 @@ void test_format() {
                 for (const bool input_delay : {false, true}) {
                     const display::Settings settings{fullscreen, resolution, interpolation, input_delay};
                     const display::Parsed parsed = display::parse(display::format(settings));
-                    check(parsed.settings == settings && parsed.given == 5 && parsed.warnings.empty(),
+                    check(parsed.settings == settings && parsed.given == 6 && parsed.warnings.empty(),
                           "round trip of " + text_of(settings));
                 }
             }
@@ -393,7 +401,7 @@ void test_path(const fs::path& scratch) {
 void test_load(const fs::path& scratch) {
     const fs::path file = scratch / "display.ini";
     const std::string name = file.string();
-    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no, shaders in the background no";
+    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no, shaders in the background no, shaders prepared by the launcher no";
     fs::remove(file);
     const display::Loaded missing = display::load(file);
     check(missing.settings == display::Settings{} && missing.error.empty(), "missing file: defaults, no error");
@@ -413,15 +421,17 @@ void test_load(const fs::path& scratch) {
           "file: " + text_of(loaded.settings));
     const std::vector<std::string> log{
         "display: " + name + ":2: unknown setting \"vsync\", line ignored",
-        "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no, shaders in the background no (from " + name + ")"};
+        "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no, shaders in the background no, "
+        "shaders prepared by the launcher no (from " + name + ")"};
     check(loaded.log == log, "file: log " + joined(loaded.log));
 
-    const display::Settings written{true, Resolution::k1080, false, true, true};
+    const display::Settings written{true, Resolution::k1080, false, true, true, true};
     write(file, display::format(written));
     const display::Loaded launcher = display::load(file);
     check(launcher.settings == written && launcher.error.empty() &&
               launcher.log == std::vector<std::string>{"display: fullscreen yes, resolution 1920x1080, "
-                                                       "interpolation no, input delay yes, shaders in the background yes (from " + name + ")"},
+                                                       "interpolation no, input delay yes, shaders in the background yes, "
+                                                       "shaders prepared by the launcher yes (from " + name + ")"},
           "the launcher's file: " + joined(launcher.log));
 
     const fs::path link = scratch / "link.ini";
