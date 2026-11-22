@@ -3709,13 +3709,17 @@ PPC_FUNC(sub_02669BAC) {
 // Builds the chooser's entries (cursor r3, select id r4) once the pictures are there: the costumes, then (while
 // there are fewer than 14 entries) one row per customization slot 0..4, filled or not. For an added fighter the
 // slot rows are made again here: only the slots its own file has filled (up to 14 preset outfits share the 14 entries: with 9 outfits all five slots fit, with
-// 10 to 13 the first 4 to 1 filled ones, with 14 none). A row is {kind, slot byte, picture, "has a saved
-// thumbnail"}; a filled slot's picture is the texture the title makes from the slot's picture in the buffer
+// 10 to 13 the first 4 to 1 filled ones, with 14 none). A row is {kind, slot byte, picture, "has a paint"}; a
+// filled slot's picture is the texture the title makes from the slot's picture in the buffer
 // (0x56200000 | player << 8 | slot, sub_0266DBBC). A slot whose picture is blank (written by a tool: CUSTOMIZE
-// mode takes the picture) shows the fighter's first costume picture instead.
+// mode takes the picture) shows the fighter's first costume picture instead. "Has a paint" is what the title's
+// own rows ask (sub_033E3460 @033E3824): tk::CustomizePaintManager's answer for (select id, slot); it puts the
+// chooser's "painted" mark on the row. The paints are kept by the real select id, added fighters' too.
 constexpr uint32_t kChooserMax = outfit_menu::kMaxPresets, kChooserCursorRow = 84, kChooserPlayer = 340;
 constexpr uint32_t kSlotPicture = 0x56200000;
+constexpr uint32_t kPaintManager = 0x10827D80, kPaintManagerMade = 0x108516A8; // the global and its "constructed"
 PPC_FUNC(sub_02430624); // whether a slot is EMPTY (manager r3, player r4, slot r5)
+PPC_FUNC(sub_02452360); // whether a paint is kept for a slot (paint manager r3, select id r4, slot r5)
 PPC_FUNC(sub_033E3460_orig);
 PPC_FUNC(sub_033E3460) {
     const uint32_t cursor = ctx.r[3], id = ctx.r[4];
@@ -3743,7 +3747,9 @@ PPC_FUNC(sub_033E3460) {
             store(entry, kChooserSlot);
             store(entry + 4, slot << 24);
             store(entry + 8, blank ? first_picture : kSlotPicture | player << 8 | slot);
-            store(entry + 12, 0);
+            const bool painted = load(kPaintManagerMade) != 0 &&
+                                 guest_call(ctx, base, sub_02452360, {kPaintManager, id, slot}) != 0;
+            store(entry + 12, painted ? 1 : 0);
         }
     }
     store8(cursor + kChooserCount, static_cast<uint8_t>(rows));
@@ -3752,6 +3758,34 @@ PPC_FUNC(sub_033E3460) {
     if (traces().roster && (rows > kept || !g_added[k].outfits.empty()))
         std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s (%u saved slots)\n",
                      rows, g_added[k].code.c_str(), rows - kept);
+}
+
+// PAINT's first view of a new paint: sub_0255B718 gives the paint its camera (eye, target, up) from the title's
+// table of one camera per fighter (24 bytes per select id at 0x107AF448: eye xyz, target xyz; ids 0..58) through
+// sub_0244F8A8 (paint r3, eye r4, target r5, up r6; the paint's {select id, slot} at *(r3 + 48)). An added
+// fighter's id lies past the table, where other data reads as a camera at the origin: PAINT then opened on the
+// calves from behind (the fights seldom show that side, so the paint seemed missing there). It gets the camera
+// of the fighter its customization comes from (the shop list's fighter, else its donor). Saved paints keep theirs.
+constexpr uint32_t kPaintCameras = 0x107AF448, kPaintCameraSize = 24, kPaintCameraCall = 0x0255BA9C;
+PPC_FUNC(sub_0244F8A8_orig);
+PPC_FUNC(sub_0244F8A8) {
+    if (ctx.lr == kPaintCameraCall) {
+        const uint32_t key = load(ctx.r[3] + 48);
+        const int k = key ? slot_of_id(load(key)) : -1;
+        if (k >= 0) {
+            const auto source = customize_grid::paint_camera_fighter(
+                !g_added[k].shop.empty() ? std::optional<uint32_t>(g_added[k].shop_fighter) : std::nullopt,
+                g_added[k].donor);
+            if (source) {
+                ctx.r[4] = kPaintCameras + kPaintCameraSize * *source;
+                ctx.r[5] = kPaintCameras + kPaintCameraSize * *source + 12;
+                if (traces().roster)
+                    std::fprintf(stderr, "ttt2: paint: %s's first paint view from fighter %u's camera\n",
+                                 g_added[k].code.c_str(), *source);
+            }
+        }
+    }
+    sub_0244F8A8_orig(ctx, base);
 }
 
 // Developer switch TTT2_TEST_CUSTOMIZE (title/test_record.h; off unless set): a customization record for one
