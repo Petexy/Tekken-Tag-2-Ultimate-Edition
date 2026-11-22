@@ -13,9 +13,17 @@
 //                                and more (60 below); yes
 //   input_delay   = yes | no     the Wii U game's two frames between a button
 //                                press and the game acting on it; no
+//   async_shaders = yes | no     compile shaders in the background: what is
+//                                seen for the first time may appear a few
+//                                frames late, in place of the game stopping
+//                                for a moment; no
+//   precompile_shaders = yes | no  the launcher, before it starts the game,
+//                                makes ready the shaders the game has used on
+//                                this computer (`ttt2 --precompile`); no.
+//                                The game itself does not use it.
 //
-// The environment's TTT2_FULLSCREEN, TTT2_SCALE, TTT2_FPS and
-// TTT2_INPUT_DELAY still win.
+// The environment's TTT2_FULLSCREEN, TTT2_SCALE, TTT2_FPS, TTT2_INPUT_DELAY
+// and TTT2_ASYNC_SHADERS still win.
 // No SDL here: the launcher builds this file too, so that what it writes
 // is what the game reads.
 
@@ -39,6 +47,8 @@ struct Settings {
     Resolution resolution = Resolution::kAuto;
     bool interpolation = true;
     bool input_delay = false;
+    bool async_shaders = false;
+    bool precompile_shaders = false; // (the launcher's: it runs `ttt2 --precompile` before the game)
     bool operator==(const Settings&) const = default;
 };
 
@@ -106,6 +116,7 @@ struct Active {
     float scale = 0;  // 0: automatic, auto_scale() of the display
     uint32_t fps = 0; // 0: 120 on displays of 100 Hz and more, else 60
     std::optional<uint32_t> input_delay = 0; // frames in place of the title's own 2; nullopt: its own
+    bool async_shaders = false;              // shaders compile in the background
     bool operator==(const Active&) const = default;
 };
 
@@ -116,10 +127,10 @@ inline constexpr uint32_t kMaxInputDelay = 15;
 // `settings` with the environment's values (nullptr or empty: not set):
 // TTT2_FULLSCREEN=1 fullscreen (another value windowed), TTT2_SCALE=1, 1.5,
 // 2, 3 or 4, TTT2_FPS a frame rate (60, 120, 180, 240), TTT2_INPUT_DELAY
-// frames (0 to kMaxInputDelay). Values that are not used get a line in
-// `log`.
+// frames (0 to kMaxInputDelay), TTT2_ASYNC_SHADERS=1 or 0. Values that are
+// not used get a line in `log`.
 Active resolve(const Settings& settings, const char* fullscreen, const char* scale, const char* fps,
-               const char* input_delay, std::vector<std::string>& log);
+               const char* input_delay, const char* async_shaders, std::vector<std::string>& log);
 
 // The window sets these before the renderer starts (defaults until then).
 const Active& active();

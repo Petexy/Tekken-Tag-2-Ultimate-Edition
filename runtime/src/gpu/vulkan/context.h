@@ -52,6 +52,7 @@ struct Context {
     // reaches the screen (surface support is checked separately).
     bool present_wait = false;
     bool surface_capabilities2 = false; // VK_KHR_get_surface_capabilities2
+    bool pipeline_cache_control = false; // pipelineCreationCacheControl: a creation can ask "only if cached"
     bool memory_budget = false;         // VK_EXT_memory_budget
     PFN_vkWaitForPresent2KHR wait_for_present = nullptr;
 

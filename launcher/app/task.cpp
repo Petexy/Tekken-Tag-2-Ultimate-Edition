@@ -92,6 +92,7 @@ void Launcher::begin_task(Kind kind, std::string title) {
     task_->title = std::move(title);
     task_->progress = Progress(kind == Kind::kImport || kind == Kind::kRemove            ? Progress::Kind::kImport
                                : kind == Kind::kLauncherUpdate || kind == Kind::kPackages ? Progress::Kind::kDownload
+                               : kind == Kind::kShaders                                   ? Progress::Kind::kCount
                                                                                           : Progress::Kind::kBuild);
     if (status_) {
         std::map<std::string, std::string> names;
@@ -337,10 +338,18 @@ void Launcher::task_exited(int code) {
         title = ok ? "Downloaded numpy and Pillow" : t.cancelled ? "Download cancelled" : "Downloading them failed";
         detail = ok ? "The character importer uses them from now on." : t.cancelled ? "Nothing was changed." : why;
         break;
+    case Kind::kShaders:
+        // (The game starts whether or not they could be prepared: it makes
+        // what is missing as it needs it.)
+        title = ok ? "Shaders are ready" : t.cancelled ? "Preparing shaders cancelled" : "Shaders could not be prepared";
+        detail = ok ? "" : t.cancelled ? "The game was not started." : "The game makes them as it needs them. " + why;
+        break;
     case Kind::kUninstall:
     case Kind::kLauncherUpdate: break; // (their own)
     }
+    const bool play_now = t.kind == Kind::kShaders && !t.cancelled;
     finish_task(ok, title, detail, t.cancelled);
+    if (play_now && !quit_after_task_) launch_game();
 }
 
 void Launcher::finish_task(bool ok, const std::string& title, const std::string& detail, bool cancelled) {

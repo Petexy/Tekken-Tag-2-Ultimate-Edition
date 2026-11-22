@@ -487,6 +487,59 @@ attachment formats and blend state.
   alike share a module, and with it their pipelines: a 40-second fight
   made 1,124 modules of 182 different translations and 1,115 pipelines,
   each compiled by the driver on a first run (now 182 and 168).
+- A first use stops the gpu thread for the translation (about 0.05 ms),
+  the GLSL compile when the SPIR-V is not on disk (about 5 ms) and the
+  driver's pipeline compile when the pipeline cache does not have it
+  (about 20 ms, some over 100): the frame is late. With display.ini's
+  `async_shaders = yes` (off by default; `TTT2_ASYNC_SHADERS=1` or `0`
+  wins) a draw of the 3D scene has the last two done on a few worker
+  threads (`vulkan/jobs.h`; a quarter of the processor's threads, 1 to 4)
+  and is left out until its pipeline is there, so a thing seen for the
+  first time appears a few frames late instead. Translation and the
+  lookups stay on the gpu thread; a module or pipeline carries its job
+  until that thread has seen it done. What the caches hold is still made
+  at once and nothing is left out for it: SPIR-V from disk, and pipelines
+  the pipeline cache already has (asked with
+  `VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED`), so with warm
+  caches the setting changes nothing. A draw is left out only where that
+  delays a part of the picture and nothing else; any other has what it
+  needs made on the gpu thread at once, exactly as without the setting
+  (`Renderer::draw` decides before it asks for the shaders). That is a
+  stream-out draw (the fighters' skinning writes memory later draws and
+  the title read); a draw of a replay (an extra frame draws what its frame
+  drew, and leaves out what that left out: `DrawRecord::skipped`); a draw
+  that is not depth-tested (the passes that make or compose whole images:
+  blur, glow, copies, the menus' and the HUD's layers); a draw into a
+  target that the frame before did not draw into (a scene's first frame,
+  and pictures drawn once and kept, which would stay without it); a draw
+  into a target that is written back to the title's memory (the title
+  would read a picture without it), and every draw while the title reads
+  larger targets back (`gpu::cpu_read_targets`: CUSTOMIZE's PAINT, whose
+  canvas it reads and saves); and any
+  draw once its frame has sent four new pipelines to the workers, or
+  while as many are in the making as two a worker (a new scene needs
+  dozens at once, and shows its first frame late rather than mostly
+  empty). The rule is `may_leave_out` (`gpu/vulkan/leave_out.h`, with
+  its test). What is left for the workers is
+  what comes up inside a scene; measured (a Practice fight from an empty
+  cache, a 6-core desktop, also pinned to 4 cores) that was a few frames
+  of 35 to 40 ms, while the long frames (a scene's first, 1.5 s; new
+  skinning shaders, 100 to 250 ms) are of the kinds that wait, so the
+  setting gained nothing that could be told from run-to-run noise there.
+  `TTT2_TRACE_SHADERS=1` logs each first use with its class and what it
+  cost, every frame over 25 ms, and totals every ten seconds.
+- Every pipeline made is also noted in the cache directory's
+  `pipelines.list`, a line of what it takes to make it again without the
+  game (its shaders by the names of their SPIR-V files, the layout's
+  bindings, formats, blending and the other baked state). `ttt2
+  --precompile` makes all of them into the pipeline cache on every
+  processor thread but one, with no window and without starting the
+  title, and prints the launchers' task lines; the launchers run it
+  before the game when Settings' "Prepare shaders before playing" is on
+  (display.ini's `precompile_shaders`, which the game itself does not
+  use). It knows only what the game has shown on that computer: no list
+  comes with the port. Its use is after a graphics driver update, when the
+  SPIR-V is still good and the driver's compiled pipelines are not.
 
 ## Presentation on a computer
 
@@ -2200,7 +2253,11 @@ the primary display's height in pixels) and `interpolation = yes` or `no`
 window opens on refreshes at 100 Hz or more, compared exactly, 60 below;
 no: 60 always) and `input_delay = yes` or `no` (default no: fighters act on
 a button in the frame the game reads it; yes: two frames later, as the Wii
-U game does; see [Input delay](#input-delay)).
+U game does; see [Input delay](#input-delay)), `async_shaders = yes` or
+`no` (default no; yes: shaders compile in the background and what is seen
+for the first time may appear a few frames late) and `precompile_shaders =
+yes` or `no` (default no; yes: the launcher runs `ttt2 --precompile`
+before it starts the game).
 Booleans also take `true`/`false`, `on`/`off` and `1`/`0`, and values (not
 names) may be in any case; an unknown name or a bad value is left out with
 a warning, keeping that setting's default, and of a name given twice the
@@ -2301,6 +2358,10 @@ debugging:
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
 | `TTT2_KEEP_MEMORY=0` | leave the memory the GPU reads to the kernel (no "memory" thread) |
 | `TTT2_TRACE_MEMORY=1` | the "memory" thread's passes: time, blocks, megabytes on huge pages |
+| `TTT2_ASYNC_SHADERS=1` or `0` | compile shaders in the background or as they are needed (over display.ini's async_shaders) |
+| `TTT2_SHADER_THREADS=<n>` | worker threads for shaders (also `--precompile`'s) |
+| `TTT2_LATE_PIPELINES=<n>` | new pipelines a frame may leave to the workers (4) |
+| `TTT2_TRACE_SHADERS=1` | first uses of shaders and pipelines: their class, their cost, frames over 25 ms, totals every 10 s |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
 | `TTT2_EVICT=0` | keep the textures and render targets the title stopped using (freed after 30 s otherwise) |
@@ -2325,7 +2386,7 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |

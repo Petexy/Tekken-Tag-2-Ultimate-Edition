@@ -31,7 +31,7 @@ RESOLUTIONS = [('auto', 'Automatic'), ('1280x720', '1280 × 720'), ('1920x1080',
                ('2560x1440', '2560 × 1440'), ('3840x2160', '3840 × 2160'), ('5120x2880', '5120 × 2880')]
 TASK_TITLES = dict(setup='Setting up the game', build='Building the game', install='Installing the game',
                    update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher',
-                   files='Updating the launcher')
+                   files='Updating the launcher', shaders='Preparing shaders')
 FOLDERS = [('source', 'Wii U archive', 'Your European Wii U .wua with update v16', False),
            ('title', 'Extracted Wii U title', 'For development imports, instead of an installed game', True),
            ('install', 'Installation folder', 'Where Set Up Game installs the game', True),
@@ -295,6 +295,16 @@ class Window:
         try:
             if self.game and self.game.poll() is None: raise ValueError('The game is already running.')
             if old := older_game(self.settings, self.files_id): raise ValueError(older_game_note(old, self.files_id))
+            self.settings.game_command()        # (says what is missing)
+        except Exception as error:
+            return self.error(error)
+        # Settings' "Prepare shaders before playing": that task first; the game starts when it ends (task_done).
+        if self.display_vars['precompile_shaders'].get() and not self.busy(): self.start('shaders')
+        else: self.launch_game()
+
+    def launch_game(self):
+        try:
+            if self.game and self.game.poll() is None: raise ValueError('The game is already running.')
             command = self.settings.game_command()
             logs = Path(self.settings.values['data']) / 'logs'
             logs.mkdir(parents=True, exist_ok=True)
@@ -1003,14 +1013,17 @@ class Window:
             title = {'import': ('Updated ' if task['updating'] else 'Added ') + shown, 'remove': 'Removed ' + shown,
                      'setup': 'The game is set up', 'build': 'The game is built', 'install': 'The game is installed',
                      'update': 'The installed game is updated', 'upgrade': 'The game is updated',
-                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date'}[action]
+                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date',
+                     'shaders': 'Shaders are ready'}[action]
             detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
             # (not .get(action, default): the default is evaluated, and TASK_TITLES has no import or remove)
             title = {'import': 'Could not add ' + shown, 'remove': 'Could not remove ' + shown,
-                     'launcher': 'Update failed', 'files': 'Update failed'}.get(action) or TASK_TITLES[action] + ' failed'
+                     'launcher': 'Update failed', 'files': 'Update failed',
+                     'shaders': 'Shaders could not be prepared'}.get(action) or TASK_TITLES[action] + ' failed'
             detail = task['error'] or 'See Details, or Open Log to send it for help.'
+            if action == 'shaders': detail = 'The game makes them as it needs them. ' + detail
         self.task_title.configure(text=title, fg=TEXT if ok or code == 130 else BAD)
         self.task_detail.configure(text=detail)
         if not detail: self.task_detail.pack_forget()
@@ -1026,6 +1039,8 @@ class Window:
             self.release['newer'] = None if ok else self.release['newer']
         if action == 'files' and ok: self.check_main()
         self.refresh()
+        # (The game starts whether or not its shaders could be prepared; not after Cancel.)
+        if action == 'shaders' and code != 130: self.launch_game()
         # A success says so for a while; a failure stays until closed.
         if ok:
             serial = task['serial']
@@ -1131,7 +1146,8 @@ class Window:
         rows.configure(padding=px(4))
         rows.pack(fill='x')
         self.display_vars = {key: tk.BooleanVar(value=default) for key, default in
-                             (('fullscreen', True), ('interpolation', True), ('input_delay', False))}
+                             (('fullscreen', True), ('interpolation', True), ('input_delay', False),
+                              ('async_shaders', False), ('precompile_shaders', False))}
         self.resolution = tk.StringVar(value=RESOLUTIONS[0][1])
         def row(title, text, control, first=False):
             if not first: tk.Frame(rows, bg=look.ROW_LINE, height=1).pack(fill='x')
@@ -1153,6 +1169,12 @@ class Window:
             'and more.', switch('interpolation'))
         row('Input delay', 'Two frames between a button press and the game acting on it, as on the Wii U. Practice\'s '
             'own Input Delay works either way.', switch('input_delay'))
+        row('Shaders in the background', 'The first time something is shown, it may appear a few frames late instead '
+            'of the game stopping for a moment while its shader is made.',
+            switch('async_shaders'))
+        row('Prepare shaders before playing', 'Play first makes ready the shaders the game has used on this PC so far, '
+            'so that it does not stop for them again, for instance after a graphics driver update. What it has never '
+            'shown yet is still made the first time.', switch('precompile_shaders'))
         row('Performance', '1280 × 720 without 120 fps: for a slower graphics card.',
             lambda parent: L.button(parent, 'Use', self.performance_preset))
         self.display_note = L.label(card, '', 'small', wrap=True)
@@ -1399,7 +1421,7 @@ class Window:
             caps = [c.cget('text') for c in self.keycaps]
             self.close_settings()
             assert rows == len(self.status['fighters']) > 0, (rows, len(self.status['fighters']))
-            assert switches == 3 and len(caps) == 19 and all(caps), (switches, caps)
+            assert switches == 5 and len(caps) == 19 and all(caps), (switches, caps)
             # (A bar to click and drag: clam's is 1 px wide when its thumb has no size.)
             bar = self.main.bar.winfo_reqwidth()
             assert bar >= self.look.px(8), bar
