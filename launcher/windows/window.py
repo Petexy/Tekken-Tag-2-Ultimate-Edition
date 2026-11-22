@@ -1421,7 +1421,7 @@ class Window:
             caps = [c.cget('text') for c in self.keycaps]
             self.close_settings()
             assert rows == len(self.status['fighters']) > 0, (rows, len(self.status['fighters']))
-            assert switches == 3 and len(caps) == 19 and all(caps), (switches, caps)
+            assert switches == 5 and len(caps) == 19 and all(caps), (switches, caps)
             # (A bar to click and drag: clam's is 1 px wide when its thumb has no size.)
             bar = self.main.bar.winfo_reqwidth()
             assert bar >= self.look.px(8), bar
