@@ -513,6 +513,31 @@ class ConverterTest(unittest.TestCase):
         self.assertIsNone(p(0x20, None))
         self.assertEqual(sum(p.stats.values()), 2)
 
+    def test_skip(self):
+        """A move playing its clip from a later frame (anim_start 3: skip 2) gets the clip from there, his travel
+        counted from where the clip's first frame stood; the whole clip stays apart (another move may play it)."""
+        good = self.fighter.clip(self.values)
+        whole, _ = self.cv.channels(panm.Animation(good))
+        part, info = self.cv.channels(panm.Animation(good), skip=2)
+        self.assertEqual((len(part), info['frames']), (22, 22))
+        np.testing.assert_allclose(part[:, 1:], whole[2:, 1:])
+        np.testing.assert_allclose(part[:, 0], whole[2:, 0] - whole[2, 0] + whole[0, 0])
+        self.assertEqual(animation.header(self.cv.animation(good, skip=2))['frames'], 22)
+        own = [[(0x10, good, [])], [], [], [], [], []]
+        banks = anmbin.Banks(anmbin.Bank(bank(own, [[0x10], [], [], [], [], []])),
+                             anmbin.Bank(bank([[], [], [], [], [], []])), 28)
+        p = T8.Animations(banks, self.cv)
+        self.assertEqual(p((0x10, 'own', 2)), self.cv.animation(good, skip=2))
+        self.assertEqual(p((0x10, 'own')), self.cv.animation(good))
+        self.assertEqual(p.stats['body animations played from a later frame (anim_start)'], 1)
+        held = T8.Animations(banks, self.cv, twists={0x10: (0, 5, 1.0)})     # a scene's clip is left whole
+        self.assertEqual(held((0x10, 'own', 2)), held((0x10, 'own')))
+        with self.assertRaises(ValueError):
+            T8.skip_frames(whole, 24)
+        self.assertTrue(T8.trimmable([('joint', 'R_Have', (0.0, 1200.0, 0.0), (0.0, 0.0, 0.0)), (0.0, 1150.0, 700.0)]))
+        self.assertFalse(T8.trimmable([('scene', 'L_Have', (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 28, 2)]))
+        self.assertFalse(T8.trimmable([('windows', [(0, 19, (0.0, 0.0, 0.0))])]))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -343,6 +343,12 @@ class Moveset8(Moveset):
             return key, 'com'
         return key, None
 
+    def anim_skip(self, i):
+        """The frames of its clip move i does not play: Tekken 8 starts a move's clip at frame anim_start - 1 (anim_start
+        1: from its first frame), so the move's frame f shows the clip's frame f - 2 + anim_start, the frame its boxes
+        are measured on (Clive's f+2 anim_start 2, f,F+2 3: the blade level ahead on their active frames)."""
+        return max(self.tables['moves'][i].get('anim_start') or 1, 1) - 1
+
     def set_anim_lengths(self, frames):
         """anim_len of every move as the game sets it when loading: frames(key, bank) = the animation's last frame
         number (its PANM header) or None; length = frames + 1 - (first frame - 1)."""

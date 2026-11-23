@@ -153,6 +153,26 @@ def bind_leg(sk):
     return float(np.mean([np.linalg.norm(sk.t[sk.index[k]]) + np.linalg.norm(sk.t[sk.index[a]]) for k, a in LEGS]))
 
 
+def trimmable(roots):
+    """Whether a clip with these root points (summons8.roots) can be played from a later frame: its points are the
+    pose's (a joint's, or an offset from the ground origin, frame by frame), not a hold clip's path or windows, which
+    run by the move's frames (prefabs8 HIT POINTS, root_windows)."""
+    return not any(isinstance(o[0], str) and o[0] in ('scene', 'windows') for o in roots)
+
+
+def skip_frames(values, skip):
+    """Channel values (F, n, 3) of a clip its move plays from frame `skip` (motbin anim_skip): the frames before it
+    dropped, and his travel (channel 0) moved so the new first frame stands where the clip's first did (the frames
+    skipped take him nowhere, as in Tekken 8, whichever way the game reads the channel)."""
+    if not skip:
+        return values
+    if skip >= len(values):
+        raise ValueError('a clip of %d frames played from frame %d' % (len(values), skip))
+    out = np.array(values[skip:])
+    out[:, 0] -= values[skip, 0] - values[0, 0]
+    return out
+
+
 class Converter:
     """Clips of a fighter -> TTT2 body animations. sk: the fighter's skeleton (load_skeleton / skeleton()); target:
     bone.read() of the TTT2 skeleton they will play on (the added fighter's, skeleton.build); kind: 0x64
@@ -225,14 +245,15 @@ class Converter:
             yaw = np.zeros(F)
         return world, root, D, yaw, LEGACY_LEG if anim.legacy else self.own_leg, J
 
-    def channels(self, anim, roots=None, snakes=None, ground=False, shift=None, twist=None):
+    def channels(self, anim, roots=None, snakes=None, ground=False, shift=None, twist=None, skip=0):
         """(TTT2 body channel values (F, 23, 3), info {'frames', 'leg', 'root_scale', 'pairs'}) of a panm.Animation;
         with weapon pairs (F, 23 + 2 n, 3) when the clip moves a weapon's joint or `roots` (the move's root point
         offsets, mm: summons8.roots) or `snakes` (the heads its move's summoned clip moves and the frame it starts at:
         convert/snakes8.py) are given (pair_values). shift: (F, 3) mm added to his Top's path (a scene cut taken back:
         convert/prefabs8.py SCENE CUTS); his scene stands where the shift leaves it, all through the clip. twist:
         (first frame, last frame, radians) by which his facing and body turn about his hips over those frames
-        (prefabs8 TWISTS: retarget.twist)."""
+        (prefabs8 TWISTS: retarget.twist). skip: the clip's first frames its move does not play (motbin anim_skip):
+        dropped (skip_frames)."""
         world, root, D, yaw, leg, J = self.pose(anim)
         k = self.leg / leg
         travel = None
@@ -255,11 +276,11 @@ class Converter:
             _, WR, Wp = self.fk(anim)
             values = np.concatenate([values, pair_values(self, WR, Wp, values, k, roots, count, snakes, ground,
                                                          travel)], 1)
-        return values, dict(frames=anim.frames, leg=leg, root_scale=k, pairs=count)
+        return skip_frames(values, skip), dict(frames=anim.frames - skip, leg=leg, root_scale=k, pairs=count)
 
-    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False, shift=None, twist=None):
-        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground, shift, twist: channels())."""
-        values, info = self.channels(panm.Animation(blob), roots, snakes, ground, shift, twist)
+    def animation(self, blob, endian='>', roots=None, snakes=None, ground=False, shift=None, twist=None, skip=0):
+        """A TTT2 body animation (bytes) of a body clip's blob (roots, snakes, ground, shift, twist, skip: channels())."""
+        values, info = self.channels(panm.Animation(blob), roots, snakes, ground, shift, twist, skip)
         self.last_pairs = info['pairs']
         return retarget.encode(values, self.kind, endian)
 
@@ -640,7 +661,8 @@ def originals(m, banks, movesets, common, pack_of, donor_row):
 
 class Animations:
     """The converter's animation provider for a Tekken 8 fighter: called with a move's anim_ref (key, bank), as one
-    tuple (moveset.Converter) or two arguments -> the TTT2 animation (bytes, big-endian) of its body clip, TTT2's own
+    tuple (moveset.Converter) or two arguments, and the frames its move skips (motbin anim_skip: (key, bank, skip), the
+    clip from that frame on) -> the TTT2 animation (bytes, big-endian) of its body clip, TTT2's own
     (an id or bytes: originals, when given), or None (no such clip). banks: anmbin.Banks; converter: a Converter. Each
     clip is converted once; .stats counts them, .seconds the time taken. roots: {clip key: root point offsets} of the
     clips whose moves hit from root points (convert/summons8.py): converted with those pairs (TTT2's own original
@@ -662,16 +684,20 @@ class Animations:
         self.stats = collections.Counter()
         self.seconds = 0.0
 
-    def __call__(self, key, bank=None):
+    def __call__(self, key, bank=None, skip=0):
         if isinstance(key, tuple):
-            key, bank = key
-        if key in self.cache:
-            return self.cache[key]
-        if key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground \
-                and key not in self.shifts and key not in self.twists:
+            key, bank, skip = (tuple(key) + (0,))[:3]
+        if skip and (key in self.snakes or key in self.ground or key in self.shifts or key in self.twists
+                     or not trimmable(self.roots.get(key, ()))):
+            self.stats['clips played from a later frame left whole (a scene, its timing by move frames)'] += 1
+            skip = 0
+        if (key, skip) in self.cache:
+            return self.cache[key, skip]
+        if not skip and key in self.originals and key not in self.roots and key not in self.snakes \
+                and key not in self.ground and key not in self.shifts and key not in self.twists:
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
-            self.cache[key] = self.originals[key]
-            return self.cache[key]
+            self.cache[key, skip] = self.originals[key]
+            return self.cache[key, skip]
         blob = self.banks.blob(anmbin.BODY, key)
         out = None
         if blob is None:
@@ -688,6 +714,9 @@ class Animations:
                     extra['shift'] = self.shifts[key]
                 if key in self.twists:
                     extra['twist'] = self.twists[key]
+                if skip:
+                    extra['skip'] = skip
+                    self.stats['body animations played from a later frame (anim_start)'] += 1
                 out = self.converter.animation(blob, **extra)
                 self.stats['body animations converted (%s)' % self.banks.where(anmbin.BODY, key)] += 1
                 if getattr(self.converter, 'pairs', None) and getattr(self.converter, 'last_pairs', 0):
@@ -697,5 +726,5 @@ class Animations:
             except ValueError as e:
                 self.stats['body animations not converted (%s)' % e] += 1
             self.seconds += time.time() - t
-        self.cache[key] = out
+        self.cache[key, skip] = out
         return out

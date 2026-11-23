@@ -3926,8 +3926,12 @@ class Converter:
 
     def anim8(self, i):
         """The TTT2 animation id of Tekken 8 move i (ANIMATIONS): a 'G' move's of the same key, else the provider's
-        (appended when it gives bytes), else the donor stance's."""
+        (appended when it gives bytes), else the donor stance's. A move that starts its clip at a later frame (motbin
+        anim_skip) asks for the clip from there: its own animation."""
         ref = tuple(self.k.anim_ref(i))
+        skip = self.k.anim_skip(i) if ref[1] is not None and hasattr(self.k, 'anim_skip') else 0
+        if skip and ref[0] not in self.generic_anim:
+            ref += (skip,)
         if ref not in self.anim_id:
             if ref[0] in self.generic_anim:
                 aid = self.generic_anim[ref[0]]

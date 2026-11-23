@@ -145,10 +145,11 @@ class Sampler:
 
     def clip(self, move):
         key = self.k.anim_ref(move)[0]
-        if key not in self._clips:
+        skip = self.k.anim_skip(move) if key is not None and hasattr(self.k, 'anim_skip') else 0   # (as it plays)
+        if (key, skip) not in self._clips:
             blob = self.banks.blob(anmbin.BODY, key) if key is not None else None
-            self._clips[key] = self.conv.channels(panm.Animation(blob))[0] if blob else None
-        return self._clips[key]
+            self._clips[key, skip] = self.conv.channels(panm.Animation(blob), skip=skip)[0] if blob else None
+        return self._clips[key, skip]
 
     def __call__(self, move, start, frames, value):
         parts, _, tail, kind = decode(value)

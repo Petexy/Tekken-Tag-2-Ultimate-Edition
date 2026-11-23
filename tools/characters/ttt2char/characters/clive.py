@@ -539,9 +539,7 @@ MOVESET = {
         'key:4bd7b552': True,         # ... back, late
     },
     # the generic throw keeps the donor's row, active at 12 only: Tekken 8's frames
-    'active_frames': {'Thrmv_B2_01': (15, 17),
-                       # f,f+2: pushed back from where Tekken 8 lets him run in, the blade comes down one frame later
-                       'Okm_66RP': (19, 21)},
+    'active_frames': {'Thrmv_B2_01': (15, 17)},
 }
 
 # ------------------------------------------------------------------------------------------------ ZAN gauge
