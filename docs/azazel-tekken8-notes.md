@@ -58,3 +58,7 @@ record what his port needed, for later fighters.
   on requirement 46 and gives the guard a normal block reaction.
 * His 4 rows went to the All Direction Attack (a boss charge) before the mid kick his Tekken 6 4 is; dropping the
   charge's rows makes 4 that kick from Tekken 8 data alone.
+* Tekken 8 gives the boss no crouch (his stance's alias 2 is the stance itself; holding down does nothing, down + a
+  button are his attacks), so lows from neutral could not be guarded. move_overrides `stance_crouch` gives his stance,
+  walks and dashes the donor stance's crouch group with the donor's crouch starts swapped for his own Tekken 8 ones,
+  and the crouch those lead to his stance's down + button rows first.
