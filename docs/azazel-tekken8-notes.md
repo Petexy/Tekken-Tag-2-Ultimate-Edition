@@ -12,7 +12,11 @@ record what his port needed, for later fighters.
   move cameras) are anchored at his head (a man's head at 1.62 m mapped on his highest sphere, scaled by the body
   size) and turned to his head when they look more than 11.5 degrees away; a launched man is kept under the health
   bars (85% of the picture's height); the KO slow motion (replay camera sub_060B44E4) and the throw camera's view step
-  (sub_06130C84, where its 10 m limit is applied) are contained the same way. Matches without a giant are identical
+  (sub_06130C84, where its 10 m limit is applied) are contained the same way; the round call ("ROUND 1", "READY",
+  "FIGHT": the win camera in its states 0x11 to 0x13, sub_061A9D34) comes round the fighters at the fight camera's
+  distance but looks at its own point at a man's height, so its shot goes up by what the fight camera went up
+  (`title/round_call.h`; a call that opens from above keeps the title's own way down and rises only at its end: a
+  metre higher it went through a hall's gallery). Matches without a giant are identical
   frame for frame (camera, bodies, pushes, hits) to the runtime without the hook.
 * `character.ini body = S` (definition `BODY`) drives `runtime/src/title/giant_body.cpp`: player+1652 is the Mushroom
   Battle size (it scales the model too, so never write it for an added giant). The hurt-sphere code (sub_03D6B9F4) and

@@ -63,13 +63,20 @@
 // giant in the fight their shots go up and back until both fighters are in
 // the picture (contain()).
 //
-// Fights without such a fighter, and every other camera (tcb_camera_win_t),
-// are the title's own.
+// The round call ("ROUND 1", "READY", "FIGHT": tcb_camera_win_t in its
+// states 0x11 to 0x13, sub_061A9D34) comes round the two fighters to where
+// the fight's camera is, at its distance but at the title's own height for
+// two men: its shot goes up by what the fight's camera went up, and ends
+// where that begins (title/round_call.h).
+//
+// Fights without such a fighter, and the win camera's other states (the win
+// scene), are the title's own.
 //
 // TTT2_TRACE_CAMERA=1 logs each change; 2 also every camera the
 // 2-character camera makes.
 
 #include "title/fight_camera.h"
+#include "title/round_call.h"
 
 #include "title/giant_body.h"
 #include "title/roster.h"
@@ -207,6 +214,10 @@ float picture_aspect(uint8_t* base) {
     return 16.0f / 9;
 }
 
+// How far up the 2-character camera's last result went for a giant (mm; 0: it was the title's own).
+// g_level: that camera's eye over the point it looks at.
+float g_lift = 0, g_level = 0;
+
 // The 2-character camera's result `camera` with the giants in it.
 void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const float heights[2]) {
     float eye[3], target[3];
@@ -269,6 +280,8 @@ void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const flo
         return;
     }
     const float middle = bottom + needed * high; // the picture's bottom kept
+    g_lift = middle - target[1];
+    g_level = -forward[1] * needed;
     for (int k = 0; k < 3; ++k) {
         const float t = target[k] + (k == 1 ? middle - target[1] : 0);
         stf(base, camera + kCameraTarget + 4 * k, t);
@@ -426,6 +439,30 @@ void contain(uint8_t* base, uint32_t camera, const View& view) {
         std::fprintf(stderr, "ttt2: camera: %s shot with a giant (sid %u %u): up %.0f, back %.0f (eye %.0f %.0f %.0f, fov %.1f)\n",
                      view.eye == kReplayView.eye ? "replay" : "throw", ppc::ld32(base, g_pair[0] + kPlayerSelectId),
                      ppc::ld32(base, g_pair[1] + kPlayerSelectId), lift, back, eye[0], eye[1], eye[2], fov);
+}
+
+// The round call's shot (the win camera's, +304 eye, +320 the point it looks at, as it comes round the two fighters
+// in play) with a giant among them: up by what the fight's camera went up, its eye only as it comes down to that
+// camera's height (round_call.h).
+constexpr uint32_t kWinShot = 304, kWinTarget = 320, kWinState = 408;
+
+void round_call_after(uint8_t* base, uint32_t camera) {
+    bool giant = false;
+    for (const uint32_t p : g_pair)
+        if (is_player(base, p) && height_of(p) > 0) giant = true;
+    if (!giant) return;
+    float eye[3], target[3];
+    for (int k = 0; k < 3; ++k) {
+        eye[k] = ldf(base, camera + kWinShot + 4 * k);
+        target[k] = ldf(base, camera + kWinTarget + 4 * k);
+    }
+    if (!round_call::raise(eye, target, g_lift, g_level)) return;
+    stf(base, camera + kWinShot + 4, eye[1]);
+    stf(base, camera + kWinTarget + 4, target[1]);
+    if (trace())
+        std::fprintf(stderr, "ttt2: camera: round call with a giant (sid %u %u, state %u): up %.0f (eye %.0f %.0f %.0f, point %.0f %.0f %.0f)\n",
+                     ppc::ld32(base, g_pair[0] + kPlayerSelectId), ppc::ld32(base, g_pair[1] + kPlayerSelectId),
+                     ppc::ld32(base, camera + kWinState), g_lift, eye[0], eye[1], eye[2], target[0], target[1], target[2]);
 }
 
 // A camera animation's camera playing for a giant: its shot as the animation made it (restored before its next frame,
@@ -659,6 +696,15 @@ PPC_FUNC(sub_06130C84) {
     if (playing) contain(base, camera, kThrowView);
 }
 
+PPC_FUNC(sub_061A9D34_orig); // the win camera's frame in the round call (r3 the camera; its states 0x11 to 0x13)
+PPC_FUNC(sub_061A9D34) {
+    const uint32_t camera = ctx.r[3];
+    sub_061A9D34_orig(ctx, base);
+    // (still calling: the frame that ends the round call puts the camera's idle shot there)
+    if (const uint32_t state = ppc::ld32(base, camera + kWinState); state >= 0x11 && state <= 0x13)
+        round_call_after(base, camera);
+}
+
 PPC_FUNC(sub_05FB6FEC_orig); // a fighter's focus point (r3 out: x y z, r4 &fighter)
 PPC_FUNC(sub_05FB6FEC) {
     const uint32_t out = ctx.r[3], player = ctx.r[4] ? ppc::ld32(base, ctx.r[4]) : 0;
@@ -673,7 +719,7 @@ PPC_FUNC(sub_05FC085C_orig); // the 2-character camera (r3 out, r4 r5 cameras, r
 PPC_FUNC(sub_05FC085C) {
     const uint32_t camera = ctx.r[3], fighters[2] = {ctx.r[6], ctx.r[7]};
     const float heights[2] = {height_of(fighters[0]), height_of(fighters[1])};
-    if (fighters[0] && fighters[1]) g_pair[0] = fighters[0], g_pair[1] = fighters[1];
+    if (fighters[0] && fighters[1]) g_pair[0] = fighters[0], g_pair[1] = fighters[1], g_lift = 0;
     // (Without both fighters and their moves the title makes no camera: sub_05FC085C returns at once.)
     const bool giant = fighters[0] && fighters[1] && (heights[0] > 0 || heights[1] > 0) &&
                        ppc::ld32(base, fighters[0] + kPlayerMove) && ppc::ld32(base, fighters[1] + kPlayerMove);

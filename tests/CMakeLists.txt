@@ -241,6 +241,13 @@ target_compile_features(unblurred_test PRIVATE cxx_std_20)
 target_compile_options(unblurred_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME unblurred_test COMMAND unblurred_test)
 
+# The round call's camera with a giant in the fight (title/round_call.h); made-up fighters.
+add_executable(round_call_test round_call_test.cpp)
+target_include_directories(round_call_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(round_call_test PRIVATE cxx_std_20)
+target_compile_options(round_call_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME round_call_test COMMAND round_call_test)
+
 # Fades of a Tekken 8 fighter's summoned weapons (title/summon_fade.h); made-up values.
 add_executable(summon_fade_test summon_fade_test.cpp)
 target_include_directories(summon_fade_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
