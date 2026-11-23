@@ -227,6 +227,13 @@ target_compile_features(select_grid_test PRIVATE cxx_std_20)
 target_compile_options(select_grid_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME select_grid_test COMMAND select_grid_test)
 
+# An added fighter's play record (title/record_store.h): the port's own file per fighter code; made-up rows.
+add_executable(record_store_test record_store_test.cpp)
+target_include_directories(record_store_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(record_store_test PRIVATE cxx_std_20)
+target_compile_options(record_store_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME record_store_test COMMAND record_store_test)
+
 # Meshes the motion blur leaves out (title/unblurred.h); a made-up NUD.
 add_executable(unblurred_test unblurred_test.cpp)
 target_include_directories(unblurred_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
