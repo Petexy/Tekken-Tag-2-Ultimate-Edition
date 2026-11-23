@@ -26,6 +26,7 @@
 #include "cafe/vfs.h"
 #include "gx2/hooks.h"
 #include "title/archive.h"
+#include "title/select_grid.h"
 
 #include <zlib.h>
 
@@ -142,6 +143,7 @@ constexpr uint32_t kRandomCell = 54, kCursorRowOne = 0x10531388;
 constexpr float kRowsCursorRow = 148.0f + 65.0f;
 bool g_grid_rows = false;       // shared/grid.ini `grid = rows`: the grid with the new top row
 constexpr uint32_t kFirstAddedCell = 62;
+std::optional<select_grid::RandomTwin> g_random_twin; // the '?' of the new top row and of the title's top row
 constexpr uint32_t kSpacers[2] = {0x1053138C, 0x105314CC}; // the grilles over the top row's ends: left, right
 constexpr uint32_t kFreeBanks[] = {1, 122, 233, 253};
 
@@ -1197,15 +1199,15 @@ void patch_title(size_t k) {
 // The added fighters' cells (kCells), joined to the grid's: each row a ring
 // left and right, each column a ring up and down, in column and row order
 // (as the title's own cells are). A slot with no fighter has a random cell
-// nothing moves to.
+// nothing moves to. With the new top row the title's top row is left
+// without a '?' (its own went up): the cell after the last added one stands
+// there, joined like any other, and g_random_twin makes it one with the
+// '?' above it (see sub_033E4704).
 void place_cells() {
-    struct Cell {
-        int32_t column, row;
-        uint32_t cell;
-        bool operator<(const Cell& o) const { return std::tie(column, row) < std::tie(o.column, o.row); }
-    };
-    if (g_grid_rows && load(kGrid + 32 * kRandomCell + kCellId) == 63 &&
-        load(kGrid + 32 * kRandomCell + kCellColumn) == 11) {
+    using select_grid::Cell;
+    const bool rows = g_grid_rows && load(kGrid + 32 * kRandomCell + kCellId) == 63 &&
+                      load(kGrid + 32 * kRandomCell + kCellColumn) == 11;
+    if (rows) {
         store(kGrid + 32 * kRandomCell + kCellRow, static_cast<uint32_t>(-1));
         store(kCursorRowOne, std::bit_cast<uint32_t>(kRowsCursorRow));
     }
@@ -1231,25 +1233,20 @@ void place_cells() {
         cells.push_back({added.column, added.grid_row, cell});
     }
     if (last == 0) return;
-    std::sort(cells.begin(), cells.end());
-    auto ring = [&](auto same, uint32_t back, uint32_t ahead) {
-        std::vector<Cell> sorted = cells;
-        std::stable_sort(sorted.begin(), sorted.end(), [&](const Cell& a, const Cell& b) { return same(a) < same(b); });
-        for (size_t i = 0; i < sorted.size();) {
-            size_t j = i;
-            while (j < sorted.size() && same(sorted[j]) == same(sorted[i])) ++j;
-            for (size_t n = i; n < j; ++n) {
-                const uint32_t next = sorted[n + 1 < j ? n + 1 : i].cell;
-                store(kGrid + 32 * sorted[n].cell + ahead, next);
-                store(kGrid + 32 * next + back, sorted[n].cell);
-            }
-            i = j;
-        }
-    };
-    // rows: column order (cells is sorted by column, then row); columns: row order
-    ring([](const Cell& c) { return static_cast<int64_t>(c.row); }, kCellLeft, kCellRight);
-    std::sort(cells.begin(), cells.end(), [](const Cell& a, const Cell& b) { return std::tie(a.row, a.column) < std::tie(b.row, b.column); });
-    ring([](const Cell& c) { return static_cast<int64_t>(c.column); }, kCellUp, kCellDown);
+    if (rows) {
+        const uint32_t cell = ++last, at = kGrid + 32 * cell;
+        store(at + kCellId, 63);
+        store(at + kCellColumn, 11);
+        store(at + kCellRow, 0);
+        cells.push_back({11, 0, cell});
+        g_random_twin.emplace(kRandomCell, cell);
+    }
+    for (const auto& [cell, links] : select_grid::rings(cells)) {
+        store(kGrid + 32 * cell + kCellUp, links.up);
+        store(kGrid + 32 * cell + kCellDown, links.down);
+        store(kGrid + 32 * cell + kCellLeft, links.left);
+        store(kGrid + 32 * cell + kCellRight, links.right);
+    }
     store(kGrids + 8 * 1 + 4, last + 1);
 }
 
@@ -3493,6 +3490,40 @@ PPC_FUNC(sub_033E265C) {
         set_mask_bit(cursor, static_cast<uint32_t>(k), g_lent_bit);
         g_lent = -1;
     }
+}
+
+// Moves a cursor (r3; its cell at +56, its select at +0x8210) to the cell its
+// cell names for the direction pressed, if any, and then sets the cursor up
+// for that cell (sub_033E1340, cursor r3). The select's grid is at +76. With the new top row the '?' of
+// two rows is one cell (g_random_twin): a cursor at the lower place moves
+// from the cell that stands there, and one that moves onto that cell rests
+// on the '?' itself, before the title looks at where it is.
+constexpr uint32_t kCursorCell = 56, kCursorSelect = 0x8210, kGridOfSelect = 76;
+uint32_t g_moving_cursor = 0;           // the cursor sub_033E4704 is moving
+std::optional<uint32_t> g_moved_to;     // and the cell it was moved to, if it was
+PPC_FUNC(sub_033E1340_orig);
+PPC_FUNC(sub_033E1340) {
+    if (g_random_twin) {
+        const uint32_t cursor = ctx.r[3], cell = load(cursor + kCursorCell);
+        if (cursor == g_moving_cursor) g_moved_to = cell;
+        store(cursor + kCursorCell, g_random_twin->stay(cell));
+    }
+    sub_033E1340_orig(ctx, base);
+}
+PPC_FUNC(sub_033E4704_orig);
+PPC_FUNC(sub_033E4704) {
+    const uint32_t cursor = ctx.r[3], select = g_random_twin ? load(cursor + kCursorSelect) : 0;
+    if (select == 0 || load(select + kGridOfSelect) != 1) {
+        sub_033E4704_orig(ctx, base);
+        return;
+    }
+    store(cursor + kCursorCell, g_random_twin->leave(cursor, load(cursor + kCursorCell)));
+    g_moving_cursor = cursor;
+    g_moved_to.reset();
+    sub_033E4704_orig(ctx, base);
+    g_moving_cursor = 0;
+    const uint32_t cell = load(cursor + kCursorCell);
+    store(cursor + kCursorCell, g_moved_to ? g_random_twin->arrive(cursor, *g_moved_to) : g_random_twin->stay(cell));
 }
 
 // The '?' cell (cell 11, 34 or 54 of a grid) picks its cursor's roulette id,
