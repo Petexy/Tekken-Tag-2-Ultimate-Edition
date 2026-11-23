@@ -10,8 +10,11 @@ SHORT_NAME = 'CLIVE'          # his name on the 2D screens (TTT2 shows short nam
 TEKKEN8_ID = 36               # his FighterId in Tekken 8 (BaseCharacterItem BCI_okm_*; autodump.ROSTER; a DLC fighter)
 TEKKEN8_CODE = 'okm'          # his code in Tekken 8's files (Character/Item/model/unique/okm/)
 CODE = 'clv'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
-REVISION = 1                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
-                              # tornado hits that launch, f+3 / qcf+1 / Phoenix 2,1 reach, Updraft's Tag Assault
+REVISION = 2                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
+                              # tornado hits that launch, f+3 / qcf+1 / Phoenix 2,1 reach, Updraft's Tag Assault;
+                              # round 2: f+2 / f,F+2 from Tekken 8's first clip frame, b+1+2 / d/b+1+2 / f+3 /
+                              # b,b+1+4 boxes where Tekken 8's are, SS 2,1's second hit and Phoenix 2 reach, bounds
+                              # on Burning Rain's last hit and f,F+1+2 (Staff of Judgment)
 SEX = 'male'
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
@@ -219,8 +222,16 @@ PREFABS = {
     'models': _PREFAB_MODELS,
     # what reaches in these moves is a later box: the middle of the blade's sweep, not its tip (u/f+1 follow-ups, up,
     # d/f+2 hit on ground), and the hand's point half a metre out (u/f+2's last); d/b+2,1's ice spikes (0.74 to 2.01 m
-    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall)
-    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3)},
+    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall); SS 2,1's second hit
+    # (key:e686509f, Titan's punch): the forearm's line and the line from a metre past the hand (Tekken 8's box 2) back
+    # to it, where boxes 0 and 1, the fist alone, met an opponent a little further away or off axis by 0 to 2 cm or not;
+    # Phoenix 2: the staff's tip to his hips and to his left knee (Tekken 8's boxes 3 and 4; box 0 is the tip alone, on
+    # both lines): the tip comes down 1.2 m ahead at 1.15 m high, and an opponent low in front of him (getting up 0.8 m
+    # away) is under the line to the hips. Tekken 8 hits her with box 5, the tip to a point 0.67 m high by his right hand
+    # (box 4 ends 20 cm above the knee and misses her); TTT2's lines end on bare joints, and the one to the knee reaches
+    # where box 5 does (the one to the right hand passes 14 cm over her)
+    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3),
+                  'key:e686509f': (1, 2), 'key:24f28bb0': (3, 4)},
     # u/f+4, in the air: the toe's line to a point past the knee (TTT2 has no such points).
     # Phoenix 2,1's second hit: the left hand's path and the upright line of the farther of Tekken 8's two columns
     # (0.4 to 1.3 m high, 1.2 m ahead; 0.8 m the other: a clip has two root points). Boxes 0 and 1 are the hand only,
@@ -230,17 +241,26 @@ PREFABS = {
                                    ('joint', 'R_LowerLeg', (0.0, 500.0, 200.0), (0.0, 0.0, 0.0))),
                   'key:d5840b8d': (13, 0, (0.0, 1300.0, 1200.0), (0.0, 400.0, 1200.0))},
     # the last hit of phoenix 3,2: she is launched further than in Tekken 8 here; the path is 800 mm longer ahead (the same)
-    'scene_reach': {'key:5c7c9f59': 800.0},
+    # The moves whose creature follows him as in Tekken 8 while their hold clip's path, the boxes', is where the move
+    # began (the clip is the creature's claw or wrist plus his travel, every frame, to 30-80 mm; prefabs8 HIT POINTS):
+    # followed, the box ran his travel ahead, so the path is taken back by his travel on its active frames (x left, z
+    # ahead, mm). f+3 (Garuda's talon, not held: below): 1.8 to 2.4 m ahead of where he began, under the talon.
+    # b+1+2 (Titan's wrist; travel 1492 and 1576): 2 and 2.8 m ahead, where followed it was 3.4 and 4.3 m and missed
+    # an opponent 2.8 m away. d/b+1+2, its second hit and its ,1 (key:7de64f86; Garuda's talons: travel 870, 1879 and
+    # 1193), and b,b+1+4 (Titan's punch; travel 1346 and 1395: it reached 4 m and missed at 2.5 m, now 3 m as in Tekken 8)
+    'scene_reach': {'key:5c7c9f59': 800.0, 'Okm_6LK': (90.0, 0.0, -1050.0), 'Okm_4WP': (-12.0, 0.0, -1534.0),
+                    'Okm_1wp': (-147.0, 0.0, -869.0), 'Okm_1wp2': (-240.0, 0.0, -1879.0),
+                    'key:7de64f86': (-44.0, 0.0, -1193.0), 'Okm_44LPRK': (82.0, 0.0, -1370.0)},
     # the loops of Wings of Light and of its walks: no row of their own, nothing hides the wings; clip 0 is as long (80)
     'body_clip_moves': {'key:50cc78a8': 0, 'key:d6291e44': 0, 'key:8b2abee3': 0, 'key:b463dca1': 0, 'key:0fcdd6ec': 0},
     # the throws with Torgal: their scene stays where they began (prefabs8 HELD SCENES). 1+3 takes him 4.4 m back
     # while Torgal bites the victim 1.6 m ahead of the scene's origin; followed, the dog played 4.4 m short.
     # key:22ca2406 is its version from the opponent's left side (1+3 or 2+4).
-    # Garuda's talon in f+3 and qcf+1 too, its hit box with it (HOLD_CLIP_PROP): Tekken 8's frames show f+3's talon
-    # coming down 1.6 to 2.4 m ahead of where he began (followed: 2.7 to 3.4 m, and it hit an opponent 3.1 m away),
-    # and qcf+1's claw hitting an opponent 1.46 m away on its first frames (followed, it set out 2 m ahead of him and
-    # missed anyone nearer than 1.5 m)
-    'held_moves': ('Okm_FLnage_n', 'key:22ca2406', 'Okm_6LK', 'Okm_236LP'),
+    # Garuda's claw in qcf+1 too, its hit box with it (HOLD_CLIP_PROP): Tekken 8's frames show it hitting an opponent
+    # 1.46 m away on its first frames (followed, it set out 2 m ahead of him and missed anyone nearer than 1.5 m).
+    # Not f+3: its talon's clip is drawn where he is now (Tekken 8's hold clip, the box's path, is the talon's place
+    # plus his travel, every frame); held, it came down 1.05 m short, behind him at the hit (scene_reach keeps the box)
+    'held_moves': ('Okm_FLnage_n', 'key:22ca2406', 'Okm_236LP'),
     # .. and their scene cut (prefabs8 SCENE CUTS): 2.26 m of that is one frame, 66, where Tekken 8 cuts to Torgal (he
     # teleported); taken back, and the victim thrown that much further from frame 40, where his push starts, so the
     # bite and the slash meet as in Tekken 8. key:fbb1941f is key:22ca2406's victim
@@ -521,10 +541,11 @@ MOVESET = {
     'direct': [(r'^La_sKAM00_$', 'move', ['Okm_sKAM00_']),                      # Lars's stance -> his
                (r'^(la|mk)_s', 'anim', ['okm_s%02d' % k for k in range(3)]),    # intros
                (r'^la_w', 'anim', ['okm_w%02d' % k for k in range(3)])],        # win poses
-    # TTT2 bounds (Tekken 8 has none, and his tornados do not become any): an air hit slams the opponent into the
-    # floor once per juggle (convert/move_overrides.py). f+3 Knight's Gambit, f,F+2 Soul Cleave, f+2,2,2's last hit
-    # (Burning Chain) and jump 1 (Griffin Hunter) out of every jump, on time or late (bake_air8's copies of the air
-    # moves are made after the bounds, so they bound alike). (Moves no name is known for are named by their key,
+    # TTT2 bounds (Tekken 8 has none, and his tornados do not become any by themselves): an air hit slams the
+    # opponent into the floor once per juggle (convert/move_overrides.py). f+3 Knight's Gambit, f,F+2 Soul Cleave,
+    # f+2,2,2's last hit (Burning Chain), jump 1 (Griffin Hunter) out of every jump, on time or late (bake_air8's
+    # copies of the air moves are made after the bounds, so they bound alike), Updraft 2,2's last hit (Burning Rain)
+    # and f,F+1+2 (Staff of Judgment). (Moves no name is known for are named by their key,
     # 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
     'bounds': {
         'Okm_6LK': True,       # f+3
@@ -537,11 +558,19 @@ MOVESET = {
         'key:0ca5fca3': True,         # ... out of key:a14f5e76, late
         'key:c42755c9': True,         # ... back (u/b+1 too)
         'key:4bd7b552': True,         # ... back, late
+        # Updraft 2,2 (Burning Rain), its last hit (the beta testers' list: "Updraft 2"; one move, whichever jump
+        # it comes from): Tekken 8's tornado hit, after which its combos go on (d/b+2,1 reaches her after the bound).
+        # Not jump 2's first hit: its 2,2 follow-up hits without a bound too, and nothing else reaches her after one
+        # there before she is down
+        'key:36f278bb': True,
+        'key:dda4fe46': True,         # f,F+1+2 Staff of Judgment (the beta testers' list)
     },
+    # the bound icons of these in the command list (Tekken 8 text key: the bound, the hit it is): their demos dash or
+    # jump first, which the demo walk does not follow
+    'bound_entries': {'TEXT_010_MOVELIST_NAME_OKM_7020': ('key:36f278bb', 3),     # Burning Rain, During Updraft 2,2
+                      'TEXT_200_MOVELIST_NAME_OKM_302': ('key:dda4fe46', 1)},     # Staff of Judgment, f,F+1+2
     # the generic throw keeps the donor's row, active at 12 only: Tekken 8's frames
-    'active_frames': {'Thrmv_B2_01': (15, 17),
-                       # f,f+2: pushed back from where Tekken 8 lets him run in, the blade comes down one frame later
-                       'Okm_66RP': (19, 21)},
+    'active_frames': {'Thrmv_B2_01': (15, 17)},
 }
 
 # ------------------------------------------------------------------------------------------------ ZAN gauge

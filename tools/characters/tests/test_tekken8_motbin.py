@@ -339,6 +339,11 @@ class Reader(unittest.TestCase):
         m.set_anim_lengths(lambda key, where: 59)
         self.assertEqual(m.tables['moves'][0]['anim_len'], 60)
         self.assertEqual(m.tables['moves'][2]['anim_len'], 0)
+        self.assertEqual(m.anim_skip(0), 0)                        # anim_start 1: the clip from its first frame
+        m.tables['moves'][0]['anim_start'] = 3
+        self.assertEqual(m.anim_skip(0), 2)
+        m.tables['moves'][0]['anim_start'] = 0
+        self.assertEqual(m.anim_skip(0), 0)
 
     def test_bank_errors(self):
         with self.assertRaises(InputError):

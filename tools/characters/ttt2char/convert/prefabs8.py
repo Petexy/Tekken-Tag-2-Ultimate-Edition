@@ -33,7 +33,11 @@ asks for it; a fighter without one is not touched.
   that path while the move plays (scene_spots: spots convert/summons8.py hands to tekken8/anim.py pair_values). TTT2's
   lines have no radius: a box with one becomes the line across it, sideways, which the path sweeps forward.
   MISSILE_CLIP_PROP names such a clip too, with no prefab: a missile, the joints flying straight ahead metres out (Clive's
-  Wings of Light 1 and 2); the same spots, and convert/missiles8.py shows what flies.
+  Wings of Light 1 and 2); the same spots, and convert/missiles8.py shows what flies. Some hold clips' paths are where
+  the move began while the prefab is drawn where he is (the path is the prefab's bone plus his travel, frame by frame:
+  Clive's f+3, b+1+2, d/b+1+2): followed, the boxes ran his travel ahead of Tekken 8's. The definition's PREFABS
+  'scene_reach' {move: mm ahead, or (x, y, z) mm} moves a move's path by that much (his travel on its active frames
+  taken back), the prefab left where he is.
 * HELD SCENES. The ground follows him (a definition's ground weapon 'held': False: Tekken 8 plays most clips where he
   is). A throw's scene stays where it began: its victim's clip is in it, and the attacker's clip takes him metres
   away (Clive's 1+3 cuts him 4.4 m back while Torgal bites the victim 1.6 m ahead of the origin; followed, the dog
@@ -1497,10 +1501,11 @@ def scene_spots(k, d, stats):
         index = int(rows[0]['value'])
         fired = _fired(_plain(rows[0]['frame'], entry), entry)
 
-        reach = float(sp.get('scene_reach', {}).get(k.move_name(i) or '#%d' % i, 0.0))
+        reach = sp.get('scene_reach', {}).get(k.move_name(i) or '#%d' % i, 0.0)
+        reach = (0.0, 0.0, float(reach)) if np.isscalar(reach) else tuple(float(x) for x in reach)
 
         def spot(h, off, delta):
-            delta = (float(delta[0]), float(delta[1]), float(delta[2]) + reach)
+            delta = tuple(float(delta[n]) + reach[n] if reach[n] else float(delta[n]) for n in range(3))
             return ('scene', joints[h.loc], tuple(float(x) for x in off), delta, index, fired)
         thick = max(ours, key=lambda h: float(h.radius))
         r = float(thick.radius)
