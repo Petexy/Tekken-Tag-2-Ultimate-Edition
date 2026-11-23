@@ -17,6 +17,7 @@ TEKKEN8_ID = 32               # his FighterId in Tekken 8 (BaseCharacterItem BCI
 TEKKEN8_CODE = 'got'          # his code in Tekken 8's files (Character/Item/model/unique/got/)
 CODE = 'aza'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
 SEX = 'male'
+REVISION = 1                  # d/f+3+4's hit leaves him 15 frames ahead, not 120 (1)
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
 # tag moves, its voice list, sound banks, item database and effects are used for him.
@@ -162,6 +163,13 @@ MOVESET = {
     'hit_grabs': {'key:34fcd66e': {'grab': 'key:657bbe2c', 'guard_as': 'key:6ecebd8e'}},
     'active_frames': {'key:34fcd66e': (13, 17)},
     'damage': {'key:34fcd66e': 0},
+    # d/f+3+4, the crystal prison (unblockable, hits at frame 80 of its 140): Tekken 8 holds the opponent it hits for
+    # 170 frames (its boss's stun: key:bbbf54b2, a clip of 180), 120 frames after he can act again, time for the same
+    # move again without end. Here its hit leaves him 15 frames ahead (the user's choice, 2026-11-22: a standing or
+    # crouching opponent, counter hit or not, acts 15 frames after he can; convert/move_overrides.py hit_advantage):
+    # the hold ends at its frame 65 and the opponent stands 10 frames later; an opponent hit in the air, lying or at
+    # a wall reacts as before
+    'hit_advantage': {'key:477c5f91': {'reaction': 'key:bbbf54b2', 'frames': 15}},
     # his tail's attacks hit along his tail as it is drawn (its spring chain swings its own way, not as Tekken 8's
     # tail): from his hips to its middle and from there to its tip (WEAPONS' points 0xF0 and 25), not from Tekken 8's
     # boxes (d/b+3, d/b+3,3: a line off his hips in the Hip joint's frame, 2 m under the floor 3 m out; 3: the tail
