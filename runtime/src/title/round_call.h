@@ -20,6 +20,15 @@
 // places the title's camera goes through on every stage, and no others (a
 // metre higher on that way it went through a hall's gallery: a black
 // picture).
+//
+// The call from above comes down level with the point it looks at, as the
+// fight's camera of two men is; with a giant the fight's camera looks down at
+// it from `level` higher (the title's direction, further back), and the
+// picture tilted down in one frame when the round began. That call's eye
+// comes down to the fight camera's height over its point instead, slowing into
+// it (from_above()). The call round the side (0x11) and the third (0x13) end
+// with the fight camera's own tilt already, their eyes never higher over
+// their points than it.
 
 #include <algorithm>
 #include <cmath>
@@ -44,6 +53,25 @@ inline bool raise(float eye[3], float target[3], float lift, float level) {
     eye[1] += lift * share(eye[1] - target[1], lift, level);
     target[1] += lift;
     return true;
+}
+
+// The call from above, raised: its eye's height over the raised point, for
+// its own `over` (the title's eye over the title's point), a fight camera
+// raised by `lift` with its eye `level` over its point. From `top` = level +
+// 2 * lift up the title's own eye (over - lift: the point alone goes up);
+// under it the eye takes ever more of the lift, all of it and `level` more
+// where the title's call has come down level: level + lift * (over / top)^k,
+// k = top / lift, meets the title's way at `top` at its speed and comes down
+// to the fight camera's tilt slowing all the way, as the title's own does
+// (a share of the lift in a straight ramp halved its speed in one frame; the
+// eye stopping at `level` would have been a second jolt). Its eye is never
+// over the title's own by more than lift + level, and only near the end.
+inline float from_above(float over, float lift, float level) {
+    const float top = level + 2 * lift;
+    if (!(lift > 0) || !std::isfinite(lift) || !std::isfinite(level) || !std::isfinite(over) || !(top > lift))
+        return over;
+    if (over >= top) return over - lift;
+    return level + lift * std::pow(std::max(over, 0.0f) / top, top / lift);
 }
 
 // How high the picture of a shot reaches where it looks (at the point's
