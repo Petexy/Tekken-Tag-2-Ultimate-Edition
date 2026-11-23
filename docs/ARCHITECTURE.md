@@ -1031,6 +1031,27 @@ fighter's code with the title's key registry (`*0x107A3FB4`: per code, the
 keys of its body files and part packs by type) and chara master
 (`*0x107A71E8`), the way the title registers its own.
 
+**Its play record.** The player's rank, wins and losses with each fighter
+are a row of the player's profile: 63 rows of 76 bytes by select id (profile
++9216), saved with it; the profile's other saved fields (the player's totals
+among them) follow the table. A profile is also a side of the match set-up:
+picking a team copies each member's row into the member's block
+(`sub_04FA571C`, the id capped at 62), a fight counts in the block, and
+`sub_04FA5928` writes the block back to the row of the member's id byte. For
+an added fighter that was a row past the table. The port keeps an added
+fighter's row itself, in a file of its own, `<save folder>/records/<code>.bin`
+(76 bytes, the title's layout; `title/record_store.h`), named by the pack's
+code because select ids move when packs are added or removed: the member's
+block is filled from it at the pick, taken back into it after a fight (the
+title's own write-back runs on ZAKO B's row, which is then put back as it
+was), and the menus are answered from it: the natives
+`ProfileGetCharacterRank`/`Wins`/`Loses` (`sub_085B1D30` and the two after
+it) and the select screen's plates (`sub_06F48E08`, which finds the fighter
+from its UI position, Paul's for an added fighter: at its two questions the
+answer is a row nobody is shown with, ZAKO B's or ZAKO A's, holding the
+added fighter's row until the plates are done). The title's save is not
+changed: it loads in a build without this and the other way round.
+
 **Its cell.** The select grid (`0x107B7668`, 32-byte cells: fighter, the
 cells the cursor moves to, column and row) has 62 cells; it grows over the
 following, unused grid of the PlayStation 3's smaller roster. The added

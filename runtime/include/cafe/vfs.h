@@ -46,6 +46,8 @@ struct DirEntry {
 // `source` is a .wua file or a directory holding code/, content/, meta/.
 void open_game(const std::filesystem::path& source);
 void set_save_root(const std::filesystem::path& root);
+// The host folder of the saves (the title's own under it; the port's own files beside them).
+const std::filesystem::path& save_root();
 
 // The title's archive `archive` ("content/hdd/data003": its .ofs and .bin
 // files) with the entries named in `stored` (by name hash, as stored: see

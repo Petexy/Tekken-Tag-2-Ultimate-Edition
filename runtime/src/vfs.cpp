@@ -347,6 +347,8 @@ void set_save_root(const fs::path& root) {
     fs::create_directories(root, ec);
 }
 
+const fs::path& save_root() { return g_save_root; }
+
 std::optional<std::vector<uint8_t>> read_whole(std::string_view path) {
     int32_t handle;
     if (open_file(path, "r", handle) != kOk) return std::nullopt;

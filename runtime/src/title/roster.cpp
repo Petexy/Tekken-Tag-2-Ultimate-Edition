@@ -1,4 +1,5 @@
 #include "title/roster.h"
+#include "title/record_store.h"
 #include "title/solo_ghost.h"
 #include "title/eliza_assist.h"
 #include "title/fight_camera.h"
@@ -59,6 +60,7 @@ struct Traces {
     bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
     bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
     bool effect_marks = std::getenv("TTT2_TRACE_EFFECT_MARKS") != nullptr; // effects that stay, effects at weapons
+    bool records = std::getenv("TTT2_TRACE_RECORDS") != nullptr;           // the added fighters' play records
 };
 const Traces& traces() {
     static const Traces read;
@@ -1953,13 +1955,55 @@ uint32_t match_side(uint32_t player) {
 // whose byte the setters below may have capped (only ZAKO B, of the Fight
 // Lab, is 62 otherwise).
 uint32_t g_picks[2][2] = {{0, 0}, {0, 0}};
+
+// The player's record with each fighter (rank, wins, losses) is a row of the
+// profile's table: 63 rows of 76 bytes by select id at +9216, saved with the
+// profile (the bytes after the table are its other saved fields). A profile
+// is also a match side: picking a team copies each member's row into its
+// block (sub_04FA571C: the id capped at 62, so ZAKO B's row), the fight's
+// result is counted in the block, and sub_04FA5928 writes the block back to
+// the row of the member's id byte, uncapped: for an added fighter (the byte
+// is put back to its id, below) that was "row 64 + k": the profile's saved
+// fields after the table (the player's totals among them), and nothing read
+// it back: the next pick copied ZAKO B's row again, so the fighter's rank,
+// wins and losses were gone after the main menu. The port keeps an added
+// fighter's row itself, by its pack's code (title/record_store.h): the
+// member's block is filled from it, the block is taken back into it after a
+// fight and never written past the table, and the menus' questions are
+// answered from it (the natives below; the select screen's plates further
+// down, at sub_06F48E08).
+// Only the player's own profile (kind 1) has such rows: a ghost's or a CPU's
+// side is not written back by the title either.
+constexpr uint32_t kProfileKind = 0, kPlayerKind = 1, kProfileRows = 9216, kProfileRest = 14948;
+constexpr uint32_t kPlayerProfile = 0x108514B4; // its holder: the profile (+0) if +4, else the side of player +8
+record_store::Rows g_records;
+uint32_t player_profile() {
+    return load8(kPlayerProfile + 4) ? load(kPlayerProfile) : match_side(load(kPlayerProfile + 8) & 1);
+}
+// Member m of a profile is added fighter k: its block from the fighter's row.
+void fill_member(uint32_t profile, uint32_t m, int k) {
+    if (load8(profile + kProfileKind) != kPlayerKind) return;
+    const record_store::Row& row = g_records.row(vfs::save_root(), g_added[k].code);
+    record_store::to_member(row, guest_pointer(profile + kSideIds + kSideMember * m),
+                            guest_pointer(profile + kProfileRest + record_store::kRestSize * m));
+    if (traces().records) {
+        std::fprintf(stderr, "ttt2: records: %s picked (profile %08X member %u): rank %u, %u wins, %u losses\n",
+                     g_added[k].code.c_str(), profile, m, record_store::rank(row, false),
+                     record_store::wins(row, false), record_store::losses(row, false));
+    }
+}
+// Puts an added fighter's id back in a member's byte the title capped; its block was filled from the capped row.
+void restore_member(uint32_t profile, uint32_t m, uint32_t id) {
+    store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(id));
+    fill_member(profile, m, slot_of_id(id));
+}
 void fix_side_ids() {
     for (uint32_t p = 0; p < 2; ++p) {
         const uint32_t side = match_side(p);
         if (!side) continue;
         for (uint32_t m = 0; m < 2; ++m) {
             const uint32_t at = side + kSideIds + kSideMember * m;
-            if (slot_of_id(g_picks[p][m]) >= 0 && load8(at) == 62) store8(at, static_cast<uint8_t>(g_picks[p][m]));
+            if (slot_of_id(g_picks[p][m]) >= 0 && load8(at) == 62) restore_member(side, m, g_picks[p][m]);
         }
     }
 }
@@ -2054,9 +2098,71 @@ PPC_FUNC(sub_04FA571C) {
         for (uint32_t m = 0; m < 2; ++m) g_picks[p][m] = slot_of_id(ids[m]) >= 0 ? ids[m] : g_picks[p][m];
     }
     for (uint32_t m = 0; m < 2; ++m) {
-        if (slot_of_id(ids[m]) >= 0 && side) store8(side + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+        if (slot_of_id(ids[m]) >= 0 && side) restore_member(side, m, ids[m]);
     }
 }
+// After a fight (profile r3): each member's block back to its row, if the
+// profile is one the title keeps records for (sub_04FC6B28: kinds 1 and 3).
+// An added fighter's block goes to the port's row; the title's own copy is
+// given ZAKO B's row for it (in the table; put back as it was afterwards).
+PPC_FUNC(sub_04FA5928_orig);
+PPC_FUNC(sub_04FA5928) {
+    const uint32_t profile = ctx.r[3];
+    uint32_t ids[2] = {0, 0};
+    bool any = false;
+    for (uint32_t m = 0; m < 2 && g_active && profile; ++m) {
+        ids[m] = load8(profile + kSideIds + kSideMember * m);
+        any = any || slot_of_id(ids[m]) >= 0;
+    }
+    if (!any) {
+        sub_04FA5928_orig(ctx, base);
+        return;
+    }
+    for (uint32_t m = 0; m < 2; ++m) {
+        const int k = slot_of_id(ids[m]);
+        if (k < 0 || (m == 1 && ids[1] == ids[0]) || load8(profile + kProfileKind) != kPlayerKind) continue;
+        record_store::Row row = g_records.row(vfs::save_root(), g_added[k].code);
+        record_store::from_member(row, guest_pointer(profile + kSideIds + kSideMember * m),
+                                  guest_pointer(profile + kProfileRest + record_store::kRestSize * m));
+        const bool saved = g_records.save(vfs::save_root(), g_added[k].code, row);
+        if (!saved || traces().records) {
+            std::fprintf(stderr, "ttt2: records: %s after the fight: rank %u, %u wins, %u losses%s\n",
+                         g_added[k].code.c_str(), record_store::rank(row, false), record_store::wins(row, false),
+                         record_store::losses(row, false),
+                         saved ? "" : " (NOT written to the save folder: kept for this session, tried again later)");
+        }
+    }
+    const uint32_t spare = profile + kProfileRows + record_store::kRowSize * kCappedId;
+    record_store::Row kept;
+    std::memcpy(kept.data(), guest_pointer(spare), kept.size());
+    for (uint32_t m = 0; m < 2; ++m) {
+        if (slot_of_id(ids[m]) >= 0) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(kCappedId));
+    }
+    sub_04FA5928_orig(ctx, base);
+    for (uint32_t m = 0; m < 2; ++m) {
+        if (slot_of_id(ids[m]) >= 0) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+    }
+    std::memcpy(guest_pointer(spare), kept.data(), kept.size());
+}
+// The menus' questions about the player's record with a fighter (set r3: 0
+// the first set of numbers, else the second; select id r4): the title's
+// answers read the row of the id, asserting an id below 63.
+#define RECORD_NUMBER(name, number)                                                                              \
+    PPC_FUNC(name##_orig);                                                                                       \
+    PPC_FUNC(name) {                                                                                             \
+        const int k = g_active ? slot_of_id(ctx.r[4]) : -1;                                                      \
+        if (k < 0) {                                                                                             \
+            name##_orig(ctx, base);                                                                              \
+            return;                                                                                              \
+        }                                                                                                        \
+        const uint32_t profile = player_profile();                                                               \
+        const bool player = profile && load8(profile + kProfileKind) == kPlayerKind;                             \
+        ctx.r[3] = player ? record_store::number(g_records.row(vfs::save_root(), g_added[k].code), ctx.r[3] != 0) : 0; \
+    }
+RECORD_NUMBER(sub_085B1D30, rank)   // ProfileGetCharacterRank
+RECORD_NUMBER(sub_085B1DF4, wins)   // ProfileGetCharacterWins
+RECORD_NUMBER(sub_085B1EB8, losses) // ProfileGetCharacterLoses
+#undef RECORD_NUMBER
 // The other functions that write the bytes.
 #define SIDE_IDS(name)                                                                                           \
     PPC_FUNC(name##_orig);                                                                                       \
@@ -2084,7 +2190,7 @@ PPC_FUNC(sub_076D6CB0) {
     if (!g_active) return;
     for (uint32_t m = 0; m < 2; ++m) {
         const bool added = slot_of_id(ids[m]) >= 0;
-        if (added && profile) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+        if (added && profile) restore_member(profile, m, ids[m]);
         if (player < 2 && (added || kind == kCpuProfile)) g_picks[player][m] = added ? ids[m] : 0;
     }
     fix_side_ids();
@@ -3018,6 +3124,56 @@ PPC_FUNC(sub_06EFA17C) {
         }
     }
     sub_06EFA17C_orig(ctx, base);
+}
+
+// The select screen's record plates (sub_06F48E08: for each player, the rank,
+// wins and losses with the fighter under the cursor, per team member) find
+// the fighter's id from its UI position (record of the position, id of the
+// record: the calls returning to 0x06F49030 for the first member and to
+// 0x06F49B00 for the second; r23 the player, r26 the player's profile) and
+// read the profile's row of that id. An added fighter's position is Paul's,
+// so its plate showed the player's record with Paul. At those two calls the
+// answer for an added fighter is a row the screen shows for nobody else
+// (ZAKO B's for the first member, ZAKO A's for the second: neither can be
+// picked there), which holds the added fighter's row (title/record_store.h)
+// until the plates are done and is then as it was.
+constexpr uint32_t kPlateIds[2] = {0x06F49030, 0x06F49B00};
+constexpr uint32_t kPlateRows[2] = {62, 61};
+struct PlateLoan {
+    uint32_t at;
+    record_store::Row kept;
+};
+bool g_plates = false;
+std::vector<PlateLoan> g_plate_loans;
+PPC_FUNC(sub_06F48E08_orig);
+PPC_FUNC(sub_06F48E08) {
+    g_plates = g_active;
+    sub_06F48E08_orig(ctx, base);
+    g_plates = false;
+    for (auto loan = g_plate_loans.rbegin(); loan != g_plate_loans.rend(); ++loan) {
+        std::memcpy(guest_pointer(loan->at), loan->kept.data(), loan->kept.size());
+    }
+    g_plate_loans.clear();
+}
+PPC_FUNC(sub_06ECF9D8_orig);
+PPC_FUNC(sub_06ECF9D8) { // a record's fighter (a jump to sub_033D50A8)
+    const uint32_t lr = ctx.lr;
+    sub_06ECF9D8_orig(ctx, base);
+    if (!g_plates) return;
+    for (uint32_t m = 0; m < 2; ++m) {
+        const uint32_t player = ctx.r[23], profile = ctx.r[26];
+        if (lr != kPlateIds[m] || player > 1 || !profile || ctx.r[3] != 0) continue;
+        const int k = g_select_slot[player][m];
+        if (k < 0) continue;
+        PlateLoan& loan = g_plate_loans.emplace_back();
+        loan.at = profile + kProfileRows + record_store::kRowSize * kPlateRows[m];
+        std::memcpy(loan.kept.data(), guest_pointer(loan.at), loan.kept.size());
+        static const record_store::Row none{};
+        const record_store::Row& row = load8(profile + kProfileKind) == kPlayerKind
+                                           ? g_records.row(vfs::save_root(), g_added[k].code) : none;
+        std::memcpy(guest_pointer(loan.at), row.data(), row.size());
+        ctx.r[3] = kPlateRows[m];
+    }
 }
 
 // The functions that ask for UI positions leave Paul's rows as they found
