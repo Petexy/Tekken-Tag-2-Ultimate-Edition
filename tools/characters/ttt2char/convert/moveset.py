@@ -620,6 +620,18 @@ UNSAID8, SILENT_SHOUT = 0x02009986, 0x020003E7
 # A win quote: TTT2's win poses play a tone of the fighter's se_Dwi bank with this property (value | tone); Tekken 7
 # plays its win quote by the pose's name. The donor's poses stay, with the animation of the quote at their tone.
 WIN_QUOTE_PROP, WIN_QUOTE_VALUE = 0x82F9, 0x0E003000
+# The donor's intros say an intro line (STREAM_LINE_PROP, STREAM_LINE_VALUE | n: line n of its rm_Dst bank, streamed)
+# and its match win poses a long win quote (STREAM_LINE_VALUE | 0x1000: its rm_Dwi bank's). A fighter with no intro
+# line (Converter.unsaid; convert/voice.py: those tones are silent; Tekken 8's Azazel has no intro line or win quote)
+# leaves the donor's lines out of the donor's intros it plays, and they say what its own intro move says at the same
+# frames (POSE_VOICES: its shouts and damage voices: Azazel's roars). The win poses keep these: their tones are
+# silent. The subtitle of a pose's line is a property of its own (SUBTITLE_PROP, in the move's begin properties:
+# value fighter id << 8 | line, entry id * 30 + line of the subtitle file 917395eb, shown by sub_04D32E08): the
+# donor's poses of a kind the fighter has no line of leave it out (Lars's "You think you can stop us?").
+STREAM_LINE_PROP, STREAM_LINE_VALUE = 0x8300, 0x0D000000
+SUBTITLE_PROP = 0x8180
+POSE_VOICES = (0x82F9, (2, 3))      # (the property, the voice types: shout n, damage voice n; convert/voice.py)
+POSE_KIND = re.compile(r'^[A-Za-z]+_([sw])')     # a donor's pose move: _s.. an intro (la_srm), _w.. a win (la_wnm_1)
 # Tekken 7's tiger (or any other summoned model) plays an animation of its own: 0x828f = the animation's index. TTT2
 # plays an animation of a fighter's extra (OPT) bones from part 3 of its motion pack with 0x82de = 0x4000 + its
 # index there (0x82df does the same in win poses only, 0x82e0 under another condition: Devil Jin's wings); the added
@@ -1222,6 +1234,8 @@ class Converter:
         self.posed_hands = {}           # donor pose part -> (Tekken 8 move, holding its last frame) (pose_sequence)
         self.hand8_shapes = {}          # hand shapes frame -> its values (hands8_generic)
         self.posed = set()              # the donor's intro and win pose moves playing the fighter's animations
+        self.unsaid = frozenset()       # the kinds of lines ('intro', 'win') the fighter has none of (the importer's)
+        self.intro_voices = {}          # donor intro part -> the Tekken 7/8 move whose voice it says (own_intro_voices)
         self.usage = usage
         self.stats = collections.Counter()
         self.unmapped = collections.Counter()
@@ -4113,6 +4127,7 @@ class Converter:
         for i in keep:
             self.link_move(i, counterpart)
         self.link_queued(counterpart)
+        self.own_intro_voices()
         self.rebuild_hubs()
         self.own_transitions()
         self.link_queued(counterpart)          # Tekken 7 generic movement states the last two reached
@@ -4518,6 +4533,76 @@ class Converter:
                     row['anim'] = self.hold(t7, frames)
                     self.stats['donor pose parts holding her pose'] += 1
                     self.posed_hands[m] = (t7, True)
+        kind = POSE_KIND.match(d.move_name(j))
+        if kind and {'s': 'intro', 'w': 'win'}[kind.group(1).lower()] in self.unsaid:
+            for m in order:
+                self.T['moves'][m]['begin_props'] = self.unsaid_subtitles(self.T['moves'][m]['begin_props'])
+        if kind and kind.group(1).lower() == 's' and 'intro' in self.unsaid:     # (a win pose's quote: silent tones)
+            for m in order:
+                self.T['moves'][m]['extraprops'] = self.unsaid_lines(self.T['moves'][m]['extraprops'], [])
+            first = next((m for m in order if not d.anim_name(m).startswith('co_dummy')), None)
+            if first is not None:
+                self.intro_voices[first] = t7              # (own_intro_voices: once its moves are linked)
+
+    def own_intro_voices(self):
+        """The donor's intros a fighter with no intro line plays (pose_sequence): their first part says what the
+        fighter's own intro move says, at its frames (after the links: a converted move's properties are made
+        there)."""
+        for m, t7 in self.intro_voices.items():
+            row = self.T['moves'][m]
+            row['extraprops'] = self.unsaid_lines(row['extraprops'], self.own_voices(t7))
+
+    def own_voices(self, t7):
+        """The voice rows (POSE_VOICES) of Tekken 7/8 move t7 as converted: [(frame, id, value)] dicts."""
+        new = self.newidx.get(t7)
+        start = self.T['moves'][new]['extraprops'] if new is not None else None
+        table, rows = self.T['extra_move_properties'], []
+        while start is not None and start < len(table) and not (table[start]['id'] == 0 and table[start]['frame'] == 0):
+            r = table[start]
+            if r['id'] == POSE_VOICES[0] and r['value'] >> 24 in POSE_VOICES[1]:
+                rows.append(dict(r))
+            start += 1
+        return rows
+
+    def unsaid_subtitles(self, start):
+        """A donor pose part's begin property list (at `start`) without the donor's subtitles (SUBTITLE_PROP) -> the
+        list's index (`start` when nothing changes, None when nothing is left)."""
+        table, rows = self.T['move_begin_props'], []
+        at = start
+        while at is not None and at < len(table) and table[at]['id'] != TT_END:
+            rows.append(dict(table[at]))
+            at += 1
+        kept = [r for r in rows if r['id'] != SUBTITLE_PROP]
+        if len(kept) == len(rows):
+            return start
+        self.stats['donor pose parts: the donor\'s subtitles left out (no line of the fighter\'s)'] += len(rows) - len(kept)
+        if not kept:
+            return None
+        out = len(table)
+        table += kept + [dict(req=0, id=TT_END, value=0)]
+        return out
+
+    def unsaid_lines(self, start, own):
+        """A donor pose part's property list (at `start`) without the donor's lines (STREAM_LINE_PROP's, win quotes),
+        with the fighter's own voice rows `own` among its frames -> the list's index (`start` when nothing changes)."""
+        table, rows = self.T['extra_move_properties'], []
+        at = start
+        while at is not None and at < len(table) and not (table[at]['id'] == 0 and table[at]['frame'] == 0):
+            rows.append(dict(table[at]))
+            at += 1
+        kept = [r for r in rows if not (r['id'] == STREAM_LINE_PROP and r['value'] & 0xFF000000 == STREAM_LINE_VALUE or
+                                        r['id'] == WIN_QUOTE_PROP and r['value'] & 0xFFFFF000 == WIN_QUOTE_VALUE)]
+        if len(kept) == len(rows) and not own:
+            return start
+        self.stats['donor pose parts: the donor\'s lines left out (no line of the fighter\'s)'] += len(rows) - len(kept)
+        for r in own:                   # (among the frames, as the direct damage rows are put)
+            kept.insert(next((n for n, x in enumerate(kept) if r['frame'] < x['frame'] < 0x8000), len(kept)), r)
+            self.stats['donor intros: voice rows of the fighter\'s own intro'] += 1
+        if not kept:
+            return None
+        out = len(table)
+        table += kept + [dict(frame=0, id=0, value=0)]
+        return out
 
     def handoffs8(self):
         """Tekken 8: a converted clip keeps HARA_ROT1 upright, TTT2's lying (and other) moves hold the body's

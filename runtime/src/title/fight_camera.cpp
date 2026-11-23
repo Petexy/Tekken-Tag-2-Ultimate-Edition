@@ -58,6 +58,17 @@
 // with him (title/win_shot.h, win_scene() below): the donor's shot is made
 // for the donor's pose, and his own goes elsewhere.
 //
+// The intros stand each fighter before an LED wall (an effect of the
+// "entry" scene: sub_07AD75C8 sets it up for a side, sub_07AD60F0, and
+// places it, 6 m behind the fighter and as big as a man's shots need). The
+// effect takes its place and size once, as it starts: moving it later does
+// not move what is drawn. A giant's scaled intro shots looked past it: a lit
+// band or rectangle in black, with him over its edges. A giant's wall is
+// placed as it is set up as his shots are: about his head, as much bigger
+// (giant_wall(): the same scaling of the scene about the same points shows
+// what a man's shot shows), and kWallMargin bigger again (his shots also
+// turn to his head and go back for a close-up).
+//
 // The KO's slow motion and replays (tcb_camera_replay_t) and the throws'
 // camera (tcb_camera_throw_t) frame a man from a man's distance: with a
 // giant in the fight their shots go up and back until both fighters are in
@@ -517,6 +528,58 @@ struct Motion {
 };
 std::map<uint32_t, Motion> g_motions; // by camera
 
+// The intros' LED wall: the effect of the wall's object (sub_07AD75C8's scene +608, the effect at +228); an effect's
+// place (+944, or +1028 for one its file marks so: +92 bit 0x80, as sub_08BE5688 puts it) and scale (+1024,
+// sub_08BE5FC4's: its matrix's, sub_08BDE41C) count as it starts.
+constexpr uint32_t kSceneWall = 608, kWallEffect = 228;
+constexpr uint32_t kEffectFile = 932, kEffectScale = 1024, kEffectPlace = 944, kEffectPlaceMarked = 1028;
+constexpr uint32_t kFileFlags = 92, kFileMarked = 0x80;
+constexpr uint32_t kPlayerActive = 7808; // 0: the side's first member is out, its partner plays (sub_05C5EF14)
+constexpr float kWallMargin = 1.4f;      // the giant's wall this much bigger again, about his head
+
+// The wall of a side's intro (sub_07AD75C8 set it up for the side's fighter in play): for a giant, placed and sized
+// as his intro shots are scaled (motion_after(): what a man's shot has at a man's head, his shot has at his head,
+// his body's size times as far).
+void giant_wall(uint8_t* base, uint32_t scene, uint32_t side) {
+    if (side > 1) return;
+    uint32_t player = ppc::ld32(base, kSidePlayers + 4 * side);
+    if (player && !ppc::ld32(base, player + kPlayerActive)) player = ppc::ld32(base, player + kPlayerPartner);
+    if (!is_player(base, player)) return;
+    const float scale = giant_body::scale_of(player);
+    if (!(scale > 1)) return;
+    const uint32_t wall = ppc::ld32(base, scene + kSceneWall);
+    const uint32_t effect = wall ? ppc::ld32(base, wall + kWallEffect) : 0;
+    const uint32_t file = effect ? ppc::ld32(base, effect + kEffectFile) : 0;
+    if (!file) return;
+    const uint32_t at = ppc::ld32(base, file + kFileFlags) & kFileMarked ? kEffectPlaceMarked : kEffectPlace;
+    const float centre[3] = {ldf(base, player), ldf(base, player + kPlayerFloor), ldf(base, player + 8)};
+    // His head: as his standing pose has it (the highest of his spheres; a man's head grown by his size if that is
+    // not between a man's and that).
+    float head[3] = {centre[0], centre[1] + kManHead * scale, centre[2]}, highest = -INFINITY;
+    for (uint32_t i = 0; i < kBodySphereCount; ++i) {
+        const uint32_t s = player + kBodySpheres + kBodySphereSize * i;
+        const float c[3] = {ldf(base, s), ldf(base, s + 4), ldf(base, s + 8)};
+        if (std::isfinite(c[0]) && std::isfinite(c[1]) && std::isfinite(c[2]) && c[1] > highest) {
+            highest = c[1];
+            if (c[1] - centre[1] > kManHead && c[1] - centre[1] < kManHead * scale) std::copy(c, c + 3, head);
+        }
+    }
+    float place[3];
+    for (int k = 0; k < 3; ++k) {
+        const float from = centre[k] + (k == 1 ? kManHead : 0);
+        place[k] = head[k] + scale * (ldf(base, effect + at + 4 * k) - from);
+    }
+    const float was = ldf(base, effect + kEffectScale), grown = was * scale * kWallMargin;
+    if (!std::isfinite(place[0]) || !std::isfinite(place[1]) || !std::isfinite(place[2]) || !std::isfinite(grown)) return;
+    if (trace())
+        std::fprintf(stderr, "ttt2: camera: the intro's LED wall for a giant (sid %u, head %.0f %.0f %.0f): %.0f %.0f %.0f "
+                     "scale %.2f (the title's %.0f %.0f %.0f scale %.2f)\n", ppc::ld32(base, player + kPlayerSelectId),
+                     head[0], head[1], head[2], place[0], place[1], place[2], grown, ldf(base, effect + at),
+                     ldf(base, effect + at + 4), ldf(base, effect + at + 8), was);
+    for (int k = 0; k < 3; ++k) stf(base, effect + at + 4 * k, place[k]);
+    stf(base, effect + kEffectScale, grown);
+}
+
 void motion_before(uint8_t* base, uint32_t camera) {
     const auto it = g_motions.find(camera);
     if (it == g_motions.end() || !it->second.scaled) return;
@@ -715,6 +778,13 @@ PPC_FUNC(sub_05FBE5B4) {
     motion_before(base, camera);
     sub_05FBE5B4_orig(ctx, base);
     motion_after(base, camera);
+}
+
+PPC_FUNC(sub_07AD75C8_orig); // the intros' LED wall of a side (r3 the entry scene, r4 the side): set up and placed
+PPC_FUNC(sub_07AD75C8) {
+    const uint32_t scene = ctx.r[3], side = ctx.r[4];
+    sub_07AD75C8_orig(ctx, base);
+    giant_wall(base, scene, side);
 }
 
 PPC_FUNC(sub_060B44E4_orig); // the replay camera's frame (r3 the camera): the KO's slow motion, replays
