@@ -505,6 +505,21 @@ HIT_NOW = 46                                         # TTT2: the move's attack h
 WHIFF8 = 48                                          # Tekken 8: the move's attack missed
 BLOCK_NOW = 49                                       # TTT2: the opponent blocked it (until his guard reaction starts)
 HELD = {HIT_NOW: 1, BLOCK_NOW: 2}                    # the latch's value for each
+# Recovery on block (BLOCK_RECOVERY8): Tekken 8's property 0x8401 with value 1 (as the move starts) sets the attacker's
+# +0xE5C to value2 (TKMovesets' SetValueE54OrE5C: value 0 sets +0xE54 instead), the frames the move recovers later
+# when it was blocked. Wavu's block advantage is the data's (the block reaction's end row - (the move's end row - its
+# first active frame)) less value2 for each of Miary Zo's six moves with it and a Wavu entry (d+1+2 and d/f+1,1,1+2 3,
+# f+3+4,2 and d/b+2,3 2, BAO.4 4, BAO.2 6: "Recovers 3f faster on hit"), the same as the data's for every other one
+# (89 named moves of hers and Reina's; her 3,2 and b+4 have value 0 only). TTT2 has no such state, and 0x8401 no
+# counterpart. A hit or a whiff keeps the move as converted (its end row, its clip played out while the fighter can
+# act); a block (49, in the move's active frames) goes on in a copy of the move whose end row is value2 frames
+# later, keeping the frame count (the same clip from that frame on), as TTT2's own moves recovering later on block
+# do (Law's Lw_2RLKiCDE -> Lw_2RLKiCDE_G, end row 55 -> 59; Lw_rk00 -> Lw_rk00E): the copy has no active frames,
+# no voice, no start or begin properties and of its property rows only those after its last active frame (the
+# move played the others: a summon again, a second sound)
+BLOCK_RECOVERY8 = {'t7': None, 't8': (0x8401, 1)}
+CONTINUE_EXTRA = tagcombo.KEEP_FRAMES | 1          # the copy goes on from the frame (TTT2's and Tekken 8's own rows)
+BLOCKED_SUFFIX = 'G'                               # the copy's name: the move's and G (guarded)
 # Electrics (the Mishimas' Electric Wind God Fist and its like). TTT2's own (Kazuya's Kz_shoryu_S; Heihachi's, Jin's
 # and Devil Jin's alike) carry: 0x8192 = 1 from the start (ELECTRIC_PROP: player +928 bit 0x2000, the electric spark
 # of sub_03AE2254), the common spark sound at frame 2 (0x82f9 0x0100002b: se_Btl_Battle's RES_BANK_SPK_L01, the same
@@ -1914,6 +1929,60 @@ class Converter:
                 {'condition': now, 'param': 0}] + tests + [{'condition': LATCH_PROP['ttt2'] + 3 * k, 'param': value},
                                                            {'condition': TT_END, 'param': 0}])
         return dict(self.action_row(self._hit_sets[k, value], 1), win_end=32767)
+
+    def block_recovery8(self):
+        """BLOCK_RECOVERY8: each of the fighter's moves recovering later on block gets a copy (its clip, the converted
+        cancel list with the end row that much later, no active frames, the property rows after its last active one)
+        and, in its active frames, an automatic row into the copy on a block (49) keeping the frame count."""
+        spec = BLOCK_RECOVERY8[self.game]
+        if not spec:
+            return
+        prop, selector = spec
+        P, E = self.T['extra_move_properties'], self.T['cancel_extras']
+        lists, blocked, go_on = {}, None, None
+        for i, mv in enumerate(self.k.tables['moves']):
+            if i not in self.newidx:
+                continue
+            extra = max((x['value2'] for _, x in self.k.iter_list('extra_move_properties', mv.get('extraprops'),
+                                                                   lambda x: x['id'] == 0 and x['frame'] == 0)
+                         if x['id'] == prop and x['value'] == selector and x['frame'] >= 0x8000), default=0)
+            if extra <= 0:
+                continue
+            idx = self.newidx[i]
+            move = self.T['moves'][idx]
+            cl = [dict(c) for c in tagsystem.cancels(self.T, move['cancel'])]
+            if not cl or cl[-1]['direction'] != M.LIST_END or not 0 < cl[-1]['win_start'] < 0x7FFF:
+                self.stats['Tekken 8 recovery on block: moves without an end row (left as they are)'] += 1
+                continue
+            fa, la, end = move['first_active'], move['last_active'], cl[-1]
+            if not 0 < fa <= la < end['win_start']:
+                self.stats['Tekken 8 recovery on block: moves without active frames before the end row (left as '
+                           'they are)'] += 1
+                continue
+            if blocked is None:
+                blocked = tagsystem.write(self.T, 'requirements', [{'condition': BLOCK_NOW, 'param': 0},
+                                                                   {'condition': TT_END, 'param': 0}])
+                go_on = next((n for n, x in enumerate(E) if x['value'] == CONTINUE_EXTRA), None)
+                if go_on is None:
+                    go_on = len(E)
+                    E.append(dict(value=CONTINUE_EXTRA))
+            if (move['cancel'], extra) not in lists:
+                late = dict(end, win_start=end['win_start'] + extra,
+                            start_frame=end['start_frame'] + extra if end['start_frame'] == end['win_start']
+                            else end['start_frame'])
+                lists[move['cancel'], extra] = tagsystem.write(self.T, 'cancels', cl[:-1] + [late])
+            later = [dict(x) for x in tagsystem.props(self.T, move['extraprops'])
+                     if la < x['frame'] < PLAIN_FRAME] if move['extraprops'] is not None else []
+            copy = dict(move, name=self.string(self.move_name(idx) + BLOCKED_SUFFIX),
+                        cancel=lists[move['cancel'], extra], first_active=0, last_active=0, begin_props=None,
+                        voiceclip=None, extraprops=len(P) if later else None)
+            if later:
+                P += later + [dict(frame=0, id=0, value=0)]
+            self.T['moves'].append(copy)
+            into = dict(end, direction=0, button=0, win_start=fa, win_end=la, start_frame=fa,
+                        move_id=len(self.T['moves']) - 1, req=blocked, extradata=go_on)
+            move['cancel'] = tagsystem.write(self.T, 'cancels', cl[:-1] + [into, end])
+            self.stats['Tekken 8 recovery on block: moves recovering later when blocked'] += 1
 
     def conv_reqs(self, i, overrides=None):
         """A Tekken 7 requirement list -> (the new list's index, ok); ok False: the list can never be true."""
@@ -4097,6 +4166,7 @@ class Converter:
             self.throw_pairs8()             # (THROW_PAIRS8: after the hand-offs, which may copy clips)
         self.flag8_rows()                   # Tekken 8's flag slots: the properties that set or test them (FLAG8)
         if self.game == 't8':
+            self.block_recovery8()          # Tekken 8's later recovery on block (BLOCK_RECOVERY8)
             self.bake_air8()                # (last: copies of whole moves)
             self.guard_copies_final8()      # (... and the guard copies of the donor's moves, as those are now)
         # every move belongs to the new motion row
