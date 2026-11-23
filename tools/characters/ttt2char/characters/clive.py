@@ -222,7 +222,9 @@ PREFABS = {
     # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall); Phoenix 2: the
     # staff's tip to his hips and to his left knee (Tekken 8's boxes 3 and 4; box 0 is the tip alone, on both lines):
     # the tip comes down 1.2 m ahead at 1.15 m high, and an opponent low in front of him (getting up 0.8 m away) is
-    # under the line to the hips but on the one to the knee
+    # under the line to the hips. Tekken 8 hits her with box 5, the tip to a point 0.67 m high by his right hand (box
+    # 4 ends 20 cm above the knee and misses her); TTT2's lines end on bare joints, and the one to the knee reaches
+    # where box 5 does (the one to the right hand passes 14 cm over her)
     'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3),
                   'key:24f28bb0': (3, 4)},
     # u/f+4, in the air: the toe's line to a point past the knee (TTT2 has no such points).
@@ -525,10 +527,11 @@ MOVESET = {
     'direct': [(r'^La_sKAM00_$', 'move', ['Okm_sKAM00_']),                      # Lars's stance -> his
                (r'^(la|mk)_s', 'anim', ['okm_s%02d' % k for k in range(3)]),    # intros
                (r'^la_w', 'anim', ['okm_w%02d' % k for k in range(3)])],        # win poses
-    # TTT2 bounds (Tekken 8 has none, and his tornados do not become any): an air hit slams the opponent into the
-    # floor once per juggle (convert/move_overrides.py). f+3 Knight's Gambit, f,F+2 Soul Cleave, f+2,2,2's last hit
-    # (Burning Chain) and jump 1 (Griffin Hunter) out of every jump, on time or late (bake_air8's copies of the air
-    # moves are made after the bounds, so they bound alike). (Moves no name is known for are named by their key,
+    # TTT2 bounds (Tekken 8 has none, and his tornados do not become any by themselves): an air hit slams the
+    # opponent into the floor once per juggle (convert/move_overrides.py). f+3 Knight's Gambit, f,F+2 Soul Cleave,
+    # f+2,2,2's last hit (Burning Chain), jump 1 (Griffin Hunter) out of every jump, on time or late (bake_air8's
+    # copies of the air moves are made after the bounds, so they bound alike), Updraft 2,2's last hit (Burning Rain)
+    # and f,F+1+2 (Staff of Judgment). (Moves no name is known for are named by their key,
     # 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
     'bounds': {
         'Okm_6LK': True,       # f+3
@@ -541,18 +544,17 @@ MOVESET = {
         'key:0ca5fca3': True,         # ... out of key:a14f5e76, late
         'key:c42755c9': True,         # ... back (u/b+1 too)
         'key:4bd7b552': True,         # ... back, late
-        # Updraft 2 (jump 2, its first hit; the beta testers' list) out of every jump, on time or late (not the copy
-        # d/f+2,2 jumps into, key:102dd9ce: that string is its own)
-        'key:48e22afd': True,         # straight up
-        'key:9096edaa': True,         # ... straight up, late
-        'key:bee6ce9f': True,         # ... forward (u/f+2 too)
-        'key:39c1bf59': True,         # ... forward, late
-        'key:c2e03fe0': True,         # ... out of key:a14f5e76
-        'key:36973851': True,         # ... out of key:a14f5e76, late
-        'key:4844e538': True,         # ... back (u/b+2 too)
-        'key:fb66b5fb': True,         # ... back, late
+        # Updraft 2,2 (Burning Rain), its last hit (the beta testers' list: "Updraft 2"; one move, whichever jump
+        # it comes from): Tekken 8's tornado hit, after which its combos go on (d/b+2,1 reaches her after the bound).
+        # Not jump 2's first hit: its 2,2 follow-up hits without a bound too, and nothing else reaches her after one
+        # there before she is down
+        'key:36f278bb': True,
         'key:dda4fe46': True,         # f,F+1+2 Staff of Judgment (the beta testers' list)
     },
+    # the bound icons of these in the command list (Tekken 8 text key: the bound, the hit it is): their demos dash or
+    # jump first, which the demo walk does not follow
+    'bound_entries': {'TEXT_010_MOVELIST_NAME_OKM_7020': ('key:36f278bb', 3),     # Burning Rain, During Updraft 2,2
+                      'TEXT_200_MOVELIST_NAME_OKM_302': ('key:dda4fe46', 1)},     # Staff of Judgment, f,F+1+2
     # the generic throw keeps the donor's row, active at 12 only: Tekken 8's frames
     'active_frames': {'Thrmv_B2_01': (15, 17),
                        # f,f+2: pushed back from where Tekken 8 lets him run in, the blade comes down one frame later
