@@ -18,7 +18,8 @@ TEKKEN8_CODE = 'got'          # his code in Tekken 8's files (Character/Item/mod
 CODE = 'aza'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
 SEX = 'male'
 REVISION = 1                  # d/f+3+4's hit leaves him 15 frames ahead, not 120 (1); his intros say his Tekken 8
-                              # roars, not Lars's line or subtitle; no Lars voice in his banks (1)
+                              # roars, not Lars's line or subtitle; no Lars voice in his banks (1); walking and
+                              # dashing he guards as any fighter, not everything (1)
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
 # tag moves, its voice list, sound banks, item database and effects are used for him.
