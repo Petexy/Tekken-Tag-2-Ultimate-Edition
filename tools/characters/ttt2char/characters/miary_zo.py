@@ -10,8 +10,9 @@ SHORT_NAME = 'MIARY ZO'       # her name on the 2D screens (TTT2 shows short nam
 TEKKEN8_ID = 40               # her FighterId in Tekken 8 (autodump.ROSTER; a DLC fighter)
 TEKKEN8_CODE = 'wkz'          # her code in Tekken 8's files (Character/Item/model/unique/wkz/)
 CODE = 'mzo'                  # her three-letter code in the pack (not a code TTT2 or another added fighter has)
-REVISION = 1                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
-                              # f,f+2,2 after a block, tornado hits that launch, Tag in a juggle's d+2 / d/f+1,1,2
+REVISION = 2                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
+                              # f,f+2,2 after a block, tornado hits that launch, Tag in a juggle's d+2 / d/f+1,1,2;
+                              # round 2: Tekken 8's extra recovery on block (d+1+2 -17), Baobab 1,4's bound
 SEX = 'female'
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of hers (the face animations set the face
