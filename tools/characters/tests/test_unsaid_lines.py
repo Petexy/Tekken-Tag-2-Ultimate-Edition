@@ -1,7 +1,7 @@
 """A fighter with no line of a kind (Tekken 8's Azazel: no intro line, win quote or name call) never speaks with the
 donor's voice: the donor's tones of that kind play silence (convert/voice.py), and the donor's intros and win poses it
-plays leave the donor's lines out, its intros saying what its own intro says (convert/moveset.py), on made-up banks
-and tables (no game files needed).
+plays leave the donor's lines and their subtitles out, its intros saying what its own intro says
+(convert/moveset.py), on made-up banks and tables (no game files needed).
 
     python3 -m unittest discover tools/characters/tests
 """
@@ -133,6 +133,84 @@ class PoseLines(unittest.TestCase):
     def test_pose_kind(self):
         self.assertEqual([moveset.POSE_KIND.match(n).group(1) for n in ('la_srm', 'la_slm_solo', 'la_wnm_1', 'ju_wem_1')],
                          ['s', 's', 'w', 'w'])
+
+
+
+class FakeDonor:
+    """A donor moveset of named moves with no cancels (pose_sequence: one part a pose)."""
+
+    def __init__(self, names):
+        self.names = names
+        self.tables = {'moves': [dict(cancel=None, anim=0, extraprops=None) for _ in names]}
+
+    def move_name(self, j):
+        return self.names[j]
+
+    def anim_name(self, j):
+        return self.names[j] + '(DVD)'
+
+
+class PoseSubtitles(unittest.TestCase):
+    """The donor's subtitle (0x8180 in a move's begin properties: Lars's "You think you can stop us?" is 0x2600) is
+    left out of the donor's poses of a kind the fighter has no line of, and only of those."""
+
+    END = dict(req=0, id=moveset.TT_END, value=0)
+    NAMES = ['la_srm', 'la_wnm_1', 'mk_srm']
+
+    def converter(self, unsaid):
+        c = moveset.Converter.__new__(moveset.Converter)
+        B = [self.END, dict(req=0, id=moveset.SUBTITLE_PROP, value=0x2600), self.END,
+             dict(req=0, id=moveset.SUBTITLE_PROP, value=0x260A), dict(req=0, id=0x8057, value=1), self.END]
+        c.d = FakeDonor(self.NAMES)
+        c.T = {'move_begin_props': B, 'extra_move_properties': [dict(frame=0, id=0, value=0)],
+               'moves': [dict(begin_props=1, extraprops=None, anim=0, anim_name=0),
+                         dict(begin_props=3, extraprops=None, anim=0, anim_name=0),
+                         dict(begin_props=0, extraprops=None, anim=0, anim_name=0)]}
+        import collections
+        c.stats = collections.Counter()
+        c.unsaid, c.posed, c.posed_hands, c.intro_voices, c.shown = frozenset(unsaid), set(), {}, {}, False
+        c.move_anim = lambda t7: 0
+        c.string = lambda name: 0
+        c.k = FakeDonor(['own_intro'])
+        c.summon_rows = lambda rows, t7: []
+        return c
+
+    def begin(self, c, j):
+        B, out, at = c.T['move_begin_props'], [], c.T['moves'][j]['begin_props']
+        while at is not None and B[at]['id'] != moveset.TT_END:
+            out.append((B[at]['id'], B[at]['value']))
+            at += 1
+        return out
+
+    def test_no_lines(self):
+        c = self.converter({'intro', 'win'})
+        for j in range(3):
+            c.pose_sequence(j, 0)
+        self.assertEqual(self.begin(c, 0), [])                          # (Azazel's intro: no Lars subtitle)
+        self.assertEqual(self.begin(c, 1), [(0x8057, 1)])               # (a win pose keeps its other properties)
+        self.assertEqual(self.begin(c, 2), [])
+        self.assertEqual(c.T['move_begin_props'][:6], self.converter(()).T['move_begin_props'])  # (the donor's lists)
+
+    def test_own_intro_line(self):
+        # a fighter with intro lines but no win quote: its intros keep the subtitle property, its win poses lose it
+        c = self.converter({'win'})
+        for j in range(2):
+            c.pose_sequence(j, 0)
+        self.assertEqual(self.begin(c, 0), [(moveset.SUBTITLE_PROP, 0x2600)])
+        self.assertEqual(self.begin(c, 1), [(0x8057, 1)])
+
+    def test_every_line(self):
+        c = self.converter(())
+        for j in range(3):
+            c.pose_sequence(j, 0)
+        self.assertEqual([c.T['moves'][j]['begin_props'] for j in range(3)], [1, 3, 0])
+        self.assertEqual(len(c.T['move_begin_props']), 6)
+
+    def test_nothing_left(self):
+        c = self.converter(())
+        self.assertIsNone(c.unsaid_subtitles(1))
+        self.assertEqual(c.unsaid_subtitles(0), 0)
+        self.assertIsNone(c.unsaid_subtitles(None))
 
 
 if __name__ == '__main__':

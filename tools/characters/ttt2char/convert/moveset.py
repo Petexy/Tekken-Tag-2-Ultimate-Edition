@@ -609,9 +609,12 @@ WIN_QUOTE_PROP, WIN_QUOTE_VALUE = 0x82F9, 0x0E003000
 # and its match win poses a long win quote (STREAM_LINE_VALUE | 0x1000: its rm_Dwi bank's). A fighter with no intro
 # line (Converter.unsaid; convert/voice.py: those tones are silent; Tekken 8's Azazel has no intro line or win quote)
 # leaves the donor's lines out of the donor's intros it plays, and they say what its own intro move says at the same
-# frames (POSE_VOICES: its shouts and damage voices: Azazel's roars). (The title shows the donor's subtitle all the
-# same: it does not come from these properties. The win poses keep theirs: their tones are silent.)
+# frames (POSE_VOICES: its shouts and damage voices: Azazel's roars). The win poses keep these: their tones are
+# silent. The subtitle of a pose's line is a property of its own (SUBTITLE_PROP, in the move's begin properties:
+# value fighter id << 8 | line, entry id * 30 + line of the subtitle file 917395eb, shown by sub_04D32E08): the
+# donor's poses of a kind the fighter has no line of leave it out (Lars's "You think you can stop us?").
 STREAM_LINE_PROP, STREAM_LINE_VALUE = 0x8300, 0x0D000000
+SUBTITLE_PROP = 0x8180
 POSE_VOICES = (0x82F9, (2, 3))      # (the property, the voice types: shout n, damage voice n; convert/voice.py)
 POSE_KIND = re.compile(r'^[A-Za-z]+_([sw])')     # a donor's pose move: _s.. an intro (la_srm), _w.. a win (la_wnm_1)
 # Tekken 7's tiger (or any other summoned model) plays an animation of its own: 0x828f = the animation's index. TTT2
@@ -4445,6 +4448,9 @@ class Converter:
                     self.stats['donor pose parts holding her pose'] += 1
                     self.posed_hands[m] = (t7, True)
         kind = POSE_KIND.match(d.move_name(j))
+        if kind and {'s': 'intro', 'w': 'win'}[kind.group(1).lower()] in self.unsaid:
+            for m in order:
+                self.T['moves'][m]['begin_props'] = self.unsaid_subtitles(self.T['moves'][m]['begin_props'])
         if kind and kind.group(1).lower() == 's' and 'intro' in self.unsaid:     # (a win pose's quote: silent tones)
             for m in order:
                 self.T['moves'][m]['extraprops'] = self.unsaid_lines(self.T['moves'][m]['extraprops'], [])
@@ -4471,6 +4477,24 @@ class Converter:
                 rows.append(dict(r))
             start += 1
         return rows
+
+    def unsaid_subtitles(self, start):
+        """A donor pose part's begin property list (at `start`) without the donor's subtitles (SUBTITLE_PROP) -> the
+        list's index (`start` when nothing changes, None when nothing is left)."""
+        table, rows = self.T['move_begin_props'], []
+        at = start
+        while at is not None and at < len(table) and table[at]['id'] != TT_END:
+            rows.append(dict(table[at]))
+            at += 1
+        kept = [r for r in rows if r['id'] != SUBTITLE_PROP]
+        if len(kept) == len(rows):
+            return start
+        self.stats['donor pose parts: the donor\'s subtitles left out (no line of the fighter\'s)'] += len(rows) - len(kept)
+        if not kept:
+            return None
+        out = len(table)
+        table += kept + [dict(req=0, id=TT_END, value=0)]
+        return out
 
     def unsaid_lines(self, start, own):
         """A donor pose part's property list (at `start`) without the donor's lines (STREAM_LINE_PROP's, win quotes),
