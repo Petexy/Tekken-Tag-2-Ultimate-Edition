@@ -343,6 +343,9 @@ class Sampler:
             made['key'] = ('disk', tuple(look), part)
         else:
             made['key'] = (self.trails.k.anim_ref(move)[0], start, 'disk', made['id'], place, part)
+            skip = self.trails.skip_of(move) if hasattr(self.trails, 'skip_of') else 0
+            if skip:                                        # (its clip played from a later frame)
+                made['key'] += (('skip', skip),)
 
 
 # ------------------------------------------------------------------------------------------------ bursts

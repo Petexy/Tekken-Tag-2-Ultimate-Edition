@@ -134,18 +134,25 @@ class Sampler:
     """The blade's way in a fighter's moves: (move, its frame the trail starts at, frames, TRAIL value) -> a trail
     (dict: far, near (frames + 1, 3) in the effect's frame, tail, kind, scale, width), or None (no clip; no such weapon)."""
 
-    def __init__(self, store, d, k, banks, conv, target):
+    def __init__(self, store, d, k, banks, conv, target, played=None):
         self.parts, self.kinds = assets(store, d.TEKKEN8_CODE)
         self.weapons = {w['bone']: w for w in getattr(d, 'WEAPONS', ())}
         self.looks = getattr(d, 'TEKKEN8_TRAIL_LOOKS', {})
         self.sockets = getattr(d, 'TEKKEN8_TRAIL_SOCKETS', {})      # (a joint no weapon has -> (a weapon's bone, offset))
         self.k, self.banks, self.conv = k, banks, conv
+        self.played = played                # (the animation provider's: anim.Animations.played)
         self.skeleton = retarget.ttt2_skeleton(target)
         self._clips = {}
 
+    def skip_of(self, move):
+        """The frames of its clip a move's animation leaves out (motbin anim_skip, as the provider plays it)."""
+        key = self.k.anim_ref(move)[0]
+        skip = self.k.anim_skip(move) if key is not None and hasattr(self.k, 'anim_skip') else 0
+        return self.played(key, skip) if skip and self.played is not None else skip
+
     def clip(self, move):
         key = self.k.anim_ref(move)[0]
-        skip = self.k.anim_skip(move) if key is not None and hasattr(self.k, 'anim_skip') else 0   # (as it plays)
+        skip = self.skip_of(move)           # (as it plays)
         if (key, skip) not in self._clips:
             blob = self.banks.blob(anmbin.BODY, key) if key is not None else None
             self._clips[key, skip] = self.conv.channels(panm.Animation(blob), skip=skip)[0] if blob else None

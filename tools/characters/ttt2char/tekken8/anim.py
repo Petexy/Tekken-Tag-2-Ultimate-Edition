@@ -684,17 +684,30 @@ class Animations:
         self.stats = collections.Counter()
         self.seconds = 0.0
 
+    def _original(self, key):
+        """Whether clip `key` is given as TTT2's own original (nothing of the move's needs it converted)."""
+        return key in self.originals and key not in self.roots and key not in self.snakes and key not in self.ground \
+            and key not in self.shifts and key not in self.twists
+
+    def played(self, key, skip):
+        """The frames of clip `key` left out for a move skipping `skip` (motbin anim_skip): 0 where the clip is given
+        whole (a scene, its timing by move frames; TTT2's own original), else skip. The clip's other users (the trails
+        baked from it: convert/trails8.py Sampler) go by it too."""
+        if skip and (key in self.snakes or key in self.ground or key in self.shifts or key in self.twists
+                     or not trimmable(self.roots.get(key, ())) or self._original(key)):
+            return 0
+        return skip
+
     def __call__(self, key, bank=None, skip=0):
         if isinstance(key, tuple):
             key, bank, skip = (tuple(key) + (0,))[:3]
-        if skip and (key in self.snakes or key in self.ground or key in self.shifts or key in self.twists
-                     or not trimmable(self.roots.get(key, ()))):
-            self.stats['clips played from a later frame left whole (a scene, its timing by move frames)'] += 1
+        if skip and not self.played(key, skip):
+            self.stats['clips played from a later frame left whole (a scene, its timing by move frames; TTT2\'s '
+                       'original)'] += 1
             skip = 0
         if (key, skip) in self.cache:
             return self.cache[key, skip]
-        if not skip and key in self.originals and key not in self.roots and key not in self.snakes \
-                and key not in self.ground and key not in self.shifts and key not in self.twists:
+        if not skip and self._original(key):
             self.stats['body animations TTT2 has (an older shared clip\'s original)'] += 1
             self.cache[key, skip] = self.originals[key]
             return self.cache[key, skip]

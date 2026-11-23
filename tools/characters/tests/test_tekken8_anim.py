@@ -530,8 +530,12 @@ class ConverterTest(unittest.TestCase):
         self.assertEqual(p((0x10, 'own', 2)), self.cv.animation(good, skip=2))
         self.assertEqual(p((0x10, 'own')), self.cv.animation(good))
         self.assertEqual(p.stats['body animations played from a later frame (anim_start)'], 1)
+        self.assertEqual(p.played(0x10, 2), 2)
         held = T8.Animations(banks, self.cv, twists={0x10: (0, 5, 1.0)})     # a scene's clip is left whole
         self.assertEqual(held((0x10, 'own', 2)), held((0x10, 'own')))
+        self.assertEqual(held.played(0x10, 2), 0)
+        ttt2s = T8.Animations(banks, self.cv, originals={0x10: 0x4005})      # TTT2's own original: whole, as before
+        self.assertEqual((ttt2s((0x10, 'own', 2)), ttt2s.played(0x10, 2)), (0x4005, 0))
         with self.assertRaises(ValueError):
             T8.skip_frames(whole, 24)
         self.assertTrue(T8.trimmable([('joint', 'R_Have', (0.0, 1200.0, 0.0), (0.0, 0.0, 0.0)), (0.0, 1150.0, 700.0)]))

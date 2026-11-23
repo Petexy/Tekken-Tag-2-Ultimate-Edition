@@ -2665,7 +2665,9 @@ class Converter:
             self.stats['Tekken 8 trails left out (no clip or weapon)'] += 1
             return
         rows.append(dict(frame=f, id=EFFECT_PROP, value=0))
-        self.trail_rows.append((rows[-1], (self.k.anim_ref(move)[0], start, frames, v), trail))
+        key = (self.k.anim_ref(move)[0], start, frames, v)
+        skip = self.trail_sampler.skip_of(move) if hasattr(self.trail_sampler, 'skip_of') else 0
+        self.trail_rows.append((rows[-1], key + (('skip', skip),) if skip else key, trail))   # (as its clip plays)
         self.stats['Tekken 8 trails'] += 1
 
     def disk8_rows(self, rows, f, idv, v, req, move):
@@ -3929,8 +3931,8 @@ class Converter:
         (appended when it gives bytes), else the donor stance's. A move that starts its clip at a later frame (motbin
         anim_skip) asks for the clip from there: its own animation."""
         ref = tuple(self.k.anim_ref(i))
-        skip = self.k.anim_skip(i) if ref[1] is not None and hasattr(self.k, 'anim_skip') else 0
-        if skip and ref[0] not in self.generic_anim:
+        skip = self.anim_skip8(i)
+        if skip:
             ref += (skip,)
         if ref not in self.anim_id:
             if ref[0] in self.generic_anim:
@@ -3957,6 +3959,16 @@ class Converter:
                     self.stats['animations: none (the donor stance\'s)'] += 1
             self.anim_id[ref] = aid
         return self.anim_id[ref]
+
+    def anim_skip8(self, i):
+        """The frames of its clip Tekken 8 move i's animation leaves out (motbin anim_skip): none for a clip a 'G' move
+        plays (the donor's) or one the provider gives whole (Animations.played)."""
+        key, bank = self.k.anim_ref(i)[:2]
+        skip = self.k.anim_skip(i) if bank is not None and hasattr(self.k, 'anim_skip') else 0
+        if not skip or key in self.generic_anim:
+            return 0
+        played = getattr(self.animations, 'played', None)
+        return played(key, skip) if played is not None else skip
 
     def move_anim(self, i):
         """The TTT2 animation id of the fighter's move i."""

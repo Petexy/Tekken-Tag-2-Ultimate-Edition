@@ -634,7 +634,8 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         spec8 = effects8.parts(d) if slot is not None else {}       # (her effects: convert/effects8.py)
         c.effects8 = {i: part for i, (part, _) in spec8.items()}
         if spec8 and getattr(d, 'TEKKEN8_TRAILS', False):          # (the weapons' trails: convert/trails8.py)
-            c.trail_sampler = trails8.Sampler(source.store, d, k, banks, converter, bone.read(bon))
+            c.trail_sampler = trails8.Sampler(source.store, d, k, banks, converter, bone.read(bon),
+                                              played=animations.played)
             if getattr(d, 'TEKKEN8_DISKS', None):                   # (its big slash arcs: convert/disks8.py)
                 c.disk_sampler = disks8.Sampler(c.trail_sampler, d.TEKKEN8_DISKS)
                 c.effect_conditions = d.TEKKEN8_DISKS.get('conditions', {})

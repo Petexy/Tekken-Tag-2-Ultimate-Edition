@@ -259,6 +259,37 @@ class Animations(unittest.TestCase):
         self.assertEqual(c.new_anims, [b'ANIM'])              # appended once (move 4 has the same key)
         self.assertEqual(c.stats['animations: none (the donor stance\'s)'], 1)
 
+    def test_skipped_frames(self):
+        """A move that plays its clip from a later frame (motbin anim_skip) asks the provider for (key, bank, skip):
+        its own animation beside the whole clip's; a 'G' move's clip stays the donor's; a clip the provider gives
+        whole (Animations.played 0: a scene's, TTT2's original) keeps one id."""
+        k = Source8(refs=[(11, 'own'), (11, 'own'), (10, 'com'), (12, 'own'), (12, 'own'), (11, 'own')])
+        skips = [0, 2, 3, 0, 1, 2]
+        k.anim_skip = lambda i: skips[i]
+        d = Tables()
+        d.move('Ju_sKAM00_', anim=0x4002)
+        d.aliases[1] = 0
+        c = converter(k)
+        c.d, c.pack0_count, c.new_anims, c.anim_id = moveset_of(d), 30, [], {}
+        c.generic_anim = {10: 0x8000 | 7}
+        asked = []
+
+        class Provider:
+            originals = {}
+
+            def __call__(self, ref):
+                asked.append(ref)
+                return b'%d/%d' % (ref[0], ref[2] if len(ref) > 2 else 0)
+
+            def played(self, key, skip):
+                return 0 if key == 12 else skip         # (12: a scene's clip, given whole)
+        c.animations = Provider()
+        self.assertEqual([c.anim8(i) for i in range(6)], [0x4000 | 30, 0x4000 | 31, 0x8007, 0x4000 | 32,
+                                                          0x4000 | 32, 0x4000 | 31])
+        self.assertEqual(asked, [(11, 'own'), (11, 'own', 2), (12, 'own')])
+        self.assertEqual(c.new_anims, [b'11/0', b'11/2', b'12/0'])
+        self.assertEqual([c.anim_skip8(i) for i in range(6)], [0, 2, 0, 0, 0, 2])
+
     def test_generic_animations(self):
         """Only common-bank clips of 'G' moves play the donor's animation: a 'G' move playing the fighter's own clip
         (Reina's sWALK_00BMv plays her stance) leaves that clip to her own moves."""

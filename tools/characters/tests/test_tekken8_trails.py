@@ -180,6 +180,41 @@ class Rows(unittest.TestCase):
         self.assertEqual({r[0]['frame'] for r in rows}, {18})
         self.assertLessEqual({5, 101, 102}, c.effect_ids)
 
+    def test_a_clip_played_from_a_later_frame_has_its_own_trail(self):
+        """Moves of one clip, start and value share a trail only when they play the clip from the same frame (the
+        sampler's skip_of: motbin anim_skip as the animation provider plays it)."""
+        class Sampler:
+            def __call__(self, *a):
+                return dict(a=a)
+
+            @staticmethod
+            def skip_of(move):
+                return (0, 2, 0)[move]
+        c = self.converter(Sampler())
+        v = 0x01120a01
+        rows = [[], [], []]
+        for m in range(3):
+            c.trail8_rows(rows[m], [(18, moveset.EFFECT8_TRAIL, v, None)], 18, v, m)
+        c.assign_trails(used={100})
+        self.assertEqual([r[0]['value'] for r in rows], [101, 102, 103])     # (move 2: another clip)
+
+    def test_the_sampler_skips_as_the_provider_plays(self):
+        """Sampler.skip_of: the move's anim_skip, or what the provider's played() makes of it (0: given whole)."""
+        s = T.Sampler.__new__(T.Sampler)
+
+        class K:
+            @staticmethod
+            def anim_ref(i):
+                return (7, 'own') if i else (None, None)
+
+            @staticmethod
+            def anim_skip(i):
+                return 2
+        s.k, s.played = K(), None
+        self.assertEqual((s.skip_of(0), s.skip_of(1)), (0, 2))
+        s.played = lambda key, skip: 0
+        self.assertEqual(s.skip_of(1), 0)
+
     def test_no_clip_no_row(self):
         c = self.converter(lambda *a: None)
         rows = []
