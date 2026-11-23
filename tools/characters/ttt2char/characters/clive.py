@@ -219,8 +219,11 @@ PREFABS = {
     'models': _PREFAB_MODELS,
     # what reaches in these moves is a later box: the middle of the blade's sweep, not its tip (u/f+1 follow-ups, up,
     # d/f+2 hit on ground), and the hand's point half a metre out (u/f+2's last); d/b+2,1's ice spikes (0.74 to 2.01 m
-    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall)
-    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3)},
+    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall); SS 2,1's second hit
+    # (key:e686509f, Titan's punch): the forearm's line and the line from a metre past the hand (Tekken 8's box 2) back
+    # to it, where boxes 0 and 1, the fist alone, met an opponent a little further away or off axis by 0 to 2 cm or not
+    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3),
+                  'key:e686509f': (1, 2)},
     # u/f+4, in the air: the toe's line to a point past the knee (TTT2 has no such points).
     # Phoenix 2,1's second hit: the left hand's path and the upright line of the farther of Tekken 8's two columns
     # (0.4 to 1.3 m high, 1.2 m ahead; 0.8 m the other: a clip has two root points). Boxes 0 and 1 are the hand only,
@@ -230,10 +233,16 @@ PREFABS = {
                                    ('joint', 'R_LowerLeg', (0.0, 500.0, 200.0), (0.0, 0.0, 0.0))),
                   'key:d5840b8d': (13, 0, (0.0, 1300.0, 1200.0), (0.0, 400.0, 1200.0))},
     # the last hit of phoenix 3,2: she is launched further than in Tekken 8 here; the path is 800 mm longer ahead (the same)
-    # f+3: Garuda's talon follows him as in Tekken 8 (not held, below), so its hold clip's path is taken back by his
-    # travel on its active frames (1033 and 1072 mm): it hits where Tekken 8's box does, 1.8 to 2.4 m ahead of where
-    # he began, under the talon
-    'scene_reach': {'key:5c7c9f59': 800.0, 'Okm_6LK': -1050.0},
+    # The moves whose creature follows him as in Tekken 8 while their hold clip's path, the boxes', is where the move
+    # began (the clip is the creature's claw or wrist plus his travel, every frame, to 30-80 mm; prefabs8 HIT POINTS):
+    # followed, the box ran his travel ahead, so the path is taken back by his travel on its active frames (x left, z
+    # ahead, mm). f+3 (Garuda's talon, not held: below): 1.8 to 2.4 m ahead of where he began, under the talon.
+    # b+1+2 (Titan's wrist; travel 1492 and 1576): 2 and 2.8 m ahead, where followed it was 3.4 and 4.3 m and missed
+    # an opponent 2.8 m away. d/b+1+2, its second hit and its ,1 (key:7de64f86; Garuda's talons: travel 870, 1879 and
+    # 1193), and b,b+1+4 (Titan's punch; travel 1346 and 1395: it reached 4 m and missed at 2.5 m, now 3 m as in Tekken 8)
+    'scene_reach': {'key:5c7c9f59': 800.0, 'Okm_6LK': (90.0, 0.0, -1050.0), 'Okm_4WP': (-12.0, 0.0, -1534.0),
+                    'Okm_1wp': (-147.0, 0.0, -869.0), 'Okm_1wp2': (-240.0, 0.0, -1879.0),
+                    'key:7de64f86': (-44.0, 0.0, -1193.0), 'Okm_44LPRK': (82.0, 0.0, -1370.0)},
     # the loops of Wings of Light and of its walks: no row of their own, nothing hides the wings; clip 0 is as long (80)
     'body_clip_moves': {'key:50cc78a8': 0, 'key:d6291e44': 0, 'key:8b2abee3': 0, 'key:b463dca1': 0, 'key:0fcdd6ec': 0},
     # the throws with Torgal: their scene stays where they began (prefabs8 HELD SCENES). 1+3 takes him 4.4 m back
