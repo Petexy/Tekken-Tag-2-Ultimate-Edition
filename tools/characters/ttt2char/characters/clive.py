@@ -230,17 +230,20 @@ PREFABS = {
                                    ('joint', 'R_LowerLeg', (0.0, 500.0, 200.0), (0.0, 0.0, 0.0))),
                   'key:d5840b8d': (13, 0, (0.0, 1300.0, 1200.0), (0.0, 400.0, 1200.0))},
     # the last hit of phoenix 3,2: she is launched further than in Tekken 8 here; the path is 800 mm longer ahead (the same)
-    'scene_reach': {'key:5c7c9f59': 800.0},
+    # f+3: Garuda's talon follows him as in Tekken 8 (not held, below), so its hold clip's path is taken back by his
+    # travel on its active frames (1033 and 1072 mm): it hits where Tekken 8's box does, 1.8 to 2.4 m ahead of where
+    # he began, under the talon
+    'scene_reach': {'key:5c7c9f59': 800.0, 'Okm_6LK': -1050.0},
     # the loops of Wings of Light and of its walks: no row of their own, nothing hides the wings; clip 0 is as long (80)
     'body_clip_moves': {'key:50cc78a8': 0, 'key:d6291e44': 0, 'key:8b2abee3': 0, 'key:b463dca1': 0, 'key:0fcdd6ec': 0},
     # the throws with Torgal: their scene stays where they began (prefabs8 HELD SCENES). 1+3 takes him 4.4 m back
     # while Torgal bites the victim 1.6 m ahead of the scene's origin; followed, the dog played 4.4 m short.
     # key:22ca2406 is its version from the opponent's left side (1+3 or 2+4).
-    # Garuda's talon in f+3 and qcf+1 too, its hit box with it (HOLD_CLIP_PROP): Tekken 8's frames show f+3's talon
-    # coming down 1.6 to 2.4 m ahead of where he began (followed: 2.7 to 3.4 m, and it hit an opponent 3.1 m away),
-    # and qcf+1's claw hitting an opponent 1.46 m away on its first frames (followed, it set out 2 m ahead of him and
-    # missed anyone nearer than 1.5 m)
-    'held_moves': ('Okm_FLnage_n', 'key:22ca2406', 'Okm_6LK', 'Okm_236LP'),
+    # Garuda's claw in qcf+1 too, its hit box with it (HOLD_CLIP_PROP): Tekken 8's frames show it hitting an opponent
+    # 1.46 m away on its first frames (followed, it set out 2 m ahead of him and missed anyone nearer than 1.5 m).
+    # Not f+3: its talon's clip is drawn where he is now (Tekken 8's hold clip, the box's path, is the talon's place
+    # plus his travel, every frame); held, it came down 1.05 m short, behind him at the hit (scene_reach keeps the box)
+    'held_moves': ('Okm_FLnage_n', 'key:22ca2406', 'Okm_236LP'),
     # .. and their scene cut (prefabs8 SCENE CUTS): 2.26 m of that is one frame, 66, where Tekken 8 cuts to Torgal (he
     # teleported); taken back, and the victim thrown that much further from frame 40, where his push starts, so the
     # bite and the slash meet as in Tekken 8. key:fbb1941f is key:22ca2406's victim
