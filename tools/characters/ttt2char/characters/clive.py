@@ -219,8 +219,12 @@ PREFABS = {
     'models': _PREFAB_MODELS,
     # what reaches in these moves is a later box: the middle of the blade's sweep, not its tip (u/f+1 follow-ups, up,
     # d/f+2 hit on ground), and the hand's point half a metre out (u/f+2's last); d/b+2,1's ice spikes (0.74 to 2.01 m
-    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall)
-    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3)},
+    # ahead, not the fist's point: it fell 0.2 to 0.4 m short of an opponent splatted on the wall); Phoenix 2: the
+    # staff's tip to his hips and to his left knee (Tekken 8's boxes 3 and 4; box 0 is the tip alone, on both lines):
+    # the tip comes down 1.2 m ahead at 1.15 m high, and an opponent low in front of him (getting up 0.8 m away) is
+    # under the line to the hips but on the one to the knee
+    'hit_boxes': {'key:7d820ba7': (0, 2), 'key:df1771a1': (0, 2), 'Okm_9RPRP': (2, 3), 'Okm_1RPLP': (2, 3),
+                  'key:24f28bb0': (3, 4)},
     # u/f+4, in the air: the toe's line to a point past the knee (TTT2 has no such points).
     # Phoenix 2,1's second hit: the left hand's path and the upright line of the farther of Tekken 8's two columns
     # (0.4 to 1.3 m high, 1.2 m ahead; 0.8 m the other: a clip has two root points). Boxes 0 and 1 are the hand only,
@@ -537,6 +541,17 @@ MOVESET = {
         'key:0ca5fca3': True,         # ... out of key:a14f5e76, late
         'key:c42755c9': True,         # ... back (u/b+1 too)
         'key:4bd7b552': True,         # ... back, late
+        # Updraft 2 (jump 2, its first hit; the beta testers' list) out of every jump, on time or late (not the copy
+        # d/f+2,2 jumps into, key:102dd9ce: that string is its own)
+        'key:48e22afd': True,         # straight up
+        'key:9096edaa': True,         # ... straight up, late
+        'key:bee6ce9f': True,         # ... forward (u/f+2 too)
+        'key:39c1bf59': True,         # ... forward, late
+        'key:c2e03fe0': True,         # ... out of key:a14f5e76
+        'key:36973851': True,         # ... out of key:a14f5e76, late
+        'key:4844e538': True,         # ... back (u/b+2 too)
+        'key:fb66b5fb': True,         # ... back, late
+        'key:dda4fe46': True,         # f,F+1+2 Staff of Judgment (the beta testers' list)
     },
     # the generic throw keeps the donor's row, active at 12 only: Tekken 8's frames
     'active_frames': {'Thrmv_B2_01': (15, 17),
