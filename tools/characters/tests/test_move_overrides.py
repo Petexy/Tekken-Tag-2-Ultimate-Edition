@@ -293,3 +293,41 @@ class SourceAirReaction(unittest.TestCase):
         self.assertEqual(c.T['hit_conditions'][:2],old)
         self.assertEqual(c.react_remap,{'slam':'rebound'})
         self.assertEqual(c.cache,{('react',0):1})
+
+class StanceCrouch(unittest.TestCase):
+    def test_stance_gets_donor_crouch_group_and_crouch_gets_down_attacks(self):
+        def row(direction, move_id, button=0):
+            return dict(direction=direction, button=button, req=0, extradata=0, win_start=1, win_end=32767,
+                        start_frame=1, move_id=move_id, option=0)
+        end = row(M.LIST_END, 0x8001)
+        # 0 donor stance, 1 donor crouch start, 2 his stance, 3 his d start, 4 crouch (alias 2), 5 d/f+1,
+        # 6 side step, 7 walk, 8 his d/f start, 9 his d/b start
+        moves = [dict(cancel=0, vuln=0x1952, transition=0x8001), dict(cancel=2, vuln=0x3929, transition=0x8002),
+                 dict(cancel=3, vuln=0x1952, transition=0x8001), dict(cancel=7, vuln=0x83929, transition=0x8002),
+                 dict(cancel=2, vuln=0x3929, transition=0x8002), dict(cancel=2, vuln=0x0842, transition=0x8001),
+                 dict(cancel=2, vuln=0x1952, transition=0x8001), dict(cancel=2, vuln=0x0842, transition=0x8001),
+                 dict(cancel=2, vuln=0x12821, transition=0x8002), dict(cancel=2, vuln=0x23029, transition=0x8002)]
+        cancels = [row(M.GROUP, 0), end, end,
+                   row(0x8, 5, 0x40000001), row(0x8004, 6), row(0x40, 7), end,
+                   row(0x2, 4), end]
+        group = [row(0x4, 1), row(0x8, 1), row(0x2, 1), row(0x8004, 6), row(M.GROUP_END, 0)]
+        c = types.SimpleNamespace(
+            T={'moves': moves, 'cancels': cancels, 'group_cancels': group,
+               'requirements': [dict(condition=T.TT_END, param=0)]},
+            kn={'stance': 2, 'd': 3, 'df': 8, 'db': 9}, newidx={2: 2, 3: 3, 8: 8, 9: 9},
+            d=types.SimpleNamespace(aliases=[0, 0, 1]), aliases=[0, 2, 4], stats=collections.Counter())
+        before = [dict(r) for r in cancels]
+        O.stance_crouch(c, {'d': 'd', 'd/f': 'df', 'd/b': 'db', 'from': ('stance',)})
+        stance = T.cancels(c.T, moves[2]['cancel'])
+        self.assertEqual([r['direction'] for r in stance], [0x8, M.GROUP, 0x8004, 0x40, M.LIST_END])
+        crouch = T.chain(group, stance[1]['move_id'], lambda r: r['direction'] == M.GROUP_END)
+        self.assertEqual([(r['direction'], r['move_id']) for r in crouch[:4]], [(0x4, 3), (0x8, 8), (0x2, 9), (0x8004, 6)])
+        for i in (3, 4, 8, 9):          # the entries and the crouch they lead to
+            first = T.cancels(c.T, moves[i]['cancel'])[0]
+            self.assertEqual(first['direction'], M.GROUP)
+            attacks = T.chain(group, first['move_id'], lambda r: r['direction'] == M.GROUP_END)
+            self.assertEqual([(r['direction'], r['button'], r['move_id']) for r in attacks[:-1]], [(0x8, 0x40000001, 5)])
+        # the donor's moves (its crouch start is no longer reached), the attack, side step and walk keep their lists
+        self.assertEqual([moves[i]['cancel'] for i in (0, 1, 5, 6, 7)], [0, 2, 2, 2, 2])
+        self.assertEqual(c.T['cancels'][:len(before)], before)
+        self.assertEqual(group[:5], [row(0x4, 1), row(0x8, 1), row(0x2, 1), row(0x8004, 6), row(M.GROUP_END, 0)])

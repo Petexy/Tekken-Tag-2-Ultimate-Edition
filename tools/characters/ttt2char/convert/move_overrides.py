@@ -204,6 +204,107 @@ def apply(c):
     for name in c.defn.MOVESET.get('direct_buffered_strings', ()):
         direct_buffered_string(c, name)
     normalize_buffered_strings(c)
+    if 'stance_crouch' in c.defn.MOVESET:
+        stance_crouch(c, c.defn.MOVESET['stance_crouch'])
+
+
+# ------------------------------------------------------------------------------------------------ a crouch
+CROUCH_DIRS = {'d/b': 0x2, 'd': 0x4, 'd/f': 0x8}    # the stick's down positions (TTT2's and Tekken's bits)
+DOWN = 0xE                                          # any of them
+CROUCHED = 0x1                                      # a move's state (vuln) bit: crouched (0x3929, 0x23029, 0x12821)
+END_OF_MOVE = 0x8000                                # a cancel row taken as the move ends
+ALIASES = 56
+
+
+def stance_crouch(c, spec):
+    """MOVESET['stance_crouch'] = {'d': move, 'd/f': move, 'd/b': move, 'from': (move, ...)}: a fighter whose source
+    gives its stance no crouch (Tekken 8's Azazel, a boss: holding down does nothing there, down + a button are his
+    attacks) crouches as any fighter.
+
+    The moves of 'from' (its stance, walks and dashes) get the donor stance's crouch group (holding d, d/f or d/b;
+    the ducks under a high it also starts) with the donor's three crouch entries replaced by the fighter's own: 'd',
+    'd/f', 'd/b'. Every move of the crouch those lead to (followed while down is held or as a move ends, through rows
+    without a condition, as long as the move is crouched) then starts its list with the stance's down + button rows,
+    so down held a little before the button gives the same attack as down + the button from standing."""
+    from . import idmaps as M
+    T = c.T
+
+    def new(name):
+        if name not in c.kn or c.kn[name] not in c.newidx:
+            raise ValueError('stance_crouch: no such move: ' + name)
+        return c.newidx[c.kn[name]]
+
+    def always(req):
+        return all(cond == 0 for cond, _ in TS.reqs(T, req) if cond != TS.TT_END)
+
+    def group(g):
+        return TS.chain(T['group_cancels'], g, lambda r: r['direction'] == M.GROUP_END)
+
+    def flat(i):
+        """A move's cancel rows, with those of its groups taken whatever the group's condition."""
+        for row in TS.cancels(T, T['moves'][i]['cancel']):
+            if row['direction'] == M.GROUP:
+                yield from (r for r in group(row['move_id']) if r['direction'] != M.GROUP_END)
+            elif row['direction'] != M.LIST_END:
+                yield row
+
+    def alias(t):
+        return c.aliases[t - 0x8000] if 0x8000 <= t < 0x8000 + ALIASES else t
+
+    entries = {CROUCH_DIRS[k]: new(v) for k, v in spec.items() if k in CROUCH_DIRS}
+    if len(entries) != len(CROUCH_DIRS):
+        raise ValueError('stance_crouch needs its d, d/f and d/b moves')
+
+    # the donor stance's crouch group (the donor's moves keep their indices): the one with a plain hold-d row
+    template = next(row for row in TS.cancels(T, T['moves'][c.d.aliases[1]]['cancel'])
+                    if row['direction'] == M.GROUP and any(
+                        r['direction'] == CROUCH_DIRS['d'] and r['button'] == 0 and r['move_id'] < 0x8000
+                        and always(r['req']) for r in group(row['move_id'])))
+    rows, swapped = [], 0
+    for r in group(template['move_id']):
+        r = dict(r)
+        if r['button'] == 0 and r['direction'] in entries and r['move_id'] < 0x8000 and always(r['req']):
+            r['move_id'] = entries[r['direction']]
+            swapped += 1
+        rows.append(r)
+    if swapped != len(CROUCH_DIRS):
+        raise ValueError('the donor stance\'s crouch group has not one entry per down position')
+    crouch_row = dict(template, move_id=TS.write(T, 'group_cancels', rows))
+    for name in spec.get('from', ()):
+        move = T['moves'][new(name)]
+        own = [dict(r) for r in TS.cancels(T, move['cancel'])]
+        # before its side steps (a tap down: as the donor's stance, whose group has them after its crouch), else its
+        # walks, else at the end
+        at = next((n for n, r in enumerate(own) if r['direction'] == 0x8004), None)
+        if at is None:
+            at = next((n for n, r in enumerate(own) if r['button'] == 0 and r['direction'] in (0x10, 0x40)),
+                      len(own) - 1)
+        move['cancel'] = TS.write(T, 'cancels', own[:at] + [dict(crouch_row)] + own[at:])
+    c.stats['crouch: moves given the stance\'s crouch (MOVESET stance_crouch)'] += len(spec.get('from', ()))
+
+    # the crouch: from the entries, while down is held or a move ends, unconditionally, crouched moves
+    seen, todo = set(), list(entries.values())
+    while todo:
+        i = todo.pop()
+        if i in seen or i >= len(T['moves']) or not T['moves'][i]['vuln'] & CROUCHED:
+            continue
+        seen.add(i)
+        todo.append(alias(T['moves'][i]['transition']))
+        for row in TS.cancels(T, T['moves'][i]['cancel']):
+            inner = group(row['move_id']) if row['direction'] == M.GROUP and always(row['req']) else [row]
+            todo += [alias(r['move_id']) for r in inner if r['button'] == 0 and always(r['req'])
+                     and r['direction'] in tuple(CROUCH_DIRS.values()) + (END_OF_MOVE,)]
+    attacks = [dict(r) for r in flat(c.aliases[1])
+               if r['button'] and r['direction'] < 0x8000 and r['direction'] & DOWN and always(r['req'])]
+    if not attacks:
+        raise ValueError('stance_crouch: the stance has no down + button rows')
+    attack_row = dict(template, move_id=TS.write(T, 'group_cancels', attacks + [
+        next(r for r in group(template['move_id']) if r['direction'] == M.GROUP_END)]))
+    for i in sorted(seen):
+        move = T['moves'][i]
+        move['cancel'] = TS.write(T, 'cancels', [dict(attack_row)] + [dict(r) for r in TS.cancels(T, move['cancel'])])
+    c.stats['crouch: crouched moves given the stance\'s down + button attacks'] += len(seen)
+    c.stats['crouch: down + button attacks of the stance'] += len(attacks)
 
 
 END_BLEND = 10                  # a move's clip goes on this long after its end row opens (the row of a Tekken 8
