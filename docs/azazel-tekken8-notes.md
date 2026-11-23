@@ -33,6 +33,11 @@ record what his port needed, for later fighters.
   owner's projectile-hit flag (+1152 0x200000, requirement 46) a frame after Tekken 8 sees it.
 * Requirement 51 (whiff) is decided by the melee hit test at the last active frame, before a projectile hits.
 * Requirements 35/36 measure the same floor distance between the fighters' origins in both games (1:1).
+* A move's state word (vuln: 0x10 guards highs and mids standing, 0x8 lows crouching; the same bits in both games,
+  player +452 holds them in game) decides what is guarded while it plays. Tekken 8 walks, dashes and back-steps him in
+  a boss state, 0xe81a in its low bits, both guards on: moving forward he blocked everything without even a guard
+  reaction. The converter gives those moves an ordinary fighter's state (convert/moveset.py vuln8: forward 0x842,
+  back 0x1052).
 * A fighter without a Tekken 8 command list gets one from its converted moveset (convert/movelist_rows.py) with
   names the definition writes (`COMMANDS`).
 * Beams: Tekken 8 0x8262/0x8263/0x8264 have no TTT2 counterpart; a TTT2 laser (0x8145/0x8146/0x8147) needs its .alo

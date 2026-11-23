@@ -940,10 +940,28 @@ FLOAT8 = ('airborne_start', 'airborne_end', 'ground_fall')
 FLOAT8_NEAR = 4                   # frames a TTT2 launch may float longer or shorter (no TTT2 name)
 LYING = re.compile(r'^dw(?:DWN|KAM)_\d\d([UD])')       # the lying states a fall ends in: face up (U) or down (D)
 GUARD_FROM8, TT_GUARD_FROM = 0x81ec, 0x80ea
+# A move's state (its vuln word, the same bits in both games: TTT2's walks forward 0x10842, back 0x21052, stance 0x1952;
+# 0x10 guards highs and mids standing, 0x8 lows crouching) decides whether a hit is guarded while it plays. Tekken 8's
+# boss Azazel walks, dashes and steps in a state of his own, 0xe81a in its low bits (standing with both guards, and
+# 0xe000, which no TTT2 move has): moving forward he guarded highs, mids and lows, until he did a move (the user,
+# 2026-11-23: "his perma-armor that autoblocks"). No other of Tekken 8's 40 fighters has it: their same walks are
+# 0x10842 and 0x21052, their dashes 0x10842 or 0x90842. So the state becomes theirs (vuln8): moving forward standing
+# and guarding nothing (0x842), back or still standing and guarding highs and mids (0x1052); the direction bits over
+# it stay
+BOSS_GUARD8 = 0xE81A
+BOSS_GUARD8_AS = (0x842, 0x1052)                # (forward, otherwise)
+BOSS_GUARD8_FORWARD = 0x10000                  # the walks' and dashes' forward bit (back: 0x20000)
 # the reaction slots of an opponent on its feet (the downed, wall-slumped and guard slots are left as they were)
 STANDING_SLOTS = frozenset(('standing', 'default', 'crouch', 'ch', 'crouch_ch', 'left', 'crouch_left', 'right',
                             'crouch_right', 'back', 'crouch_back'))
 ANIM_KEY_BYTES = 256                 # animations are matched by a hash of their first bytes
+
+
+def vuln8(v):
+    """A Tekken 8 move's vuln as a TTT2 move's: the boss's guarding state (BOSS_GUARD8) as an ordinary fighter's."""
+    if v & 0xFFFF != BOSS_GUARD8:
+        return v
+    return v & ~0xFFFF | BOSS_GUARD8_AS[0 if v & BOSS_GUARD8_FORWARD else 1]
 
 
 def state_flags(moveset):
@@ -3974,7 +3992,8 @@ class Converter:
     def conv_move(self, i):
         mv = self.k.tables['moves'][i]
         return dict(name=self.string(self.ttt2_name(i)), anim_name=self.string(self.k.anim_name(i)),
-                    anim=self.move_anim(i), vuln=mv['vuln'], hitlevel=mv['hitlevel'], cancel=None, cancel2=0,
+                    anim=self.move_anim(i), vuln=vuln8(mv['vuln']) if self.game == 't8' else mv['vuln'],
+                    hitlevel=mv['hitlevel'], cancel=None, cancel2=0,
                     c2_int=0, cancel3=0, c3_int=0, cancel4=0, c4_int=0, transition=0, m_56=mv['m_56'],
                     move_id_hi=0, move_id_lo=0, hit_condition=None, anim_len=0,
                     airborne_start=mv['airborne_start'], airborne_end=mv['airborne_end'],
