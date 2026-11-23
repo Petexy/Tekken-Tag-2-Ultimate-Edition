@@ -209,7 +209,8 @@ float picture_aspect(uint8_t* base) {
 }
 
 // How far up the 2-character camera's last result went for a giant (mm; 0: it was the title's own).
-float g_lift = 0;
+// g_level: that camera's eye over the point it looks at.
+float g_lift = 0, g_level = 0;
 
 // The 2-character camera's result `camera` with the giants in it.
 void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const float heights[2]) {
@@ -274,6 +275,7 @@ void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const flo
     }
     const float middle = bottom + needed * high; // the picture's bottom kept
     g_lift = middle - target[1];
+    g_level = -forward[1] * needed;
     for (int k = 0; k < 3; ++k) {
         const float t = target[k] + (k == 1 ? middle - target[1] : 0);
         stf(base, camera + kCameraTarget + 4 * k, t);
@@ -434,7 +436,8 @@ void contain(uint8_t* base, uint32_t camera, const View& view) {
 }
 
 // The round call's shot (the win camera's, +304 eye, +320 the point it looks at, as it comes round the two fighters
-// in play) with a giant among them: up by what the fight's camera went up (round_call.h).
+// in play) with a giant among them: up by what the fight's camera went up, its eye only as it comes down to that
+// camera's height (round_call.h).
 constexpr uint32_t kWinShot = 304, kWinTarget = 320, kWinState = 408;
 
 void round_call_after(uint8_t* base, uint32_t camera) {
@@ -447,7 +450,7 @@ void round_call_after(uint8_t* base, uint32_t camera) {
         eye[k] = ldf(base, camera + kWinShot + 4 * k);
         target[k] = ldf(base, camera + kWinTarget + 4 * k);
     }
-    if (!round_call::raise(eye, target, g_lift)) return;
+    if (!round_call::raise(eye, target, g_lift, g_level)) return;
     stf(base, camera + kWinShot + 4, eye[1]);
     stf(base, camera + kWinTarget + 4, target[1]);
     if (trace())

@@ -12,20 +12,36 @@
 // man's height the picture is half floor and cuts the giant off at his
 // shoulders, and jumps up when the round starts.
 //
-// The round call's shot is raised by what the fight's camera was raised
-// (its eye and the point it looks at alike: the shot keeps its direction),
-// so that it ends as the fight's camera begins.
+// The round call's shot is raised by what the fight's camera was raised, so
+// that it ends as the fight's camera begins. The point it looks at goes up
+// all through. Its eye goes up only as it comes down to the fight camera's
+// own height over its point: a call that opens from high above the fighters
+// (the win camera's state 0x12) keeps the title's own way down, through
+// places the title's camera goes through on every stage, and no others (a
+// metre higher on that way it went through a hall's gallery: a black
+// picture).
 
+#include <algorithm>
 #include <cmath>
 
 namespace cafe::title::round_call {
 
-// The shot (its eye, the point it looks at) raised by `lift` mm (what the
-// fight's camera was raised by this frame; 0: not at all). -> whether it
-// was raised.
-inline bool raise(float eye[3], float target[3], float lift) {
-    if (!(lift > 0) || !std::isfinite(lift) || !std::isfinite(eye[1]) || !std::isfinite(target[1])) return false;
-    eye[1] += lift;
+// How much of the fight camera's `lift` the shot's eye takes, `over` mm over
+// the point it looks at; `level`: the fight camera's eye over its point. All
+// of it at that height and under it, none 2 * lift higher: there the raised
+// eye still comes down, at half the title's speed.
+inline float share(float over, float lift, float level) {
+    if (!(lift > 0)) return 0;
+    return std::clamp(1 - (over - level) / (2 * lift), 0.0f, 1.0f);
+}
+
+// The shot (its eye, the point it looks at) raised for a fight camera that
+// went up by `lift` mm this frame (0: not at all) and has its eye `level` mm
+// over its point. -> whether it was raised.
+inline bool raise(float eye[3], float target[3], float lift, float level) {
+    if (!(lift > 0) || !std::isfinite(lift) || !std::isfinite(level) || !std::isfinite(eye[1]) || !std::isfinite(target[1]))
+        return false;
+    eye[1] += lift * share(eye[1] - target[1], lift, level);
     target[1] += lift;
     return true;
 }
