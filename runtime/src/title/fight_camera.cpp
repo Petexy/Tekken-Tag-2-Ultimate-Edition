@@ -190,6 +190,46 @@ float rising(uint8_t* base, uint32_t player, float lowest) {
     return r.speed;
 }
 
+// A fighter's body's middle across the floor: the mean of his spheres (inside a move his body runs up to a metre
+// ahead of or behind his position, which the title moves on at the move's end), or his position while his spheres
+// are still where the title took him from: they follow a new place (a round's start, his position more than a metre
+// away at once) only a frame later, and at the start of a round after a knockout 10 m away the camera went out to
+// its 15 m limit for the round call's first frame. (The camera runs several times in that frame, his move changing
+// in between: so it goes by his spheres, which stay as they were until they follow.)
+struct Place {
+    float x = NAN, z = NAN, stale_x = NAN, stale_z = NAN;
+};
+std::map<uint32_t, Place> g_places; // by fighter
+
+void body_middle(uint8_t* base, uint32_t player, float& x, float& z) {
+    float mx = 0, mz = 0;
+    int n = 0;
+    for (uint32_t i = 0; i < kBodySphereCount; ++i) {
+        const uint32_t at = player + kBodySpheres + kBodySphereSize * i;
+        const float sx = ldf(base, at), sz = ldf(base, at + 8);
+        if (!std::isfinite(sx) || !std::isfinite(sz)) continue;
+        mx += sx;
+        mz += sz;
+        ++n;
+    }
+    const float px = ldf(base, player), pz = ldf(base, player + 8);
+    Place& q = g_places[player];
+    if (std::hypot(px - q.x, pz - q.z) > 1000) { // (put in a new place: his spheres where he was)
+        q.stale_x = mx;
+        q.stale_z = mz;
+    }
+    q.x = px;
+    q.z = pz;
+    if (n && mx == q.stale_x && mz == q.stale_z) {
+        x = px;
+        z = pz;
+        return;
+    }
+    q.stale_x = q.stale_z = NAN;
+    x = n ? mx / n : px;
+    z = n ? mz / n : pz;
+}
+
 // The giants the 2-character camera frames now (while it runs).
 uint32_t g_giants[2] = {};
 float g_scales[2] = {};
@@ -247,19 +287,9 @@ void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const flo
         const Extent body = body_extent(base, p);
         const float lowest = std::isfinite(body.bottom) ? std::max(body.bottom, floor) : floor;
         top = std::max({top, lowest + rising(base, p, lowest) * kLead + heights[k], body.top + heights[k] * kOverBody});
-        // (his body's middle across the floor, the mean of his spheres: inside a move his body runs up to a metre
-        // ahead of or behind his position, which the title moves on at the move's end)
-        float mx = 0, mz = 0;
-        int n = 0;
-        for (uint32_t i = 0; i < kBodySphereCount; ++i) {
-            const uint32_t at = p + kBodySpheres + kBodySphereSize * i;
-            const float sx = ldf(base, at), sz = ldf(base, at + 8);
-            if (!std::isfinite(sx) || !std::isfinite(sz)) continue;
-            mx += sx;
-            mz += sz;
-            ++n;
-        }
-        const float x = (n ? mx / n : ldf(base, p)) - target[0], z = (n ? mz / n : ldf(base, p + 8)) - target[2];
+        float mx, mz; // (his body's middle across the floor)
+        body_middle(base, p, mx, mz);
+        const float x = mx - target[0], z = mz - target[2];
         const float side = std::fabs(x * right[0] + z * right[1]), depth = x * forward[0] + z * forward[2];
         needed = std::max(needed, (side + heights[k] * kInFromSide) / wide - depth);
     }

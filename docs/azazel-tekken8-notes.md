@@ -22,7 +22,9 @@ record what his port needed, for later fighters.
   state is the win camera's counter +440 mod 3 (sub_061AAA8C: 1 round the side 0x11, 2 = 0x13, 0 from above 0x12);
   0x11 and 0x13 end on the fight camera's tilt by themselves; the 2-character camera's lead for a rising fighter counts
   a rise from its second frame (his spheres take the round's stance a frame after the round places him, 0.33 m up:
-  read as a rise it sent the call's second frame 2.5 m out). Matches without a giant are identical
+  read as a rise it sent the call's second frame 2.5 m out), and on the frame the title puts him in a new place (a
+  round's start) the camera takes his place for his body's middle (his spheres still where he was knocked out took
+  the call's first frame of round 2 out to the 15 m limit). Matches without a giant are identical
   frame for frame (camera, bodies, pushes, hits) to the runtime without the hook.
 * `character.ini body = S` (definition `BODY`) drives `runtime/src/title/giant_body.cpp`: player+1652 is the Mushroom
   Battle size (it scales the model too, so never write it for an added giant). The hurt-sphere code (sub_03D6B9F4) and
