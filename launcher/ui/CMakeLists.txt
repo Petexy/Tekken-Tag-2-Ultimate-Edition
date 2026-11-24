@@ -71,6 +71,27 @@ function(ttt2_launcher_program target)
     endif()
 endfunction()
 
+# The toolkit (include/ttt2ui/*.h; src/): window and input, drawing, text, icons, layout, focus, the Tag Split stage
+# and generic widgets. It knows no screen of the launcher and nothing of its model; every look constant is in
+# include/ttt2ui/theme.h.
+add_library(ttt2_launcher_ui STATIC
+    src/anim.cpp src/canvas.cpp src/focus.cpp src/icons.cpp src/input.cpp src/stage.cpp src/text.cpp
+    src/textures.cpp src/ui.cpp src/widgets.cpp src/window.cpp)
+target_include_directories(ttt2_launcher_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_link_libraries(ttt2_launcher_ui PUBLIC ttt2_launcher_sdl ttt2_launcher_vendor ttt2_launcher_fonts
+    ttt2_launcher_icons)
+target_compile_features(ttt2_launcher_ui PUBLIC cxx_std_20)
+target_compile_options(ttt2_launcher_ui PRIVATE -Wall -Wextra -Wpedantic)
+if(WIN32)
+    target_link_libraries(ttt2_launcher_ui PUBLIC ole32 shell32)
+endif()
+
+# The toolkit's demo: Tag Split Home / Fighters / Settings from fake data (no model), --screenshot for tests.
+add_executable(launcher_ui_demo demo/demo.cpp)
+target_link_libraries(launcher_ui_demo PRIVATE ttt2_launcher_ui)
+ttt2_launcher_program(launcher_ui_demo NAME launcher_ui_demo FILENAME launcher_ui_demo.exe
+    DESCRIPTION "Ultimate Launcher (interface toolkit demo)")
+
 add_executable(launcher_smoke smoke/smoke.cpp)
 ttt2_launcher_program(launcher_smoke NAME launcher_smoke FILENAME launcher_smoke.exe
     DESCRIPTION "Ultimate Launcher (smoke test)")
