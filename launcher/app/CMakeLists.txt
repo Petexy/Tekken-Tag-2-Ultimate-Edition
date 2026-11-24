@@ -1,21 +1,20 @@
-# ttt2-launcher: the players' window over the builder and the importer, in
-# plain GTK 4 (no libadwaita, no C++ bindings: few libraries to ship in the
-# AppImage). Without GTK 4.10 or newer it is left out.
+# ttt2-launcher: the players' launcher (Ultimate Launcher) in the Tag Split look, on the toolkit of ../ui (SDL 3)
+# over the model of ../model (what the window shows and does) and core's processes (../backend). This folder has
+# the program: its loop, its screens, and what it asks of Linux (backend_linux.cpp). Windows' backend comes with
+# the Windows program (launcher/windows/); until then this program is Linux only.
 
-# The importer, as the launcher runs it installed: read-only, without its
-# tests and caches.
+# The importer, as the launcher runs it installed: read-only, without its tests and caches.
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/characters/ DESTINATION share/ttt2/characters
     PATTERN tests EXCLUDE
     PATTERN __pycache__ EXCLUDE
     PATTERN .pytest_cache EXCLUDE
     PATTERN "*.pyc" EXCLUDE)
 
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(GTK4 QUIET IMPORTED_TARGET gtk4>=4.10)
+if(NOT TARGET ttt2_launcher_ui)
+    message(STATUS "SDL 3 not found (TTT2_LAUNCHER_SDL): ttt2-launcher is left out")
+    return()
 endif()
-if(NOT GTK4_FOUND)
-    message(STATUS "GTK 4.10 or newer not found: ttt2-launcher is left out")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     return()
 endif()
 
@@ -28,94 +27,38 @@ if(NOT TTT2_KIT_DIR)
     set(TTT2_KIT_DIR ${CMAKE_BINARY_DIR}/launcher/kit)
 endif()
 
-# The launcher's own icons (Settings, Back, Update, the GamePad's inputs),
-# built into the program as a GResource: they are there whether it runs from
-# the build tree, an install or the AppImage. Its icon theme finds them under
-# <prefix>/icons/scalable/actions.
-set(TTT2_LAUNCHER_ICON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/icons CACHE PATH "The folder of the launcher's SVG icons")
-set(launcher_icons ttt2-settings-symbolic ttt2-back-symbolic ttt2-update-symbolic)
-foreach(input dpad_up dpad_down dpad_left dpad_right face_top face_bottom face_left face_right l r zl zr
-              stick_up stick_down stick_left stick_right plus minus home)
-    list(APPEND launcher_icons ttt2-input-${input})
-endforeach()
-pkg_get_variable(glib_compile_resources gio-2.0 glib_compile_resources)
-find_program(TTT2_GLIB_COMPILE_RESOURCES NAMES ${glib_compile_resources} glib-compile-resources)
-set(icon_files "")
-set(icon_list "")
-foreach(icon ${launcher_icons})
-    if(NOT EXISTS ${TTT2_LAUNCHER_ICON_DIR}/${icon}.svg)
-        list(APPEND missing_icons ${icon}.svg)
-    endif()
-    list(APPEND icon_files ${TTT2_LAUNCHER_ICON_DIR}/${icon}.svg)
-    string(APPEND icon_list "    <file>${icon}.svg</file>\n")
-endforeach()
-if(NOT TTT2_GLIB_COMPILE_RESOURCES)
-    message(WARNING "glib-compile-resources (GLib's development files) not found: ttt2-launcher is left out")
-    return()
-endif()
-if(missing_icons)
-    message(WARNING "${TTT2_LAUNCHER_ICON_DIR} lacks ${missing_icons}: ttt2-launcher is left out")
-    return()
-endif()
-set(TTT2_LAUNCHER_RESOURCE_PATH /io/github/petexy/TekkenTag2UltimateEdition)
-set(icons_xml ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml)
-file(CONFIGURE OUTPUT ${icons_xml} CONTENT
-     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<gresources>
-  <gresource prefix=\"${TTT2_LAUNCHER_RESOURCE_PATH}/icons/scalable/actions\">
-${icon_list}  </gresource>
-</gresources>
-")
-add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/icons.c
-    COMMAND ${TTT2_GLIB_COMPILE_RESOURCES} --sourcedir=${TTT2_LAUNCHER_ICON_DIR} --generate-source
-            --c-name=ttt2_launcher_icons --target=${CMAKE_CURRENT_BINARY_DIR}/icons.c ${icons_xml}
-    DEPENDS ${icons_xml} ${icon_files}
-    COMMENT "Building the launcher's icons into it"
-    VERBATIM)
+# The parts without SDL (tested on their own): the file browser's folders, the install's steps from its log.
+add_library(ttt2_launcher_app_parts STATIC browser.cpp steps.cpp)
+target_include_directories(ttt2_launcher_app_parts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(ttt2_launcher_app_parts PUBLIC launcher_model)
+target_compile_features(ttt2_launcher_app_parts PUBLIC cxx_std_20)
+target_compile_options(ttt2_launcher_app_parts PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(ttt2-launcher
     main.cpp
-    characters.cpp
-    game.cpp
-    launcher.cpp
-    process.cpp
-    self_update.cpp
-    settings.cpp
-    task.cpp
-    widgets.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/icons.c)
-target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_core_linux PkgConfig::GTK4)
-# (Not on the generated icons.c.)
-target_compile_options(ttt2-launcher PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
-# The build tree's kit and the source tree's importer and icon are found
-# when the launcher runs from the build tree (an installed one has its own).
-# A package turns that off (launcher/appimage/make_appimage.sh): then the
-# program names no folder of the computer it was built on.
+    app.cpp
+    home.cpp
+    picker.cpp
+    tests_hooks.cpp
+    backend_linux.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_app_parts ttt2_launcher_ui launcher_backend launcher_model
+    ttt2_launcher_core_linux Threads::Threads)
+ttt2_launcher_program(ttt2-launcher NAME ttt2-launcher FILENAME ttt2-launcher DESCRIPTION "Ultimate Launcher")
+# The build tree's kit and the source tree's importer are found when the launcher runs from the build tree (an
+# installed one has its own). A package turns that off (launcher/appimage/make_appimage.sh): then the program names
+# no folder of the computer it was built on.
 option(TTT2_LAUNCHER_BUILD_TREE_PATHS "ttt2-launcher also looks in its build and source trees" ON)
 if(TTT2_LAUNCHER_BUILD_TREE_PATHS)
     set(build_kit ${TTT2_KIT_DIR})
     set(source_importer ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/characters)
-    set(source_icon ${CMAKE_CURRENT_SOURCE_DIR})
 else()
     set(build_kit "")
     set(source_importer "")
-    set(source_icon "")
 endif()
-# Only what GTK 4.10 and the GLib it needs (2.76) have, so that it runs on the
-# distributions that ship them (newer GLib headers' type macros otherwise
-# call 2.80's g_once_init_enter_pointer).
 target_compile_definitions(ttt2-launcher PRIVATE
-    GDK_VERSION_MIN_REQUIRED=GDK_VERSION_4_10
-    GDK_VERSION_MAX_ALLOWED=GDK_VERSION_4_10
-    GLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_76
-    GLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_76
-    TTT2_LAUNCHER_APP_ID="${TTT2_LAUNCHER_APP_ID}"
-    TTT2_LAUNCHER_VERSION="${TTT2_LAUNCHER_VERSION}"
-    TTT2_LAUNCHER_RESOURCE_PATH="${TTT2_LAUNCHER_RESOURCE_PATH}"
     TTT2_LAUNCHER_BUILD_KIT="${build_kit}"
-    TTT2_LAUNCHER_SOURCE_IMPORTER="${source_importer}"
-    TTT2_LAUNCHER_SOURCE_ICON="${source_icon}")
-set_target_properties(ttt2-launcher PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/launcher)
+    TTT2_LAUNCHER_SOURCE_IMPORTER="${source_importer}")
 # This build's commit (launcher/builder reads it; empty without Git), in a file of its own: a new commit
 # compiles only that file again.
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/build_commit.cpp @ONLY CONTENT
@@ -125,3 +68,23 @@ target_sources(ttt2-launcher PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/build_commit.cp
 install(TARGETS ttt2-launcher RUNTIME DESTINATION bin)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.desktop DESTINATION share/applications)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.svg DESTINATION share/icons/hicolor/scalable/apps)
+
+# Tests: the parts (no window), and the program itself offscreen against stub programs (tests/stub: an importer
+# answering from a fixture, a builder printing the protocol, a game writing a marker), in a scratch home.
+add_executable(launcher_app_test tests/app_test.cpp)
+target_link_libraries(launcher_app_test PRIVATE ttt2_launcher_app_parts)
+target_compile_options(launcher_app_test PRIVATE -Wall -Wextra)
+add_test(NAME launcher_app_test COMMAND launcher_app_test ${CMAKE_CURRENT_BINARY_DIR}/app-test)
+add_test(NAME launcher_app_version COMMAND ttt2-launcher --version)
+set_tests_properties(launcher_app_version PROPERTIES PASS_REGULAR_EXPRESSION "^ttt2-launcher ${TTT2_LAUNCHER_VERSION}\n$")
+find_program(TTT2_BASH bash)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+set(_app_tests launcher_app_test launcher_app_version)
+if(TTT2_BASH AND Python3_Interpreter_FOUND)
+    add_test(NAME launcher_app_e2e
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/e2e.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/e2e ${Python3_EXECUTABLE})
+    list(APPEND _app_tests launcher_app_e2e)
+    set_tests_properties(launcher_app_e2e PROPERTIES TIMEOUT 240)
+endif()
+set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

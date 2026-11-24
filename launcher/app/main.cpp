@@ -1,97 +1,99 @@
-// ttt2-launcher [GAME.wua] [--screenshot FILE]: the players' launcher (see
-// launcher.h). One window per user; starting it again shows that window
-// (with the archive given, chosen in it). ttt2-launcher --version: its
-// version, which an update checks the new launcher by (self_update.cpp).
+// ttt2-launcher (Ultimate Launcher): first what needs no window (core/startup: --version, --help, the launcher it
+// replaces waited for, one launcher per user), then SDL and the window (app.h).
+//
+//   ttt2-launcher [GAME.wua] [--screenshot FILE [--size WxH] [--scale S]] | --version | --help
 
-#include "launcher.h"
+#include "app.h"
+
+#include "paths.h"
+#include "startup.h"
+
+#include <SDL3/SDL.h>
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <memory>
 
 namespace {
 
-struct App {
-    launcher::Options options;
-    std::unique_ptr<launcher::Launcher> window;
-};
+const char* const kUsage =
+    "usage: ttt2-launcher [GAME.wua] [--screenshot FILE [--size WxH] [--scale S]] | --version\n"
+    "  Installs Tekken Tag Tournament 2 from your own .wua (the game program is built on this PC),\n"
+    "  starts it, and adds Tekken 7's and Tekken 8's characters from your own copies of them.\n"
+    "  --screenshot FILE  saves the window as a PNG once it has loaded (after the test actions of\n"
+    "                     TTT2_LAUNCHER_TEST_ACTIONS), then quits (for tests; drawn offscreen)\n"
+    "  --size WxH         the window's size for --screenshot (default 1280x800)\n"
+    "  --scale S          the interface's scale for --screenshot\n"
+    "  --version          prints its version (\"ttt2-launcher <ver>\")\n";
 
-void activate(GtkApplication* app, gpointer data) {
-    auto* a = static_cast<App*>(data);
-    if (!a->window) a->window = std::make_unique<launcher::Launcher>(app, a->options);
-    a->window->present();
-}
-
-void open(GtkApplication* app, GFile** files, int count, const char*, gpointer data) {
-    auto* a = static_cast<App*>(data);
-    activate(app, data);
-    if (count > 0) {
-        if (char* path = g_file_get_path(files[0])) {
-            a->window->open_game(path);
-            g_free(path);
-        }
+void wake() {
+    // (A later start was handed over: the loop looks at it. Before SDL is up the event is dropped: the loop looks
+    // at every start anyway.)
+    if (SDL_WasInit(SDL_INIT_EVENTS)) {
+        SDL_Event e{};
+        e.type = SDL_EVENT_USER;
+        SDL_PushEvent(&e);
     }
 }
 
-void usage() {
-    std::printf("usage: ttt2-launcher [GAME.wua] [--screenshot FILE] | --version\n"
-                "  Installs Tekken Tag Tournament 2 from your own .wua (the game program is built on this PC),\n"
-                "  starts it, and adds Tekken 7's and Tekken 8's characters from your own copies of them.\n"
-                "  --screenshot FILE  saves the window as a PNG once it has loaded, then quits (for tests)\n"
-                "  --version          prints its version (\"ttt2-launcher " TTT2_LAUNCHER_VERSION "\")\n");
+bool size_of(const char* text, int& w, int& h) {
+    return text && std::sscanf(text, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    App a;
-    std::vector<char*> args = {argv[0]};
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
-            a.options.screenshot = argv[++i];
-        } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            usage();
-            return 0;
-        } else if (std::strcmp(argv[i], "--version") == 0) {
-            std::printf("ttt2-launcher %s\n", TTT2_LAUNCHER_VERSION);
-            return 0;
-        } else if (argv[i][0] == '-') {
-            std::fprintf(stderr, "ttt2-launcher: unknown option %s\n", argv[i]);
-            usage();
-            return 2;
-        } else {
-            a.options.game = launcher::normal(argv[i]);
-            args.push_back(argv[i]); // (to the running launcher, when there is one)
+    namespace st = launcher::startup;
+    const std::vector<std::string> args = st::arguments(argc, argv);
+    const char* actions = std::getenv("TTT2_LAUNCHER_TEST_ACTIONS");
+    bool screenshot = false;
+    for (const std::string& a : args) screenshot = screenshot || a == "--screenshot";
+    st::Program program;
+    program.version = TTT2_LAUNCHER_VERSION;
+    program.usage = kUsage;
+    program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}};
+    program.unique = !screenshot && !(actions && *actions);
+    program.wake = wake;
+    st::Start start = st::begin(args, program);
+    if (start.exit >= 0) return start.exit;
+
+    launcher::app::Options o;
+    o.instance = std::move(start.instance);
+    for (size_t i = 0; i < start.args.size(); ++i) {
+        const std::string& a = start.args[i];
+        const bool more = i + 1 < start.args.size();
+        if (a == "--screenshot" && more) {
+            o.screenshot = start.args[++i];
+        } else if (a == "--size" && more) {
+            if (!size_of(start.args[++i].c_str(), o.width, o.height)) {
+                std::fprintf(stderr, "ttt2-launcher: --size is WxH, at least 320x240\n%s", kUsage);
+                return 2;
+            }
+        } else if (a == "--scale" && more) {
+            o.scale = static_cast<float>(std::atof(start.args[++i].c_str()));
+        } else if (!a.empty() && a[0] != '-') {
+            o.game = launcher::normal(a);
         }
     }
-    // Test runs are launchers of their own, beside the player's; one with
-    // actions it cannot do stops at once.
-    const char* actions = std::getenv("TTT2_LAUNCHER_TEST_ACTIONS");
-    const bool test = !a.options.screenshot.empty() || (actions && *actions);
-    if (std::string error; actions && *actions && !launcher::parse_test_actions(actions, &error)) {
-        std::fprintf(stderr, "@test actions failed %s\n", error.c_str());
-        return 2;
+    if (actions && *actions) {
+        std::string error;
+        auto parsed = launcher::parse_test_actions(actions, &error);
+        if (!parsed) {
+            std::fprintf(stderr, "@test actions failed %s\n", error.c_str());
+            return 2;
+        }
+        o.tests = std::move(*parsed);
     }
-    // Opened by an update of the launcher: once the one it replaces has
-    // ended (it closes at once; 10 s at most), whose window would be shown
-    // instead of this one's.
-    if (const char* replaces = std::getenv(launcher::kReplacesVariable)) {
-        const int pid = std::atoi(replaces);
-        g_unsetenv(launcher::kReplacesVariable); // (not for what it starts)
-        for (int i = 0; i < 100 && launcher::process_alive(pid); ++i) g_usleep(100'000);
+    o.testing = !o.screenshot.empty() || (actions && *actions);
+    if (const char* shots = std::getenv("TTT2_LAUNCHER_TEST_SHOTS"); shots && *shots) {
+        o.shots = shots;
+        std::error_code ec;
+        std::filesystem::create_directories(o.shots, ec);
     }
-    // The program's name is the window's class on X11, which its menu entry
-    // names (StartupWMClass) so that docks match the two; GApplication would
-    // take argv[0] ("ttt2-launcher") otherwise.
-    g_set_prgname(TTT2_LAUNCHER_APP_ID);
-    GtkApplication* app = gtk_application_new(
-        TTT2_LAUNCHER_APP_ID, GApplicationFlags(G_APPLICATION_HANDLES_OPEN | (test ? G_APPLICATION_NON_UNIQUE : 0)));
-    g_set_application_name(launcher::kName);
-    g_signal_connect(app, "activate", G_CALLBACK(activate), &a);
-    g_signal_connect(app, "open", G_CALLBACK(open), &a);
-    const int status = g_application_run(G_APPLICATION(app), static_cast<int>(args.size()), args.data());
-    a.window.reset();
-    g_object_unref(app);
-    return status;
+    if (o.width == 0) size_of(std::getenv("TTT2_LAUNCHER_TEST_SIZE"), o.width, o.height);
+    if (o.scale == 0) {
+        if (const char* s = std::getenv("TTT2_LAUNCHER_TEST_SCALE")) o.scale = static_cast<float>(std::atof(s));
+    }
+    if (!start.note.empty()) std::fprintf(stderr, "ttt2-launcher: %s\n", start.note.c_str());
+    launcher::app::App app(std::move(o));
+    return app.run();
 }

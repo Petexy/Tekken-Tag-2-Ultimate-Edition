@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Stub of the kit's ttt2-build for the launcher's tests: the builder's protocol lines, then an install the
+# launcher finds (see ../../README.md). Stopped by SIGTERM like the real one (the launcher's Cancel).
+set -u
+here=$(cd "$(dirname "$0")/.." && pwd)
+pause=${TTT2_STUB_STEP_SECONDS:-0.05}
+fail=${TTT2_STUB_FAIL:-}
+config=${XDG_CONFIG_HOME:-$HOME/.config}
+[ -n "${TTT2_STUB_PIDFILE:-}" ] && echo $$ > "$TTT2_STUB_PIDFILE"
+step() {
+    echo "@step $1 $2"
+    if [ "$fail" = "signal:$1" ]; then # as the compiler killed by the system
+        echo "stub: killing itself at $1" >&2
+        kill -KILL $$
+    fi
+    if [ "$fail" = "$1" ]; then
+        echo "stub: error: $1 failed on purpose" >&2
+        echo "@error The stub builder stopped at $1 on purpose"
+        exit 1
+    fi
+    local n=${3:-4} i
+    for ((i = 1; i <= n; i++)); do
+        sleep "$pause"
+        echo "@progress $i $n"
+    done
+}
+program() { # the game program: writes the marker, or prepares shaders
+    cat > "$1/Tekken Tag Tournament 2" <<'GAME'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--precompile" ]; then echo "@step shaders Preparing shaders"; echo "@progress 1 1"; exit 0; fi
+echo "stub game started: $*"
+[ -n "${TTT2_STUB_MARKER:-}" ] && echo "played $(date +%s)" > "$TTT2_STUB_MARKER"
+sleep "${TTT2_STUB_GAME_SECONDS:-0.2}"
+exit "${TTT2_STUB_GAME_EXIT:-0}"
+GAME
+    chmod +x "$1/Tekken Tag Tournament 2"
+}
+case "${1:-}" in
+install)
+    game=$2 folder=$3
+    echo "ttt2-build install $game $folder"
+    [ -f "$game" ] || { echo "@error $game does not exist"; exit 1; }
+    step check "Checking the game" 2
+    step extract "Reading the game's code" 3
+    step recompile "Translating the game's code" 4
+    step compile "Compiling the game's code" 10
+    step link "Linking the game program" 2
+    mkdir -p "$folder" && touch "$folder/.ttt2-installing"
+    step copy "Copying the game" 8
+    step finish "Finishing" 1
+    program "$folder"
+    echo "kit $(head -n1 "$here/VERSION")" > "$folder/.ttt2-build"
+    touch "$folder/.ttt2-install" && rm -f "$folder/.ttt2-installing"
+    mkdir -p "$config/ttt2" && echo "$folder" > "$config/ttt2/installed"
+    echo "@done"
+    ;;
+update)
+    folder=$2
+    echo "ttt2-build update $folder"
+    step check "Checking the game" 2
+    step compile "Compiling the game's code" 6
+    step link "Linking the game program" 2
+    step finish "Finishing" 1
+    program "$folder"
+    echo "kit $(head -n1 "$here/VERSION")" > "$folder/.ttt2-build"
+    echo "@done"
+    ;;
+*)
+    echo "usage: ttt2-build install GAME FOLDER | update FOLDER" >&2
+    exit 2
+    ;;
+esac

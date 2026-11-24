@@ -1,0 +1,207 @@
+#pragma once
+
+// The launcher's window (Ultimate Launcher, Tag Split): the loop that drives the model (launcher/model) and the
+// toolkit (launcher/ui), the top band (brand, tabs, version, Sound, Quit), the prompt band, the task strip, the
+// seam (its split per screen, its lean, the blue readout's slide, the wipe between screens), the model's dialogs
+// and the Effects it asks for. Screens: home.cpp (Home in every state, the install's task screen), picker.cpp (the
+// in-app file and folder browser). Test hooks (TTT2_LAUNCHER_TEST_*, --screenshot): tests_hooks.cpp.
+
+#include "backend_linux.h"
+#include "browser.h"
+#include "model.h"
+#include "single_instance.h"
+#include "starter.h"
+#include "steps.h"
+#include "subprocess.h"
+#include "test_actions.h"
+
+#include "ttt2ui/stage.h"
+#include "ttt2ui/widgets.h"
+#include "ttt2ui/window.h"
+
+#include <deque>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace launcher::app {
+
+namespace ui = ttt2::ui;
+namespace m = launcher::model;
+
+struct Options {
+    fs::path game;                  // a .wua given on the command line
+    std::string screenshot;         // --screenshot FILE: saved once everything has settled (after the test actions)
+    int width = 0, height = 0;      // --size / TTT2_LAUNCHER_TEST_SIZE (0: the default)
+    float scale = 0;                // --scale / TTT2_LAUNCHER_TEST_SCALE
+    std::vector<TestAction> tests;  // TTT2_LAUNCHER_TEST_ACTIONS
+    bool testing = false;           // test actions or a screenshot: offscreen, nothing opened on the desktop
+    fs::path shots;                 // TTT2_LAUNCHER_TEST_SHOTS
+    std::unique_ptr<SingleInstance> instance;
+};
+
+enum class Screen : int { kHome = 0, kFighters = 1, kSettings = 2 };
+
+class App {
+public:
+    explicit App(Options options);
+    ~App();
+    int run();
+    // Work for the UI thread (from any thread: threads' ends, file dialogs); the loop wakes for it.
+    void post(std::function<void()> work);
+
+private:
+    // ---- the loop (app.cpp)
+    bool open_window();
+    void make_model();
+    void pump_input(double now, bool wait);
+    void frame(double now);
+    void declare();
+    void on_events(const std::vector<ui::Event>& events);
+    void activate(const std::string& id);
+    void refused(const std::string& id);
+    void handle(std::vector<m::Effect> effects);
+    void go(Screen to);
+    void toast(const std::string& title, const std::string& text, bool bad = true);
+    void run_preflight(const fs::path& game, const fs::path& folder);
+    void run_uninstall(const fs::path& folder, UninstallOptions options);
+    void answer_game(const fs::path& game);
+    void sync_log();
+    std::string focused_label() const;
+    const m::Action* action(const std::string& id) const;
+    double now() const;
+
+    // ---- bands (app.cpp)
+    void top_band();
+    void bottom_band();
+    void task_strip();
+    void dialog_band();
+    std::vector<ui::Hint> hints() const;
+
+    // ---- screens (home.cpp)
+    float share() const;
+    bool tall() const;
+    bool task_screen() const { return task_screen_; }
+    void home(const ui::Box& crimson, const ui::Box& blue);
+    void home_installed(const ui::Box& crimson, const ui::Box& blue);
+    void home_first_run(const ui::Box& crimson, const ui::Box& blue);
+    void home_unfinished(const ui::Box& crimson, const ui::Box& blue);
+    void home_preflight(const ui::Box& crimson, const ui::Box& blue);
+    void home_task(const ui::Box& crimson, const ui::Box& blue);
+    // How far the task is as its screen shows it (a build: its steps, each one share), -1 when unknown.
+    double task_fraction() const;
+    void game_head(const std::string& kick);
+    void home_readout(const std::string& key);
+    void notice_card();
+    void placeholder(const ui::Box& crimson, const ui::Box& blue);
+    std::string slot_target() const;
+
+    // ---- the in-app browser (picker.cpp)
+    void open_picker(bool folder, const std::string& purpose);
+    void picker_dir(const fs::path& dir);
+    void picker_screen(const ui::Box& crimson, const ui::Box& blue);
+    bool picker_activate(const std::string& id);
+    void picker_chosen(const fs::path& path);
+    void close_picker();
+
+    // ---- tests (tests_hooks.cpp)
+    void test_tick(double now);
+    bool settled(double now) const;
+    void shot(const std::string& name);
+    void test_said(bool ok, const std::string& message);
+    void test_watch_task();
+
+    Options o_;
+    Places places_;
+    std::optional<fs::path> appimage_;
+    std::string banner_;
+
+    // toolkit
+    ui::Window window_;
+    std::unique_ptr<ui::TextureRegistry> textures_;
+    std::unique_ptr<ui::TextEngine> text_;
+    std::unique_ptr<ui::Icons> icons_;
+    std::unique_ptr<ui::Canvas> canvas_;
+    std::unique_ptr<ui::Ui> ui_;
+    std::unique_ptr<ui::SplitStage> stage_;
+    std::unique_ptr<ui::Wipe> wipe_;
+    ui::InputRouter router_;
+    ui::SystemClock clock_;
+    ui::Readout readout_;
+    ui::LogView log_;
+    size_t log_seen_ = 0;
+    std::string log_last_;
+
+    // model
+    std::unique_ptr<ProcessHost> host_;
+    std::unique_ptr<backend::ProcessStarter> starter_;
+    std::unique_ptr<LinuxEnvironment> env_;
+    m::LinuxCommands commands_;
+    std::unique_ptr<m::KeyFile> keys_;
+    LinuxUpdateFiles files_;
+    std::unique_ptr<m::LauncherModel> model_;
+    m::View view_;
+
+    // posted work
+    std::mutex posted_mutex_;
+    std::deque<std::function<void()>> posted_;
+    std::vector<std::thread> threads_;
+    int working_ = 0; // threads not ended (preflight, uninstall)
+
+    // what is shown
+    Screen screen_ = Screen::kHome;
+    std::map<int, std::string> saved_focus_;
+    bool quit_ = false;
+    bool first_ = true;
+    double last_ = 0;
+    int last_dy_ = 0;
+    std::string readout_key_ = "play";
+    int pre_index_ = 0;           // the check the blue side shows (preflight)
+    bool task_screen_ = false;    // the install / update / uninstall / launcher update fills Home
+    m::TaskKind task_kind_ = m::TaskKind::kInstall;
+    std::string task_title_;
+    bool task_was_running_ = false;
+    std::string pending_choose_;  // kChooseGame's purpose ("" install, "resume")
+    fs::path slot_folder_;        // where the install goes (first run's second slot)
+    std::string toast_title_, toast_text_;
+    bool toast_bad_ = true;
+    double toast_until_ = -1;
+    bool sounds_ = false;
+
+    // the in-app browser
+    struct Picker {
+        bool folder = false;
+        std::string purpose; // "game", "folder"
+        bool then_answer = false; // the model asked: its chosen_game / chosen_folder
+        fs::path dir;
+        std::vector<Entry> entries;
+        std::vector<Place> places;
+        std::string error;
+        std::optional<uint64_t> free;
+        std::string back_focus;
+    };
+    std::optional<Picker> picker_;
+    std::string picker_key_; // the browser's entry the blue side shows
+
+    // tests
+    size_t test_next_ = 0;
+    int test_number_ = 0;
+    enum class TestWait { kNone, kSettle, kTask, kPlay, kTime, kPreflight, kQuitting } test_wait_ = TestWait::kNone;
+    TestAction test_now_;
+    std::string test_label_;
+    double test_since_ = 0, test_until_ = 0, idle_since_ = 0;
+    int frames_idle_ = 0;
+    bool test_running_shot_ = false, test_cancelled_ = false, test_task_seen_ = false;
+    bool test_start_shot_ = false, screenshot_done_ = false;
+    double cancel_poll_ = 0;
+    int test_quit_ = 0;        // TTT2_LAUNCHER_TEST_QUIT_AT: 1 Quit pressed, 2 its dialog's picture taken
+    double test_quit_at_ = 0;  // when that picture is taken
+    int exit_code_ = 0;
+};
+
+} // namespace launcher::app
