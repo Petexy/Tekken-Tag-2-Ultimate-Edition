@@ -4,6 +4,7 @@
 #include "single_instance.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -93,6 +94,22 @@ struct DBus {
     void (*message_unref)(void*) = nullptr;
     void (*connection_close)(void*) = nullptr;
     void (*connection_unref)(void*) = nullptr;
+    // (Answering under the old launcher's name, serve_old_name.)
+    int (*request_name)(void*, const char*, unsigned, void*) = nullptr;
+    unsigned (*add_filter)(void*, int (*)(void*, void*, void*), void*, void (*)(void*)) = nullptr;
+    unsigned (*read_write_dispatch)(void*, int) = nullptr;
+    int (*message_get_type)(void*) = nullptr;
+    const char* (*message_get_path)(void*) = nullptr;
+    const char* (*message_get_interface)(void*) = nullptr;
+    const char* (*message_get_member)(void*) = nullptr;
+    void* (*new_method_return)(void*) = nullptr;
+    void* (*new_error)(void*, const char*, const char*) = nullptr;
+    unsigned (*send)(void*, void*, uint32_t*) = nullptr;
+    unsigned (*iter_init)(void*, void*) = nullptr;
+    int (*iter_get_arg_type)(void*) = nullptr;
+    void (*iter_recurse)(void*, void*) = nullptr;
+    void (*iter_get_basic)(void*, void*) = nullptr;
+    unsigned (*iter_next)(void*) = nullptr;
 
     bool load() {
         library = dlopen("libdbus-1.so.3", RTLD_NOW | RTLD_LOCAL);
@@ -113,6 +130,23 @@ struct DBus {
                get(message_unref, "dbus_message_unref") && get(connection_close, "dbus_connection_close") &&
                get(connection_unref, "dbus_connection_unref");
     }
+    bool load_service() {
+        const auto get = [&](auto& f, const char* name) {
+            f = reinterpret_cast<std::remove_reference_t<decltype(f)>>(dlsym(library, name));
+            return f != nullptr;
+        };
+        return load() && get(request_name, "dbus_bus_request_name") &&
+               get(add_filter, "dbus_connection_add_filter") &&
+               get(read_write_dispatch, "dbus_connection_read_write_dispatch") &&
+               get(message_get_type, "dbus_message_get_type") && get(message_get_path, "dbus_message_get_path") &&
+               get(message_get_interface, "dbus_message_get_interface") &&
+               get(message_get_member, "dbus_message_get_member") &&
+               get(new_method_return, "dbus_message_new_method_return") &&
+               get(new_error, "dbus_message_new_error") && get(send, "dbus_connection_send") &&
+               get(iter_init, "dbus_message_iter_init") && get(iter_get_arg_type, "dbus_message_iter_get_arg_type") &&
+               get(iter_recurse, "dbus_message_iter_recurse") && get(iter_get_basic, "dbus_message_iter_get_basic") &&
+               get(iter_next, "dbus_message_iter_next");
+    }
     ~DBus() {
         if (library) dlclose(library);
     }
@@ -125,6 +159,10 @@ struct alignas(16) Iter {
 
 constexpr int kSession = 0; // DBUS_BUS_SESSION
 constexpr int kArray = 'a', kDictEntry = 'e', kString = 's', kVariant = 'v';
+constexpr int kMethodCall = 1;                         // DBUS_MESSAGE_TYPE_METHOD_CALL
+constexpr unsigned kDoNotQueue = 4;                     // DBUS_NAME_FLAG_DO_NOT_QUEUE
+constexpr int kPrimaryOwner = 1;                        // DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER
+constexpr int kHandled = 0, kNotYetHandled = 1;         // DBusHandlerResult
 
 std::string file_uri(const std::string& path) {
     static const char digits[] = "0123456789ABCDEF";
@@ -234,11 +272,15 @@ struct SingleInstance::Os {
     int listener = -1;
     int stop_read = -1, stop_write = -1;
     std::thread thread;
+    std::thread bus;                                         // serve_old_name
+    std::shared_ptr<std::atomic<bool>> stopping = std::make_shared<std::atomic<bool>>(false);
 };
 
 SingleInstance::SingleInstance() : shared_(std::make_shared<Shared>()), os_(std::make_unique<Os>()) {}
 
 SingleInstance::~SingleInstance() {
+    *os_->stopping = true;
+    if (os_->bus.joinable()) os_->bus.join();
     if (os_->stop_write >= 0) {
         const char c = 0;
         [[maybe_unused]] const ssize_t n = write(os_->stop_write, &c, 1);
@@ -250,6 +292,148 @@ SingleInstance::~SingleInstance() {
 }
 
 namespace {
+
+// "file:///a%20b.wua" -> "/a b.wua"; "" for another kind of URI.
+std::string file_path(const std::string& uri) {
+    if (uri.rfind("file://", 0) != 0) return {};
+    std::string out;
+    for (size_t i = 7; i < uri.size(); ++i) {
+        if (uri[i] == '%' && i + 2 < uri.size() && std::isxdigit(static_cast<unsigned char>(uri[i + 1])) &&
+            std::isxdigit(static_cast<unsigned char>(uri[i + 2]))) {
+            out += static_cast<char>(std::stoi(uri.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else {
+            out += uri[i];
+        }
+    }
+    return out.empty() || out[0] != '/' ? std::string() : out;
+}
+
+// The reverse of activate_old (C12): this launcher answers under the old GTK launcher's bus name, so that an old
+// launcher started now (a second copy of 0.8.0's AppImage, its menu entry) hands over to it as it would to itself:
+// GApplication's org.gtk.Actions DescribeAll (the old one asks it first), org.gtk.Application and
+// org.freedesktop.Application Activate / Open arrive as later starts (their files and activation token).
+struct BusService {
+    DBus dbus;
+    void* bus = nullptr;
+    std::string path;
+    std::shared_ptr<SingleInstance::Shared> shared;
+
+    // The activation token of a{sv} platform data at `dict` (an iterator on it).
+    std::string token(void* dict) {
+        std::string found;
+        Iter entries, entry, value;
+        if (dbus.iter_get_arg_type(dict) != kArray) return found;
+        dbus.iter_recurse(dict, &entries);
+        while (dbus.iter_get_arg_type(&entries) == kDictEntry) {
+            dbus.iter_recurse(&entries, &entry);
+            const char* key = nullptr;
+            if (dbus.iter_get_arg_type(&entry) == kString) dbus.iter_get_basic(&entry, &key);
+            if (key && dbus.iter_next(&entry) && dbus.iter_get_arg_type(&entry) == kVariant) {
+                dbus.iter_recurse(&entry, &value);
+                const char* text = nullptr;
+                if (dbus.iter_get_arg_type(&value) == kString) dbus.iter_get_basic(&value, &text);
+                if (text && (std::strcmp(key, "activation-token") == 0 ||
+                             (found.empty() && std::strcmp(key, "desktop-startup-id") == 0)))
+                    found = text;
+            }
+            if (!dbus.iter_next(&entries)) break;
+        }
+        return found;
+    }
+
+    // Open's URIs (as) at `list`: the files' paths.
+    std::vector<std::string> paths(void* list) {
+        std::vector<std::string> out;
+        Iter items;
+        if (dbus.iter_get_arg_type(list) != kArray) return out;
+        dbus.iter_recurse(list, &items);
+        while (dbus.iter_get_arg_type(&items) == kString) {
+            const char* uri = nullptr;
+            dbus.iter_get_basic(&items, &uri);
+            if (uri && !file_path(uri).empty()) out.push_back(file_path(uri));
+            if (!dbus.iter_next(&items)) break;
+        }
+        return out;
+    }
+
+    void reply(void* message, const char* error = nullptr) {
+        void* answer = error ? dbus.new_error(message, error, "Ultimate Launcher does not do this")
+                             : dbus.new_method_return(message);
+        if (!answer) return;
+        if (!error && std::strcmp(dbus.message_get_member(message), "DescribeAll") == 0) {
+            Iter args, list; // (no actions: a{s(bgav)} empty)
+            dbus.iter_init_append(answer, &args);
+            dbus.iter_open_container(&args, kArray, "{s(bgav)}", &list);
+            dbus.iter_close_container(&args, &list);
+        } else if (!error && std::strcmp(dbus.message_get_member(message), "List") == 0) {
+            Iter args, list;
+            dbus.iter_init_append(answer, &args);
+            dbus.iter_open_container(&args, kArray, "s", &list);
+            dbus.iter_close_container(&args, &list);
+        }
+        dbus.send(bus, answer, nullptr);
+        dbus.message_unref(answer);
+    }
+
+    int handle(void* message) {
+        const char* at = dbus.message_get_path(message);
+        const char* interface = dbus.message_get_interface(message);
+        const char* member = dbus.message_get_member(message);
+        if (dbus.message_get_type(message) != kMethodCall || !at || path != at || !interface || !member)
+            return kNotYetHandled;
+        const std::string i = interface, m = member;
+        if (i == "org.gtk.Actions" && (m == "DescribeAll" || m == "List")) {
+            reply(message);
+            return kHandled;
+        }
+        const bool gtk = i == "org.gtk.Application", freedesktop = i == "org.freedesktop.Application";
+        if ((gtk || freedesktop) && (m == "Activate" || m == "Open" || (freedesktop && m == "ActivateAction"))) {
+            Forwarded start;
+            Iter args;
+            if (dbus.iter_init(message, &args)) {
+                if (m == "Open") {
+                    start.args = paths(&args);
+                    dbus.iter_next(&args);
+                    if (gtk) dbus.iter_next(&args); // (org.gtk.Application's hint)
+                } else if (m == "ActivateAction") {
+                    dbus.iter_next(&args);
+                    dbus.iter_next(&args);
+                }
+                start.token = token(&args);
+            }
+            {
+                std::lock_guard lock(shared->mutex);
+                shared->arrived.push_back(std::move(start));
+            }
+            reply(message);
+            if (shared->wake) shared->wake();
+            return kHandled;
+        }
+        reply(message, "org.freedesktop.DBus.Error.UnknownMethod");
+        return kHandled;
+    }
+};
+
+void serve_old_name(InstanceOptions options, std::shared_ptr<SingleInstance::Shared> shared,
+                    std::shared_ptr<std::atomic<bool>> stopping) {
+    auto service = std::make_unique<BusService>();
+    if (!service->dbus.load_service()) return;
+    service->bus = service->dbus.bus_get_private(kSession, nullptr);
+    if (!service->bus) return;
+    service->dbus.set_exit_on_disconnect(service->bus, 0);
+    service->path = options.old_object_path;
+    service->shared = std::move(shared);
+    const auto filter = [](void*, void* message, void* data) { return static_cast<BusService*>(data)->handle(message); };
+    if (service->dbus.request_name(service->bus, options.old_bus_name.c_str(), kDoNotQueue, nullptr) == kPrimaryOwner &&
+        service->dbus.add_filter(service->bus, filter, service.get(), nullptr)) {
+        // (Answered on this thread; 0.2 s between looks at whether the launcher ends.)
+        while (!*stopping && service->dbus.read_write_dispatch(service->bus, 200)) {
+        }
+    }
+    service->dbus.connection_close(service->bus);
+    service->dbus.connection_unref(service->bus);
+}
 
 void listen_for_starts(int listener, int stop, std::shared_ptr<SingleInstance::Shared> shared) {
     const std::string pid = std::to_string(getpid());
@@ -325,6 +509,9 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
             instance->os_->stop_read = stop[0];
             instance->os_->stop_write = stop[1];
             instance->os_->thread = std::thread(listen_for_starts, fd, stop[0], instance->shared_);
+            // (Under the old launcher's name too, when the session bus is there: an old one started now hands over.)
+            if (!options.old_bus_name.empty() && std::getenv("DBUS_SESSION_BUS_ADDRESS"))
+                instance->os_->bus = std::thread(serve_old_name, options, instance->shared_, instance->os_->stopping);
             claim.result = InstanceClaim::Result::kPrimary;
             claim.instance = std::move(instance);
             return claim;

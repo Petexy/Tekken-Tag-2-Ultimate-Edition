@@ -371,6 +371,7 @@ void App::pump_input(double t, bool wait) {
     for (auto& w : work) w();
     if (o_.instance) {
         for (const Forwarded& f : o_.instance->take()) {
+            std::fprintf(stderr, "ttt2-launcher: a later start came here (%zu argument(s))\n", f.args.size());
             for (const std::string& a : f.args) {
                 if (!a.empty() && a[0] != '-')
                     model_->mutable_facts().chosen_game = normal(fs::path(std::u8string(a.begin(), a.end())));

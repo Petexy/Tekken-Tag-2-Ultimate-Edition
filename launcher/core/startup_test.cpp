@@ -499,6 +499,66 @@ Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN).run([sy
     options.after = false;
     claim = claim_instance(options);
     check(claim.result == InstanceClaim::Result::kPrimary, "old launcher: once it is gone this one is the launcher");
+
+    // The other way (C12): an old launcher started now finds this one under its bus name and hands over to it.
+    const fs::path remote = g_root / "old_remote.py";
+    // (GtkApplication's platform data, as the old launcher sends it: the activation token, X11's id.)
+    write_file(remote, R"(import os, sys
+from gi.repository import Gio, GLib
+class Old(Gio.Application):
+    def do_add_platform_data(self, builder):
+        token = os.environ.get('XDG_ACTIVATION_TOKEN', '')
+        builder.add_value(GLib.Variant('{sv}', ('activation-token', GLib.Variant('s', token))))
+        builder.add_value(GLib.Variant('{sv}', ('desktop-startup-id', GLib.Variant('s', 'x11-' + token))))
+app = Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN)
+app.register(None)
+print('REMOTE', app.get_is_remote(), flush=True)
+sys.exit(app.run(['old'] + sys.argv[2:]) if app.get_is_remote() else 3)
+)");
+    const auto old_start = [&](const std::vector<std::string>& files, const std::string& token) {
+        auto run = std::make_shared<Run>();
+        ProcessSpec s;
+        s.argv = {"python3", utf8(remote), id};
+        s.argv.insert(s.argv.end(), files.begin(), files.end());
+        s.env = {{"GIO_USE_VFS", "local"}, {"GVFS_DISABLE_FUSE", "1"}, {"GSETTINGS_BACKEND", "memory"},
+                 {"XDG_ACTIVATION_TOKEN", token}};
+        std::string why;
+        run->process = host.start(s,
+                                  {[run](const std::string& l, bool e) { (e ? run->err : run->out).push_back(l); },
+                                   [run](int c) { run->code = c; }},
+                                  &why);
+        wait_until([&] { return run->code != -1; }, 20);
+        return run;
+    };
+    std::shared_ptr<Run> handed;
+    for (int i = 0; i < 25; ++i) { // (until this one owns the name: its bus thread asks for it)
+        handed = old_start({}, "tokR1");
+        if (handed->has("REMOTE True")) break;
+        wait_until([] { return false; }, 0.2);
+    }
+    check(handed->has("REMOTE True") && handed->code == 0, "reverse: an old launcher hands over " + handed->all());
+    std::vector<Forwarded> got;
+    wait_until([&] {
+        for (auto& f : claim.instance->take()) got.push_back(std::move(f));
+        return !got.empty();
+    }, 10);
+    const auto said = [&] {
+        std::string s;
+        for (const auto& f : got) s += "[" + encode_forwarded(f) + "]";
+        return s;
+    };
+    check(!got.empty() && got.back() == Forwarded{{}, "tokR1"}, "reverse: activated, with its token " + said());
+    handed = old_start({"/games/my game.wua"}, "tokR2");
+    check(handed->has("REMOTE True") && handed->code == 0, "reverse: an old launcher opening a file " + handed->all());
+    got.clear();
+    wait_until([&] {
+        for (auto& f : claim.instance->take()) got.push_back(std::move(f));
+        return !got.empty();
+    }, 10);
+    check(got.size() == 1 && got[0] == Forwarded{{"/games/my game.wua"}, "tokR2"}, "reverse: the file and token " + said());
+    claim.instance.reset(); // (the name is given back)
+    handed = old_start({}, "tokR3");
+    check(handed->has("REMOTE False"), "reverse: once it ended, an old launcher is the launcher again " + handed->all());
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

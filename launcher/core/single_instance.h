@@ -12,7 +12,11 @@
 // same app id on the session bus) is looked for through libdbus-1 when the
 // system has it (dlopen: nothing is linked; SDL itself uses that library for
 // the screensaver and input methods): it is asked to Activate (or Open the
-// .wua) and this start ends.
+// .wua) and this start ends. The other way round, the launcher then answers
+// under that bus name too (a thread of its own): an old GTK launcher started
+// later hands over to it as to itself (GApplication: org.gtk.Actions
+// DescribeAll, org.gtk.Application / org.freedesktop.Application Activate and
+// Open), its files and token arriving as a later start's.
 //
 // Windows: the mutex "Local\<name>" (this session) and the named pipe
 // "\\.\pipe\<name>-<session>"; the second start allows the first one to take
