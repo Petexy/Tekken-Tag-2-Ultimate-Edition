@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace launcher::app {
 
@@ -566,6 +567,7 @@ bool App::settings_activate(const std::string& id, ttt2::ui::Device device) {
         if (model_->keys().picking() >= 0) {
             router_.begin_capture(device == ttt2::ui::Device::None ? ttt2::ui::Device::Keyboard : device, now());
             capture_since_ = now();
+            if (o_.trace_cues) std::fprintf(stderr, "@capture start %s\n", id.c_str());
         } else {
             router_.end_capture();
         }
@@ -592,19 +594,32 @@ bool App::settings_activate(const std::string& id, ttt2::ui::Device device) {
 // Choosing a key: the router hands the keys over (U4), the model takes them; 10 s without one stops it.
 void App::key_capture_tick(double t) {
     if (!router_.capturing()) return;
+    bool keyed = false;
     for (const CaptureEvent& e : router_.take_capture()) {
         switch (e.kind) {
-        case CaptureEvent::Key: model_->key_down(e.scancode, false, t); break;
+        case CaptureEvent::Key:
+            model_->key_down(e.scancode, false, t);
+            keyed = true;
+            break;
         case CaptureEvent::KeyUp: model_->key_up(e.scancode, t); break;
         case CaptureEvent::CancelByPad:
         case CaptureEvent::CancelByMouse: model_->cancel_key(); break;
         }
     }
+    // A key it refused (F11, Super, one that cannot be used): its note on the row, choosing goes on.
+    if (keyed && model_->keys().picking() >= 0 && !model_->keys().taken().ok &&
+        !model_->keys().taken().text.starts_with("no key"))
+        cue(ttt2::app::Cue::Refuse);
     if (model_->keys().picking() >= 0 && t - capture_since_ > kCaptureSeconds) model_->cancel_key();
     if (model_->keys().picking() < 0 || screen_ != Screen::kSettings || settings_section_ != "keyboard") {
         if (model_->keys().picking() >= 0) model_->cancel_key();
         router_.end_capture();
-        if (!model_->said().empty()) cue(model_->keys().taken().ok ? ttt2::app::Cue::Accept : ttt2::app::Cue::Refuse);
+        const m::KeyCapture::Taken& taken = model_->keys().taken();
+        if (o_.trace_cues)
+            std::fprintf(stderr, "@capture end %s\n", taken.text.empty() ? "kept" : taken.text.c_str());
+        const bool kept = taken.text.empty() || taken.text.starts_with("no key") ||
+                          taken.text.starts_with("cancelled") || taken.text.starts_with("choosing");
+        cue(taken.ok ? ttt2::app::Cue::Accept : kept ? ttt2::app::Cue::Back : ttt2::app::Cue::Refuse);
     }
 }
 

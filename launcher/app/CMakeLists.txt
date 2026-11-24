@@ -95,5 +95,11 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
     list(APPEND _app_tests launcher_app_frames)
     # (About 3.5 minutes on 4 cores: large windows drawn by the software renderer.)
     set_tests_properties(launcher_app_frames PROPERTIES TIMEOUT 900)
+    # Fighters and Settings (FEEDBACK F1/F3/F4/F5, U4 key capture, Add/Remove/Cancel): tests/screens.sh.
+    add_test(NAME launcher_app_screens
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/screens.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/screens ${Python3_EXECUTABLE})
+    list(APPEND _app_tests launcher_app_screens)
+    set_tests_properties(launcher_app_screens PROPERTIES TIMEOUT 1200)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)
