@@ -22,6 +22,9 @@ public:
     // Where the seam should go: `share` of the width (theme::split::*), tall plates (a task fills the screen),
     // which half has the focus (-1 crimson, 0 none, 1 blue).
     void set_target(float share, bool tall_plates, int focus_side);
+    // A drill-in lock (FEEDBACK F4): that half's plate darkens (eased) while its content is locked (Box::locked);
+    // -1 crimson, 1 blue, 0 none.
+    void set_locked(int side) { lock_side_ = side; }
     void snap();
     // Advance (dt seconds), for a window of `size` points.
     void update(double now, float dt, Vec2 size, bool reduced_motion);
@@ -30,6 +33,9 @@ public:
     // The seam a screen is laid out for (its target split, no lean) and the one drawn now (springing).
     Seam layout_seam(float share) const;
     Seam seam_now() const;
+    // The split as it is now (springing toward the target): lay the screen out for THIS every frame (with
+    // crimson_area/blue_area(share_now())), so nothing ever crosses the seam drawn while it moves.
+    float share_now() const { return c_.value; }
     float plate_top() const { return theme::kPlateTop; }
     float plate_bottom() const;
     float content_top() const { return theme::kTopBand; }
@@ -66,6 +72,8 @@ private:
     Spring bottom_{0, theme::motion::kPlateBottom};       // 0 = normal plates, 1 = tall
     Spring lean_{0, theme::motion::kLean};
     float bright_red_ = 1, bright_blue_ = 1;
+    int lock_side_ = 0, lock_drawn_ = 0;  // (the side the veil is on: it fades out where it was)
+    float lock_ = 0;
     bool reduced_ = false, animating_ = false;
     bool ambient_on_ = true, frozen_ = false;
     double last_input_ = 0, last_ambient_ = -1e9, ambient_time_ = 0;
@@ -99,7 +107,8 @@ public:
     // A switch: `dir` 1 = the new screen comes from the right (a later tab), -1 from the left.
     void start(double now, int dir, bool reduced);
     bool active(double now) const { return start_ >= 0 && now < start_ + duration_; }
-    // Where the new content is drawn during the wipe (it slides in by 40 points).
+    // Where the new content is drawn during the wipe: it slides in ALONG the seam (parallel to it), so its distance
+    // from the seam never changes and nothing enters the gutter.
     Vec2 new_offset(double now) const;
     // The content area wiped (stage points); the bands outside stay live.
     void set_area(float top, float bottom) {

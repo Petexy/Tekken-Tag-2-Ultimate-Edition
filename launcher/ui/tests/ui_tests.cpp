@@ -261,6 +261,182 @@ TEST(layout_seam_staircase_fit) {
     CHECK_NEAR(x.x, std::round(seam.x_at(x.y) + theme::kSeamGap), .51f);
 }
 
+TEST(layout_mirror_right_aligned) {
+    // FEEDBACK F2: a mirrored (blue) half anchors everything to its right edge; fitted boxes keep the gap from the
+    // seam on their left; rows go to the right end.
+    Harness h;
+    const Seam seam{640, 414, theme::kSeamTan};
+    h.run([&](Ui& ui) {
+        Box half;
+        half.seam = seam;
+        half.mirror = true;
+        half.margin = {640, 102, 0, 0};
+        half.w = Size::fixed(560);
+        auto g = ui.open("blue", half);
+        CHECK(ui.mirrored());
+        ui.leaf("fixed", fixed(100, 30), {}, {});
+        Box fb = fixed(200, 30);
+        fb.fit = SeamFit::BlueRect;
+        ui.leaf("fitted", fb, {}, {});
+        Box wide;
+        wide.h = Size::fixed(30);
+        wide.fit = SeamFit::BlueRect;
+        ui.leaf("wide", wide, {}, {});
+        Box row;
+        row.layout = Layout::Row;
+        row.gap = 10;
+        auto r = ui.open("row", row);
+        ui.leaf("b1", fixed(80, 30), {}, {});
+        ui.leaf("b2", fixed(80, 30), {}, {});
+    });
+    CHECK_NEAR(h.ui.rect("fixed").right(), 1200, .51f);
+    CHECK_NEAR(h.ui.rect("fitted").right(), 1200, .51f);
+    const Rect w = h.ui.rect("wide");
+    CHECK_NEAR(w.right(), 1200, .51f);
+    CHECK_NEAR(w.x, std::round(seam.x_at(w.y) + theme::kSeamGap), .51f);  // (the slack: its left side only)
+    CHECK_NEAR(h.ui.rect("b2").right(), 1200, .51f);
+    CHECK_NEAR(h.ui.rect("b1").right(), h.ui.rect("b2").x - 10, .51f);
+    // Crimson (not mirrored) stays left-aligned.
+    Harness c;
+    c.run([&](Ui& ui) {
+        Box half;
+        half.seam = seam;
+        half.margin = {40, 102, 0, 0};
+        half.w = Size::fixed(560);
+        auto g = ui.open("crimson", half);
+        CHECK(!ui.mirrored());
+        ui.leaf("fixed", fixed(100, 30), {}, {});
+    });
+    CHECK_NEAR(c.ui.rect("fixed").x, 40, .51f);
+}
+
+TEST(layout_audit_finds_seam_crossings) {
+    // Ui::audit (FEEDBACK F1 tests): a painted crimson box running into the gutter is reported, a fitted one not.
+    const Seam seam{640, 414, theme::kSeamTan};
+    auto declare = [&](bool fitted) {
+        return [&seam, fitted](Ui& ui) {
+            Box half;
+            half.seam = seam;
+            half.margin = {40, 102, 0, 0};
+            half.w = Size::fixed(700);
+            auto g = ui.open("crimson", half);
+            Box row;
+            row.h = Size::fixed(40);
+            if (fitted) row.fit = SeamFit::CrimsonRect;
+            else row.w = Size::fixed(640);
+            ui.leaf("row", row, {}, [](PaintContext&) {});
+        };
+    };
+    Harness bad;
+    bad.run(declare(false));
+    const std::vector<std::string> p = bad.ui.audit();
+    CHECK(p.size() == 1);
+    CHECK(!p.empty() && p[0].find("row (crimson)") == 0);
+    Harness good;
+    good.run(declare(true));
+    CHECK(good.ui.audit(theme::kSeamGap - 1).empty());
+}
+
+TEST(focus_highlight_follows_moving_item) {
+    // FEEDBACK F1: once the highlight reached its item it is drawn exactly on it while the layout moves (a
+    // springing seam narrows the rows), and a new focus is on its item from the first frame (snap).
+    Harness h;
+    float width = 400;
+    auto declare = [&](Ui& ui) {
+        Focus f;
+        ui.leaf("a", fixed(width, 40), {}, {}, &f);
+    };
+    h.run(declare);
+    for (int i = 0; i < 30; ++i) h.run(declare);
+    CHECK(!h.ui.focus_rect().empty());
+    CHECK_NEAR(h.ui.highlight_rect().w, h.ui.focus_rect().w, .01f);
+    for (int i = 0; i < 20; ++i) {
+        width -= 7;
+        h.run(declare);
+        CHECK_NEAR(h.ui.highlight_rect().w, h.ui.focus_rect().w, .01f);
+    }
+}
+
+TEST(focus_drill_in_lock) {
+    // FEEDBACK F4: a locked half takes no focus (keys or hover) so the pointer can travel over it to the other
+    // half's actions; a left click anywhere on it is Unlock (naming the item clicked, else the half); it fades and
+    // moves back while locked.
+    Harness h;
+    bool lock = false;
+    auto declare = [&](Ui& ui) {
+        Box hb{.layout = Layout::Row, .gap = 100};
+        hb.seam = Seam{450, 150, theme::kSeamTan};
+        auto halves = ui.open("halves", hb);
+        {
+            Box c = fixed(400, 300);
+            c.locked = lock;
+            auto g = ui.open("crimson", c);
+            for (const char* id : {"a", "b"}) {
+                Focus f;
+                ui.leaf(id, fixed(300, 40), {}, {}, &f);
+            }
+        }
+        auto g = ui.open("blue", fixed(400, 300));
+        for (const char* id : {"x", "y"}) {
+            Focus f;
+            ui.leaf(id, fixed(300, 40), {}, {}, &f);
+        }
+    };
+    h.run(declare);
+    CHECK(h.ui.focused() == "a");
+    // Accept on "a" -> the app drills in: lock crimson, focus the blue action.
+    lock = true;
+    h.ui.focus("x", true);
+    h.run(declare);
+    CHECK(h.ui.focused() == "x");
+    CHECK(h.ui.highlight_rect() == h.ui.focus_rect());  // (into the other half: no flight across)
+    auto ev = h.run(declare, {act(Action::Left, h.now)});
+    CHECK(h.ui.focused() == "x");
+    CHECK(has_event(ev, EventKind::Bump));
+    // The pointer crosses crimson ("b") on its way: no focus change; on "y" it focuses.
+    MouseState m;
+    m.inside = true;
+    m.moved = true;
+    m.pos = h.ui.rect("b").center();
+    h.run(declare, {}, m);
+    CHECK(h.ui.focused() == "x");
+    m.pos = h.ui.rect("y").center();
+    h.run(declare, {}, m);
+    CHECK(h.ui.focused() == "y");
+    for (int i = 0; i < 40; ++i) h.run(declare);
+    CHECK_NEAR(h.ui.state("crimson")->lock, 1.f, .001f);
+    // A click on "b": Unlock naming "b" (no Activate); a click on crimson's empty part: Unlock naming the half.
+    m.moved = false;
+    m.pos = h.ui.rect("b").center();
+    m.pressed = m.down = true;
+    h.run(declare, {}, m);
+    m.pressed = m.down = false;
+    m.released = true;
+    ev = h.run(declare, {}, m);
+    CHECK(has_event(ev, EventKind::Unlock, "b"));
+    for (const Event& e : ev)
+        if (e.kind == EventKind::Unlock) CHECK(e.delta == 1);
+    CHECK(!has_event(ev, EventKind::Activate));
+    m.released = false;
+    m.pos = {h.ui.rect("crimson").x + 10, h.ui.rect("crimson").bottom() - 10};
+    m.pressed = m.down = true;
+    h.run(declare, {}, m);
+    m.pressed = m.down = false;
+    m.released = true;
+    ev = h.run(declare, {}, m);
+    CHECK(has_event(ev, EventKind::Unlock, "crimson"));
+    for (const Event& e : ev)
+        if (e.kind == EventKind::Unlock) CHECK(e.delta == 0);
+    // Unlocked: the app focuses the item; it fades back in.
+    lock = false;
+    h.ui.focus("b", true);
+    m.released = false;
+    h.run(declare, {}, m);
+    CHECK(h.ui.focused() == "b");
+    for (int i = 0; i < 40; ++i) h.run(declare);
+    CHECK_NEAR(h.ui.state("crimson")->lock, 0.f, .001f);
+}
+
 TEST(layout_scroll_keeps_focus_in_view) {
     Harness h;
     auto declare = [](Ui& ui) {

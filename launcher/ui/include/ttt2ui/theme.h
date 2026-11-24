@@ -21,7 +21,7 @@ constexpr float kGutter = 30;               // seam -> plate edge
 constexpr float kPlatePad = 18;             // plate edge -> content
 constexpr float kSeamGap = kGutter + kPlatePad;  // content keeps this far from the seam
 constexpr float kPlateTop = 88;             // stage y
-constexpr float kPlateBottomGap = 64;       // stage height - plate bottom (688 of 800)
+constexpr float kPlateBottomGap = 64;       // prompt band top - plate bottom (688 of 800: room for the task strip)
 constexpr float kPlateBottomGapTask = 12;   // ... while a task fills the screen (740)
 constexpr float kPlateSide = 20;            // plate outer edges from the window's sides
 constexpr float kLean = 10;                 // the seam moves this far toward blue while the focus is there
@@ -199,7 +199,12 @@ constexpr SpringSpec kReduced{2600, 1.f};    // every spring when Reduce motion 
 constexpr float kSpringStep = 1.f / 240;     // integration sub-step
 constexpr float kBrightRate = 6;             // field brightness easing per second
 constexpr float kBrightBlue = 1.3f, kBrightRed = 1.12f;
-constexpr float kReadoutIn = .26f, kReadoutOut = .2f, kReadoutDx = -26, kReadoutDy = 12, kReadoutOutDx = 18;
+// The blue readout: the new content comes in from the right (the half's straight edge) and along the seam, the old
+// one leaves to the right; neither ever moves toward the seam (FEEDBACK F1).
+constexpr float kReadoutIn = .26f, kReadoutOut = .2f, kReadoutDx = 22, kReadoutDy = 12, kReadoutOutDx = 18;
+// A drill-in lock (FEEDBACK F4): the locked half's content fades to this much and moves this far away from the
+// seam, at this rate per second (eased); its plate darkens by kLockVeil.
+constexpr float kLockOpacity = .42f, kLockPush = 10, kLockRate = 12, kLockVeil = .42f;
 constexpr float kWipe = .4f, kWipeReduced = .14f;
 constexpr float kBand = .32f, kScrimFade = .2f;
 constexpr float kEntry = .42f, kEntryStagger = .04f;
