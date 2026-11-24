@@ -747,6 +747,22 @@ TEST(text_measure_ellipsis_wrap) {
     CHECK(t.has_glyph_builtin(U'A'));
 }
 
+TEST(text_system_fallback) {
+    // The system's fonts (fc-match on Linux, the Fonts folders on Windows) for characters the launcher's own fonts
+    // lack. Not every machine has one with Chinese letters: then the letter falls back to U+FFFD, measured all the
+    // same; a face found is used only when stb_truetype accepts it.
+    TextureRegistry textures;
+    TextEngine t(textures);
+    t.set_system_fallback(true);
+    const int before = t.face_count();
+    const int face = t.face_for(theme::text::kPara, U'\u4e2d');
+    std::printf("     (system fallback for U+4E2D: face %d of %d, %d before)\n", face, t.face_count(), before);
+    CHECK(face < t.face_count());
+    CHECK(t.width(theme::text::kPara, "\xe4\xb8\xad\xe6\x96\x87") > 0);
+    // A file that is not a font is refused.
+    CHECK(!t.add_fallback_file("/nonexistent/font.ttf"));
+}
+
 TEST(scale_follows_window_size) {
     CHECK_NEAR(ui_scale({1280, 800}, 1), 1.f, .001f);
     CHECK_NEAR(ui_scale({960, 640}, 1), 1.f, .001f);   // smaller: the layout reflows, letters keep their size

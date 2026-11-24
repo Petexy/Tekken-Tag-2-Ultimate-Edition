@@ -207,7 +207,9 @@ public:
             std::vector<Hint> hints;
             hints.push_back({Prompt::Move, "Move"});
             if (dialog) {
-                hints.push_back({Prompt::Accept, ui.focused() == "dlg-ok" ? "Uninstall" : ui.focused() == "dlg-cancel" ? "Cancel" : "Tick"});
+                hints.push_back({Prompt::Accept, ui.focused() == "dlg-ok"       ? "Uninstall"
+                                                 : ui.focused() == "dlg-cancel" ? "Cancel"
+                                                                                : "Tick"});
                 hint_bar(ui, "hints", hints);
                 return;
             }
@@ -637,9 +639,10 @@ private:
                     step_row(ui, "step:" + std::to_string(i), steps[i], fit({}, SeamFit::CrimsonSkewed));
             }
             section_label(ui, "kit/files-label", "Files", Half::Crimson, {}, fit({}, SeamFit::CrimsonRect));
-            const FileRowSpec files[] = {{"stroke:up", ".. (up to Games)", "", Tone::Neutral},
-                                         {"stroke:disc", "Tekken Tag Tournament 2 [EUR] (update 16).wua", "6.9 GB", Tone::Ok},
-                                         {"stroke:file", "notes.txt", "2 KB", Tone::Dim}};
+            const FileRowSpec files[] = {
+                {"stroke:up", ".. (up to Games)", "", Tone::Neutral},
+                {"stroke:disc", "Tekken Tag Tournament 2 [EUR] (update 16).wua", "6.9 GB", Tone::Ok},
+                {"stroke:file", "notes.txt", "2 KB", Tone::Dim}};
             for (int i = 0; i < 3; ++i) {
                 Focus f;
                 f.group = -1;
@@ -651,7 +654,9 @@ private:
         section_label(ui, "kit/task-label", "Installing", Half::Blue, "49%", fit({}, SeamFit::BlueRect));
         progress_bar(ui, "kit/progress", .49f, Tone::Blue, fit({}, SeamFit::BlueRect));
         {
-            auto r = ui.open("kit/pills", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 12}, .gap = 10, .wrap = true}, SeamFit::BlueRect));
+            auto r = ui.open(
+                "kit/pills",
+                fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 12}, .gap = 10, .wrap = true}, SeamFit::BlueRect));
             pill(ui, "kit/p-ok", "Ready", Tone::Ok, true);
             pill(ui, "kit/p-warn", "Update", Tone::Warn);
             pill(ui, "kit/p-bad", "Failed", Tone::Bad);
@@ -698,9 +703,11 @@ private:
                  fit(Box{.margin = {0, 0, 0, 14}}, SeamFit::CrimsonRect));
             Focus f;
             option_row(ui, "opt:saves", {"Also delete saves", del_saves_}, f, fit({}, SeamFit::CrimsonSkewed));
-            option_row(ui, "opt:chars", {"Also delete added characters and what was saved from Tekken 7 and Tekken 8", del_chars_},
-                       f, fit({}, SeamFit::CrimsonSkewed));
-            auto bg = ui.open("dlg/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14 - 8, 0, 0}, .gap = 12}, SeamFit::CrimsonRect));
+            option_row(ui, "opt:chars",
+                       {"Also delete added characters and what was saved from Tekken 7 and Tekken 8", del_chars_}, f,
+                       fit({}, SeamFit::CrimsonSkewed));
+            auto bg = ui.open("dlg/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14 - 8, 0, 0}, .gap = 12},
+                                              SeamFit::CrimsonRect));
             ButtonSpec cancel;
             cancel.label = "Cancel";
             cancel.prompt = Prompt::Back;
@@ -716,11 +723,15 @@ private:
         auto bg = ui.open("dlg/blue", L.blue);
         section_label(ui, "dlg/what-label", "What happens", Half::Blue, {}, fit({}, SeamFit::BlueRect));
         const WhatLine what[] = {
-            {"Deleted", WhatTone::Removed, {{"The game, its program and its menu entry, from"}, {" ~/Games/Tekken Tag Tournament 2", true}}},
+            {"Deleted",
+             WhatTone::Removed,
+             {{"The game, its program and its menu entry, from"}, {" ~/Games/Tekken Tag Tournament 2", true}}},
             {"Stays", WhatTone::Kept, {{"Anything else in that folder."}}},
-            {"Saves", del_saves_ ? WhatTone::Removed : WhatTone::Kept,
+            {"Saves",
+             del_saves_ ? WhatTone::Removed : WhatTone::Kept,
              {{del_saves_ ? "Deleted too:" : "Kept:"}, {" ~/.local/share/ttt2/save", true}}},
-            {"Fighters", del_chars_ ? WhatTone::Removed : WhatTone::Kept,
+            {"Fighters",
+             del_chars_ ? WhatTone::Removed : WhatTone::Kept,
              {{del_chars_ ? "The added characters and what was saved from Tekken 7 and Tekken 8 are deleted too."
                           : "The added characters are kept, for when it is installed again."}}}};
         what_list(ui, "dlg/what", what, fit({}, SeamFit::BlueRect));
