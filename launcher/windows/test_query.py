@@ -69,6 +69,10 @@ class Query(unittest.TestCase):
                          (str(self.root), str(self.build), str(self.config)))
         self.assertEqual(state['settings']['install'], str(folder))
         self.assertEqual(sorted(state['settings']), sorted(query.FOLDERS))
+        # Each folder's default (the new launcher's Settings > Folders > Default): what Settings found before
+        # launcher.json changed it.
+        self.assertEqual(sorted(state['defaults']), sorted(query.FOLDERS))
+        self.assertEqual(state['defaults']['tools'], self.fresh().defaults['tools'])
         self.assertEqual((state['version'], state['files_id']), (self_update.version(), self_update.files_id()))
         self.assertEqual((state['display_file'], state['keyboard_file']),
                          (str(self.data / 'config/display.ini'), str(self.data / 'config/keyboard.ini')))

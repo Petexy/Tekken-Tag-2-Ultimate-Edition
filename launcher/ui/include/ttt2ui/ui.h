@@ -69,6 +69,15 @@ struct Box {
     Vec2 shift{};
     float opacity = 1;
     bool inert = false;           // nothing inside takes focus or clicks (content fading out)
+    // The blue half (FEEDBACK F2): its straight edge is its RIGHT one, so everything inside is anchored and aligned
+    // to the right (inherited): rows and narrower children go to the right end, the widgets right-align their
+    // text, mirror their tables (facts) and put their marks (label bar, note icon, accent) on the right; the slanted
+    // left side only takes up the slack, its seam fit keeping the gap on every row.
+    bool mirror = false;
+    // A drill-in lock (FEEDBACK F4): the half whose item opened the other half's actions. Nothing inside takes the
+    // focus (navigation, hover) so the pointer travels over it freely; it fades and moves back (eased, drawn
+    // only); a left click anywhere on it is an Unlock event (id: the item under the pointer, else this box).
+    bool locked = false;
 };
 
 struct Focus {
@@ -93,6 +102,7 @@ struct NodeState {
     std::uint64_t last_frame = 0;
     double first_seen = 0;
     float hover = 0, focus = 0;  // 0..1, eased
+    float lock = 0;              // 0..1 eased toward Box::locked
     bool pressed = false;
     Spring scroll{0, theme::motion::kScroll};
     float content_h = 0, view_h = 0;
@@ -140,6 +150,7 @@ enum class EventKind : std::uint8_t {
     Bump,         // a move with nowhere to go
     ClickOutside, // a click outside the open modal (id = the modal)
     FocusMoved,   // (id = the new focus)
+    Unlock,       // a left click on a locked box (Box::locked): delta 1, id = the item clicked; else 0, the box
 };
 const char* event_name(EventKind k);
 
@@ -198,7 +209,17 @@ public:
     void set_fallback(std::function<std::string(const std::string& lost)> f) { fallback_ = std::move(f); }
     void set_highlight(HighlightFn f) { highlight_paint_ = std::move(f); }
     void set_wrap(WrapRule w) { wrap_ = w; }
-    Rect highlight_rect() const { return highlight_screen_; }
+    // The highlight as drawn (screen points, with its item's drawing shift) and where it belongs: the focused item
+    // outset by its pad, shifted as its item is drawn (empty when nothing has the focus).
+    Rect highlight_rect() const;
+    Rect focus_rect() const;
+
+    // Checks of the Tag Split rule on this frame's layout (after end()), for tests: every painted node of a half
+    // (the side of its nearest seam-fitted ancestor, else of its centre) stays `min_gap` points from its seam on
+    // every row it covers (skewed shapes measured along their slanted edge), as it is drawn (shift included, the
+    // part scrolled out of view left out); the highlight is never empty while something has the focus. Returns
+    // one sentence per problem (empty: all good).
+    std::vector<std::string> audit(float min_gap = theme::kGutter) const;
 
     // Queries (after end()).
     bool animating() const { return animating_ || paint_animating_; }
@@ -219,6 +240,8 @@ public:
     Glyphs glyphs() const { return frame_.glyphs; }
     const FrameInput& frame() const { return frame_; }
     std::string id_scope() const;  // the current container's id (for children ids)
+    // Whether what is declared now goes into a mirrored (right-aligned) container (Box::mirror).
+    bool mirrored() const;
     // Ids declared until the matching pop get this prefix (the same content declared twice: a readout's old and
     // new content).
     void push_prefix(const std::string& p) { prefixes_.push_back(prefix_); prefix_ += p; }
@@ -243,6 +266,8 @@ private:
         int parent = -1;
         std::vector<int> children;
         bool modal = false;
+        bool mirrored = false;  // Box::mirror here or above
+        float slot_x = 0;       // the left edge of the room its parent gave it (the seam fit measures from it)
         // layout
         float pref_w = 0, w = 0, h = 0, x = 0, y = 0, content_h = 0;
         float fit_w = -1, fit_dx = 0;
@@ -293,9 +318,16 @@ private:
     };
     std::vector<Item> items_;       // can take the focus
     std::vector<int> clickables_;   // nodes that take clicks (items_ and click-only ones)
+    std::vector<int> locked_;       // locked boxes (Box::locked), outermost first
+    std::vector<int> locked_items_; // items inside them (what an unlocking click names)
+    int press_locked_ = -1;         // the locked box a press began on
     std::string hovered_;
     int item_of_node(int node) const;
+    Vec2 drawn_shift(int node, float* opacity = nullptr) const;  // the drawing shift of a node and its ancestors
+    float lock_shift(int node, float lock) const;                // a locked box's move away from its seam
     std::string focused_, focus_before_modal_, modal_id_;
+    std::string highlight_id_;  // the item the highlight reached (it then follows that item's layout exactly)
+    int highlight_side_ = 0;    // the half it is on (-1 crimson, 1 blue, 0 no seam): it jumps between halves
     int modal_ = -1;
     double modal_opened_ = -1;
     Rect last_focus_rect_{};

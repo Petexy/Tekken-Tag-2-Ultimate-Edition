@@ -190,7 +190,7 @@ void TaskRunner::clear_for(TaskSpec spec, double now) {
     end_ = {};
     log_.clear();
     running_ = shown_ = true;
-    cancelled_ = failed_ = started_ = false;
+    cancelled_ = failed_ = started_ = replacing_ = false;
     title_ = spec_.title;
     detail_ = "Starting…";
     hide_at_ = -1;
@@ -256,6 +256,9 @@ void TaskRunner::line(const std::string& text, bool is_error) {
         end_.updated = text.substr(18);
         return;
     }
+    if ((spec_.kind == TaskKind::kLauncherUpdate || spec_.kind == TaskKind::kLauncherFiles) &&
+        text.starts_with("@step update Putting "))
+        replacing_ = true;
     const launcher::Line l = parse_line(text);
     switch (l.kind) {
     case launcher::Line::Kind::kError: end_.error = l.text; break;
@@ -269,7 +272,9 @@ void TaskRunner::line(const std::string& text, bool is_error) {
     if (progress_.feed(l)) started_ = true;
 }
 
-bool TaskRunner::cancellable() const { return running_ && !cancelled_ && caps_.cancellable.count(spec_.kind) > 0; }
+bool TaskRunner::cancellable() const {
+    return running_ && !cancelled_ && !replacing_ && caps_.cancellable.count(spec_.kind) > 0;
+}
 
 void TaskRunner::cancel() {
     if (!cancellable() || !job_) return;
@@ -347,15 +352,23 @@ TaskView TaskRunner::view() const {
             v.fraction = progress_.fraction();
         }
         v.detail = !started_ ? detail_ : detail;
+        // (Play's own step: the step line repeats the title; say what follows.)
+        if (spec_.kind == TaskKind::kShaders && (v.detail.empty() || v.detail.starts_with(spec_.title)))
+            v.detail = "The game starts once they are ready" +
+                       (progress_.fraction() >= 0
+                            ? " · " + std::to_string(static_cast<int>(progress_.fraction() * 100)) + "%"
+                            : std::string()) +
+                       ".";
         if (cancelled_) {
             v.detail = spec_.kind == TaskKind::kImport
                            ? "Stopping… " + (spec_.hidden.empty() ? std::string("Tekken 7") : spec_.hidden) +
                                  " is closed first when it runs hidden: a few seconds."
                            : std::string("Stopping…");
         }
-        v.button.label = cancelled_ ? "Stopping…" : "Cancel";
+        v.button.label = cancelled_ ? "Stopping…" : replacing_ ? "" : "Cancel";
         v.button.enabled = cancellable();
         v.button.why = cancelled_                           ? "It is stopping."
+                       : replacing_                         ? "The new version is being put in place: it ends in moments."
                        : spec_.kind == TaskKind::kUninstall ? "An uninstall cannot be stopped half-way."
                        : !v.button.enabled                  ? "This task cannot be stopped half-way."
                                                             : "";

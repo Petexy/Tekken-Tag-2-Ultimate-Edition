@@ -388,8 +388,12 @@ void prompt(Ui& ui, const std::string& id, Prompt p, const Box& box) {
 
 // ---- text -----------------------------------------------------------------------------------------------------------
 
-void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
+void text(Ui& ui, const std::string& id, const TextSpec& spec0, const Box& box) {
     TextEngine& te = ui.text();
+    // (In a mirrored half: right-aligned, wrapped lines too.)
+    const bool right = ui.mirrored();
+    TextSpec spec = spec0;
+    if (right && spec.wrap && spec.align == 0) spec.align = 1;
     ui.leaf(
         id, box,
         [&te, spec](float max_w) -> Vec2 {
@@ -400,7 +404,7 @@ void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
             }
             return {te.width(spec.style, spec.text) + spec.chroma * 2, te.line_height(spec.style)};
         },
-        [spec](PaintContext& ctx) {
+        [spec, right](PaintContext& ctx) {
             const Rect r = ctx.rect;
             if (spec.wrap) {
                 ctx.text.draw_wrapped(ctx.canvas, spec.style, spec.text, r, TextPaint{spec.color, spec.outline},
@@ -415,7 +419,8 @@ void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
             const std::string shown = ctx.text.width(st, spec.text) + spec.chroma * 2 > r.w + .5f
                                           ? ctx.text.ellipsize(st, spec.text, r.w - spec.chroma * 2, spec.ellipsis)
                                           : spec.text;
-            const Vec2 pos{r.x + spec.chroma, r.y + (r.h - ctx.text.line_height(st)) / 2};
+            const float x = right ? r.right() - spec.chroma - ctx.text.width(st, shown) : r.x + spec.chroma;
+            const Vec2 pos{x, r.y + (r.h - ctx.text.line_height(st)) / 2};
             if (spec.chroma > 0) chroma_text(ctx.canvas, ctx.text, st, shown, pos, spec.chroma);
             else ctx.text.draw(ctx.canvas, st, shown, pos, TextPaint{spec.color, spec.outline});
         });
@@ -430,8 +435,13 @@ void runs(Ui& ui, const std::string& id, const TextStyle& style, std::vector<Run
             for (const Run& r : rs) w += te.width(style, r.text);
             return Vec2{w, te.line_height(style)};
         },
-        [style, rs](PaintContext& ctx) {
+        [style, rs, right = ui.mirrored()](PaintContext& ctx) {
             float x = ctx.rect.x;
+            if (right) {
+                float w = 0;
+                for (const Run& r : rs) w += ctx.text.width(style, r.text);
+                x = ctx.rect.right() - w;
+            }
             for (const Run& r : rs) x += ctx.text.draw(ctx.canvas, style, r.text, {x, ctx.rect.y}, r.color);
         });
 }
@@ -448,10 +458,27 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
             return Vec2{
                 32 + te.width(tx::kLabel, label) + 30 + (right.empty() ? 0 : 10 + te.width(tx::kLabelEm, right)), 20};
         },
-        [label, right, col](PaintContext& ctx) {
+        [label, right, col, mirrored = ui.mirrored()](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
             const float cy = r.y + r.h / 2;
+            if (mirrored) {
+                // (Mirrored: the hairline from the left, the label, the bar at the right end; `right` first.)
+                const Rect bar{r.right() - 22, cy - 2, 22, 4};
+                cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
+                cv.fill(skewed(bar, kSeamTan), col);
+                const float w = ctx.text.width(tx::kLabel, label);
+                const float x = r.right() - 32 - w;
+                ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
+                const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+                if (!right.empty())
+                    ctx.text.draw(cv, tx::kLabelEm, right, {r.x, centred_y(ctx.text, tx::kLabelEm, r)}, rgb(0xe9edf5));
+                const float l0 = r.x + (right.empty() ? 0 : rw + 10), l1 = x - 10;
+                if (l1 > l0)
+                    cv.fill_rect({l0, cy - .5f, l1 - l0, 1},
+                                 Gradient::linear({l0, 0}, {l1, 0}, col.faded(0), col.faded(.35f)));
+                return;
+            }
             const Rect bar{r.x, cy - 2, 22, 4};
             cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
             cv.fill(skewed(bar, kSeamTan), col);
@@ -500,7 +527,38 @@ void facts(Ui& ui, const std::string& id, std::span<const Fact> fs, const Box& b
             h += kGapY * static_cast<float>(std::max<std::size_t>(1, list.size()) - 1);
             return Vec2{w, h};
         },
-        [list, key_w, value_style, row_h](PaintContext& ctx) {
+        [list, key_w, value_style, row_h, mirrored = ui.mirrored()](PaintContext& ctx) {
+            if (mirrored) {
+                // The mirrored table: values right-aligned at the right edge, keys right-aligned before the widest
+                // value (both columns' straight edges face right).
+                float vmax = 0;
+                for (const Fact& f : list) {
+                    float w = 0;
+                    for (const Run& r : f.value) w += ctx.text.width(value_style(f), r.text);
+                    vmax = std::max(vmax, w);
+                }
+                const float kw = key_w(), vw = std::min(vmax, ctx.rect.w - kw - kGapX);
+                const float kx1 = ctx.rect.right() - vw - kGapX;
+                float y = ctx.rect.y;
+                for (const Fact& f : list) {
+                    const float h = row_h(f, vw);
+                    ctx.text.draw(ctx.canvas, tx::kFactKey, f.key, {kx1 - ctx.text.width(tx::kFactKey, f.key), y},
+                                  c::kBlueFaint);
+                    const TextStyle vs = value_style(f);
+                    const float dy = (ctx.text.line_height(tx::kFactKey) - ctx.text.line_height(vs)) / 2;
+                    if (f.value.size() == 1) {
+                        ctx.text.draw_wrapped(ctx.canvas, vs, f.value[0].text,
+                                              {ctx.rect.right() - vw, y + dy, vw, h}, TextPaint{f.value[0].color}, 1);
+                    } else {
+                        float w = 0;
+                        for (const Run& r : f.value) w += ctx.text.width(vs, r.text);
+                        float x = ctx.rect.right() - w;
+                        for (const Run& r : f.value) x += ctx.text.draw(ctx.canvas, vs, r.text, {x, y + dy}, r.color);
+                    }
+                    y += h + kGapY;
+                }
+                return;
+            }
             const float kw = key_w(), vx = ctx.rect.x + kw + kGapX, vw = ctx.rect.right() - vx;
             float y = ctx.rect.y;
             for (const Fact& f : list) {
@@ -533,7 +591,13 @@ void note(Ui& ui, const std::string& id, Tone tone, const std::string& s, const 
             const float w = std::min(max_w, 26 + te.width(tx::kWarn, s));
             return Vec2{w, std::max(18.f, te.wrapped_height(tx::kWarn, s, std::max(1.f, w - 26)))};
         },
-        [s, text_col, icon_col, ic](PaintContext& ctx) {
+        [s, text_col, icon_col, ic, mirrored = ui.mirrored()](PaintContext& ctx) {
+            if (mirrored) {  // (the icon at the right end, the words right-aligned before it)
+                icon(ctx.canvas, ctx.icons, ic, {ctx.rect.right() - 16, ctx.rect.y + 1, 16, 16}, icon_col);
+                ctx.text.draw_wrapped(ctx.canvas, tx::kWarn, s, {ctx.rect.x, ctx.rect.y, ctx.rect.w - 26, ctx.rect.h},
+                                      TextPaint{text_col}, 1);
+                return;
+            }
             icon(ctx.canvas, ctx.icons, ic, {ctx.rect.x, ctx.rect.y + 1, 16, 16}, icon_col);
             ctx.text.draw_wrapped(ctx.canvas, tx::kWarn, s, {ctx.rect.x + 26, ctx.rect.y, ctx.rect.w - 26, ctx.rect.h},
                                   TextPaint{text_col});
@@ -1044,7 +1108,9 @@ void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, co
             bs.size = ButtonSize::Tiny;
             bs.disabled = hb.disabled;
             bs.half = Half::Crimson;
-            button(ui, hb.id, bs);
+            Focus f;
+            f.group = spec.focus_group;
+            button(ui, hb.id, bs, f);
         }
     }
 }
@@ -1147,7 +1213,8 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
         &focus);
 }
 
-void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box) {
+void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box,
+                  int focus_group) {
     Box b = box;
     b.layout = Layout::Row;
     b.align = Align::Center;
@@ -1162,6 +1229,7 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
         const bool on = static_cast<int>(i) == active;
         Focus f;
         f.disabled = s.disabled;
+        f.group = focus_group;
         ui.leaf(
             s.id, Box{.h = Size::fixed(m::kSectionHeight)},
             [&te, s](float) { return Vec2{40 + te.width(tx::kSection, s.label), m::kSectionHeight}; },
@@ -1393,6 +1461,7 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
 
 void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box) {
     Box b = with_height(box, m::kPillHeight);
+    b.hug = true;  // (a tag: as wide as its word, also in a stretching column)
     TextEngine& te = ui.text();
     ui.leaf(
         id, b,
@@ -1451,9 +1520,23 @@ void describe_panel(Ui& ui, const std::string& id, const std::string& title, con
             return Vec2{w, 11 + te.line_height(tx::kExplainTitle) + 5 +
                                te.wrapped_height(tx::kExplainText, body, std::max(1.f, w - 46)) + 12};
         },
-        [title, body](PaintContext& ctx) {
+        [title, body, mirrored = ui.mirrored()](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
+            if (mirrored) {  // (the accent on the right, the words right-aligned)
+                surface(cv, r, Gradient::css(r, 260, {{0, rgba(45, 128, 255, .16f)}, {1, rgba(8, 14, 34, .5f)}}),
+                        rgba(140, 190, 255, .3f));
+                const Rect accent{r.right() - 8, r.y + 8, 4, r.h - 16};
+                const Quad aq = sk_rect(r, accent);
+                cv.glow(aq, 8, c::kCyan.faded(.5f));
+                cv.fill(aq, c::kCyan);
+                ctx.text.draw(cv, tx::kExplainTitle, title,
+                              {r.right() - 26 - ctx.text.width(tx::kExplainTitle, title), r.y + 11}, c::kCyan);
+                const float y = r.y + 11 + ctx.text.line_height(tx::kExplainTitle) + 5;
+                ctx.text.draw_wrapped(cv, tx::kExplainText, body, {r.x + 20, y, r.w - 46, r.bottom() - y},
+                                      TextPaint{rgb(0xdbe6f8)}, 1);
+                return;
+            }
             surface(cv, r, Gradient::css(r, 100, {{0, rgba(45, 128, 255, .16f)}, {1, rgba(8, 14, 34, .5f)}}),
                     rgba(140, 190, 255, .3f));
             const Rect accent{r.x + 4, r.y + 8, 4, r.h - 16};
@@ -1477,6 +1560,7 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
                          : spec.size == ButtonSize::Small ? tx::kButtonSmall
                                                           : tx::kButton;
     Box b = with_height(box, h);
+    if (ui.mirrored()) b.hug = true;  // (blue: as wide as its label, at the right end - not a full-width bar)
     focus.disabled = focus.disabled || spec.disabled;
     TextEngine& te = ui.text();
     const Glyphs g = ui.glyphs();
@@ -1574,7 +1658,9 @@ void Readout::build(Ui& ui, const std::string& id, const Box& box,
         Box ob;
         ob.inert = true;
         ob.opacity = 1 - t;
-        ob.shift = {theme::motion::kReadoutOutDx * t, -static_cast<float>(dy_) * theme::motion::kReadoutDy * t};
+        // (Up or down ALONG the seam, and away from it: never into the gutter.)
+        const float oy = -static_cast<float>(dy_) * theme::motion::kReadoutDy * t;
+        ob.shift = {theme::motion::kReadoutOutDx * t - oy * kSeamTan, oy};
         auto og = ui.open(id + "/old", ob);
         ui.push_prefix("old:");
         content(old_);
@@ -1584,7 +1670,9 @@ void Readout::build(Ui& ui, const std::string& id, const Box& box,
     if (!reduced && age < theme::motion::kReadoutIn) {
         const float e = ease::out_expo_like(std::max(0.f, age) / theme::motion::kReadoutIn);
         nb.opacity = e;
-        nb.shift = {theme::motion::kReadoutDx * (1 - e), static_cast<float>(dy_) * theme::motion::kReadoutDy * (1 - e)};
+        // (In from the half's straight outer edge, moving along the seam: never into the gutter.)
+        const float ny = static_cast<float>(dy_) * theme::motion::kReadoutDy * (1 - e);
+        nb.shift = {theme::motion::kReadoutDx * (1 - e) - ny * kSeamTan, ny};
     }
     auto ng = ui.open(id + "/cur", nb);
     content(key_);
@@ -1604,6 +1692,7 @@ BandLayout band_layout(Vec2 size, float top, float height, float share) {
     l.crimson.h = Size::fixed(y1 - y0 - 14);
     const float bx = std::round(seam.x_at(y1) + theme::kSeamGap);
     l.blue.seam = seam;
+    l.blue.mirror = true;  // (FEEDBACK F2: right-aligned)
     l.blue.margin = {bx, y0, 0, 0};
     l.blue.w = Size::fixed(size.x - theme::kPlateSide - theme::kPlatePad - bx);
     l.blue.h = Size::fixed(y1 - y0 - 14);
@@ -1898,7 +1987,7 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
             }
             return Vec2{std::min(max_w, w), h};
         },
-        [copy](PaintContext& ctx) {
+        [copy, mirrored = ui.mirrored()](PaintContext& ctx) {
             const Rect r = ctx.rect;
             const float room = std::max(40.f, r.w - kWhatKeyWidth - kWhatGap);
             const float lh = ctx.text.line_height(kWhatText);
@@ -1907,14 +1996,23 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
                 const Color kc = l.tone == WhatTone::Removed ? rgb(0xff9aa8)
                                  : l.tone == WhatTone::Kept  ? c::kOk
                                                              : c::kBlueFaint;
-                ctx.text.draw(ctx.canvas, kWhatKey, l.key, {r.x, y + (19 - ctx.text.line_height(kWhatKey)) / 2}, kc);
+                // (Mirrored: the keys in a column at the right edge, each line of words right-aligned before it.)
+                const float kx = mirrored ? r.right() - ctx.text.width(kWhatKey, l.key) : r.x;
+                ctx.text.draw(ctx.canvas, kWhatKey, l.key, {kx, y + (19 - ctx.text.line_height(kWhatKey)) / 2}, kc);
                 int n = 1;
                 const auto placed = what_layout(ctx.text, what_words(ctx.text, l), room, n);
+                std::vector<float> line_end(static_cast<std::size_t>(n), 0);
+                for (const Placed& p : placed)
+                    line_end[static_cast<std::size_t>(p.line)] =
+                        std::max(line_end[static_cast<std::size_t>(p.line)],
+                                 p.x + ctx.text.width(p.mono ? kWhatMono : kWhatText, p.text));
                 for (const Placed& p : placed) {
                     const TextStyle& st = p.mono ? kWhatMono : kWhatText;
                     // (Mono words sit on the same baseline as the text around them.)
                     const float dy = p.mono ? ctx.text.ascent(kWhatText) - ctx.text.ascent(kWhatMono) : 0;
-                    ctx.text.draw(ctx.canvas, st, p.text, {r.x + kWhatKeyWidth + kWhatGap + p.x, y + p.line * lh + dy},
+                    const float x = mirrored ? r.x + room - line_end[static_cast<std::size_t>(p.line)] + p.x
+                                             : r.x + kWhatKeyWidth + kWhatGap + p.x;
+                    ctx.text.draw(ctx.canvas, st, p.text, {x, y + p.line * lh + dy},
                                   p.mono ? rgb(0xffffff) : rgb(0xd6e2f5));
                 }
                 y += n * lh + kWhatLineGap;

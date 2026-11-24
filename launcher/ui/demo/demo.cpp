@@ -11,6 +11,8 @@
 // ("0.5 key Down", "1 pad South", "1.2 move 300 400", "1.3 click 300 400", "1.5 wheel -1"; '#' comments).
 // --compare: the frame scaled down to the reference's size; exit 3 when the mean difference is over T (default 4)
 // or more than --max-changed pixels (default 200 of a 320 x 200 reference) differ by more than 48 in a channel.
+// Every --screenshot also checks the last frame's layout (Ui::audit: everything painted keeps the gutter from its
+// half's seam, the highlight is not empty): exit 4 with the problems listed.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -173,8 +175,8 @@ public:
                             false, Box{.margin = {10, 0, 0, 0}});
         }
         // The screen's halves.
-        const Seam seam = stage.layout_seam(share());
-        const Rect cr = stage.crimson_area(share()), bl = stage.blue_area(share());
+        const Seam seam = stage.layout_seam(stage.share_now());
+        const Rect cr = stage.crimson_area(stage.share_now()), bl = stage.blue_area(stage.share_now());
         Box crimson;
         crimson.seam = seam;
         crimson.scroll = true;
@@ -189,6 +191,7 @@ public:
         blue.w = Size::fixed(bl.w + 16 + 16);
         blue.h = Size::fixed(std::max(60.f, bl.h + 14));
         blue.pad = {16, 0, 16, 8};
+        blue.mirror = true;  // (FEEDBACK F2: the blue half is right-aligned)
         if (screen == 0) home(ui, crimson, blue);
         else if (screen == 1) fighters(ui, crimson, blue);
         else if (screen == 2) settings(ui, crimson, blue);
@@ -466,7 +469,8 @@ private:
                           .color = rgba(255, 255, 255, .78f),
                           .outline = 1.2f},
                  fit(Box{.h = Size::fixed(30), .margin = {4, 4, 0, 14}}, SeamFit::BlueRect));
-            pair(ui, "fro/pair", p, f, fit(Box{.margin = {10, 0, 0, 16}}, SeamFit::BlueRect));
+            // (No "P1 TAG P2" preview: the blue side shows only the focused fighter, FEEDBACK F3.)
+            (void)p;
             {
                 auto r =
                     ui.open("fro/st2", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
@@ -1063,17 +1067,20 @@ int run(const std::vector<std::string>& args) {
         in.glyphs = router.glyphs();
         for (const ActionEvent& a : in.actions)
             if (a.action == Action::Up || a.action == Action::Down) demo.note_move(a.action == Action::Up ? -1 : 1);
+        // The seam first (leaning toward the half the focus was on: blue items are in focus group 1), then the
+        // screen laid out for the split as it is drawn now (FEEDBACK F1: never for an old or target split).
+        {
+            const Rect fr = ui.rect(ui.focused());
+            const int side = fr.empty() ? 0 : fr.center().x > stage.seam_now().x_at(fr.center().y) ? 1 : -1;
+            stage.set_target(demo.share(), false, side);
+            if (first) stage.snap();
+            stage.update(now, static_cast<float>(std::clamp(now - last, 0.0, .25)), in.size, reduced);
+            last = now;
+        }
         ui.begin(in);
         demo.declare(ui, stage, window);
         ui.end();
         const std::vector<Event> events = ui.take_events();
-        // The seam leans toward the half with the focus (blue: its items are in focus group 1).
-        const Rect fr = ui.rect(ui.focused());
-        const int side = fr.empty() ? 0 : fr.center().x > stage.layout_seam(demo.share()).x_at(fr.center().y) ? 1 : -1;
-        stage.set_target(demo.share(), false, side);
-        if (first) stage.snap();
-        stage.update(now, static_cast<float>(std::clamp(now - last, 0.0, .25)), in.size, reduced);
-        last = now;
         window.set_drag_area({0, 0, in.size.x, theme::kTopBand},
                              {ui.rect("tabs"), ui.rect("sound"), ui.rect("quit"), ui.rect("frame")});
 
@@ -1123,8 +1130,13 @@ int run(const std::vector<std::string>& args) {
         say("launcher_ui_demo: cannot write " + reference_out + "\n", true);
         return 1;
     }
-    if (!compare_path.empty()) return compare(rgba, w, h, compare_path, tolerance, max_changed);
-    return 0;
+    const std::vector<std::string> problems = ui.audit();
+    for (const std::string& p : problems) say("launcher_ui_demo: layout: " + p + "\n", true);
+    if (!compare_path.empty()) {
+        const int c = compare(rgba, w, h, compare_path, tolerance, max_changed);
+        if (c != 0) return c;
+    }
+    return problems.empty() ? 0 : 4;
 }
 
 }  // namespace

@@ -78,6 +78,10 @@ std::optional<WindowsStateAnswer> parse_windows_state(const std::string& output,
     w.commit = v["commit"].string();
     const json::Value& settings = v["settings"];
     for (size_t i = 0; i < settings.keys().size(); ++i) w.folders[settings.keys()[i]] = settings.values()[i].string();
+    // (Files older than 0.8.0's answer have none: no Default then.)
+    if (const json::Value& defaults = v["defaults"]; defaults.is_object())
+        for (size_t i = 0; i < defaults.keys().size(); ++i)
+            w.folder_defaults[defaults.keys()[i]] = defaults.values()[i].string();
     w.logs = path_of(v["logs"]);
     w.latest_log = path_of(v["latest_log"]);
     w.data_problem = v["data_problem"].string();

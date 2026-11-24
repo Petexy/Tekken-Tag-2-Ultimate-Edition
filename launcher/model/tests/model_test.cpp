@@ -107,6 +107,11 @@ void intended(Dump& golden, const Dump& model) {
         add({"label", {{"t", "Reduce motion"}}, {}});
         add({"label", {{"t", "No moving backgrounds, and pages change without sliding."}, {"tone", "dim"}}, {}});
         add({"switch", {{"id", "reduce-motion"}}, {{"on", false}, {"s", true}}});
+        add({"label", {{"t", "Button prompts"}}, {}});
+        add({"label",
+             {{"t", "The buttons the prompts show: those of the last device used, or always these."}, {"tone", "dim"}},
+             {}});
+        add({"choice", {{"id", "prompts"}, {"t", "Automatic"}}, {{"s", true}}});
         add({"label", {{"t", "Text size"}}, {}});
         add({"label", {{"t", "How large this launcher's text is."}, {"tone", "dim"}}, {}});
         add({"choice", {{"id", "text-size"}, {"t", "100 %"}}, {{"s", true}}});
@@ -288,7 +293,8 @@ const TkDifference kTkDifferences[] = {
     // I2 The launcher's own settings.
     {false, "settings",
      "Ultimate Launcher|How this launcher looks and sounds\\.|Sounds|Short sounds when moving between and choosing "
-     "items\\.|Reduce motion|No moving backgrounds, and pages change without sliding\\.|Text size|How large this "
+     "items\\.|Reduce motion|No moving backgrounds, and pages change without sliding\\.|Button prompts|The buttons "
+     "the prompts show: those of the last device used, or always these\\.|Automatic|Text size|How large this "
      "launcher's text is\\.|100 %",
      "I2"},
     // W6 Linux's words where Tk's had drifted (or Tk had none).

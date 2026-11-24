@@ -1,5 +1,7 @@
 #include "ttt2ui/ui.h"
 
+#include <cstdio>
+
 #include <algorithm>
 #include <functional>
 #include <cassert>
@@ -18,7 +20,8 @@ float approach(float v, float target, float rate, float dt) {
 const char* event_name(EventKind k) {
     static const char* kNames[] = {"activate",     "refused",      "change",   "back",     "tab-prev",
                                    "tab-next",     "section-prev", "section-next", "context1", "context2",
-                                   "menu",         "fullscreen",   "bump",     "click-outside", "focus"};
+                                   "menu",         "fullscreen",   "bump",     "click-outside", "focus",
+                                   "unlock"};
     return kNames[static_cast<int>(k)];
 }
 
@@ -45,6 +48,8 @@ void Ui::begin(FrameInput frame) {
     stack_.push_back(0);
 }
 
+bool Ui::mirrored() const { return !stack_.empty() && nodes_[static_cast<std::size_t>(stack_.back())].mirrored; }
+
 std::string Ui::id_scope() const {
     return stack_.empty() ? std::string() : nodes_[static_cast<std::size_t>(stack_.back())].id;
 }
@@ -66,6 +71,7 @@ int Ui::add(std::string id, const Box& box) {
     n.id = id;
     n.box = box;
     n.parent = parent;
+    n.mirrored = box.mirror || (parent >= 0 && nodes_[static_cast<std::size_t>(parent)].mirrored);
     nodes_.push_back(std::move(n));
     const int index = static_cast<int>(nodes_.size()) - 1;
     if (parent >= 0) nodes_[static_cast<std::size_t>(parent)].children.push_back(index);
@@ -337,11 +343,13 @@ void Ui::place(int index, float x, float y) {
             used += nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical();
         if (!n.children.empty()) used += b.gap * static_cast<float>(n.children.size() - 1);
         float cy = iy - scroll + (b.scroll ? 0 : std::max(0.f, cross(n, ih, used, b.justify)));
+        // (Mirrored: what is narrower than its room goes to the right end.)
+        const Align along = n.mirrored && (b.align == Align::Start || b.align == Align::Stretch) ? Align::End : b.align;
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const float room = iw - k.box.margin.horizontal() - k.fit_dx;
-            const float cx =
-                ix + k.box.margin.left + k.fit_dx + (b.align == Align::Stretch ? 0 : cross(k, room, k.w, b.align));
+            const float cx = ix + k.box.margin.left + k.fit_dx + cross(k, room, k.w, along);
+            k.slot_x = ix + k.box.margin.left;
             place(c, cx, cy + k.box.margin.top);
             cy += k.h + k.box.margin.vertical() + b.gap;
         }
@@ -350,12 +358,14 @@ void Ui::place(int index, float x, float y) {
         for (int c : n.children)
             used += nodes_[static_cast<std::size_t>(c)].w + nodes_[static_cast<std::size_t>(c)].box.margin.horizontal();
         if (!n.children.empty()) used += b.gap * static_cast<float>(n.children.size() - 1);
-        float cx = ix + std::max(0.f, cross(n, iw, used, b.justify));
+        const Align justify = n.mirrored && b.justify == Align::Start ? Align::End : b.justify;
+        float cx = ix + std::max(0.f, cross(n, iw, used, justify));
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const float room = ih - k.box.margin.vertical();
             const float cy =
                 iy - scroll + k.box.margin.top + (b.align == Align::Stretch ? 0 : cross(k, room, k.h, b.align));
+            k.slot_x = cx + k.box.margin.left;
             place(c, cx + k.box.margin.left + k.fit_dx, cy);
             cx += k.w + k.box.margin.horizontal() + k.fit_dx + b.gap;
         }
@@ -374,9 +384,11 @@ void Ui::place(int index, float x, float y) {
                 line_h = std::max(line_h, k.h + k.box.margin.vertical());
                 ++j;
             }
-            float cx = ix + std::max(0.f, cross(n, iw, line_w, b.justify));
+            float cx = ix + std::max(0.f, cross(n, iw, line_w,
+                                                n.mirrored && b.justify == Align::Start ? Align::End : b.justify));
             for (std::size_t q = i; q < j; ++q) {
                 Node& k = nodes_[static_cast<std::size_t>(n.children[q])];
+                k.slot_x = cx + k.box.margin.left;
                 place(n.children[q], cx + k.box.margin.left,
                       cy + k.box.margin.top +
                           cross(k, line_h - k.box.margin.vertical(), k.h,
@@ -390,6 +402,7 @@ void Ui::place(int index, float x, float y) {
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const Align a = b.align == Align::Stretch ? Align::Start : b.align;
+            k.slot_x = ix + k.box.margin.left;
             place(c, ix + k.box.margin.left + k.fit_dx + cross(k, iw - k.box.margin.horizontal() - k.fit_dx, k.w, a),
                   iy - scroll + k.box.margin.top +
                       cross(k, ih - k.box.margin.vertical(), k.h, b.justify == Align::Start ? a : b.justify));
@@ -425,7 +438,8 @@ bool Ui::fit_pass() {
         case SeamFit::BlueSkewed:
         case SeamFit::BlueRect: {
             const float y = n.box.fit == SeamFit::BlueSkewed ? n.y + n.h / 2 : n.y;
-            const float x0 = n.x - n.fit_dx;
+            // (From the left of its room: a right-aligned box is not moved by fit_dx, only given less room.)
+            const float x0 = n.slot_x;
             const float dx = std::max(0.f, std::round(seam->x_at(y) + g - x0));
             if (std::fabs(dx - n.fit_dx) > .5f) {
                 n.fit_dx = dx;
@@ -516,15 +530,27 @@ void Ui::collect_focus() {
             if (nodes_[static_cast<std::size_t>(p)].box.inert) return true;
         return false;
     };
+    auto locked = [&](int i) {
+        for (int p = i; p >= 0; p = nodes_[static_cast<std::size_t>(p)].parent)
+            if (nodes_[static_cast<std::size_t>(p)].box.locked) return true;
+        return false;
+    };
     items_.clear();
     clickables_.clear();
+    locked_.clear();
+    locked_items_.clear();
     for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
         const Node& n = nodes_[static_cast<std::size_t>(i)];
+        if (n.box.locked && inside(i) && (n.parent < 0 || !locked(n.parent))) locked_.push_back(i);
         if (!n.focus || !inside(i) || inert(i)) continue;
         const Rect r{n.x, n.y, n.w, n.h};
         // Items scrolled out of their viewport still count (navigation scrolls to them); items clipped away by a
         // plain clip do not.
         if (n.scroller < 0 && r.intersect(n.clip).empty()) continue;
+        if (locked(i)) {
+            locked_items_.push_back(i);
+            continue;
+        }
         clickables_.push_back(i);
         if (n.focus->nav) items_.push_back({i, {r, n.focus->group}});
     }
@@ -631,9 +657,16 @@ void Ui::handle_mouse() {
             return;
         }
     }
+    // A locked box under the pointer: nothing there is hovered; a click there unlocks (FEEDBACK F4).
+    int over_locked = -1;
+    if (m.inside)
+        for (int l : locked_) {
+            const Node& n = nodes_[static_cast<std::size_t>(l)];
+            if (Rect{n.x, n.y, n.w, n.h}.intersect(n.clip).contains(m.pos)) over_locked = l;
+        }
     // What is under the pointer: the topmost clickable (last declared) in reach, and the innermost scroller.
     int hover = -1, scroller = -1;
-    if (m.inside) {
+    if (m.inside && over_locked < 0) {
         for (int i = static_cast<int>(clickables_.size()) - 1; i >= 0 && hover < 0; --i) {
             const Node& n = nodes_[static_cast<std::size_t>(clickables_[static_cast<std::size_t>(i)])];
             if (Rect{n.x, n.y, n.w, n.h}.intersect(n.clip).contains(m.pos))
@@ -677,7 +710,25 @@ void Ui::handle_mouse() {
                 return;
             }
         }
+        press_locked_ = over_locked;
         if (hover >= 0) press_node_ = hover;
+    }
+    if (m.released && press_locked_ >= 0) {
+        // (Released on the box it was pressed on: Unlock, naming the item under the pointer if there is one.)
+        if (over_locked == press_locked_ && press_locked_ < static_cast<int>(nodes_.size())) {
+            std::string id = nodes_[static_cast<std::size_t>(press_locked_)].id;
+            int item = 0;
+            for (int i = static_cast<int>(locked_items_.size()) - 1; i >= 0; --i) {
+                const Node& n = nodes_[static_cast<std::size_t>(locked_items_[static_cast<std::size_t>(i)])];
+                if (Rect{n.x, n.y, n.w, n.h}.intersect(n.clip).contains(m.pos)) {
+                    id = n.id;
+                    item = 1;
+                    break;
+                }
+            }
+            events_.push_back({EventKind::Unlock, id, item, Device::Mouse});
+        }
+        press_locked_ = -1;
     }
     if (press_node_ >= 0 && m.down)
         states_[nodes_[static_cast<std::size_t>(press_node_)].id].pressed = hover == press_node_;
@@ -891,6 +942,13 @@ void Ui::step_animations() {
         s.focus = frame_.reduced_motion ? fh : approach(s.focus, fh, 18, dt);
         if (std::fabs(s.focus - fh) > .01f) animating_ = true;
         else s.focus = fh;
+        const auto at = index_.find(id);
+        const float lk = at != index_.end() && nodes_[static_cast<std::size_t>(at->second)].box.locked ? 1.f : 0.f;
+        if (lk > 0 || s.lock > 0) {
+            s.lock = frame_.reduced_motion ? lk : approach(s.lock, lk, theme::motion::kLockRate, dt);
+            if (std::fabs(s.lock - lk) > .01f) animating_ = true;
+            else s.lock = lk;
+        }
     }
     // The highlight: a spring in the focused item's scroll content space (it rides along with scrolling).
     const int fi = node_index(focused_);
@@ -921,14 +979,24 @@ void Ui::step_animations() {
         highlight_.y.value = moved.y;
         highlight_container_ = container;
     }
+    // Once it reached its item, it stays on it exactly while that item's layout moves (a springing seam resizes
+    // the rows): the spring only carries it from one item to the next - within a half: into the other half it
+    // jumps (it never flies across the seam, FEEDBACK F1/F4).
+    const Seam* seam = seam_of(fi);
+    const int side = !seam ? 0 : n.x + n.w / 2 > seam->x_at(n.y + n.h / 2) ? 1 : -1;
+    if (side != highlight_side_) snap_next_ = true;
+    highlight_side_ = side;
+    const bool on_item = highlight_id_ == focused_ && highlight_.settled(.5f);
     highlight_.set_target(target.translated(Vec2{0, 0} - o));
-    if (snap_next_ || frame_.reduced_motion) {
+    if (snap_next_ || frame_.reduced_motion || on_item) {
         highlight_.snap_to(target.translated(Vec2{0, 0} - o));
         snap_next_ = false;
     }
     highlight_.set_spec(frame_.reduced_motion ? theme::motion::kReduced : theme::motion::kFocus);
     highlight_.step(dt);
     if (!highlight_.settled(.1f)) animating_ = true;
+    else highlight_id_ = focused_;
+    if (highlight_id_ != focused_ && highlight_.settled(.5f)) highlight_id_ = focused_;
     highlight_screen_ = highlight_.value().translated(o);
     highlight_skewed_ = n.focus->skewed;
     highlight_alpha_ = 1;
@@ -972,10 +1040,14 @@ void Ui::paint_node(Canvas& canvas, int index) {
     Node& n = nodes_[static_cast<std::size_t>(index)];
     const Rect r{n.x, n.y, n.w, n.h};
     if (index > 0 && r.intersect(n.clip).empty() && n.children.empty()) return;
-    if (n.box.opacity <= .002f) return;
-    const bool layer = n.box.opacity < 1 || n.box.shift.x != 0 || n.box.shift.y != 0;
-    if (layer) canvas.push_layer(n.box.shift, n.box.opacity);
     NodeState& s = states_[n.id];
+    // (A locked box: faded and moved away from its seam, eased; Box::locked.)
+    const float lock_k = s.lock;
+    const Vec2 shift = n.box.shift + Vec2{lock_shift(index, lock_k), 0};
+    const float opacity = n.box.opacity * (1 - (1 - theme::motion::kLockOpacity) * lock_k);
+    if (opacity <= .002f) return;
+    const bool layer = opacity < 1 || shift.x != 0 || shift.y != 0;
+    if (layer) canvas.push_layer(shift, opacity);
     PaintContext ctx{canvas,
                      text_,
                      icons_,
@@ -1008,18 +1080,106 @@ void Ui::paint_node(Canvas& canvas, int index) {
     if (layer) canvas.pop_layer();
 }
 
+float Ui::lock_shift(int node, float lock) const {
+    if (lock <= 0) return 0;
+    // Away from its seam: crimson boxes to the left, blue ones to the right (no seam: left).
+    const Node& n = nodes_[static_cast<std::size_t>(node)];
+    const Seam* seam = seam_of(node);
+    const bool blue = seam && n.x + n.w / 2 > seam->x_at(n.y + n.h / 2);
+    return (blue ? 1 : -1) * theme::motion::kLockPush * lock;
+}
+
+Vec2 Ui::drawn_shift(int node, float* opacity) const {
+    Vec2 shift{0, 0};
+    float o = 1;
+    for (int i = node; i >= 0; i = nodes_[static_cast<std::size_t>(i)].parent) {
+        const Node& n = nodes_[static_cast<std::size_t>(i)];
+        const auto st = states_.find(n.id);
+        const float lk = st == states_.end() ? 0 : st->second.lock;
+        shift = shift + n.box.shift + Vec2{lock_shift(i, lk), 0};
+        o *= n.box.opacity * (1 - (1 - theme::motion::kLockOpacity) * lk);
+    }
+    if (opacity) *opacity = o;
+    return shift;
+}
+
+Rect Ui::highlight_rect() const {
+    const int fi = node_index(focused_);
+    return fi < 0 ? highlight_screen_ : highlight_screen_.translated(drawn_shift(fi));
+}
+
+Rect Ui::focus_rect() const {
+    const int fi = node_index(focused_);
+    if (fi < 0 || !nodes_[static_cast<std::size_t>(fi)].focus) return {};
+    const Node& n = nodes_[static_cast<std::size_t>(fi)];
+    return Rect{n.x, n.y, n.w, n.h}.outset(n.focus->pad).translated(drawn_shift(fi));
+}
+
 void Ui::paint(Canvas& canvas) {
     paint_animating_ = false;
     if (nodes_.empty()) return;
     paint_node(canvas, 0);
     const int fi = node_index(focused_);
     if (highlight_paint_ && highlight_alpha_ > 0 && fi >= 0) {
+        // (Drawn as its item is: moved and faded with it, e.g. while a screen slides in.)
         const Node& n = nodes_[static_cast<std::size_t>(fi)];
-        canvas.push_clip(n.clip.outset(n.focus ? n.focus->pad + 12 : 12));
-        highlight_paint_(canvas, highlight_screen_, highlight_skewed_, highlight_alpha_, frame_.now);
-        canvas.pop_clip();
+        float opacity = 1;
+        const Vec2 shift = drawn_shift(fi, &opacity);
+        if (opacity > .002f) {
+            canvas.push_clip(n.clip.outset(n.focus ? n.focus->pad + 12 : 12).translated(shift));
+            highlight_paint_(canvas, highlight_screen_.translated(shift), highlight_skewed_,
+                             highlight_alpha_ * opacity, frame_.now);
+            canvas.pop_clip();
+        }
     }
     canvas.flush();
+}
+
+std::vector<std::string> Ui::audit(float min_gap) const {
+    std::vector<std::string> out;
+    auto fmt = [](float v) {
+        char b[32];
+        std::snprintf(b, sizeof b, "%.1f", static_cast<double>(v));
+        return std::string(b);
+    };
+    for (int i = 1; i < static_cast<int>(nodes_.size()); ++i) {
+        const Node& n = nodes_[static_cast<std::size_t>(i)];
+        // Only what is drawn: painted nodes and leaves.
+        if (!n.paint && !n.paint_after && !n.children.empty()) continue;
+        if (!n.paint && !n.paint_after && !n.measure) continue;
+        const Seam* seam = seam_of(i);
+        if (!seam) continue;
+        float opacity = 1;
+        const Vec2 shift = drawn_shift(i, &opacity);
+        if (opacity <= .002f) continue;
+        const Rect visible = Rect{n.x, n.y, n.w, n.h}.intersect(n.clip);
+        if (visible.empty()) continue;
+        const Rect r = visible.translated(shift);
+        // Its side and shape: from the nearest fitted node (itself or above), else its centre.
+        SeamFit fit = SeamFit::None;
+        bool self = false;
+        for (int p = i; p >= 0 && fit == SeamFit::None; p = nodes_[static_cast<std::size_t>(p)].parent) {
+            fit = nodes_[static_cast<std::size_t>(p)].box.fit;
+            self = p == i;
+        }
+        const bool crimson = fit == SeamFit::CrimsonSkewed || fit == SeamFit::CrimsonRect ||
+                             (fit == SeamFit::None && r.center().x < seam->x_at(r.center().y));
+        const bool skewed_edge = self && (fit == SeamFit::CrimsonSkewed || fit == SeamFit::BlueSkewed) &&
+                                 visible.h >= n.h - .5f;
+        float gap;
+        if (crimson) gap = seam->x_at(skewed_edge ? r.y + r.h / 2 : r.bottom()) - r.right();
+        else gap = r.x - seam->x_at(skewed_edge ? r.y + r.h / 2 : r.y);
+        if (gap < min_gap - .5f)
+            out.push_back(n.id + (crimson ? " (crimson)" : " (blue)") + " is " + fmt(gap) + " from the seam at " +
+                          fmt(seam->c) + " (at least " + fmt(min_gap) + ")");
+    }
+    const int fi = node_index(focused_);
+    if (fi >= 0 && nodes_[static_cast<std::size_t>(fi)].focus && nodes_[static_cast<std::size_t>(fi)].focus->nav &&
+        highlight_alpha_ > 0) {
+        const Rect h = highlight_rect();
+        if (h.w < 4 || h.h < 4) out.push_back("the highlight of " + focused_ + " is empty");
+    }
+    return out;
 }
 
 }  // namespace ttt2::ui

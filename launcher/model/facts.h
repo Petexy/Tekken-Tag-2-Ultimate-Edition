@@ -136,6 +136,7 @@ struct WindowsState {
     std::string branch;           // a test build's branch (not main), empty otherwise
     std::string commit;           // this build's commit (40 hex), empty when not known (project ZIP)
     std::map<std::string, std::string> folders; // Settings > Folders: source, title, install, data, packs, saves, tools
+    std::map<std::string, std::string> folder_defaults; // each one's default (Settings > Folders' Default), "" none
     fs::path logs, latest_log;                  // <data>/logs, and its newest *.log (empty: none)
     // Why Play cannot start the game: "" (it can), "exe" (the installed game's program is missing),
     // "source" (a development build without its Wii U source).
@@ -161,10 +162,12 @@ struct LauncherSettings {
     bool sounds = false;        // U17: off by default
     bool reduce_motion = false; // U9 (the app sets it from the OS where readable, until chosen)
     int text_size = 100;        // U6: percent (kTextSizes)
+    int prompts = 0;            // the button prompts shown: an index into kPrompts (0: from the last device used)
     bool operator==(const LauncherSettings&) const = default;
 };
 
 inline constexpr int kTextSizes[] = {100, 125, 150};
+inline constexpr const char* kPrompts[] = {"Automatic", "Keyboard", "Xbox", "PlayStation", "Nintendo"};
 
 struct Facts {
     Caps caps = Caps::linux_caps();

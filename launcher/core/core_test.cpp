@@ -601,6 +601,13 @@ void test_actions() {
         check((*settings)[0].name == "settings" && (*settings)[3].name == "reset-keys" && (*settings)[4].name == "back",
               "actions: settings, reset-keys, back");
     }
+    const auto input =
+        parse_test_actions("press:Return;pad:south;steam:south;click:play;hover:fighters;tab:next", &error);
+    check(input && input->size() == 6 && (*input)[0].args == std::vector<std::string>{"Return"} &&
+              (*input)[5].label() == "tab-next",
+          "actions: input as the devices give it (" + error + ")");
+    check(!parse_test_actions("tab:sideways", &error) && !parse_test_actions("press", &error),
+          "actions: input needs what to press");
     const auto shown = parse_test_actions(
         "fullscreen:yes;fullscreen:no;resolution:1920x1080;resolution:AUTO;interpolation:no;interpolation:yes;"
         "input-delay:yes",

@@ -5,6 +5,8 @@
 #include "builders.h"
 #include "rules.h"
 
+#include <cstdlib>
+
 namespace launcher::model {
 
 Line text_line(std::string text, Tone tone, bool small) {
@@ -121,7 +123,10 @@ void installed(const Facts& facts, GameView& v) {
     } else {
         Action play =
             button("play", playing ? "Playing" : "Play", !playing && !task,
-                   playing ? refusal_sentence("The game is running", "Only one can run at a time.") : task_why("play"));
+                   playing ? refusal_sentence("The game is running", "Only one can run at a time.")
+                   : facts.task && facts.task->kind == TaskKind::kShaders
+                       ? std::string("The game starts by itself once its shaders are ready.")
+                       : task_why("play"));
         play.primary = true;
         play.icon = Icon::kPlay;
         play.describe.state = playing ? "Running" : "";
@@ -282,7 +287,63 @@ void more(const Facts& facts, GameView& v) {
     entry("more:latest-log", "Open Latest Log", true, {});
 }
 
+// What each of the game's actions does, said on the blue side beside it (the Tag Split's readout; the GTK
+// window had only tooltips): as the mock's texts (concepts/tagsplit2), from the facts.
+void explain(const Facts& facts, GameView& v) {
+    const auto shown = [](const fs::path& p) { return shown_path(p); };
+    const bool task = facts.task.has_value();
+    for (Action& a : v.actions) {
+        std::string& x = a.describe.explain;
+        if (a.id == "play") {
+            x = facts.game_running ? "Tekken Tag Tournament 2 is running. Update and Uninstall wait until it is closed."
+                                   : "Starts Tekken Tag Tournament 2 with the Display settings and keys as they are now.";
+        } else if (a.id == "update") {
+            x = older_game(facts).empty()
+                    ? "Builds the game program again with this launcher's version: a few minutes. The game and your "
+                      "saves stay as they are."
+                    : "Builds the game again with this launcher's version (" +
+                          std::string(launcher_version(facts.this_build)) +
+                          "): a few minutes. Then it can be played, and fighters added or updated.";
+        } else if (a.id == "settings") {
+            x = facts.install.state == InstallState::kInstalled
+                    ? "Display and keyboard, which the game uses when it starts, and the launcher's own sounds, "
+                      "motion and button prompts."
+                    : "The launcher's own sounds, motion and button prompts. Display and keyboard come with the game.";
+        } else if (a.id == "open-folder") {
+            x = "Opens " + shown(facts.install.folder) + " in the file manager.";
+        } else if (a.id == "uninstall") {
+            x = "Deletes the game and its program from this folder. It asks first: your saves and the added "
+                "characters can stay.";
+            if (facts.game_running) x += " Not while the game is running: close it first.";
+            else if (task) x += " Not while a task is running.";
+        } else if (a.id == "resume") {
+            x = "Finishes the install into " + shown(facts.install.folder) + ": the files copied so far are kept.";
+        } else if (a.id == "install") {
+            x = facts.chosen_game.empty()
+                    ? "Asks for your .wua first, then checks this PC and installs."
+                    : "Checks this PC, then builds the game program from " + facts.chosen_game.filename().string() +
+                          " and copies the game into the folder chosen.";
+        } else if (a.id == "check-again") {
+            x = "Checks this PC again: the install starts once everything is ready.";
+        } else if (a.id == "preflight-cancel") {
+            x = "Goes back without installing.";
+        }
+    }
+}
+
 } // namespace
+
+// A path as the window shows it: the home folder as ~.
+std::string shown_path(const fs::path& path) {
+    const std::string p = path.string();
+    const char* home = std::getenv("HOME");
+    if (home && *home) {
+        const std::string h = std::string(home);
+        if (p == h) return "~";
+        if (p.size() > h.size() && p.compare(0, h.size(), h) == 0 && p[h.size()] == '/') return "~" + p.substr(h.size());
+    }
+    return p;
+}
 
 GameView game_view(const Facts& facts) {
     GameView v;
@@ -313,6 +374,7 @@ GameView game_view(const Facts& facts) {
         if (v.spacer == SIZE_MAX) v.spacer = v.actions.size();
         more(facts, v);
     }
+    explain(facts, v);
     return v;
 }
 
@@ -362,10 +424,17 @@ NoticeView notice_view(const Facts& facts) {
     const bool task = facts.task.has_value();
     n.update = button("notice-update", "Update", !task, task_why("update the launcher"));
     n.update.primary = true;
+    if (facts.newer) {
+        n.update.describe.explain = "Downloads version " + facts.newer->version +
+                                    (facts.caps.windows ? ", checks it, then it replaces this launcher and opens."
+                                                        : ", checks it, then it replaces this AppImage and opens.");
+    }
     const auto page = [&](const std::string& link, bool shown) {
         if (!shown) return;
         Action p = button("release-page", "What's New");
         p.describe.path = link;
+        p.describe.explain = "Opens the release page of " + (facts.newer ? facts.newer->version : std::string()) +
+                             " in the browser.";
         n.page = p;
     };
     if (facts.self_update && facts.newer) {

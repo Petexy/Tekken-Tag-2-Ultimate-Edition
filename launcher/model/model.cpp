@@ -1,5 +1,7 @@
 #include "model.h"
 
+#include <set>
+
 #include "json.h"
 #include "rules.h"
 
@@ -22,6 +24,18 @@ std::map<std::string, std::string> importer_environment(const fs::path& kit,
 }
 
 namespace {
+
+// A program's answer: its whole output, or (main.py's --query answers, launcher/backend/windows_backend.h) its last
+// line, after what a module printed first.
+std::string answer_of(const std::string& out) {
+    std::string error;
+    if (json::parse(out, &error)) return out;
+    size_t end = out.find_last_not_of("\r\n \t");
+    if (end == std::string::npos) return out;
+    const size_t start = out.rfind('\n', end);
+    return out.substr(start == std::string::npos ? 0 : start + 1, end + 1 - (start == std::string::npos ? 0 : start + 1));
+}
+
 
 Command script(const Facts& facts, const std::map<std::string, std::string>& env, const char* name) {
     return Command{{facts.python.string(), (facts.importer / name).string()}, env, {}, {}, {}};
@@ -140,6 +154,20 @@ Command WindowsCommands::update(const Facts& facts) { return worker_command(fact
 
 Command WindowsCommands::shaders(const Facts& facts) { return worker_command(facts, "shaders", {}, {}); }
 
+std::optional<Command> WindowsCommands::presave(const Facts& facts, TaskKind kind) {
+    if (kind != TaskKind::kSetup || facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
+    return save_settings(facts, facts.windows.folders);
+}
+
+std::optional<Command> WindowsCommands::precheck(const Facts& facts, TaskKind kind,
+                                                 const std::vector<std::string>& names) {
+    static const std::set<std::string> kChecked = {"setup",   "build",  "install", "update",
+                                                   "upgrade", "import", "remove",  "shaders"};
+    const std::string action = worker_action(kind);
+    if (!kChecked.count(action) || facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
+    return check(facts, action, names);
+}
+
 std::optional<Command> WindowsCommands::worker(const Facts& facts, TaskKind kind) {
     const std::string action = worker_action(kind);
     if (action.empty() || facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
@@ -235,7 +263,7 @@ LauncherModel::LauncherModel(Facts facts, Parts parts)
 }
 
 bool LauncherModel::busy() const {
-    return runner_.running() || facts_.status_loading || facts_.owned.state == OwnedState::kChecking ||
+    return runner_.running() || before_.has_value() || facts_.status_loading || facts_.owned.state == OwnedState::kChecking ||
            (facts_.preflight && facts_.preflight->running) || release_checking_ || main_checking_;
 }
 
@@ -265,6 +293,7 @@ void LauncherModel::tick(double now) {
         folders_note_until_ = -1;
     }
     done_job_.reset();
+    if (before_ && before_done_) before_answered(now);
     sync();
 }
 
@@ -316,7 +345,7 @@ void LauncherModel::load_status(double now) {
              facts_.status_loading = false;
              status_time_ = now_;
              std::string why;
-             if (auto parsed = parse_status(status_out_, &why)) {
+             if (auto parsed = parse_status(answer_of(status_out_), &why)) {
                  facts_.status = std::move(parsed);
                  facts_.status_error.clear();
              } else {
@@ -369,7 +398,7 @@ void LauncherModel::check_ownership(double now) {
                                            if (!is_error) owned_out_ += line + "\n";
                                        },
                                        [this](int) {
-                                           Ownership answer = parse_owned(owned_out_);
+                                           Ownership answer = parse_owned(answer_of(owned_out_));
                                            Owned& o = facts_.owned;
                                            if (answer.error.empty()) {
                                                // (A game Steam could not be asked through keeps its fighters' last
@@ -410,7 +439,7 @@ void LauncherModel::check_release(double now) {
              release_checking_ = false;
              // (Quietly: no notice when GitHub cannot be asked now.)
              if (code == 0 || json::parse(release_out_)) {
-                 const ReleaseAnswer answer = parse_release(release_out_);
+                 const ReleaseAnswer answer = parse_release(answer_of(release_out_));
                  if (self_update_->on_release) self_update_->on_release(answer);
              }
              done_job_ = std::move(release_job_);
@@ -435,7 +464,7 @@ void LauncherModel::check_main(double now) {
                                           main_checking_ = false;
                                           // (Quietly: no notice when GitHub cannot be asked now, or does not know this
                                           // build.)
-                                          MainNews news = parse_main_news(main_out_);
+                                          MainNews news = parse_main_news(answer_of(main_out_));
                                           if (news.error.empty()) facts_.main_news = std::move(news);
                                           done_job_ = std::move(main_job_);
                                       }},
@@ -456,9 +485,72 @@ void LauncherModel::refuse(const std::string& title, const std::string& why, dou
 }
 
 void LauncherModel::start_task(TaskSpec spec, double now) {
-    if (runner_.running()) return refuse("Another task is running", "Wait for it to end.", now);
+    if (runner_.running() || before_) return refuse("Another task is running", "Wait for it to end.", now);
+    if (parts_.read_check && parts_.read_save) {
+        before_ = Before{std::move(spec), 0, false};
+        return before_next(now);
+    }
     runner_.start(std::move(spec), now);
     sync();
+}
+
+// Windows: the next step before the task, or the task.
+void LauncherModel::before_next(double now) {
+    Before& b = *before_;
+    std::optional<Command> command;
+    while (b.stage < 2 && !command) {
+        b.save = b.stage == 0;
+        command = b.save ? parts_.commands.presave(facts_, b.spec.kind)
+                         : parts_.commands.precheck(facts_, b.spec.kind, b.spec.names);
+        ++b.stage;
+    }
+    if (!command) {
+        TaskSpec spec = std::move(b.spec);
+        before_.reset();
+        runner_.start(std::move(spec), now);
+        sync();
+        return;
+    }
+    before_out_.clear();
+    before_err_.clear();
+    before_done_ = false;
+    std::string error;
+    before_job_ = parts_.starter.start(
+        *command,
+        {[this](const std::string& line, bool is_error) { (is_error ? before_err_ : before_out_) += line + "\n"; },
+         [this](int) { before_done_ = true; }},
+        &error);
+    if (!before_job_) {
+        const std::string title = b.spec.title;
+        before_.reset();
+        refuse(title + ": not started", "Python did not start: " + error + ".", now);
+    }
+}
+
+// (On the next tick: never inside the job's own handler.)
+void LauncherModel::before_answered(double now) {
+    before_done_ = false;
+    done_job_ = std::move(before_job_);
+    Before& b = *before_;
+    std::string error;
+    const auto problem = (b.save ? parts_.read_save : parts_.read_check)(before_out_, &error);
+    if (!problem || !problem->code.empty()) {
+        const std::string title = b.spec.title;
+        const bool save = b.save;
+        before_.reset();
+        std::string why;
+        if (!problem) {
+            std::string last = before_err_;
+            while (!last.empty() && last.back() == '\n') last.pop_back();
+            if (const size_t at = last.rfind('\n'); at != std::string::npos) last.erase(0, at + 1);
+            why = "The launcher's files did not answer" + (last.empty() ? " (" + error + ")" : ": " + last) + ".";
+        } else {
+            why = save ? save_problem_text(*problem) : setup_problem_text(*problem);
+        }
+        refuse(title + ": not started", why, now);
+        return;
+    }
+    before_next(now);
 }
 
 void LauncherModel::start_import(const std::vector<std::string>& names, double now) {
@@ -763,6 +855,8 @@ std::vector<Effect> LauncherModel::choose(const std::string& id, int index, doub
         if (!display_.set(id, index)) said_ = display_.error();
     } else if (id == "text-size" && index >= 0 && static_cast<size_t>(index) < std::size(kTextSizes)) {
         launcher_.text_size = kTextSizes[index];
+    } else if (id == "prompts" && index >= 0 && static_cast<size_t>(index) < std::size(kPrompts)) {
+        launcher_.prompts = index;
     }
     return {};
 }
@@ -998,6 +1092,8 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         launcher_.sounds = !launcher_.sounds;
     else if (id == "reduce-motion")
         launcher_.reduce_motion = !launcher_.reduce_motion;
+    else if (id == "prompts")
+        return choose(id, (launcher_.prompts + 1) % static_cast<int>(std::size(kPrompts)), now);
     else if (id == "text-size") {
         const auto at = std::find(std::begin(kTextSizes), std::end(kTextSizes), launcher_.text_size);
         return choose(id, static_cast<int>((at - std::begin(kTextSizes) + 1) % std::size(kTextSizes)), now);

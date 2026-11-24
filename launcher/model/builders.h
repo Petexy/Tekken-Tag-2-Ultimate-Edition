@@ -19,6 +19,8 @@ std::string refusal_sentence(const std::string& title, const std::string& why);
 Banner banner_view(const Facts& facts);
 Header header_view(const Facts& facts, bool in_settings);
 GameView game_view(const Facts& facts);
+// A path as the window shows it: the home folder ($HOME) as "~".
+std::string shown_path(const fs::path& path);
 CharactersView characters_view(const Facts& facts);
 NoticeView notice_view(const Facts& facts);
 

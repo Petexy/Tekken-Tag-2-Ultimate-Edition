@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cmath>
+#include <vector>
 
 namespace ttt2::ui {
 
@@ -58,6 +59,8 @@ void SplitStage::snap() {
     lean_.snap_to(side_ > 0 ? theme::kLean : 0.f);
     bright_red_ = side_ < 0 ? theme::motion::kBrightRed : 1;
     bright_blue_ = side_ > 0 ? theme::motion::kBrightBlue : 1;
+    lock_ = lock_side_ != 0 ? 1.f : 0.f;
+    if (lock_side_) lock_drawn_ = lock_side_;
 }
 
 void SplitStage::update(double, float dt, Vec2 size, bool reduced) {
@@ -78,7 +81,11 @@ void SplitStage::update(double, float dt, Vec2 size, bool reduced) {
     const float k = reduced ? 1 : 1 - std::exp(-theme::motion::kBrightRate * dt);
     bright_red_ += ((side_ < 0 ? theme::motion::kBrightRed : 1) - bright_red_) * k;
     bright_blue_ += ((side_ > 0 ? theme::motion::kBrightBlue : 1) - bright_blue_) * k;
-    animating_ = !c_.settled(.0005f) || !bottom_.settled(.002f) || !lean_.settled(.05f) ||
+    if (lock_side_) lock_drawn_ = lock_side_;
+    const float lock_to = lock_side_ != 0 ? 1.f : 0.f;
+    lock_ = reduced ? lock_to : lock_ + (lock_to - lock_) * (1 - std::exp(-theme::motion::kLockRate * dt));
+    if (std::fabs(lock_ - lock_to) < .005f) lock_ = lock_to;
+    animating_ = lock_ != lock_to || !c_.settled(.0005f) || !bottom_.settled(.002f) || !lean_.settled(.05f) ||
                  std::fabs(bright_red_ - (side_ < 0 ? theme::motion::kBrightRed : 1)) > .005f ||
                  std::fabs(bright_blue_ - (side_ > 0 ? theme::motion::kBrightBlue : 1)) > .005f;
 }
@@ -89,7 +96,9 @@ Seam SplitStage::layout_seam(float share) const {
 Seam SplitStage::seam_now() const { return layout_seam(c_.value); }
 
 float SplitStage::plate_bottom() const {
-    return lerp(size_.y - theme::kPlateBottomGap, size_.y - theme::kPlateBottomGapTask, bottom_.value);
+    // (The gaps are measured from the prompt band: 688 and 740 of 800.)
+    const float bottom = size_.y - theme::kBottomBand;
+    return lerp(bottom - theme::kPlateBottomGap, bottom - theme::kPlateBottomGapTask, bottom_.value);
 }
 
 Rect SplitStage::crimson_area(float share) const {
@@ -240,6 +249,9 @@ void SplitStage::draw_plates(Canvas& canvas) {
     canvas.stroke(crimson, 1, c::kPlateRedStroke);
     canvas.fill(blue, Gradient::linear({s.x_at(s.yc) + g, 0}, {pr, 0}, c::kPlateBlueSeam, c::kPlateBlueOuter));
     canvas.stroke(blue, 1, c::kPlateBlueStroke);
+    // A locked half's plate: darker (its content fades with it, Box::locked).
+    if (lock_ > 0 && lock_drawn_ != 0)
+        canvas.fill(lock_drawn_ < 0 ? crimson : blue, rgba(6, 4, 12, theme::motion::kLockVeil * lock_));
     // Seam-facing edges and the top accents fading away from the seam.
     canvas.line({s.x_at(y0) - g, y0}, {s.x_at(y1) - g, y1}, 1.6f, c::kPlateRedEdge.faded(li));
     canvas.line({s.x_at(y0) + g, y0}, {s.x_at(y1) + g, y1}, 1.6f, c::kPlateBlueEdge.faded(ri));
@@ -359,7 +371,8 @@ float Wipe::progress(double now) const {
 
 Vec2 Wipe::new_offset(double now) const {
     if (!active(now) || reduced_) return {};
-    return {static_cast<float>(dir_) * 40 * (1 - ease::in_out_cubic(progress(now))), 0};
+    const float dy = static_cast<float>(dir_) * 36 * (1 - ease::in_out_cubic(progress(now)));
+    return {-dy * theme::kSeamTan, dy};
 }
 
 void Wipe::end_frame(Canvas& canvas, double now) {
@@ -382,17 +395,39 @@ void Wipe::end_frame(Canvas& canvas, double now) {
     const float bx = dir_ > 0 ? (W + 210) + (-W - 560) * e : -160 + (W + 560) * e;
     auto line_x = [&](float y) { return bx + 75 - y * theme::kSeamTan; };
     const float shift = -static_cast<float>(dir_) * 50 * e;
-    Vec2 pts[4], uvs[4];
+    std::vector<Vec2> pts;
     if (dir_ > 0) {  // old on the left of the line
-        pts[0] = {0, y0}, pts[1] = {line_x(y0), y0}, pts[2] = {line_x(y1), y1}, pts[3] = {0, y1};
+        pts = {{-W, y0}, {line_x(y0), y0}, {line_x(y1), y1}, {-W, y1}};
     } else {
-        pts[0] = {line_x(y0), y0}, pts[1] = {W, y0}, pts[2] = {W, y1}, pts[3] = {line_x(y1), y1};
+        pts = {{line_x(y0), y0}, {2 * W, y0}, {2 * W, y1}, {line_x(y1), y1}};
     }
-    for (int i = 0; i < 4; ++i) {
-        pts[i].x = std::clamp(pts[i].x, 0.f, W);
-        uvs[i] = uv({pts[i].x - shift, pts[i].y});
+    // Clipped to the window (the reveal line keeps its slant), then each point shows the old frame where it was
+    // (moved by `shift`); UVs kept inside the texture (the edge column repeated, as a GPU's clamp would). Drawn in
+    // strips 24 pixels tall: SDL's software renderer drops a textured triangle whose area times its texture
+    // coordinates overflows an int (a whole window's half did: "triangle area overflow").
+    const auto clip = [](const std::vector<Vec2>& in, bool on_x, float at, bool keep_above) {
+        std::vector<Vec2> out;
+        const auto v = [on_x](Vec2 p) { return on_x ? p.x : p.y; };
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            const Vec2 a = in[i], b = in[(i + 1) % in.size()];
+            const bool ia = keep_above ? v(a) >= at : v(a) <= at, ib = keep_above ? v(b) >= at : v(b) <= at;
+            if (ia) out.push_back(a);
+            if (ia != ib) {
+                const float t = (at - v(a)) / (v(b) - v(a));
+                out.push_back({a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t});
+            }
+        }
+        return out;
+    };
+    pts = clip(clip(pts, true, 0, true), true, W, false);
+    const float strip = 24 / std::max(.25f, canvas.scale());
+    for (float a = y0; a < y1 && pts.size() >= 3; a += strip) {
+        const std::vector<Vec2> part = clip(clip(pts, false, a, true), false, std::min(y1, a + strip), false);
+        if (part.size() < 3) continue;
+        std::vector<Vec2> uvs;
+        for (const Vec2& p : part) uvs.push_back(uv({std::clamp(p.x - shift, 0.f, W - .5f), p.y}));
+        canvas.textured(old, part, uvs, rgba(255, 255, 255, 1 - e * .5f));
     }
-    canvas.textured(old, pts, uvs, rgba(255, 255, 255, 1 - e * .5f));
     // The band: red fading in, a white core, blue fading out (150 points wide), over the whole height.
     const float H = size_.y;
     auto band = [&](float a, float b, const Gradient& g) {

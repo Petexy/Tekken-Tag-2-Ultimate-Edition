@@ -41,6 +41,12 @@ struct Commands {
     virtual std::optional<Command> play(const Facts& facts) = 0;
     // Windows' own tasks (setup, build, install from source, update installed, launcher, files).
     virtual std::optional<Command> worker(const Facts& facts, TaskKind kind) = 0;
+    // Before a task (Windows): the folders saved first (Set Up Game's archive and folder: the worker reads them
+    // from launcher.json), then what refuses it asked (--query check). None: nothing first.
+    virtual std::optional<Command> presave(const Facts&, TaskKind) { return std::nullopt; }
+    virtual std::optional<Command> precheck(const Facts&, TaskKind, const std::vector<std::string>&) {
+        return std::nullopt;
+    }
 };
 
 // Linux (spec/linux_app.md 2.x): the importer's scripts with Python, the kit's ttt2-build, the game's program.
@@ -91,6 +97,8 @@ struct WindowsCommands : Commands {
     Command shaders(const Facts& facts) override;
     std::optional<Command> play(const Facts& facts) override { return facts.windows.play; }
     std::optional<Command> worker(const Facts& facts, TaskKind kind) override;
+    std::optional<Command> presave(const Facts& facts, TaskKind kind) override;
+    std::optional<Command> precheck(const Facts& facts, TaskKind kind, const std::vector<std::string>& names) override;
 };
 // Whether an element id is one this OS's window has (U1): Windows' More, Set Up Game, Folders, Performance,
 // keyboard.ini and log; Linux's install flow, uninstall, numpy/Pillow download and commands to copy.
@@ -169,6 +177,10 @@ public:
         SelfUpdate::Config update{};
         fs::path display_file;
         KeyLabel key_label = us_key_label;
+        // Windows: reads the answers of the steps before a task (backend/windows_backend.h's parse_save_settings
+        // and parse_check, as their problem: code "" none); unset, tasks start at once.
+        std::function<std::optional<SetupProblem>(const std::string& output, std::string* error)> read_save,
+            read_check;
     };
     LauncherModel(Facts facts, Parts parts);
 
@@ -231,6 +243,8 @@ private:
     void launch_game(double now);
     std::vector<Effect> uninstall_confirmed(double now);
     void task_ended(const TaskResult& result);
+    void before_next(double now);
+    void before_answered(double now);
     void sync();
 
     Facts facts_;
@@ -257,6 +271,16 @@ private:
     double folders_note_until_ = -1;
     std::string said_;
     std::vector<Effect> pending_;
+    // Windows: a task waiting for the steps before it (presave, precheck).
+    struct Before {
+        TaskSpec spec;
+        int stage = 0; // 0 presave next, 1 precheck next, 2 the task
+        bool save = false; // the step running is the presave
+    };
+    std::optional<Before> before_;
+    std::unique_ptr<Job> before_job_;
+    std::string before_out_, before_err_;
+    bool before_done_ = false;
 };
 
 } // namespace launcher::model

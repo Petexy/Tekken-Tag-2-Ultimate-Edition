@@ -415,6 +415,13 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
                                 "Short sounds when moving between and choosing items.", in.launcher.sounds);
     SettingRow motion = setting("reduce-motion", ActionKind::kSwitch, "Reduce motion",
                                 "No moving backgrounds, and pages change without sliding.", in.launcher.reduce_motion);
+    SettingRow prompts = setting("prompts", ActionKind::kChoice, "Button prompts",
+                                 "The buttons the prompts show: those of the last device used, or always these.",
+                                 false);
+    for (const char* p : kPrompts) prompts.control.choices.push_back(p);
+    prompts.control.chosen =
+        std::clamp(in.launcher.prompts, 0, static_cast<int>(prompts.control.choices.size()) - 1);
+    prompts.control.describe.state = prompts.control.choices[static_cast<size_t>(prompts.control.chosen)];
     SettingRow text =
         setting("text-size", ActionKind::kChoice, "Text size", "How large this launcher's text is.", false);
     for (const int size : kTextSizes) {
@@ -422,7 +429,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         if (size == in.launcher.text_size) text.control.chosen = static_cast<int>(text.control.choices.size()) - 1;
     }
     if (text.control.chosen >= 0) text.control.describe.state = text.control.choices[text.control.chosen];
-    v.launcher = {sounds, motion, text};
+    v.launcher = {sounds, motion, prompts, text};
     return v;
 }
 
