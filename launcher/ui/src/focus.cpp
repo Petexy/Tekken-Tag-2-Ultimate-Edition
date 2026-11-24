@@ -31,7 +31,8 @@ int navigate(const std::vector<FocusItem>& items, int current, Dir dir, WrapRule
             overlap = std::min(a.right(), b.right()) - std::max(a.x, b.x);
             off = std::fabs(bcx - acx);
         }
-        float score = std::max(0.f, edge) + along * .25f + (overlap > 0 ? off * .6f : 1000 - overlap * 2.4f + off * .4f);
+        float score =
+            std::max(0.f, edge) + along * .25f + (overlap > 0 ? off * .6f : 1000 - overlap * 2.4f + off * .4f);
         if (!horizontal && items[static_cast<std::size_t>(i)].group != items[static_cast<std::size_t>(current)].group)
             score += 3000;
         if (score < best_score) {

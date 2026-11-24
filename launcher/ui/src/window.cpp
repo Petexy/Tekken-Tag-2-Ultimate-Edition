@@ -54,7 +54,8 @@ bool Window::try_open(const WindowOptions& o, const char* video, const char* ren
         w = std::min(w, std::max(320, usable.w - 32));
         h = std::min(h, std::max(240, usable.h - 32));
     }
-    SDL_WindowFlags flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    SDL_WindowFlags flags =
+        SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     if (gamescope_ || o.start_fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
     window_ = SDL_CreateWindow(o.title.c_str(), w, h, flags);
     if (!window_) {
@@ -166,7 +167,8 @@ SDL_HitTestResult SDLCALL Window::hit_test(SDL_Window* window, const SDL_Point* 
     if (self->gamescope_) return SDL_HITTEST_NORMAL;
     const int edge = static_cast<int>(theme::metric::kResizeEdge);
     if (!full) {
-        const bool left = area->x < edge, right = area->x >= w - edge, top = area->y < edge, bottom = area->y >= h - edge;
+        const bool left = area->x < edge, right = area->x >= w - edge, top = area->y < edge,
+                   bottom = area->y >= h - edge;
         if (top && left) return SDL_HITTEST_RESIZE_TOPLEFT;
         if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
         if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
@@ -178,7 +180,8 @@ SDL_HitTestResult SDLCALL Window::hit_test(SDL_Window* window, const SDL_Point* 
     }
     // Window coordinates -> interface points.
     const float density = SDL_GetWindowPixelDensity(window);
-    const Vec2 p{static_cast<float>(area->x) * density / self->scale_, static_cast<float>(area->y) * density / self->scale_};
+    const Vec2 p{static_cast<float>(area->x) * density / self->scale_,
+                 static_cast<float>(area->y) * density / self->scale_};
     for (const Rect& b : self->buttons_)
         if (b.contains(p)) return SDL_HITTEST_NORMAL;
     if (!full && self->drag_.contains(p)) return SDL_HITTEST_DRAGGABLE;
@@ -355,7 +358,8 @@ bool Window::read_pixels(std::vector<std::uint8_t>& rgba, int& w, int& h) {
     h = image->h;
     rgba.resize(static_cast<std::size_t>(w) * h * 4);
     for (int y = 0; y < h; ++y)
-        std::memcpy(&rgba[static_cast<std::size_t>(y) * w * 4], static_cast<const std::uint8_t*>(image->pixels) + static_cast<std::size_t>(y) * image->pitch,
+        std::memcpy(&rgba[static_cast<std::size_t>(y) * w * 4],
+                    static_cast<const std::uint8_t*>(image->pixels) + static_cast<std::size_t>(y) * image->pitch,
                     static_cast<std::size_t>(w) * 4);
     SDL_DestroySurface(image);
     return true;

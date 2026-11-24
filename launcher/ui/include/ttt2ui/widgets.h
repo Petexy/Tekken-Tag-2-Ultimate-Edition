@@ -130,7 +130,7 @@ struct MenuRowSpec {
     int number = 0;  // > 0: an outlined number instead of the icon (setup slots)
     bool ok = false;
     int check = -1;  // >= 0: a check box instead of the icon: 0 off, 1 on, 2 some (.oall)
-    bool small = false;  // a lower row with smaller letters
+    bool compact = false;  // a lower row with smaller letters
 };
 void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focus = {}, const Box& box = {});
 // A fighter tile with its corner badge.
@@ -223,7 +223,8 @@ public:
     void show(const std::string& key, int dy, double now);
     const std::string& key() const { return key_; }
     // Declares a Stack `id` with the old content (inert, fading) and the new one; `content(key)` declares one.
-    void build(Ui& ui, const std::string& id, const Box& box, const std::function<void(const std::string& key)>& content);
+    void build(Ui& ui, const std::string& id, const Box& box,
+               const std::function<void(const std::string& key)>& content);
     bool animating(double now) const;
 
 private:
@@ -242,7 +243,8 @@ struct BandLayout {
 BandLayout band_layout(Vec2 size, float top, float height, float share = theme::split::kDialog);
 [[nodiscard]] Ui::Guard dialog_band(Ui& ui, const std::string& id, const BandLayout& layout);
 
-// ---- log view --------------------------------------------------------------------------------------------------------
+// ---- log view
+// --------------------------------------------------------------------------------------------------------
 enum class LogKind : std::uint8_t { Normal, Command, Error, Status };
 struct LogLine {
     std::string text{};

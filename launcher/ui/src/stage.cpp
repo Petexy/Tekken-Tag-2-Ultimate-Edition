@@ -100,7 +100,8 @@ Rect SplitStage::crimson_area(float share) const {
 }
 Rect SplitStage::blue_area(float share) const {
     const Seam s = layout_seam(share);
-    const float left = std::round(s.x_at(plate_bottom()) + theme::kSeamGap), right = size_.x - theme::kPlateSide - theme::kPlatePad;
+    const float left = std::round(s.x_at(plate_bottom()) + theme::kSeamGap),
+                right = size_.x - theme::kPlateSide - theme::kPlatePad;
     return {left, theme::kPlateTop + 14, right - left, plate_bottom() - theme::kPlateTop - 28};
 }
 
@@ -183,7 +184,8 @@ void SplitStage::render_ambient(Canvas& canvas, double, float dt) {
     const float step = theme::motion::kHalftoneStep;
     const float phase = std::fmod(static_cast<float>(ambient_time_) * theme::motion::kHalftoneSpeed, step);
     for (int side : {-1, 1}) {
-        const Color col = side < 0 ? rgba(255, 70, 110, std::min(1.f, .15f * li)) : rgba(90, 160, 255, std::min(1.f, .15f * ri));
+        const Color col =
+            side < 0 ? rgba(255, 70, 110, std::min(1.f, .15f * li)) : rgba(90, 160, 255, std::min(1.f, .15f * ri));
         int column = 0;
         for (float gx = 6; gx < theme::motion::kHalftoneReach; gx += step, ++column) {
             const float r = theme::motion::kHalftoneDot * std::pow(1 - gx / theme::motion::kHalftoneReach, 1.5f);
@@ -242,9 +244,11 @@ void SplitStage::draw_plates(Canvas& canvas) {
     canvas.line({s.x_at(y0) - g, y0}, {s.x_at(y1) - g, y1}, 1.6f, c::kPlateRedEdge.faded(li));
     canvas.line({s.x_at(y0) + g, y0}, {s.x_at(y1) + g, y1}, 1.6f, c::kPlateBlueEdge.faded(ri));
     canvas.fill_rect({pl, y0, s.x_at(y0) - g - pl, 3},
-                     Gradient::linear({pl, 0}, {s.x_at(y0) - g, 0}, rgba(255, 42, 85, 0), rgba(255, 42, 85, std::min(1.f, .85f * li))));
+                     Gradient::linear({pl, 0}, {s.x_at(y0) - g, 0}, rgba(255, 42, 85, 0),
+                                      rgba(255, 42, 85, std::min(1.f, .85f * li))));
     canvas.fill_rect({s.x_at(y0) + g, y0, pr - s.x_at(y0) - g, 3},
-                     Gradient::linear({s.x_at(y0) + g, 0}, {pr, 0}, rgba(45, 128, 255, std::min(1.f, .9f * ri)), rgba(45, 128, 255, 0)));
+                     Gradient::linear({s.x_at(y0) + g, 0}, {pr, 0}, rgba(45, 128, 255, std::min(1.f, .9f * ri)),
+                                      rgba(45, 128, 255, 0)));
 }
 
 void SplitStage::draw_seam_and_bands(Canvas& canvas) {
@@ -253,7 +257,8 @@ void SplitStage::draw_seam_and_bands(Canvas& canvas) {
     const float lean = lean_.value;
     auto lx = [&](float y) { return s.x_at(y) + lean; };
     // The seam's line in the gutter.
-    const Vec2 line[4] = {{lx(top) - 1.2f, top}, {lx(top) + 1.2f, top}, {lx(bottom) + 1.2f, bottom}, {lx(bottom) - 1.2f, bottom}};
+    const Vec2 line[4] = {
+        {lx(top) - 1.2f, top}, {lx(top) + 1.2f, top}, {lx(bottom) + 1.2f, bottom}, {lx(bottom) - 1.2f, bottom}};
     canvas.fill(line, c::kSeamLine);
     // Neutral bands; the seam continues faintly behind them; hairlines at their inner edges.
     canvas.fill_rect({0, 0, W, top}, c::kBand);
@@ -306,8 +311,9 @@ void SplitStage::draw(Canvas& canvas, double now) {
         canvas.fill(red, Gradient::linear(at - n * (120 * kCos12), at, rgba(255, 42, 85, 0),
                                           rgba(255, 42, 85, std::min(1.f, .6f * bright_red_))));
         const Vec2 blue[4] = {{lx(top), top}, {lx(top) + 120, top}, {lx(bottom) + 120, bottom}, {lx(bottom), bottom}};
-        canvas.fill(blue, Gradient::linear(at, at + n * (120 * kCos12), rgba(45, 128, 255, std::min(1.f, .65f * bright_blue_)),
-                                           rgba(45, 128, 255, 0)));
+        canvas.fill(
+            blue, Gradient::linear(at, at + n * (120 * kCos12), rgba(45, 128, 255, std::min(1.f, .65f * bright_blue_)),
+                                   rgba(45, 128, 255, 0)));
     }
     draw_plates(canvas);
     draw_seam_and_bands(canvas);
@@ -390,12 +396,14 @@ void Wipe::end_frame(Canvas& canvas, double now) {
     // The band: red fading in, a white core, blue fading out (150 points wide), over the whole height.
     const float H = size_.y;
     auto band = [&](float a, float b, const Gradient& g) {
-        const Vec2 q[4] = {{bx + a, 0}, {bx + b, 0}, {bx + b - H * theme::kSeamTan, H}, {bx + a - H * theme::kSeamTan, H}};
+        const Vec2 q[4] = {
+            {bx + a, 0}, {bx + b, 0}, {bx + b - H * theme::kSeamTan, H}, {bx + a - H * theme::kSeamTan, H}};
         canvas.fill(q, g);
     };
     band(0, 72, Gradient::linear({bx, 0}, {bx + 72, 0}, rgba(255, 42, 85, 0), theme::color::kRed));
     band(78, 150, Gradient::linear({bx + 78, 0}, {bx + 150, 0}, theme::color::kBlue, rgba(45, 128, 255, 0)));
-    const Vec2 core[4] = {{bx + 70, 0}, {bx + 78, 0}, {bx + 78 - H * theme::kSeamTan, H}, {bx + 70 - H * theme::kSeamTan, H}};
+    const Vec2 core[4] = {
+        {bx + 70, 0}, {bx + 78, 0}, {bx + 78 - H * theme::kSeamTan, H}, {bx + 70 - H * theme::kSeamTan, H}};
     canvas.glow(core, 40, rgba(255, 255, 255, .45f));
     canvas.fill(core, rgba(255, 255, 255, 1));
 }

@@ -44,14 +44,16 @@ void say(std::string_view text, bool error = false) {
 #ifdef _WIN32
     HANDLE out = GetStdHandle(error ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
     DWORD written = 0;
-    if (out && out != INVALID_HANDLE_VALUE) WriteFile(out, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+    if (out && out != INVALID_HANDLE_VALUE)
+        WriteFile(out, text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
 #else
     std::fwrite(text.data(), 1, text.size(), error ? stderr : stdout);
     std::fflush(error ? stderr : stdout);
 #endif
 }
 
-// ---- fake data --------------------------------------------------------------------------------------------------------
+// ---- fake data
+// --------------------------------------------------------------------------------------------------------
 
 struct Fighter {
     std::string first, last, code, short_name;
@@ -70,19 +72,29 @@ std::vector<Fighter> fake_fighters() {
         bool o;
     };
     using S = TileState;
-    const Row rows[] = {
-        {"Kazumi", "Mishima", "KAZ", "Kazumi", 0, S::Added, 3, true}, {"Lucky", "Chloe", "CHL", "Chloe", 0, S::Added, 4, false},
-        {"Claudio", "Serafino", "CLA", "Claudio", 0, S::Update, 2, false}, {"Akuma", "", "AKU", "Akuma", 0, S::Newer, 2, true},
-        {"Gigas", "", "GIG", "Gigas", 0, S::None, 2, false}, {"Josie", "Rizal", "JOS", "Josie", 0, S::Added, 3, false},
-        {"Katarina", "Alves", "KAT", "Katarina", 0, S::None, 3, false}, {"Master", "Raven", "MRV", "Raven", 0, S::Added, 2, false},
-        {"Shaheen", "", "SHA", "Shaheen", 0, S::None, 2, false}, {"Eliza", "", "ELI", "Eliza", 1, S::Added, 2, false},
-        {"Fahkumram", "", "FAH", "Fahkumram", 1, S::Added, 2, false}, {"Leroy", "Smith", "LER", "Leroy", 1, S::Update, 2, true},
-        {"Lidia", "Sobieska", "LID", "Lidia", 1, S::NotOwned, 2, false}, {"Kunimitsu", "II", "KUN", "Kunimitsu", 1, S::None, 2, false},
-        {"Negan", "", "NEG", "Negan", 1, S::NotOwned, 1, false}, {"Geese", "Howard", "GEE", "Geese", 1, S::Added, 2, false},
-        {"Noctis", "", "NOC", "Noctis", 1, S::Added, 2, false}, {"Reina", "", "REI", "Reina", 2, S::Added, 3, false},
-        {"Azucena", "", "AZU", "Azucena", 2, S::Added, 3, false}, {"Miary", "Zo", "MIA", "Miary", 2, S::Update, 2, false},
-        {"Victor", "Chevalier", "VIC", "Victor", 2, S::None, 2, false}, {"Clive", "Rosfield", "CLI", "Clive", 2, S::Added, 1, false},
-        {"Azazel", "", "AZA", "Azazel", 2, S::None, 1, false}};
+    const Row rows[] = {{"Kazumi", "Mishima", "KAZ", "Kazumi", 0, S::Added, 3, true},
+                        {"Lucky", "Chloe", "CHL", "Chloe", 0, S::Added, 4, false},
+                        {"Claudio", "Serafino", "CLA", "Claudio", 0, S::Update, 2, false},
+                        {"Akuma", "", "AKU", "Akuma", 0, S::Newer, 2, true},
+                        {"Gigas", "", "GIG", "Gigas", 0, S::None, 2, false},
+                        {"Josie", "Rizal", "JOS", "Josie", 0, S::Added, 3, false},
+                        {"Katarina", "Alves", "KAT", "Katarina", 0, S::None, 3, false},
+                        {"Master", "Raven", "MRV", "Raven", 0, S::Added, 2, false},
+                        {"Shaheen", "", "SHA", "Shaheen", 0, S::None, 2, false},
+                        {"Eliza", "", "ELI", "Eliza", 1, S::Added, 2, false},
+                        {"Fahkumram", "", "FAH", "Fahkumram", 1, S::Added, 2, false},
+                        {"Leroy", "Smith", "LER", "Leroy", 1, S::Update, 2, true},
+                        {"Lidia", "Sobieska", "LID", "Lidia", 1, S::NotOwned, 2, false},
+                        {"Kunimitsu", "II", "KUN", "Kunimitsu", 1, S::None, 2, false},
+                        {"Negan", "", "NEG", "Negan", 1, S::NotOwned, 1, false},
+                        {"Geese", "Howard", "GEE", "Geese", 1, S::Added, 2, false},
+                        {"Noctis", "", "NOC", "Noctis", 1, S::Added, 2, false},
+                        {"Reina", "", "REI", "Reina", 2, S::Added, 3, false},
+                        {"Azucena", "", "AZU", "Azucena", 2, S::Added, 3, false},
+                        {"Miary", "Zo", "MIA", "Miary", 2, S::Update, 2, false},
+                        {"Victor", "Chevalier", "VIC", "Victor", 2, S::None, 2, false},
+                        {"Clive", "Rosfield", "CLI", "Clive", 2, S::Added, 1, false},
+                        {"Azazel", "", "AZA", "Azazel", 2, S::None, 1, false}};
     std::vector<Fighter> out;
     for (const Row& r : rows) out.push_back({r.first, r.last, r.code, r.short_name, r.group, r.st, r.n, r.o});
     return out;
@@ -96,12 +108,16 @@ struct DisplayRow {
 const DisplayRow kDisplayRows[] = {
     {"fullscreen", "Fullscreen", "Start the game fullscreen. F11 switches it in the game."},
     {"res", "Resolution", "The size the game draws at; the picture is scaled to the window or the screen."},
-    {"interp", "120 FPS", "A frame between each two of the game's 60 every second: smoother motion on displays of 100 Hz and more."},
+    {"interp", "120 FPS",
+     "A frame between each two of the game's 60 every second: smoother motion on displays of 100 Hz and more."},
     {"delay", "Input delay", "Two frames between a button press and the game acting on it, as on the Wii U."},
-    {"async", "Shaders in the background", "The first time something is shown, it may appear a few frames late instead of the game stopping."},
-    {"pre", "Prepare shaders before playing", "Play first makes ready the shaders the game has used on this PC so far."}};
+    {"async", "Shaders in the background",
+     "The first time something is shown, it may appear a few frames late instead of the game stopping."},
+    {"pre", "Prepare shaders before playing",
+     "Play first makes ready the shaders the game has used on this PC so far."}};
 
-// ---- the demo -----------------------------------------------------------------------------------------------------------
+// ---- the demo
+// -----------------------------------------------------------------------------------------------------------
 
 class Demo {
 public:
@@ -125,18 +141,22 @@ public:
             top.pad = {30, 0, 22, 0};
             auto g = ui.open("top", top);
             brand(ui, "brand", "Ultimate", "Launcher");
-            const int ups = static_cast<int>(std::count_if(fighters_.begin(), fighters_.end(), [](const Fighter& f) { return f.state == TileState::Update; }));
-            const Tab tabs[] = {{"tab:home", "Home", ""}, {"tab:fighters", "Fighters", ups ? std::to_string(ups) : ""}, {"tab:settings", "Settings", ""}};
+            const int ups = static_cast<int>(std::count_if(
+                fighters_.begin(), fighters_.end(), [](const Fighter& f) { return f.state == TileState::Update; }));
+            const Tab tabs[] = {{"tab:home", "Home", ""},
+                                {"tab:fighters", "Fighters", ups ? std::to_string(ups) : ""},
+                                {"tab:settings", "Settings", ""}};
             tab_bar(ui, "tabs", tabs, screen);
             ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
             TextSpec version{"Launcher 0.8.0", tx::kVersion, c::kFaint};
             version.drop = true;  // (the first thing to go in a narrow window)
             text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
-            icon_button(ui, "sound", {sound_ ? "stroke:sound-on" : "stroke:sound-off", sound_ ? "Sound on" : "Sound off", sound_},
+            icon_button(ui, "sound",
+                        {sound_ ? "stroke:sound-on" : "stroke:sound-off", sound_ ? "Sound on" : "Sound off", sound_},
                         Box{.margin = {0, 0, 10, 0}});
             icon_button(ui, "quit", {"stroke:power", "Quit"});
-            caption_buttons(ui, "frame", window.can_minimise(), window.can_toggle_fullscreen(), window.fullscreen(), false,
-                            Box{.margin = {10, 0, 0, 0}});
+            caption_buttons(ui, "frame", window.can_minimise(), window.can_toggle_fullscreen(), window.fullscreen(),
+                            false, Box{.margin = {10, 0, 0, 0}});
         }
         // The screen's halves.
         const Seam seam = stage.layout_seam(share());
@@ -242,18 +262,21 @@ private:
     void home(Ui& ui, const Box& crimson, const Box& blue) {
         {
             auto g = ui.open("home/crimson", crimson);
-            section_label(ui, "home/menu-label", "Menu", Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
+            section_label(ui, "home/menu-label", "Menu", Half::Crimson, {},
+                          fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
             Focus f;
             f.is_default = true;
             f.group = -1;
-            slab(ui, "play", {"Play", "Tekken Tag", "Tournament 2"}, f, fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+            slab(ui, "play", {"Play", "Tekken Tag", "Tournament 2"}, f,
+                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
             auto rows = ui.open("home/rows", Box{.gap = 10});
             Focus r;
             r.group = -1;
             const int added = static_cast<int>(std::count_if(fighters_.begin(), fighters_.end(), [](const Fighter& x) {
                 return x.state == TileState::Added || x.state == TileState::Update || x.state == TileState::Newer;
             }));
-            menu_row(ui, "fighters", {"stroke:users", "Fighters", std::to_string(added) + " of " + std::to_string(fighters_.size())}, r,
+            menu_row(ui, "fighters",
+                     {"stroke:users", "Fighters", std::to_string(added) + " of " + std::to_string(fighters_.size())}, r,
                      fit({}, SeamFit::CrimsonSkewed));
             menu_row(ui, "settings", {"stroke:gear", "Settings"}, r, fit({}, SeamFit::CrimsonSkewed));
             menu_row(ui, "folder", {"stroke:folder", "Open the game folder"}, r, fit({}, SeamFit::CrimsonSkewed));
@@ -264,27 +287,39 @@ private:
         auto g = ui.open("home/blue", blue);
         section_label(ui, "home/game-label", "The game", Half::Blue, {}, fit({}, SeamFit::BlueRect));
         {
-            auto k = ui.open("home/kick", fit(Box{.layout = Layout::Row, .h = Size::fixed(26), .margin = {0, 0, 0, 10}, .gap = 12, .align = Align::Center}, SeamFit::BlueRect));
+            auto k = ui.open("home/kick", fit(Box{.layout = Layout::Row,
+                                                  .h = Size::fixed(26),
+                                                  .margin = {0, 0, 0, 10},
+                                                  .gap = 12,
+                                                  .align = Align::Center},
+                                              SeamFit::BlueRect));
             pill(ui, "home/installed", "Installed", Tone::Ok);
             text(ui, "home/kv", TextSpec{"Game 0.8.0 · built on this PC", tx::kKick, c::kBlueDim});
         }
-        text(ui, "home/t1", TextSpec{.text = "Tekken Tag", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30}, fit({}, SeamFit::BlueRect));
-        text(ui, "home/t2", TextSpec{.text = "Tournament 2", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30}, fit({}, SeamFit::BlueRect));
+        text(ui, "home/t1", TextSpec{.text = "Tekken Tag", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30},
+             fit({}, SeamFit::BlueRect));
+        text(ui, "home/t2", TextSpec{.text = "Tournament 2", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30},
+             fit({}, SeamFit::BlueRect));
         edition(ui, "home/edition", fit(Box{.margin = {4, 12, 0, 16}}, SeamFit::BlueSkewed));
         const int added = 15;
-        const Fact facts_list[] = {{"Version", {{"0.8.0 (1cab8c6)", rgb(0xdbe3f1)}}},
-                                   {"Folder", {{"~/Games/Tekken Tag Tournament 2", rgb(0xdbe3f1)}}},
-                                   {"Fighters", {{std::to_string(added) + " of 23 added · ", rgb(0xdbe3f1)}, {"3 to update", c::kWarn}}, false}};
+        const Fact facts_list[] = {
+            {"Version", {{"0.8.0 (1cab8c6)", rgb(0xdbe3f1)}}},
+            {"Folder", {{"~/Games/Tekken Tag Tournament 2", rgb(0xdbe3f1)}}},
+            {"Fighters",
+             {{std::to_string(added) + " of 23 added · ", rgb(0xdbe3f1)}, {"3 to update", c::kWarn}},
+             false}};
         facts(ui, "home/facts", facts_list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
         const std::string key = ui.focused().empty() ? "play" : ui.focused();
         readout_[0].show(key, last_dy_, ui.now());
         readout_[0].build(ui, "home/ro", Box{}, [&](const std::string& k) {
             static const std::map<std::string, std::pair<std::string, std::string>> kExplain = {
-                {"play", {"Play", "Starts Tekken Tag Tournament 2 with the Display settings and keys as they are now."}},
+                {"play",
+                 {"Play", "Starts Tekken Tag Tournament 2 with the Display settings and keys as they are now."}},
                 {"fighters", {"Fighters", "Add Tekken 7 and Tekken 8 characters to the game from your own copies."}},
                 {"settings", {"Settings", "Display, keyboard and the launcher's own settings."}},
                 {"folder", {"Open the game folder", "Shows the folder the game is installed in."}},
-                {"uninstall", {"Uninstall", "Removes the game program; your saves and added characters stay (it asks first)."}}};
+                {"uninstall",
+                 {"Uninstall", "Removes the game program; your saves and added characters stay (it asks first)."}}};
             auto it = kExplain.find(k);
             if (it == kExplain.end()) return;
             describe_panel(ui, "home/xpl", it->second.first, it->second.second, fit({}, SeamFit::BlueSkewed));
@@ -296,12 +331,16 @@ private:
         Box b = box;
         b.h = Size::fixed(34);
         b.hug = true;
-        ui.leaf(id, b, [&te](float) { return Vec2{te.width(tx::kEdition, "Ultimate Edition") + 44, 34}; }, [](PaintContext& ctx) {
-            const Rect r = ctx.rect;
-            surface(ctx.canvas, r, Gradient::css(r, 90, {{0, rgb(0xe8173f)}, {.5f, rgb(0x7c1a6a)}, {1, rgb(0x1f5fe8)}}), rgba(255, 255, 255, .35f));
-            ctx.text.draw(ctx.canvas, tx::kEdition, "Ultimate Edition", {r.x + 20, r.y + (r.h - ctx.text.line_height(tx::kEdition)) / 2},
-                          rgb(0xffffff));
-        });
+        ui.leaf(
+            id, b, [&te](float) { return Vec2{te.width(tx::kEdition, "Ultimate Edition") + 44, 34}; },
+            [](PaintContext& ctx) {
+                const Rect r = ctx.rect;
+                surface(ctx.canvas, r,
+                        Gradient::css(r, 90, {{0, rgb(0xe8173f)}, {.5f, rgb(0x7c1a6a)}, {1, rgb(0x1f5fe8)}}),
+                        rgba(255, 255, 255, .35f));
+                ctx.text.draw(ctx.canvas, tx::kEdition, "Ultimate Edition",
+                              {r.x + 20, r.y + (r.h - ctx.text.line_height(tx::kEdition)) / 2}, rgb(0xffffff));
+            });
     }
 
     // ---- Fighters
@@ -315,7 +354,8 @@ private:
                 for (const Fighter& f : fighters_)
                     if (f.group == gi) {
                         ++n;
-                        added += f.state == TileState::Added || f.state == TileState::Update || f.state == TileState::Newer;
+                        added +=
+                            f.state == TileState::Added || f.state == TileState::Update || f.state == TileState::Newer;
                         upd += f.state == TileState::Update;
                     }
                 GroupHeaderSpec h;
@@ -324,11 +364,15 @@ private:
                 if (gi == 1) h.sub = "6 of 8 owned", h.sub_tone = Tone::Ok;
                 else if (upd) h.sub = std::to_string(upd) + " to update", h.sub_tone = Tone::Warn;
                 const std::string gid = gi == 0 ? "t7" : gi == 1 ? "dlc" : "t8";
-                h.buttons = {{"gadd:" + gid, gi == 1 ? "Add All Owned" : "Add All"}, {"gupd:" + gid, "Update All"}, {"grem:" + gid, "Remove All"}};
-                group_header(ui, "grp" + std::to_string(gi) + "/h", h, fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::CrimsonRect));
-                auto tiles = ui.open("grp" + std::to_string(gi) + "/tiles",
-                                     fit(Box{.layout = Layout::Row, .pad = {12, 0, 0, 0}, .gap = 8, .line_gap = 8, .wrap = true},
-                                         SeamFit::CrimsonRect));
+                h.buttons = {{"gadd:" + gid, gi == 1 ? "Add All Owned" : "Add All"},
+                             {"gupd:" + gid, "Update All"},
+                             {"grem:" + gid, "Remove All"}};
+                group_header(ui, "grp" + std::to_string(gi) + "/h", h,
+                             fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::CrimsonRect));
+                auto tiles =
+                    ui.open("grp" + std::to_string(gi) + "/tiles",
+                            fit(Box{.layout = Layout::Row, .pad = {12, 0, 0, 0}, .gap = 8, .line_gap = 8, .wrap = true},
+                                SeamFit::CrimsonRect));
                 for (std::size_t i = 0; i < fighters_.size(); ++i) {
                     const Fighter& f = fighters_[i];
                     if (f.group != gi) continue;
@@ -337,7 +381,8 @@ private:
                     t.name = f.short_name;
                     t.tone = gi == 0 ? TileTone::Red : gi == 1 ? TileTone::Pink : TileTone::Orange;
                     t.state = f.state;
-                    if (f.with_outfits && f.state != TileState::None && f.state != TileState::NotOwned) t.tag = "Outfits";
+                    if (f.with_outfits && f.state != TileState::None && f.state != TileState::NotOwned)
+                        t.tag = "Outfits";
                     Focus fo;
                     fo.group = -1;
                     fo.is_default = i == 0;
@@ -348,7 +393,7 @@ private:
             o.title = "Outfits for every character";
             o.value = outfits_all_ ? "All" : "3 of 21";
             o.check = outfits_all_ ? 1 : 2;
-            o.small = true;
+            o.compact = true;
             Focus fo;
             fo.group = -1;
             menu_row(ui, "oall", o, fo, fit({}, SeamFit::CrimsonSkewed));
@@ -363,28 +408,60 @@ private:
             const int i = std::stoi(k.substr(2));
             const Fighter& f = fighters_[static_cast<std::size_t>(i)];
             const Fighter& p = fighters_[static_cast<std::size_t>(i == 17 ? 18 : 17)];
-            section_label(ui, "fro/label", "Fighter", Half::Blue, std::to_string(i + 1) + "/" + std::to_string(fighters_.size()),
-                          fit({}, SeamFit::BlueRect));
+            section_label(ui, "fro/label", "Fighter", Half::Blue,
+                          std::to_string(i + 1) + "/" + std::to_string(fighters_.size()), fit({}, SeamFit::BlueRect));
             {
-                auto r = ui.open("fro/stl", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}, .gap = 12, .align = Align::Center}, SeamFit::BlueRect));
-                pill(ui, "fro/game", f.group == 2 ? "Tekken 8" : f.group == 1 ? "Tekken 7 · DLC" : "Tekken 7", f.group == 2 ? Tone::Blue : Tone::Red);
-                text(ui, "fro/own", TextSpec{f.group == 1 ? "Steam: owned" : f.group == 2 ? "Tekken 8 found" : "Tekken 7 found", theme::TextStyle{theme::Font::BodySemiBold, 13.5f, 0, false, 1}, c::kBlueDim});
+                auto r =
+                    ui.open("fro/stl",
+                            fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}, .gap = 12, .align = Align::Center},
+                                SeamFit::BlueRect));
+                pill(ui, "fro/game",
+                     f.group == 2   ? "Tekken 8"
+                     : f.group == 1 ? "Tekken 7 · DLC"
+                                    : "Tekken 7",
+                     f.group == 2 ? Tone::Blue : Tone::Red);
+                text(ui, "fro/own",
+                     TextSpec{f.group == 1   ? "Steam: owned"
+                              : f.group == 2 ? "Tekken 8 found"
+                                             : "Tekken 7 found",
+                              theme::TextStyle{theme::Font::BodySemiBold, 13.5f, 0, false, 1}, c::kBlueDim});
             }
-            text(ui, "fro/first", TextSpec{.text = f.first, .style = tx::kFighterName, .chroma = 4, .autofit_min = 34}, fit({}, SeamFit::BlueRect));
-            text(ui, "fro/last", TextSpec{.text = f.last.empty() ? " " : f.last, .style = tx::kLastName, .color = rgba(255, 255, 255, .78f), .outline = 1.2f},
+            text(ui, "fro/first", TextSpec{.text = f.first, .style = tx::kFighterName, .chroma = 4, .autofit_min = 34},
+                 fit({}, SeamFit::BlueRect));
+            text(ui, "fro/last",
+                 TextSpec{.text = f.last.empty() ? " " : f.last,
+                          .style = tx::kLastName,
+                          .color = rgba(255, 255, 255, .78f),
+                          .outline = 1.2f},
                  fit(Box{.h = Size::fixed(30), .margin = {4, 4, 0, 14}}, SeamFit::BlueRect));
             pair(ui, "fro/pair", p, f, fit(Box{.margin = {10, 0, 0, 16}}, SeamFit::BlueRect));
             {
-                auto r = ui.open("fro/st2", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
+                auto r =
+                    ui.open("fro/st2", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
                 const bool in = f.state == TileState::Added;
-                pill(ui, "fro/state", in ? "Added" : f.state == TileState::Update ? "Update ready" : f.state == TileState::NotOwned ? "Not owned" : "Not added",
-                     in ? Tone::Ok : f.state == TileState::Update ? Tone::Warn : Tone::Neutral);
+                pill(ui, "fro/state",
+                     in                               ? "Added"
+                     : f.state == TileState::Update   ? "Update ready"
+                     : f.state == TileState::NotOwned ? "Not owned"
+                                                      : "Not added",
+                     in                             ? Tone::Ok
+                     : f.state == TileState::Update ? Tone::Warn
+                                                    : Tone::Neutral);
             }
-            text(ui, "fro/why", TextSpec{.text = "In the game: on the select screen next time it starts.", .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
+            text(ui, "fro/why",
+                 TextSpec{.text = "In the game: on the select screen next time it starts.",
+                          .style = tx::kPara,
+                          .color = c::kBlueDim,
+                          .wrap = true},
                  fit({}, SeamFit::BlueRect));
-            text(ui, "fro/out", TextSpec{.text = "Their pack has their outfits: untick, then Update, to remove them.", .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
+            text(ui, "fro/out",
+                 TextSpec{.text = "Their pack has their outfits: untick, then Update, to remove them.",
+                          .style = tx::kParaSmall,
+                          .color = c::kBlueFaint,
+                          .wrap = true},
                  fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueRect));
-            auto b = ui.open("fro/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12}, SeamFit::BlueRect));
+            auto b = ui.open("fro/btns",
+                             fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12}, SeamFit::BlueRect));
             Focus bf;
             bf.group = 1;
             bf.left = k;
@@ -412,8 +489,13 @@ private:
             const Rect r = ctx.rect;
             auto sz = [k](theme::TextStyle st) { st.size *= k; return st; };
             auto slot = [&](const Rect& s, const Fighter& f, bool blue, const char* label) {
-                const Gradient g = blue ? Gradient::css(s, 165, {{0, rgba(45, 128, 255, .62f)}, {.7f, rgba(8, 26, 80, .9f)}, {1, rgba(8, 26, 80, .9f)}})
-                                        : Gradient::css(s, 165, {{0, rgba(255, 42, 85, .5f)}, {.7f, rgba(70, 6, 22, .9f)}, {1, rgba(70, 6, 22, .9f)}});
+                const Gradient g =
+                    blue ? Gradient::css(
+                               s, 165,
+                               {{0, rgba(45, 128, 255, .62f)}, {.7f, rgba(8, 26, 80, .9f)}, {1, rgba(8, 26, 80, .9f)}})
+                         : Gradient::css(
+                               s, 165,
+                               {{0, rgba(255, 42, 85, .5f)}, {.7f, rgba(70, 6, 22, .9f)}, {1, rgba(70, 6, 22, .9f)}});
                 surface(cv, s, g, blue ? rgba(160, 205, 255, .75f) : rgba(255, 255, 255, .22f));
                 const theme::TextStyle kCode = sz({theme::Font::DisplayBlackItalic, 58, -.01f, true, 1});
                 const theme::TextStyle kSmall = sz({theme::Font::DisplayExtraBoldItalic, 12, .22f, false, 1});
@@ -432,7 +514,8 @@ private:
             cv.fill(skewed(tag, theme::kSeamTan), rgb(0xffffff));
             const theme::TextStyle mark = sz(tx::kTagMark);
             const float tw = ctx.text.width(mark, "TAG");
-            ctx.text.draw(cv, mark, "TAG", {tag.center().x - tw / 2, tag.y + (tag.h - ctx.text.line_height(mark)) / 2}, rgb(0x07080d));
+            ctx.text.draw(cv, mark, "TAG", {tag.center().x - tw / 2, tag.y + (tag.h - ctx.text.line_height(mark)) / 2},
+                          rgb(0x07080d));
         });
     }
 
@@ -468,12 +551,18 @@ private:
             const DisplayRow& d = kDisplayRows[i];
             const bool is_res = i == 1;
             const std::string value = is_res ? kResolutions[res_] : display_[i] ? "On" : "Off";
-            section_label(ui, "sro/label", "Display", Half::Blue, std::to_string(i + 1) + "/6", fit({}, SeamFit::BlueRect));
+            section_label(ui, "sro/label", "Display", Half::Blue, std::to_string(i + 1) + "/6",
+                          fit({}, SeamFit::BlueRect));
             {
-                auto r = ui.open("sro/stl", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
+                auto r =
+                    ui.open("sro/stl", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
                 pill(ui, "sro/now", "Now: " + value, !is_res && display_[i] ? Tone::Blue : Tone::Neutral);
             }
-            text(ui, "sro/big", TextSpec{.text = d.name, .style = theme::TextStyle{tx::kBig.font, 44, tx::kBig.tracking, true, .92f}, .chroma = 3}, fit({}, SeamFit::BlueRect));
+            text(ui, "sro/big",
+                 TextSpec{.text = d.name,
+                          .style = theme::TextStyle{tx::kBig.font, 44, tx::kBig.tracking, true, .92f},
+                          .chroma = 3},
+                 fit({}, SeamFit::BlueRect));
             text(ui, "sro/about", TextSpec{.text = d.about, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
                  fit(Box{.margin = {0, 12, 0, 10}}, SeamFit::BlueRect));
             std::vector<std::string> opts;
@@ -481,7 +570,11 @@ private:
             else opts = {"Off", "On"};
             chips(ui, "sro/chips", opts, is_res ? res_ : display_[i] ? 1 : 0, fit({}, SeamFit::BlueRect));
             diagram(ui, "sro/diag", display_[0], fit(Box{.margin = {0, 10, 0, 4}}, SeamFit::BlueRect));
-            text(ui, "sro/hint", TextSpec{.text = "The game uses it when it starts. Left and right change it on the row.", .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
+            text(ui, "sro/hint",
+                 TextSpec{.text = "The game uses it when it starts. Left and right change it on the row.",
+                          .style = tx::kParaSmall,
+                          .color = c::kBlueFaint,
+                          .wrap = true},
                  fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueRect));
         });
     }
@@ -499,7 +592,8 @@ private:
             cv.fill_rect(win, rgba(98, 160, 220, .55f));
             constexpr theme::TextStyle kT{theme::Font::DisplayExtraBoldItalic, 14, .12f, true, 1};
             ctx.text.draw(cv, kT, full ? "The whole screen" : "A window", {r.x + 172, r.y + 26}, rgb(0xe9edf5));
-            ctx.text.draw(cv, theme::TextStyle{theme::Font::Body, 12.5f, 0, false, 1.3f}, "F11 switches it in the game", {r.x + 172, r.y + 48}, c::kBlueFaint);
+            ctx.text.draw(cv, theme::TextStyle{theme::Font::Body, 12.5f, 0, false, 1.3f}, "F11 switches it in the game",
+                          {r.x + 172, r.y + 48}, c::kBlueFaint);
         });
     }
 
@@ -515,7 +609,8 @@ private:
 
 const char* kWatermarks[] = {"Tag", "Roster", "Setup"};
 
-// ---- scripted input --------------------------------------------------------------------------------------------------------
+// ---- scripted input
+// --------------------------------------------------------------------------------------------------------
 
 struct Scripted {
     double time;
@@ -600,7 +695,8 @@ bool load_script(const std::string& path, std::vector<Scripted>& out, std::strin
     return true;
 }
 
-// ---- comparing with a reference ---------------------------------------------------------------------------------------
+// ---- comparing with a reference
+// ---------------------------------------------------------------------------------------
 
 int compare(const std::vector<std::uint8_t>& rgba, int w, int h, const std::string& ref_path, float tolerance,
             int max_changed) {
@@ -667,7 +763,8 @@ bool write_small(const std::vector<std::uint8_t>& rgba, int w, int h, const std:
 }
 
 int usage(bool error) {
-    say("usage: launcher_ui_demo [--screen home|fighters|settings] [--size WxH] [--scale S] [--glyphs kb|xbox|ps|nintendo|generic]\n"
+    say("usage: launcher_ui_demo [--screen home|fighters|settings] [--size WxH] [--scale S] [--glyphs "
+        "kb|xbox|ps|nintendo|generic]\n"
         "                        [--reduced] [--script FILE] [--frames N] [--screenshot FILE] [--compare REF.png]\n"
         "                        [--tolerance T] [--max-changed N] [--write-reference FILE] | --version\n",
         error);
@@ -698,7 +795,8 @@ int run(const std::vector<std::string>& args) {
         else if (a == "--scale" && more) scale = std::stof(args[++i]);
         else if (a == "--reduced") reduced = true;
         else if (a == "--size" && more) {
-            if (std::sscanf(args[++i].c_str(), "%dx%d", &width, &height) != 2 || width < 320 || height < 240) return usage(true);
+            if (std::sscanf(args[++i].c_str(), "%dx%d", &width, &height) != 2 || width < 320 || height < 240)
+                return usage(true);
         } else if (a == "--screen" && more) {
             const std::string s = args[++i];
             screen = s == "fighters" ? 1 : s == "settings" ? 2 : s == "home" ? 0 : -1;
@@ -817,7 +915,8 @@ int run(const std::vector<std::string>& args) {
         if (first) stage.snap();
         stage.update(now, static_cast<float>(std::clamp(now - last, 0.0, .25)), in.size, reduced);
         last = now;
-        window.set_drag_area({0, 0, in.size.x, theme::kTopBand}, {ui.rect("tabs"), ui.rect("sound"), ui.rect("quit"), ui.rect("frame")});
+        window.set_drag_area({0, 0, in.size.x, theme::kTopBand},
+                             {ui.rect("tabs"), ui.rect("sound"), ui.rect("quit"), ui.rect("frame")});
 
         const Vec2 px = window.pixels();
         canvas.begin(window.scale(), static_cast<int>(px.x), static_cast<int>(px.y));

@@ -16,7 +16,8 @@ void dedupe(std::vector<Vec2>& p) {
     std::vector<Vec2> out;
     out.reserve(p.size());
     for (const Vec2& v : p)
-        if (out.empty() || std::fabs(v.x - out.back().x) > 1e-4f || std::fabs(v.y - out.back().y) > 1e-4f) out.push_back(v);
+        if (out.empty() || std::fabs(v.x - out.back().x) > 1e-4f || std::fabs(v.y - out.back().y) > 1e-4f)
+            out.push_back(v);
     while (out.size() > 1 && std::fabs(out.front().x - out.back().x) < 1e-4f &&
            std::fabs(out.front().y - out.back().y) < 1e-4f)
         out.pop_back();
@@ -379,7 +380,8 @@ void Canvas::radial(Vec2 center, float radius, Color color) {
     for (int k = 1; k < 4; ++k)
         for (int i = 0; i < n; ++i) {
             float a = 6.2831853f * static_cast<float>(i) / n;
-            add_vertex({c.x + r * ts[k] * std::cos(a), c.y + r * ts[k] * std::sin(a)}, color.with_alpha(color.a * as[k]));
+            add_vertex({c.x + r * ts[k] * std::cos(a), c.y + r * ts[k] * std::sin(a)},
+                       color.with_alpha(color.a * as[k]));
         }
     for (int i = 0; i < n; ++i) tri(base, base + 1 + i, base + 1 + (i + 1) % n);
     for (int k = 1; k < 3; ++k)

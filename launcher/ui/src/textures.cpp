@@ -62,8 +62,8 @@ void TextureRegistry::update_alpha(TextureId id, int x, int y, int w, int h, con
     Entry& e = entries_[id - 1];
     if (e.kind != Entry::Alpha || x < 0 || y < 0 || x + w > e.w || y + h > e.h) return;
     for (int row = 0; row < h; ++row)
-        std::memcpy(&e.pixels[static_cast<std::size_t>(y + row) * e.w + x], coverage + static_cast<std::size_t>(row) * pitch,
-                    static_cast<std::size_t>(w));
+        std::memcpy(&e.pixels[static_cast<std::size_t>(y + row) * e.w + x],
+                    coverage + static_cast<std::size_t>(row) * pitch, static_cast<std::size_t>(w));
     if (!e.dirty) {
         e.dx0 = x;
         e.dy0 = y;

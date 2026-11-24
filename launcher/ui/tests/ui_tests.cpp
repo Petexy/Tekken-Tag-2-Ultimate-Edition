@@ -40,9 +40,9 @@ void check(bool ok, const std::string& what, int line) {
     }
 }
 #define CHECK(cond) check((cond), #cond, __LINE__)
-#define CHECK_NEAR(a, b, eps)                                                                                        \
-    check(std::fabs((a) - (b)) <= (eps), std::string(#a " ~ " #b ": ") + std::to_string(a) + " vs " + std::to_string(b), \
-          __LINE__)
+#define CHECK_NEAR(a, b, eps)            \
+    check(std::fabs((a) - (b)) <= (eps), \
+          std::string(#a " ~ " #b ": ") + std::to_string(a) + " vs " + std::to_string(b), __LINE__)
 #define TEST(name)                                                                                                   \
     void name();                                                                                                     \
     Register reg_##name(#name, name);                                                                                \
@@ -95,7 +95,8 @@ bool has_event(const std::vector<Event>& ev, EventKind k, const std::string& id 
     return false;
 }
 
-// ---- layout ------------------------------------------------------------------------------------------------------------
+// ---- layout
+// ------------------------------------------------------------------------------------------------------------
 
 TEST(layout_column_padding_gap_margin) {
     Harness h;
@@ -168,7 +169,8 @@ TEST(layout_heights_measured_at_widths) {
         Box col;
         col.w = Size::fixed(100);
         auto g = ui.open("col", col);
-        ui.leaf("text", Box{}, [](float w) { return Vec2{std::min(w, 400.f), std::ceil(400 / std::max(1.f, w)) * 10}; }, {});
+        ui.leaf("text", Box{}, [](float w) { return Vec2{std::min(w, 400.f), std::ceil(400 / std::max(1.f, w)) * 10}; },
+                {});
         ui.leaf("after", fixed(10, 10), {}, {});
     });
     CHECK_NEAR(h.ui.rect("text").w, 100.f, .01f);
@@ -311,7 +313,8 @@ TEST(layout_scroll_anchoring) {
     CHECK_NEAR(h.ui.rect("i6").y, before, .5f);
 }
 
-// ---- focus -------------------------------------------------------------------------------------------------------------
+// ---- focus
+// -------------------------------------------------------------------------------------------------------------
 
 TEST(focus_navigate_grid) {
     std::vector<FocusItem> grid;
@@ -509,7 +512,8 @@ TEST(focus_mouse_hover_and_click) {
     CHECK(has_event(ev, EventKind::Change, "sel"));
 }
 
-// ---- per-id state --------------------------------------------------------------------------------------------------------
+// ---- per-id state
+// --------------------------------------------------------------------------------------------------------
 
 TEST(state_swept_when_not_declared) {
     Harness h;
@@ -545,7 +549,8 @@ TEST(state_swept_when_not_declared) {
     CHECK(h.ui.has("old:x"));
 }
 
-// ---- input -----------------------------------------------------------------------------------------------------------------
+// ---- input
+// -----------------------------------------------------------------------------------------------------------------
 
 RawEvent key(int scancode, double t, bool down = true) {
     RawEvent e;
@@ -662,10 +667,12 @@ TEST(input_capture_rules) {
     CHECK(k.take_capture().empty());
 }
 
-// ---- springs -------------------------------------------------------------------------------------------------------------
+// ---- springs
+// -------------------------------------------------------------------------------------------------------------
 
 TEST(springs_settle_without_runaway) {
-    for (const theme::SpringSpec spec : {theme::motion::kFocus, theme::motion::kSeam, theme::motion::kTabBar, theme::motion::kScroll}) {
+    for (const theme::SpringSpec spec :
+         {theme::motion::kFocus, theme::motion::kSeam, theme::motion::kTabBar, theme::motion::kScroll}) {
         Spring s{0, spec};
         s.target = 100;
         float peak = 0;
@@ -701,7 +708,8 @@ TEST(springs_settle_without_runaway) {
     CHECK(!tw.active(2));
 }
 
-// ---- text ----------------------------------------------------------------------------------------------------------------
+// ---- text
+// ----------------------------------------------------------------------------------------------------------------
 
 TEST(text_measure_ellipsis_wrap) {
     TextureRegistry textures;
@@ -738,7 +746,8 @@ TEST(text_measure_ellipsis_wrap) {
     // Invalid UTF-8 becomes U+FFFD (drawn by us); characters no face has are measured too.
     std::vector<char32_t> cps;
     decode_utf8("a\xff" "b\xc3\xa9\xed\xa0\x80" "c", cps);  // (a surrogate: one U+FFFD per byte, as browsers do)
-    CHECK(cps.size() == 8 && cps[1] == 0xFFFD && cps[3] == 0xE9 && cps[4] == 0xFFFD && cps[6] == 0xFFFD && cps[7] == 'c');
+    CHECK(cps.size() == 8 && cps[1] == 0xFFFD && cps[3] == 0xE9 && cps[4] == 0xFFFD && cps[6] == 0xFFFD &&
+          cps[7] == 'c');
     CHECK(t.width(st, "\xe4\xb8\xad") > 0);
     CHECK(to_upper(U'é') == U'É' && to_upper(U'α') == U'Α' && to_upper(U'ж') == U'Ж');
     CHECK(t.has_glyph_builtin(U'A'));

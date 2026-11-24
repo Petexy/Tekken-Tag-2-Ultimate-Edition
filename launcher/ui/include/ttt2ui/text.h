@@ -32,7 +32,7 @@ struct TextLine {
     float width = 0;  // points
 };
 
-struct DrawText {
+struct TextPaint {
     Color color{1, 1, 1, 1};
     float outline = 0;  // > 0: only the outline, this many points wide (CSS -webkit-text-stroke)
     float shear = 0;    // slant: x moved by shear * (height above the baseline); e.g. theme::kSeamTan
@@ -61,7 +61,8 @@ public:
     float line_height(const TextStyle& style) const { return style.size * style.line_height; }
     float ascent(const TextStyle& style);   // from the top of the line box to the baseline
     float cap_height(const TextStyle& style);
-    std::string ellipsize(const TextStyle& style, std::string_view text, float max_width, Ellipsis where = Ellipsis::End);
+    std::string ellipsize(const TextStyle& style, std::string_view text, float max_width,
+                          Ellipsis where = Ellipsis::End);
     // Greedy wrapping at spaces; words longer than the width break anywhere (paths). Cached.
     const std::vector<TextLine>& wrap(const TextStyle& style, std::string_view text, float max_width);
     float wrapped_height(const TextStyle& style, std::string_view text, float max_width) {
@@ -69,12 +70,12 @@ public:
     }
 
     // Drawing one line with its line box's top-left at `pos` (points); returns its width.
-    float draw(Canvas& canvas, const TextStyle& style, std::string_view text, Vec2 pos, const DrawText& how);
+    float draw(Canvas& canvas, const TextStyle& style, std::string_view text, Vec2 pos, const TextPaint& how);
     float draw(Canvas& canvas, const TextStyle& style, std::string_view text, Vec2 pos, Color color) {
-        return draw(canvas, style, text, pos, DrawText{color});
+        return draw(canvas, style, text, pos, TextPaint{color});
     }
     // Lines wrapped to `max_width`, aligned 0 = left, .5 = centre, 1 = right; returns the height.
-    float draw_wrapped(Canvas& canvas, const TextStyle& style, std::string_view text, Rect box, const DrawText& how,
+    float draw_wrapped(Canvas& canvas, const TextStyle& style, std::string_view text, Rect box, const TextPaint& how,
                        float align = 0);
 
     // Diagnostics (tests).

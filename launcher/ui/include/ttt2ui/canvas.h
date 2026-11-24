@@ -88,7 +88,8 @@ public:
     // Images: the whole texture (or `uv` part of it, 0..1) into `dst`, multiplied by `tint`.
     void image(TextureId texture, const Rect& dst, Color tint = {1, 1, 1, 1}, const Rect& uv = {0, 0, 1, 1});
     // A texture through a convex polygon with texture coordinates per point (the wipe).
-    void textured(TextureId texture, std::span<const Vec2> points, std::span<const Vec2> uvs, Color tint = {1, 1, 1, 1});
+    void textured(TextureId texture, std::span<const Vec2> points, std::span<const Vec2> uvs,
+                  Color tint = {1, 1, 1, 1});
     // One glyph quad in PHYSICAL pixels (text engine), with x shifted by `shear` * (baseline - y) for slanted text.
     void glyph_quad(TextureId texture, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                     Color color, float shear = 0, float baseline = 0);

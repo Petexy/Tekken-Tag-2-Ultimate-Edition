@@ -14,8 +14,12 @@
 #include "ttt2_launcher_fonts.h"
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <knownfolders.h>
 #include <shlobj.h>
@@ -158,7 +162,8 @@ std::filesystem::path path_from_utf8(const std::string& s) {
 }
 
 float quantise(float px) {
-    if (px < theme::kTextQuantSmallLimit) return std::max(1.f, std::round(px / theme::kTextQuantSmall) * theme::kTextQuantSmall);
+    if (px < theme::kTextQuantSmallLimit)
+        return std::max(1.f, std::round(px / theme::kTextQuantSmall) * theme::kTextQuantSmall);
     return std::round(px);
 }
 
@@ -312,7 +317,8 @@ struct TextEngine::Impl {
                 Face* f = face(fi);
                 const float s = stbtt_ScaleForMappingEmToPixels(&f->info, px);
                 g.glyph = stbtt_FindGlyphIndex(&f->info, static_cast<int>(c));
-                if (fi == prev_face) pen += s * static_cast<float>(stbtt_GetGlyphKernAdvance(&f->info, prev_glyph, g.glyph));
+                if (fi == prev_face)
+                    pen += s * static_cast<float>(stbtt_GetGlyphKernAdvance(&f->info, prev_glyph, g.glyph));
                 int adv = 0, lsb = 0;
                 stbtt_GetGlyphHMetrics(&f->info, g.glyph, &adv, &lsb);
                 advance = s * static_cast<float>(adv);
@@ -368,7 +374,8 @@ struct TextEngine::Impl {
             textures.destroy(p.texture);
             p = Page{};
             p.size = size;
-            p.texture = textures.create_alpha(size, size, std::vector<std::uint8_t>(static_cast<std::size_t>(size) * size));
+            p.texture =
+                textures.create_alpha(size, size, std::vector<std::uint8_t>(static_cast<std::size_t>(size) * size));
             // (Moved to the end so that it is the page new glyphs go into.)
             std::swap(pages[static_cast<std::size_t>(reuse)], pages.back());
             for (auto& [k, g] : glyphs)
@@ -376,7 +383,8 @@ struct TextEngine::Impl {
         } else {
             Page p;
             p.size = size;
-            p.texture = textures.create_alpha(size, size, std::vector<std::uint8_t>(static_cast<std::size_t>(size) * size));
+            p.texture =
+                textures.create_alpha(size, size, std::vector<std::uint8_t>(static_cast<std::size_t>(size) * size));
             pages.push_back(p);
         }
         page_index = static_cast<int>(pages.size()) - 1;
@@ -400,7 +408,8 @@ struct TextEngine::Impl {
             const float r = static_cast<float>(d) / 2;
             for (int y = 0; y < d; ++y)
                 for (int x = 0; x < d; ++x) {
-                    float dist = std::fabs(static_cast<float>(x) + .5f - r) + std::fabs(static_cast<float>(y) + .5f - r);
+                    float dist =
+                        std::fabs(static_cast<float>(x) + .5f - r) + std::fabs(static_cast<float>(y) + .5f - r);
                     bitmap[static_cast<std::size_t>(y) * d + x] =
                         static_cast<std::uint8_t>(std::lround(255 * clamp01(r - dist + .5f)));
                 }
@@ -430,8 +439,8 @@ struct TextEngine::Impl {
                 const float width = static_cast<float>(key.outline2) / 2;
                 const int pad = static_cast<int>(std::ceil(width)) + 2;
                 int xoff = 0, yoff = 0;
-                unsigned char* sdf = stbtt_GetGlyphSDF(&f->info, s, key.glyph, pad, 128, 128.f / static_cast<float>(pad),
-                                                       &w, &h, &xoff, &yoff);
+                unsigned char* sdf = stbtt_GetGlyphSDF(&f->info, s, key.glyph, pad, 128,
+                                                       128.f / static_cast<float>(pad), &w, &h, &xoff, &yoff);
                 if (sdf) {
                     bitmap.resize(static_cast<std::size_t>(w) * h);
                     for (std::size_t i = 0; i < bitmap.size(); ++i) {
@@ -447,14 +456,15 @@ struct TextEngine::Impl {
             } else {
                 const int ox = px <= theme::kTextOversampleLimit ? 2 : 1;
                 int x0, y0, x1, y1;
-                stbtt_GetGlyphBitmapBoxSubpixel(&f->info, key.glyph, s * static_cast<float>(ox), s, 0, 0, &x0, &y0, &x1, &y1);
+                stbtt_GetGlyphBitmapBoxSubpixel(&f->info, key.glyph, s * static_cast<float>(ox), s, 0, 0, &x0, &y0, &x1,
+                                                &y1);
                 w = x1 - x0 + (ox - 1);
                 h = y1 - y0;
                 if (w > 0 && h > 0) {
                     bitmap.assign(static_cast<std::size_t>(w) * h, 0);
                     float sub_x = 0, sub_y = 0;
-                    stbtt_MakeGlyphBitmapSubpixelPrefilter(&f->info, bitmap.data(), w, h, w, s * static_cast<float>(ox), s,
-                                                           0, 0, ox, 1, &sub_x, &sub_y, key.glyph);
+                    stbtt_MakeGlyphBitmapSubpixelPrefilter(&f->info, bitmap.data(), w, h, w, s * static_cast<float>(ox),
+                                                           s, 0, 0, ox, 1, &sub_x, &sub_y, key.glyph);
                     g.x0 = static_cast<float>(x0) / static_cast<float>(ox) + sub_x;
                     g.y0 = static_cast<float>(y0);
                     g.draw_w = static_cast<float>(w) / static_cast<float>(ox);
@@ -519,7 +529,8 @@ int TextEngine::Impl::system_face_for(char32_t c) {
             for (const auto& e : std::filesystem::directory_iterator(dirs.back(), ec)) {
                 std::wstring ext = e.path().extension().wstring();
                 for (auto& ch : ext) ch = static_cast<wchar_t>(towlower(ch));
-                if (ext == L".ttf" || ext == L".ttc" || ext == L".otf") candidates.push_back(to_utf8(e.path().wstring()));
+                if (ext == L".ttf" || ext == L".ttc" || ext == L".otf")
+                    candidates.push_back(to_utf8(e.path().wstring()));
             }
         }
     }
@@ -666,7 +677,8 @@ const std::vector<TextLine>& TextEngine::wrap(const TextStyle& style, std::strin
                     int lo = 1, hi = static_cast<int>(cps.size()) - 1;
                     while (lo < hi) {
                         int mid = (lo + hi + 1) / 2;
-                        if (width(style, word.substr(0, offsets[static_cast<std::size_t>(mid)])) <= max_width + .01f) lo = mid;
+                        if (width(style, word.substr(0, offsets[static_cast<std::size_t>(mid)])) <= max_width + .01f)
+                            lo = mid;
                         else hi = mid - 1;
                     }
                     if (cps.size() <= 1) break;
@@ -685,7 +697,7 @@ const std::vector<TextLine>& TextEngine::wrap(const TextStyle& style, std::strin
     return impl_->wraps.emplace(std::move(key), std::move(lines)).first->second;
 }
 
-float TextEngine::draw(Canvas& canvas, const TextStyle& style, std::string_view text, Vec2 pos, const DrawText& how) {
+float TextEngine::draw(Canvas& canvas, const TextStyle& style, std::string_view text, Vec2 pos, const TextPaint& how) {
     const float px = quantise(style.size * scale_);
     const Run& r = impl_->run(style, px, text, system_fallback_);
     if (r.glyphs.empty()) return r.width / scale_;
@@ -710,7 +722,7 @@ float TextEngine::draw(Canvas& canvas, const TextStyle& style, std::string_view 
 }
 
 float TextEngine::draw_wrapped(Canvas& canvas, const TextStyle& style, std::string_view text, Rect box,
-                               const DrawText& how, float align) {
+                               const TextPaint& how, float align) {
     const auto& lines = wrap(style, text, box.w);
     float y = box.y;
     for (const TextLine& l : lines) {

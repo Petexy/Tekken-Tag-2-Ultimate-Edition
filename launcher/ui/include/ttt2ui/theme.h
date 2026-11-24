@@ -39,7 +39,8 @@ constexpr Color kBackground = rgb(0x05060a), kWindow = rgb(0x030306);
 constexpr Color kRed = rgb(0xff2a55), kRed2 = rgb(0xd6123f), kRed3 = rgb(0x5e0a1f);
 constexpr Color kBlue = rgb(0x2d80ff), kBlue2 = rgb(0x155ae2), kBlue3 = rgb(0x0a2366), kCyan = rgb(0x62d4ff);
 constexpr Color kText = rgb(0xf4f6fb), kDim = rgb(0xaab2c4), kFaint = rgb(0x7d859b);
-constexpr Color kRedDim = rgb(0xd9b3bd), kRedFaint = rgb(0xa4808a), kBlueDim = rgb(0xb3c4e0), kBlueFaint = rgb(0x7f93b6);
+constexpr Color kRedDim = rgb(0xd9b3bd), kRedFaint = rgb(0xa4808a), kBlueDim = rgb(0xb3c4e0),
+                kBlueFaint = rgb(0x7f93b6);
 constexpr Color kOk = rgb(0x3fe7a1), kWarn = rgb(0xffc843), kBad = rgb(0xff6b7e);
 constexpr Color kRedLabel = rgb(0xff9db1), kBlueLabel = rgb(0x9cc6ff);
 constexpr Color kTabIdle = rgb(0x7a8296), kTabHover = rgb(0xc9cfdc);

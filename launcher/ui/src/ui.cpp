@@ -45,7 +45,9 @@ void Ui::begin(FrameInput frame) {
     stack_.push_back(0);
 }
 
-std::string Ui::id_scope() const { return stack_.empty() ? std::string() : nodes_[static_cast<std::size_t>(stack_.back())].id; }
+std::string Ui::id_scope() const {
+    return stack_.empty() ? std::string() : nodes_[static_cast<std::size_t>(stack_.back())].id;
+}
 
 int Ui::add(std::string id, const Box& box) {
     const int parent = stack_.empty() ? -1 : stack_.back();
@@ -156,7 +158,8 @@ void Ui::assign_widths(int index) {
             float deficit = -free;
             std::vector<int> orders;
             for (int c : n.children)
-                if (shrinks(nodes_[static_cast<std::size_t>(c)])) orders.push_back(nodes_[static_cast<std::size_t>(c)].box.shrink_order);
+                if (shrinks(nodes_[static_cast<std::size_t>(c)]))
+                    orders.push_back(nodes_[static_cast<std::size_t>(c)].box.shrink_order);
             std::sort(orders.begin(), orders.end(), std::greater<>());
             orders.erase(std::unique(orders.begin(), orders.end()), orders.end());
             for (int order : orders) {
@@ -170,7 +173,8 @@ void Ui::assign_widths(int index) {
                 const float take = std::min(deficit, room);
                 for (int c : n.children) {
                     Node& k = nodes_[static_cast<std::size_t>(c)];
-                    if (shrinks(k) && k.box.shrink_order == order) k.w -= take * std::max(0.f, k.w - k.box.min_w) / room;
+                    if (shrinks(k) && k.box.shrink_order == order)
+                        k.w -= take * std::max(0.f, k.w - k.box.min_w) / room;
                 }
                 deficit -= take;
             }
@@ -210,7 +214,8 @@ void Ui::assign_widths(int index) {
             if (weights > 0 && free > 0)
                 for (std::size_t q = i; q < j; ++q) {
                     Node& k = nodes_[static_cast<std::size_t>(n.children[q])];
-                    if (k.box.w.mode == Size::Grow) k.w = std::min(k.box.max_w, free * std::max(.0001f, k.box.w.value) / weights);
+                    if (k.box.w.mode == Size::Grow)
+                        k.w = std::min(k.box.max_w, free * std::max(.0001f, k.box.w.value) / weights);
                 }
             i = j;
         }
@@ -238,7 +243,8 @@ float Ui::content_height(int index) {
     if (n.children.empty()) {
         h = n.measure ? n.measure(std::max(0.f, n.w - b.pad.horizontal())).y : 0;
     } else if (b.layout == Layout::Column) {
-        for (int c : n.children) h += nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical();
+        for (int c : n.children)
+            h += nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical();
         h += b.gap * static_cast<float>(n.children.size() - 1);
     } else if (b.layout == Layout::Row && b.wrap) {
         const float inner = std::max(0.f, n.w - b.pad.horizontal());
@@ -263,7 +269,8 @@ float Ui::content_height(int index) {
         h += b.line_gap * static_cast<float>(lines);
     } else {
         for (int c : n.children)
-            h = std::max(h, nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical());
+            h = std::max(
+                h, nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical());
     }
     h += b.pad.vertical();
     n.content_h = h;
@@ -326,25 +333,29 @@ void Ui::place(int index, float x, float y) {
     };
     if (b.layout == Layout::Column) {
         float used = 0;
-        for (int c : n.children) used += nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical();
+        for (int c : n.children)
+            used += nodes_[static_cast<std::size_t>(c)].h + nodes_[static_cast<std::size_t>(c)].box.margin.vertical();
         if (!n.children.empty()) used += b.gap * static_cast<float>(n.children.size() - 1);
         float cy = iy - scroll + (b.scroll ? 0 : std::max(0.f, cross(n, ih, used, b.justify)));
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const float room = iw - k.box.margin.horizontal() - k.fit_dx;
-            const float cx = ix + k.box.margin.left + k.fit_dx + (b.align == Align::Stretch ? 0 : cross(k, room, k.w, b.align));
+            const float cx =
+                ix + k.box.margin.left + k.fit_dx + (b.align == Align::Stretch ? 0 : cross(k, room, k.w, b.align));
             place(c, cx, cy + k.box.margin.top);
             cy += k.h + k.box.margin.vertical() + b.gap;
         }
     } else if (b.layout == Layout::Row && !b.wrap) {
         float used = 0;
-        for (int c : n.children) used += nodes_[static_cast<std::size_t>(c)].w + nodes_[static_cast<std::size_t>(c)].box.margin.horizontal();
+        for (int c : n.children)
+            used += nodes_[static_cast<std::size_t>(c)].w + nodes_[static_cast<std::size_t>(c)].box.margin.horizontal();
         if (!n.children.empty()) used += b.gap * static_cast<float>(n.children.size() - 1);
         float cx = ix + std::max(0.f, cross(n, iw, used, b.justify));
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const float room = ih - k.box.margin.vertical();
-            const float cy = iy - scroll + k.box.margin.top + (b.align == Align::Stretch ? 0 : cross(k, room, k.h, b.align));
+            const float cy =
+                iy - scroll + k.box.margin.top + (b.align == Align::Stretch ? 0 : cross(k, room, k.h, b.align));
             place(c, cx + k.box.margin.left + k.fit_dx, cy);
             cx += k.w + k.box.margin.horizontal() + k.fit_dx + b.gap;
         }
@@ -366,7 +377,10 @@ void Ui::place(int index, float x, float y) {
             float cx = ix + std::max(0.f, cross(n, iw, line_w, b.justify));
             for (std::size_t q = i; q < j; ++q) {
                 Node& k = nodes_[static_cast<std::size_t>(n.children[q])];
-                place(n.children[q], cx + k.box.margin.left, cy + k.box.margin.top + cross(k, line_h - k.box.margin.vertical(), k.h, b.align == Align::Stretch ? Align::Start : b.align));
+                place(n.children[q], cx + k.box.margin.left,
+                      cy + k.box.margin.top +
+                          cross(k, line_h - k.box.margin.vertical(), k.h,
+                                b.align == Align::Stretch ? Align::Start : b.align));
                 cx += k.w + k.box.margin.horizontal() + b.gap;
             }
             cy += line_h + b.line_gap;
@@ -377,7 +391,8 @@ void Ui::place(int index, float x, float y) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const Align a = b.align == Align::Stretch ? Align::Start : b.align;
             place(c, ix + k.box.margin.left + k.fit_dx + cross(k, iw - k.box.margin.horizontal() - k.fit_dx, k.w, a),
-                  iy - scroll + k.box.margin.top + cross(k, ih - k.box.margin.vertical(), k.h, b.justify == Align::Start ? a : b.justify));
+                  iy - scroll + k.box.margin.top +
+                      cross(k, ih - k.box.margin.vertical(), k.h, b.justify == Align::Start ? a : b.justify));
         }
     }
 }
@@ -621,7 +636,8 @@ void Ui::handle_mouse() {
     if (m.inside) {
         for (int i = static_cast<int>(clickables_.size()) - 1; i >= 0 && hover < 0; --i) {
             const Node& n = nodes_[static_cast<std::size_t>(clickables_[static_cast<std::size_t>(i)])];
-            if (Rect{n.x, n.y, n.w, n.h}.intersect(n.clip).contains(m.pos)) hover = clickables_[static_cast<std::size_t>(i)];
+            if (Rect{n.x, n.y, n.w, n.h}.intersect(n.clip).contains(m.pos))
+                hover = clickables_[static_cast<std::size_t>(i)];
         }
         for (int i = static_cast<int>(nodes_.size()) - 1; i >= 0; --i) {
             const Node& n = nodes_[static_cast<std::size_t>(i)];
@@ -663,7 +679,8 @@ void Ui::handle_mouse() {
         }
         if (hover >= 0) press_node_ = hover;
     }
-    if (press_node_ >= 0 && m.down) states_[nodes_[static_cast<std::size_t>(press_node_)].id].pressed = hover == press_node_;
+    if (press_node_ >= 0 && m.down)
+        states_[nodes_[static_cast<std::size_t>(press_node_)].id].pressed = hover == press_node_;
     if (m.released) {
         for (auto& [id, s] : states_) s.dragging_bar = false;
         if (press_node_ >= 0 && hover == press_node_) {
@@ -690,10 +707,13 @@ void Ui::handle_actions() {
         int current = -1;
         for (int i = 0; i < static_cast<int>(items_.size()); ++i)
             if (nodes_[static_cast<std::size_t>(items_[static_cast<std::size_t>(i)].node)].id == focused_) current = i;
-        const Node* fn = current >= 0 ? &nodes_[static_cast<std::size_t>(items_[static_cast<std::size_t>(current)].node)] : nullptr;
+        const Node* fn =
+            current >= 0 ? &nodes_[static_cast<std::size_t>(items_[static_cast<std::size_t>(current)].node)] : nullptr;
         auto emit = [&](EventKind k, int delta = 0) { events_.push_back({k, focused_, delta, a.device}); };
         auto bump = [&]() {
-            if (!frame_.reduced_motion) highlight_.kick((frame_.now * 1000 - std::floor(frame_.now * 1000)) < .5 ? -theme::motion::kBump : theme::motion::kBump);
+            if (!frame_.reduced_motion)
+                highlight_.kick((frame_.now * 1000 - std::floor(frame_.now * 1000)) < .5 ? -theme::motion::kBump
+                                                                                         : theme::motion::kBump);
             emit(EventKind::Bump);
         };
         switch (a.action) {
@@ -716,7 +736,8 @@ void Ui::handle_actions() {
             if (!over.empty()) {
                 int target = -1;
                 for (int i = 0; i < static_cast<int>(items_.size()); ++i)
-                    if (nodes_[static_cast<std::size_t>(items_[static_cast<std::size_t>(i)].node)].id == over) target = i;
+                    if (nodes_[static_cast<std::size_t>(items_[static_cast<std::size_t>(i)].node)].id == over)
+                        target = i;
                 if (target >= 0) {
                     set_focus(target, a.device, false);
                     break;
@@ -738,7 +759,8 @@ void Ui::handle_actions() {
         case Action::FocusPrev:
             if (!items_.empty()) {
                 const int n = static_cast<int>(items_.size());
-                set_focus(current < 0 ? 0 : (current + (a.action == Action::FocusNext ? 1 : n - 1)) % n, a.device, false);
+                set_focus(current < 0 ? 0 : (current + (a.action == Action::FocusNext ? 1 : n - 1)) % n, a.device,
+                          false);
             }
             break;
         case Action::Accept:

@@ -90,7 +90,9 @@ struct RectSpring {
         h.step(dt);
     }
     void kick(float vx) { x.velocity += vx; }
-    bool settled(float eps = .05f) const { return x.settled(eps) && y.settled(eps) && w.settled(eps) && h.settled(eps); }
+    bool settled(float eps = .05f) const {
+        return x.settled(eps) && y.settled(eps) && w.settled(eps) && h.settled(eps);
+    }
     Rect value() const { return {x.value, y.value, w.value, h.value}; }
     void set_spec(theme::SpringSpec s) { x.spec = y.spec = w.spec = h.spec = s; }
 };

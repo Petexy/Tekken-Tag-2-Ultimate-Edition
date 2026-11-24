@@ -19,7 +19,8 @@ struct StrokeIcon {
 };
 constexpr StrokeIcon kStrokeIcons[] = {
     {"update", R"(<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>)"},
-    {"gear", R"(<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.9 1.9M16.5 16.5l1.9 1.9M5.6 18.4l1.9-1.9M16.5 7.5l1.9-1.9"/><circle cx="12" cy="12" r="6.4"/>)"},
+    {"gear",
+     R"(<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.9 1.9M16.5 16.5l1.9 1.9M5.6 18.4l1.9-1.9M16.5 7.5l1.9-1.9"/><circle cx="12" cy="12" r="6.4"/>)"},
     {"folder", R"(<path d="M3 6.5h6l2 2.2h10V19H3z"/>)"},
     {"trash", R"(<path d="M4.5 7h15M9.5 7V4h5v3M6.5 7l1 13h9l1-13"/>)"},
     {"check", R"(<path d="M5 12.5l4.2 4.2L19 7"/>)"},
@@ -31,7 +32,8 @@ constexpr StrokeIcon kStrokeIcons[] = {
     {"dots", R"(<path d="M6 12h.01M12 12h.01M18 12h.01"/>)"},
     {"warn", R"(<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>)"},
     {"info", R"(<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/>)"},
-    {"users", R"(<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.4 2.8-5.2 5.5-5.2s4.9 1.8 5.5 5.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M15.5 14c2.6-.2 4.4 1.3 5 4.6"/>)"},
+    {"users",
+     R"(<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19c.6-3.4 2.8-5.2 5.5-5.2s4.9 1.8 5.5 5.2"/><circle cx="16.5" cy="9.5" r="2.6"/><path d="M15.5 14c2.6-.2 4.4 1.3 5 4.6"/>)"},
     {"file", R"(<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>)"},
     {"disc", R"(<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.4"/>)"},
     {"home", R"(<path d="M4 11l8-7 8 7M6 9.5V20h12V9.5"/>)"},
@@ -58,7 +60,8 @@ bool icon_svg(const std::string& path, std::string& out) {
         }
         for (const StrokeIcon& i : kStrokeIcons)
             if (name == i.name) {
-                out = std::string(R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">)") +
+                out = std::string(
+                          R"(<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">)") +
                       R"(<g fill="none" stroke="#ffffff" stroke-width=")" + width +
                       R"(" stroke-linecap="round" stroke-linejoin="round">)" + i.svg + "</g></svg>";
                 return true;
@@ -113,7 +116,8 @@ bool Icons::draw(Canvas& canvas, const std::string& path, const Rect& box, Color
     if (!id) return false;
     // Whole pixels: crisp at the size it was made for.
     const Vec2 c = canvas.to_pixels(box.center());
-    const float x = std::round(c.x - static_cast<float>(pixels) / 2), y = std::round(c.y - static_cast<float>(pixels) / 2);
+    const float x = std::round(c.x - static_cast<float>(pixels) / 2),
+                y = std::round(c.y - static_cast<float>(pixels) / 2);
     const float s = canvas.scale();
     const Vec2 off = canvas.to_pixels({0, 0});
     canvas.image(id, {(x - off.x) / s, (y - off.y) / s, static_cast<float>(pixels) / s, static_cast<float>(pixels) / s},

@@ -123,7 +123,9 @@ std::vector<Vec2> round_points(const Rect& r, float rt, float rb) {
 }
 }  // namespace
 
-void rounded_rect(Canvas& canvas, const Rect& r, float radius, Color color) { rounded_rect(canvas, r, radius, radius, color); }
+void rounded_rect(Canvas& canvas, const Rect& r, float radius, Color color) {
+    rounded_rect(canvas, r, radius, radius, color);
+}
 void rounded_rect(Canvas& canvas, const Rect& r, float top_radius, float bottom_radius, Color color) {
     const auto p = round_points(r, top_radius, bottom_radius);
     canvas.fill(p, color);
@@ -159,8 +161,8 @@ void paint_focus_highlight(Canvas& cv, const Rect& r, bool skew, float alpha, do
         if (x1 > x0) {
             const Rect band{x0, r.y + 2, x1 - x0, r.h - 4};
             const Quad bq = sk_rect(r, band, tan);
-            cv.fill(bq, Gradient::linear3({x, 0}, {x + 60, 0}, rgba(255, 255, 255, 0), .5f, rgba(255, 255, 255, .16f * alpha),
-                                          rgba(255, 255, 255, 0)));
+            cv.fill(bq, Gradient::linear3({x, 0}, {x + 60, 0}, rgba(255, 255, 255, 0), .5f,
+                                          rgba(255, 255, 255, .16f * alpha), rgba(255, 255, 255, 0)));
         }
     }
     // Corner accents: red top-left, blue bottom-right (5 points thick, 20 long), skewed with the frame.
@@ -312,7 +314,9 @@ float draw_part(Canvas& cv, TextEngine& text, Icons& icons, const GlyphPart& par
     case GlyphShape::Dpad: {
         const float s = 1;
         const Vec2 o{x, cy - 12};
-        auto R = [&](float rx, float ry, float rw, float rh) { return Rect{o.x + rx * s, o.y + ry * s, rw * s, rh * s}; };
+        auto R = [&](float rx, float ry, float rw, float rh) {
+            return Rect{o.x + rx * s, o.y + ry * s, rw * s, rh * s};
+        };
         const Color edge = rgb(0x8d96ab, alpha), base = c::kPadGlyphBase.faded(alpha), lit = rgb(0xe8ecf4, alpha);
         cv.fill_rect(R(8.8f, 2.3f, 6.4f, 19.4f), edge);
         cv.fill_rect(R(2.3f, 8.8f, 19.4f, 6.4f), edge);
@@ -373,10 +377,11 @@ float draw_prompt(Canvas& canvas, TextEngine& text, Icons& icons, Glyphs glyphs,
 void prompt(Ui& ui, const std::string& id, Prompt p, const Box& box) {
     TextEngine& te = ui.text();
     const Glyphs g = ui.glyphs();
-    ui.leaf(id, box, [&te, g, p](float) { return Vec2{prompt_width(te, g, p), 24}; },
-            [p](PaintContext& ctx) {
-                draw_prompt(ctx.canvas, ctx.text, ctx.icons, ctx.glyphs, p, ctx.rect.x, ctx.rect.y + ctx.rect.h / 2, .9f);
-            });
+    ui.leaf(
+        id, box, [&te, g, p](float) { return Vec2{prompt_width(te, g, p), 24}; },
+        [p](PaintContext& ctx) {
+            draw_prompt(ctx.canvas, ctx.text, ctx.icons, ctx.glyphs, p, ctx.rect.x, ctx.rect.y + ctx.rect.h / 2, .9f);
+        });
 }
 
 // ---- text -----------------------------------------------------------------------------------------------------------
@@ -396,7 +401,8 @@ void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
         [spec](PaintContext& ctx) {
             const Rect r = ctx.rect;
             if (spec.wrap) {
-                ctx.text.draw_wrapped(ctx.canvas, spec.style, spec.text, r, DrawText{spec.color, spec.outline}, spec.align);
+                ctx.text.draw_wrapped(ctx.canvas, spec.style, spec.text, r, TextPaint{spec.color, spec.outline},
+                                      spec.align);
                 return;
             }
             TextStyle st = spec.style;
@@ -409,7 +415,7 @@ void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
                                           : spec.text;
             const Vec2 pos{r.x + spec.chroma, r.y + (r.h - ctx.text.line_height(st)) / 2};
             if (spec.chroma > 0) chroma_text(ctx.canvas, ctx.text, st, shown, pos, spec.chroma);
-            else ctx.text.draw(ctx.canvas, st, shown, pos, DrawText{spec.color, spec.outline});
+            else ctx.text.draw(ctx.canvas, st, shown, pos, TextPaint{spec.color, spec.outline});
         });
 }
 
@@ -437,7 +443,8 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
     ui.leaf(
         id, b,
         [&te, label, right](float) {
-            return Vec2{32 + te.width(tx::kLabel, label) + 30 + (right.empty() ? 0 : 10 + te.width(tx::kLabelEm, right)), 20};
+            return Vec2{
+                32 + te.width(tx::kLabel, label) + 30 + (right.empty() ? 0 : 10 + te.width(tx::kLabelEm, right)), 20};
         },
         [label, right, col](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
@@ -450,9 +457,12 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
             const float w = ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
             const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
             const float l0 = x + w + 10, l1 = r.right() - (right.empty() ? 0 : rw + 10);
-            if (l1 > l0) cv.fill_rect({l0, cy - .5f, l1 - l0, 1}, Gradient::linear({l0, 0}, {l1, 0}, col.faded(.35f), col.faded(0)));
+            if (l1 > l0)
+                cv.fill_rect({l0, cy - .5f, l1 - l0, 1},
+                             Gradient::linear({l0, 0}, {l1, 0}, col.faded(.35f), col.faded(0)));
             if (!right.empty())
-                ctx.text.draw(cv, tx::kLabelEm, right, {r.right() - rw, centred_y(ctx.text, tx::kLabelEm, r)}, rgb(0xe9edf5));
+                ctx.text.draw(cv, tx::kLabelEm, right, {r.right() - rw, centred_y(ctx.text, tx::kLabelEm, r)},
+                              rgb(0xe9edf5));
         });
 }
 
@@ -498,7 +508,8 @@ void facts(Ui& ui, const std::string& id, std::span<const Fact> fs, const Box& b
                 // (Keys and values share a line height of 18: their first lines sit on the same line box.)
                 const float dy = (ctx.text.line_height(tx::kFactKey) - ctx.text.line_height(vs)) / 2;
                 if (f.value.size() == 1)
-                    ctx.text.draw_wrapped(ctx.canvas, vs, f.value[0].text, {vx, y + dy, vw, h}, DrawText{f.value[0].color});
+                    ctx.text.draw_wrapped(ctx.canvas, vs, f.value[0].text, {vx, y + dy, vw, h},
+                                          TextPaint{f.value[0].color});
                 else {
                     float x = vx;
                     for (const Run& r : f.value) x += ctx.text.draw(ctx.canvas, vs, r.text, {x, y + dy}, r.color);
@@ -508,7 +519,8 @@ void facts(Ui& ui, const std::string& id, std::span<const Fact> fs, const Box& b
         });
 }
 
-void note(Ui& ui, const std::string& id, Tone tone, const std::string& s, const Box& box, const std::string& icon_name) {
+void note(Ui& ui, const std::string& id, Tone tone, const std::string& s, const Box& box,
+          const std::string& icon_name) {
     const Color text_col = tone == Tone::Bad ? rgb(0xffd0d7) : tone == Tone::Blue ? rgb(0xcfe2ff) : rgb(0xf6e6bd);
     const Color icon_col = tone == Tone::Bad ? c::kBad : tone == Tone::Blue ? c::kCyan : c::kWarn;
     const std::string ic = !icon_name.empty() ? icon_name : tone == Tone::Blue ? "stroke:info:2.2" : "stroke:warn:2.2";
@@ -522,17 +534,18 @@ void note(Ui& ui, const std::string& id, Tone tone, const std::string& s, const 
         [s, text_col, icon_col, ic](PaintContext& ctx) {
             icon(ctx.canvas, ctx.icons, ic, {ctx.rect.x, ctx.rect.y + 1, 16, 16}, icon_col);
             ctx.text.draw_wrapped(ctx.canvas, tx::kWarn, s, {ctx.rect.x + 26, ctx.rect.y, ctx.rect.w - 26, ctx.rect.h},
-                                  DrawText{text_col});
+                                  TextPaint{text_col});
         });
 }
 
 void watermark(Canvas& canvas, TextEngine& text, const std::string& word, Vec2 bottom_right) {
     const float w = text.width(tx::kWatermark, word);
     text.draw(canvas, tx::kWatermark, word, {bottom_right.x - w, bottom_right.y - text.line_height(tx::kWatermark)},
-              DrawText{rgba(255, 255, 255, .035f), 2});
+              TextPaint{rgba(255, 255, 255, .035f), 2});
 }
 
-// ---- top band ---------------------------------------------------------------------------------------------------------
+// ---- top band
+// ---------------------------------------------------------------------------------------------------------
 
 void brand(Ui& ui, const std::string& id, const std::string& line1, const std::string& line2, const Box& box) {
     Box b = with_height(box, 34);
@@ -545,7 +558,8 @@ void brand(Ui& ui, const std::string& id, const std::string& line1, const std::s
         const float x = ctx.rect.x, cy = ctx.rect.y + ctx.rect.h / 2;
         const Rect red{x + 2, cy - 15, 20, 30}, blue{x + 19, cy - 15, 20, 30};
         cv.fill(skewed(red, kSeamTan), Gradient::linear({0, red.y}, {0, red.bottom()}, rgb(0xff4d72), rgb(0xc40f39)));
-        cv.fill(skewed(blue, kSeamTan), Gradient::linear({0, blue.y}, {0, blue.bottom()}, rgb(0x4b98ff, .92f), rgb(0x1650d6, .92f)));
+        cv.fill(skewed(blue, kSeamTan),
+                Gradient::linear({0, blue.y}, {0, blue.bottom()}, rgb(0x4b98ff, .92f), rgb(0x1650d6, .92f)));
         if (ctx.rect.w < 52 + std::max(ctx.text.width(tx::kBrand, line1), ctx.text.width(kSecond, line2))) return;
         const float lh = ctx.text.line_height(tx::kBrand);
         ctx.text.draw(cv, tx::kBrand, line1, {x + 52, cy - lh}, rgb(0xe6e9f2));
@@ -559,7 +573,8 @@ void tab_bar(Ui& ui, const std::string& id, std::span<const Tab> tabs, int activ
     b.align = Align::Center;
     b.gap = 2;
     if (b.h.mode == Size::Fit) b.h = Size::fixed(theme::kTopBand);
-    std::string active_id = active >= 0 && active < static_cast<int>(tabs.size()) ? tabs[static_cast<std::size_t>(active)].id : "";
+    std::string active_id =
+        active >= 0 && active < static_cast<int>(tabs.size()) ? tabs[static_cast<std::size_t>(active)].id : "";
     Ui* u = &ui;
     auto underline = [u, active_id](PaintContext& ctx) {
         if (active_id.empty() || !u->has(active_id)) return;
@@ -613,7 +628,8 @@ void tab_bar(Ui& ui, const std::string& id, std::span<const Tab> tabs, int activ
                     const float bw = ctx.text.width(tx::kTabBadge, t.badge) + 14;
                     const Rect br{r.right() + 2 - bw, r.y + 16, bw, 18};
                     ctx.canvas.fill(skewed(br, kSeamTan), c::kWarn);
-                    ctx.text.draw(cv, tx::kTabBadge, t.badge, {br.x + 7, centred_y(ctx.text, tx::kTabBadge, br)}, rgb(0x160f00));
+                    ctx.text.draw(cv, tx::kTabBadge, t.badge, {br.x + 7, centred_y(ctx.text, tx::kTabBadge, br)},
+                                  rgb(0x160f00));
                 }
             },
             &f);
@@ -635,7 +651,10 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
     ui.leaf(
         id, b,
         [&te, spec](float) {
-            return Vec2{28 + (spec.icon.empty() ? 0 : 17) + (spec.label.empty() ? 0 : (spec.icon.empty() ? 0 : 8) + te.width(tx::kIconButton, spec.label)), 34};
+            return Vec2{
+                28 + (spec.icon.empty() ? 0 : 17) +
+                    (spec.label.empty() ? 0 : (spec.icon.empty() ? 0 : 8) + te.width(tx::kIconButton, spec.label)),
+                34};
         },
         [spec](PaintContext& ctx) {
             const Rect r = ctx.rect;
@@ -643,14 +662,17 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
             const Color border = spec.on ? rgba(98, 212, 255, .5f) : rgba(255, 255, 255, .16f);
             surface(ctx.canvas, r, mix(rgba(255, 255, 255, .05f), rgba(255, 255, 255, .12f), hv), border);
             const Color col = spec.on ? c::kCyan : mix(c::kTabHover, rgb(0xffffff), hv);
-            const bool label = !spec.label.empty() &&
-                               (spec.icon.empty() || r.w >= 28 + 17 + 8 + ctx.text.width(tx::kIconButton, spec.label) - .5f);
+            const bool label =
+                !spec.label.empty() &&
+                (spec.icon.empty() || r.w >= 28 + 17 + 8 + ctx.text.width(tx::kIconButton, spec.label) - .5f);
             float x = label ? r.x + 14 : r.x + (r.w - 17) / 2;
             if (!spec.icon.empty()) {
                 icon(ctx.canvas, ctx.icons, spec.icon, {x, r.y + (r.h - 17) / 2, 17, 17}, col);
                 x += 17 + 8;
             }
-            if (label) ctx.text.draw(ctx.canvas, tx::kIconButton, spec.label, {x, centred_y(ctx.text, tx::kIconButton, r)}, col);
+            if (label)
+                ctx.text.draw(ctx.canvas, tx::kIconButton, spec.label, {x, centred_y(ctx.text, tx::kIconButton, r)},
+                              col);
         },
         &f);
 }
@@ -673,7 +695,8 @@ void caption_buttons(Ui& ui, const std::string& id, bool minimise, bool fullscre
             const Color fill = danger ? mix(rgba(255, 255, 255, .05f), rgba(255, 42, 85, .75f), hv)
                                       : mix(rgba(255, 255, 255, .05f), rgba(255, 255, 255, .14f), hv);
             surface(ctx.canvas, ctx.rect, fill, rgba(255, 255, 255, .16f));
-            icon(ctx.canvas, ctx.icons, ic, {ctx.rect.x + 9, ctx.rect.y + 9, 16, 16}, mix(c::kTabHover, rgb(0xffffff), hv));
+            icon(ctx.canvas, ctx.icons, ic, {ctx.rect.x + 9, ctx.rect.y + 9, 16, 16},
+                 mix(c::kTabHover, rgb(0xffffff), hv));
         }, &f);
     };
     if (minimise) one("min", "stroke:minimise", false);
@@ -697,13 +720,14 @@ void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const 
             [h](PaintContext& ctx) {
                 const float cy = ctx.rect.y + ctx.rect.h / 2;
                 const float w = draw_prompt(ctx.canvas, ctx.text, ctx.icons, ctx.glyphs, h.prompt, ctx.rect.x, cy);
-                ctx.text.draw(ctx.canvas, tx::kHint, h.label, {ctx.rect.x + w + 8, centred_y(ctx.text, tx::kHint, ctx.rect)},
-                              rgb(0xd9dee9));
+                ctx.text.draw(ctx.canvas, tx::kHint, h.label,
+                              {ctx.rect.x + w + 8, centred_y(ctx.text, tx::kHint, ctx.rect)}, rgb(0xd9dee9));
             });
     }
 }
 
-// ---- crimson lists ----------------------------------------------------------------------------------------------------
+// ---- crimson lists
+// ----------------------------------------------------------------------------------------------------
 
 void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, const Box& box) {
     Box b = with_height(box, m::kSlabHeight);
@@ -732,7 +756,9 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             auto col = [&](Color cc) {
                 if (dis) {
                     const float g = (cc.r * .3f + cc.g * .59f + cc.b * .11f);
-                    cc = mix(rgba(static_cast<int>(g * 255), static_cast<int>(g * 255), static_cast<int>(g * 255), cc.a), cc, .35f);
+                    cc =
+                        mix(rgba(static_cast<int>(g * 255), static_cast<int>(g * 255), static_cast<int>(g * 255), cc.a),
+                            cc, .35f);
                     return brightened(cc, .72f);
                 }
                 return brightened(cc, bright);
@@ -749,7 +775,8 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
                     const float a = std::max(0.f, x0), b2 = std::min(r.w, x1);
                     if (b2 <= a) continue;
                     const Rect part{r.x + a, r.y + l[0] * s, b2 - a, 2};
-                    cv.fill(sk_rect(r, part), Gradient::linear({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0), rgba(255, 255, 255, .55f)));
+                    cv.fill(sk_rect(r, part), Gradient::linear({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0),
+                                                               rgba(255, 255, 255, .55f)));
                 }
                 const float ph = std::fmod(t, 3.4f) / 3.4f;
                 if (ph < .55f) {
@@ -767,7 +794,8 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             cv.line(q.p[0] + Vec2{0, .5f}, q.p[1] + Vec2{0, .5f}, 1, rgba(255, 255, 255, .45f));
             cv.fill(sk_rect(r, {r.x, r.bottom() - 3, r.w, 3}), rgba(0, 0, 0, .25f));
             // Content (upright): the word, two small lines, the Accept glyph when focused.
-            const TextStyle big = spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
+            const TextStyle big =
+                spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
             const float bx = r.x + 40;
             const float by = r.y + (r.h - ctx.text.line_height(big)) / 2;
             ctx.text.draw(cv, big, spec.big, {bx, by + 4}, rgba(0, 0, 0, .22f));
@@ -786,14 +814,15 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
 
 void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focus, const Box& box) {
     const bool tall = !spec.caption.empty();
-    Box b = with_height(box, tall ? 72 : spec.small ? 50 : m::kMenuRowHeight);
+    Box b = with_height(box, tall ? 72 : spec.compact ? 50 : m::kMenuRowHeight);
     focus.disabled = focus.disabled || spec.disabled;
     TextEngine& te = ui.text();
     ui.leaf(
         id, b,
         [&te, spec, tall](float) {
-            return Vec2{26 + 36 + 16 + te.width(tx::kMenuTitle, spec.title) + 16 + te.width(tx::kMenuValue, spec.value) + 40,
-                        tall ? 72.f : m::kMenuRowHeight};
+            return Vec2{
+                26 + 36 + 16 + te.width(tx::kMenuTitle, spec.title) + 16 + te.width(tx::kMenuValue, spec.value) + 40,
+                tall ? 72.f : m::kMenuRowHeight};
         },
         [spec, tall](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
@@ -801,7 +830,7 @@ void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focu
             const float f = ctx.focus_t;
             if (spec.disabled) cv.push_layer({}, .42f);
             row_surface(cv, r, f, c::kRowFill, c::kRowStrokeRed, c::kRowFocusA, c::kRowFocusB, c::kRowFocusStroke);
-            float x = r.x + (spec.small ? 24 : 26);
+            float x = r.x + (spec.compact ? 24 : 26);
             const float cy = r.y + r.h / 2;
             if (spec.check >= 0) {
                 const Rect cb{x, cy - 10, 20, 20};
@@ -818,7 +847,7 @@ void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focu
             } else if (spec.number > 0) {
                 constexpr TextStyle kNum{theme::Font::DisplayBlackItalic, 40, 0, false, 1};
                 const std::string n = std::to_string(spec.number);
-                ctx.text.draw(cv, kNum, n, {x, cy - 20}, DrawText{spec.ok ? c::kOk : rgba(255, 200, 212, .6f), 1.4f});
+                ctx.text.draw(cv, kNum, n, {x, cy - 20}, TextPaint{spec.ok ? c::kOk : rgba(255, 200, 212, .6f), 1.4f});
                 x += 26 + 16;
             } else if (!spec.icon.empty()) {
                 const Rect ib{x, cy - 18, 36, 36};
@@ -830,10 +859,12 @@ void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focu
             constexpr TextStyle kChev = tx::kChevron;
             const float chev_w = ctx.text.width(kChev, "›");
             const float chev_x = r.right() - 22 - chev_w + 4 * f;
-            ctx.text.draw(cv, kChev, "›", {chev_x, centred_y(ctx.text, kChev, r)}, mix(rgba(255, 255, 255, .3f), rgb(0xffffff), f));
+            ctx.text.draw(cv, kChev, "›", {chev_x, centred_y(ctx.text, kChev, r)},
+                          mix(rgba(255, 255, 255, .3f), rgb(0xffffff), f));
             float right = r.right() - 22 - chev_w - 16;
             if (!spec.value.empty()) {
-                const Color vc = spec.value_tone == Tone::Neutral ? mix(c::kRedDim, rgb(0xffe3e9), f) : tone_text(spec.value_tone, c::kRedDim);
+                const Color vc = spec.value_tone == Tone::Neutral ? mix(c::kRedDim, rgb(0xffe3e9), f)
+                                                                  : tone_text(spec.value_tone, c::kRedDim);
                 const float vw = ctx.text.width(tx::kMenuValue, spec.value);
                 ctx.text.draw(cv, tx::kMenuValue, spec.value, {right - vw, centred_y(ctx.text, tx::kMenuValue, r)}, vc);
                 right -= vw + 16;
@@ -846,11 +877,14 @@ void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focu
                 const float h = ctx.text.line_height(kCap) + 5 + ctx.text.line_height(ts);
                 const float y = cy - h / 2;
                 ctx.text.draw(cv, kCap, spec.caption, {x, y}, mix(c::kRedDim, rgb(0xffe3e9), f));
-                ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x, spec.mono_title ? Ellipsis::Middle : Ellipsis::End),
-                              {x, y + ctx.text.line_height(kCap) + 5}, title_col);
+                ctx.text.draw(
+                    cv, ts,
+                    ctx.text.ellipsize(ts, spec.title, right - x, spec.mono_title ? Ellipsis::Middle : Ellipsis::End),
+                    {x, y + ctx.text.line_height(kCap) + 5}, title_col);
             } else {
-                const TextStyle ts = spec.small ? TextStyle{tx::kMenuTitle.font, 19, .06f, true, 1} : tx::kMenuTitle;
-                ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x), {x, centred_y(ctx.text, ts, r)}, title_col);
+                const TextStyle ts = spec.compact ? TextStyle{tx::kMenuTitle.font, 19, .06f, true, 1} : tx::kMenuTitle;
+                ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x), {x, centred_y(ctx.text, ts, r)},
+                              title_col);
             }
             if (spec.disabled) cv.pop_layer();
         },
@@ -870,17 +904,23 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             const float f = ctx.focus_t;
             const Quad q = skewed(r, kSeamTan);
             const TileState st = spec.state;
-            const bool none = st == TileState::None, notowned = st == TileState::NotOwned, checking = st == TileState::Checking;
+            const bool none = st == TileState::None, notowned = st == TileState::NotOwned,
+                       checking = st == TileState::Checking;
             // Body.
             if (none) cv.fill(q, rgba(20, 8, 12, .72f));
             else if (notowned) cv.fill(q, rgba(14, 8, 10, .82f));
             else if (checking) cv.fill(q, rgba(20, 10, 14, .72f));
             else {
                 Color top = rgba(255, 42, 85, .42f), mid = rgba(60, 6, 20, .85f), low = rgba(10, 6, 10, .92f);
-                if (spec.tone == TileTone::Orange) top = rgba(255, 110, 60, .42f), mid = rgba(70, 16, 8, .85f), low = rgba(12, 6, 6, .92f);
-                if (spec.tone == TileTone::Pink) top = rgba(255, 42, 140, .36f), mid = rgba(70, 8, 46, .82f), low = rgba(10, 6, 14, .92f);
+                if (spec.tone == TileTone::Orange)
+                    top = rgba(255, 110, 60, .42f), mid = rgba(70, 16, 8, .85f), low = rgba(12, 6, 6, .92f);
+                if (spec.tone == TileTone::Pink)
+                    top = rgba(255, 42, 140, .36f), mid = rgba(70, 8, 46, .82f), low = rgba(10, 6, 14, .92f);
                 const float lift = 1 + .4f * f;
-                cv.fill(q, Gradient::css(r, 170, {{0, brightened(top, lift)}, {.62f, brightened(mid, lift)}, {1, brightened(low, lift)}}));
+                cv.fill(q,
+                        Gradient::css(
+                            r, 170,
+                            {{0, brightened(top, lift)}, {.62f, brightened(mid, lift)}, {1, brightened(low, lift)}}));
                 // Halftone dots in the upper corner.
                 for (float y = r.y + 3; y < r.y + r.h * .55f; y += 6)
                     for (float x = r.x - 10; x < r.right() + 10; x += 6) {
@@ -903,30 +943,42 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             // The top accent.
             if (!notowned) {
                 const Quad top = sk_rect(r, {r.x, r.y, r.w, 3});
-                if (spec.tone == TileTone::Pink && !none) cv.fill(top, Gradient::linear({r.x, 0}, {r.right(), 0}, c::kRed, rgb(0xff4fc0)));
+                if (spec.tone == TileTone::Pink && !none)
+                    cv.fill(top, Gradient::linear({r.x, 0}, {r.right(), 0}, c::kRed, rgb(0xff4fc0)));
                 else cv.fill(top, (spec.tone == TileTone::Orange ? rgb(0xff7a3c) : c::kRed).faded(none ? .5f : 1));
             }
             // Border.
-            const Color border = notowned ? rgba(255, 255, 255, .1f) : none ? rgba(255, 200, 212, .34f)
-                                 : spec.busy ? c::kCyan : checking ? rgba(255, 255, 255, .18f) : rgba(255, 255, 255, .14f);
+            const Color border = notowned    ? rgba(255, 255, 255, .1f)
+                                 : none      ? rgba(255, 200, 212, .34f)
+                                 : spec.busy ? c::kCyan
+                                 : checking  ? rgba(255, 255, 255, .18f)
+                                             : rgba(255, 255, 255, .14f);
             if (none && !spec.busy) dashed(cv, q, 1, 4, 3, mix(border, rgb(0xffffff), f));
             else cv.stroke(q, 1, mix(border, rgb(0xffffff), f));
             if (checking && !ctx.reduced) {
                 const float ph = std::fmod(static_cast<float>(ctx.now) / 1.3f, 1.f);
                 const float x0 = r.x + r.w * (1.5f - 3 * ph) - r.w * .4f;
                 const float a = std::max(r.x, x0), b2 = std::min(r.right(), x0 + r.w * .8f);
-                if (b2 > a) cv.fill(sk_rect(r, {a, r.y, b2 - a, r.h}), Gradient::linear3({x0, 0}, {x0 + r.w * .8f, 0}, rgba(98, 212, 255, 0), .5f, rgba(98, 212, 255, .25f), rgba(98, 212, 255, 0)));
+                if (b2 > a)
+                    cv.fill(sk_rect(r, {a, r.y, b2 - a, r.h}),
+                            Gradient::linear3({x0, 0}, {x0 + r.w * .8f, 0}, rgba(98, 212, 255, 0), .5f,
+                                              rgba(98, 212, 255, .25f), rgba(98, 212, 255, 0)));
                 ctx.animate();
             }
             // Code and name.
-            const Color code_col = notowned ? rgb(0x7d6a70) : checking ? rgb(0xa8949a) : none ? rgb(0xecd5db) : rgb(0xffffff);
+            const Color code_col = notowned   ? rgb(0x7d6a70)
+                                   : checking ? rgb(0xa8949a)
+                                   : none     ? rgb(0xecd5db)
+                                              : rgb(0xffffff);
             TextStyle code = tx::kTileCode;
             code.size *= 1 + .14f * f;
             const float cw = ctx.text.width(code, spec.code);
-            ctx.text.draw(cv, code, spec.code, {r.center().x - cw / 2, r.y + 19 - (code.size - tx::kTileCode.size) / 2}, code_col);
+            ctx.text.draw(cv, code, spec.code, {r.center().x - cw / 2, r.y + 19 - (code.size - tx::kTileCode.size) / 2},
+                          code_col);
             const std::string name = ctx.text.ellipsize(tx::kTileName, spec.name, r.w + 12);
             const float nw = ctx.text.width(tx::kTileName, name);
-            ctx.text.draw(cv, tx::kTileName, name, {r.center().x - nw / 2, r.bottom() - 10 - ctx.text.line_height(tx::kTileName)},
+            ctx.text.draw(cv, tx::kTileName, name,
+                          {r.center().x - nw / 2, r.bottom() - 10 - ctx.text.line_height(tx::kTileName)},
                           notowned ? rgb(0x7d6a70) : rgb(0xecd9de));
             // Corner badge.
             Color bc = rgb(0xecd5db);
@@ -948,7 +1000,8 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
                 const float tw = ctx.text.width(tx::kTileTag, spec.tag) + 8;
                 const Rect tr{r.x + 4, r.y - 4, tw, 14};
                 cv.fill(skewed(tr, kSeamTan), rgb(0xf1e4e8));
-                ctx.text.draw(cv, tx::kTileTag, spec.tag, {tr.x + 4, centred_y(ctx.text, tx::kTileTag, tr)}, rgb(0x0b0d14));
+                ctx.text.draw(cv, tx::kTileTag, spec.tag, {tr.x + 4, centred_y(ctx.text, tx::kTileTag, tr)},
+                              rgb(0x0b0d14));
             }
         },
         &focus);
@@ -979,7 +1032,8 @@ void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, co
         [count, sub, sub_col](PaintContext& ctx) {
             ctx.text.draw(ctx.canvas, tx::kGroupCount, count, {ctx.rect.x, ctx.rect.y}, c::kRedDim);
             if (!sub.empty())
-                ctx.text.draw(ctx.canvas, tx::kGroupCount, sub, {ctx.rect.x, ctx.rect.y + ctx.text.line_height(tx::kGroupCount) + 3}, sub_col);
+                ctx.text.draw(ctx.canvas, tx::kGroupCount, sub,
+                              {ctx.rect.x, ctx.rect.y + ctx.text.line_height(tx::kGroupCount) + 3}, sub_col);
         });
     ui.leaf(id + "/space", Box{.w = Size::grow(), .h = Size::fixed(1)}, {}, {});
     {
@@ -1010,7 +1064,10 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
     }
     ui.leaf(
         id, b,
-        [&te, spec, vw](float) { return Vec2{26 + te.width(tx::kSettingTitle, spec.title) + 18 + 16 + 10 + vw + 10 + 16 + 22, m::kSettingRowHeight}; },
+        [&te, spec, vw](float) {
+            return Vec2{26 + te.width(tx::kSettingTitle, spec.title) + 18 + 16 + 10 + vw + 10 + 16 + 22,
+                        m::kSettingRowHeight};
+        },
         [spec, vw, two](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
@@ -1032,18 +1089,21 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
             const float kick = ctx.reduced || age >= .25f ? 0 : 1 - age / .25f;
             if (slide != 0 || kick > 0) ctx.animate();
             if (spec.disabled) cv.push_layer({}, .42f);
-            row_surface(cv, r, f, c::kRowFill, rgba(255, 120, 150, .2f), rgba(255, 42, 85, .58f), rgba(150, 10, 40, .4f), c::kRowFocusStroke);
+            row_surface(cv, r, f, c::kRowFill, rgba(255, 120, 150, .2f), rgba(255, 42, 85, .58f),
+                        rgba(150, 10, 40, .4f), c::kRowFocusStroke);
             const float cy = r.y + r.h / 2;
             float right = r.right() - 22;
             if (spec.chevron) {
                 constexpr TextStyle kChev{theme::Font::DisplayBlackItalic, 26, 0, false, 1};
                 const float cw = ctx.text.width(kChev, "›");
-                ctx.text.draw(cv, kChev, "›", {right - cw, centred_y(ctx.text, kChev, r)}, mix(rgba(255, 255, 255, .3f), rgb(0xffffff), f));
+                ctx.text.draw(cv, kChev, "›", {right - cw, centred_y(ctx.text, kChev, r)},
+                              mix(rgba(255, 255, 255, .3f), rgb(0xffffff), f));
                 right -= cw + 18;
                 if (!spec.value.empty()) {
                     const Color vc = spec.value_on ? c::kWarn : c::kRedFaint;
                     const float w = ctx.text.width(tx::kMenuValue, spec.value);
-                    ctx.text.draw(cv, tx::kMenuValue, spec.value, {right - w, centred_y(ctx.text, tx::kMenuValue, r)}, vc);
+                    ctx.text.draw(cv, tx::kMenuValue, spec.value, {right - w, centred_y(ctx.text, tx::kMenuValue, r)},
+                                  vc);
                     right -= w + 18;
                 }
             } else {
@@ -1054,11 +1114,15 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
                 draw_arrow(cv, {right - 8, cy}, 8 * arrow_scale(1), 12 * arrow_scale(1), 1, arrow_col(1));
                 right -= 16 + 10;
                 const Rect vb{right - vw, cy - m::kValueBoxHeight / 2, vw, m::kValueBoxHeight};
-                if (spec.value_on) surface(cv, vb, Gradient::css(vb, 100, {{0, rgb(0x3b8cff)}, {1, rgb(0x1452d6)}}), rgba(160, 205, 255, .8f));
-                else surface(cv, vb, rgba(2, 3, 8, .7f), rgba(255, 255, 255, .22f));
+                if (spec.value_on)
+                    surface(cv, vb, Gradient::css(vb, 100, {{0, rgb(0x3b8cff)}, {1, rgb(0x1452d6)}}),
+                            rgba(160, 205, 255, .8f));
+                else
+                    surface(cv, vb, rgba(2, 3, 8, .7f), rgba(255, 255, 255, .22f));
                 cv.push_clip(vb);
                 const float tw = ctx.text.width(tx::kSettingValue, spec.value);
-                ctx.text.draw(cv, tx::kSettingValue, spec.value, {vb.center().x - tw / 2 + slide, centred_y(ctx.text, tx::kSettingValue, vb)},
+                ctx.text.draw(cv, tx::kSettingValue, spec.value,
+                              {vb.center().x - tw / 2 + slide, centred_y(ctx.text, tx::kSettingValue, vb)},
                               rgba(255, 255, 255, 1 - std::fabs(slide) / 30));
                 cv.pop_clip();
                 right -= vw + 10;
@@ -1070,7 +1134,8 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
                 constexpr TextStyle kCode{theme::Font::Mono, 12.5f, 0, false, 1};
                 const float hh = ctx.text.line_height(tx::kSettingTitle) + 6 + ctx.text.line_height(kCode);
                 const float y = cy - hh / 2;
-                ctx.text.draw(cv, tx::kSettingTitle, ctx.text.ellipsize(tx::kSettingTitle, spec.title, right - x), {x, y}, c::kText);
+                ctx.text.draw(cv, tx::kSettingTitle, ctx.text.ellipsize(tx::kSettingTitle, spec.title, right - x),
+                              {x, y}, c::kText);
                 ctx.text.draw(cv, kCode, ctx.text.ellipsize(kCode, spec.detail, right - x, Ellipsis::Middle),
                               {x, y + ctx.text.line_height(tx::kSettingTitle) + 6}, mix(c::kRedDim, rgb(0xffe3e9), f));
             } else {
@@ -1106,9 +1171,11 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
                 if (s.disabled) ctx.canvas.push_layer({}, .42f);
                 if (on) {
                     const Color a = mix(rgb(0xff2a55), rgb(0xff5a7d), fo), b2 = mix(rgb(0xa80d33), rgb(0xc8103a), fo);
-                    surface(ctx.canvas, r, Gradient::css(r, 100, {{0, a}, {1, b2}}), mix(rgba(255, 170, 185, .8f), rgb(0xffffff), fo));
+                    surface(ctx.canvas, r, Gradient::css(r, 100, {{0, a}, {1, b2}}),
+                            mix(rgba(255, 170, 185, .8f), rgb(0xffffff), fo));
                 } else {
-                    surface(ctx.canvas, r, rgba(255, 255, 255, .04f), mix(rgba(255, 120, 150, .22f), rgb(0xffffff), fo));
+                    surface(ctx.canvas, r, rgba(255, 255, 255, .04f),
+                            mix(rgba(255, 120, 150, .22f), rgb(0xffffff), fo));
                 }
                 ctx.text.draw(ctx.canvas, tx::kSection, s.label, {r.x + 20, centred_y(ctx.text, tx::kSection, r)},
                               on ? rgb(0xffffff) : rgb(0xd8b9c1));
@@ -1126,7 +1193,8 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
     ui.leaf(
         id, b,
         [&te, spec](float) {
-            return Vec2{14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 + std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) + 12,
+            return Vec2{14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 +
+                            std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) + 12,
                         m::kKeyRowHeight};
         },
         [spec](PaintContext& ctx) {
@@ -1146,12 +1214,14 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
             const float kw = std::max(44.f, ctx.text.width(tx::kKeyCap, spec.key) + 18);
             const Rect kc{r.right() - 12 - kw, cy - 13, kw, 26};
             const float x = r.x + 14 + 22 + 10;
-            ctx.text.draw(cv, tx::kKeyName, ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x), {x, centred_y(ctx.text, tx::kKeyName, r)},
-                          c::kText);
+            ctx.text.draw(cv, tx::kKeyName, ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x),
+                          {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
             Color text_col = rgb(0xffffff);
             if (spec.capturing) {
                 const float pulse = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / .8f);
-                surface(cv, kc, Gradient::css(kc, 100, {{0, brightened(c::kWarn, 1 + .25f * pulse)}, {1, rgb(0xff9a2e)}}), rgb(0xffffff));
+                surface(cv, kc,
+                        Gradient::css(kc, 100, {{0, brightened(c::kWarn, 1 + .25f * pulse)}, {1, rgb(0xff9a2e)}}),
+                        rgb(0xffffff));
                 text_col = rgb(0x1a1000);
                 if (!ctx.reduced) ctx.animate();
             } else if (f > .5f) {
@@ -1163,7 +1233,8 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
                         spec.swapped ? c::kWarn : rgba(255, 255, 255, .28f));
             }
             const float tw = ctx.text.width(tx::kKeyCap, spec.key);
-            ctx.text.draw(cv, tx::kKeyCap, spec.key, {kc.center().x - tw / 2, centred_y(ctx.text, tx::kKeyCap, kc)}, text_col);
+            ctx.text.draw(cv, tx::kKeyCap, spec.key, {kc.center().x - tw / 2, centred_y(ctx.text, tx::kKeyCap, kc)},
+                          text_col);
         },
         &focus);
 }
@@ -1222,7 +1293,8 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
                     ctx.text.draw(cv, kNum, n, {ib.center().x - w / 2, centred_y(ctx.text, kNum, ib)}, icon_col);
                 }
                 const float nx = ib.right() + 14;
-                ctx.text.draw(cv, tx::kStepName, ctx.text.ellipsize(tx::kStepName, spec.name, 118), {nx, centred_y(ctx.text, tx::kStepName, r)}, name_col);
+                ctx.text.draw(cv, tx::kStepName, ctx.text.ellipsize(tx::kStepName, spec.name, 118),
+                              {nx, centred_y(ctx.text, tx::kStepName, r)}, name_col);
                 const float bx = nx + 118 + 14, bw = std::max(30.f, r.right() - 20 - 96 - 14 - bx);
                 const Rect bar{bx, cy - 3, bw, 6};
                 cv.fill(skewed(bar, kSeamTan), rgba(255, 255, 255, .08f));
@@ -1244,7 +1316,9 @@ void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focu
     ui.leaf(
         id, b,
         [&te, spec](float) {
-            return Vec2{16 + 18 + 12 + te.width(tx::kFileName, spec.name) + 12 + te.width(tx::kFileMeta, spec.meta) + 16, m::kFileRowHeight};
+            return Vec2{
+                16 + 18 + 12 + te.width(tx::kFileName, spec.name) + 12 + te.width(tx::kFileMeta, spec.meta) + 16,
+                m::kFileRowHeight};
         },
         [spec](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
@@ -1255,7 +1329,8 @@ void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focu
             const float cy = r.y + r.h / 2;
             icon(cv, ctx.icons, spec.icon, {r.x + 16, cy - 9, 18, 18}, spec.tone == Tone::Ok ? c::kOk : rgb(0xffc1cd));
             const float mw = ctx.text.width(tx::kFileMeta, spec.meta);
-            ctx.text.draw(cv, tx::kFileMeta, spec.meta, {r.right() - 16 - mw, centred_y(ctx.text, tx::kFileMeta, r)}, c::kRedDim);
+            ctx.text.draw(cv, tx::kFileMeta, spec.meta, {r.right() - 16 - mw, centred_y(ctx.text, tx::kFileMeta, r)},
+                          c::kRedDim);
             const float x = r.x + 16 + 18 + 12, room = r.right() - 16 - mw - 12 - x;
             const Color nc = spec.tone == Tone::Ok ? rgb(0xeafff5) : spec.tone == Tone::Dim ? rgb(0xcdb3ba) : c::kText;
             ctx.text.draw(cv, tx::kFileName, ctx.text.ellipsize(tx::kFileName, spec.name, room, Ellipsis::Middle),
@@ -1264,7 +1339,8 @@ void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focu
         &focus);
 }
 
-// ---- blue readout -----------------------------------------------------------------------------------------------------
+// ---- blue readout
+// -----------------------------------------------------------------------------------------------------
 
 void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, const Box& box) {
     Box b = with_height(box, m::kProgressHeight);
@@ -1319,21 +1395,23 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
 void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box) {
     Box b = with_height(box, m::kPillHeight);
     TextEngine& te = ui.text();
-    ui.leaf(id, b, [&te, label, dot](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(tx::kPill, label), m::kPillHeight}; },
-            [label, tone, dot](PaintContext& ctx) {
-                const ToneColors tc = tone_colors(tone);
-                surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
-                float x = ctx.rect.x + 13;
-                if (dot) {
-                    const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.now) * 2 * kPi);
-                    const Vec2 ctr{x + 3.5f, ctx.rect.y + ctx.rect.h / 2};
-                    ctx.canvas.radial(ctr, 9, tc.text.faded(.5f * blink));
-                    ctx.canvas.circle(ctr, 3.5f, tc.text.faded(blink));
-                    if (!ctx.reduced) ctx.animate();
-                    x += 13;
-                }
-                ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);
-            });
+    ui.leaf(
+        id, b,
+        [&te, label, dot](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(tx::kPill, label), m::kPillHeight}; },
+        [label, tone, dot](PaintContext& ctx) {
+            const ToneColors tc = tone_colors(tone);
+            surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
+            float x = ctx.rect.x + 13;
+            if (dot) {
+                const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.now) * 2 * kPi);
+                const Vec2 ctr{x + 3.5f, ctx.rect.y + ctx.rect.h / 2};
+                ctx.canvas.radial(ctr, 9, tc.text.faded(.5f * blink));
+                ctx.canvas.circle(ctr, 3.5f, tc.text.faded(blink));
+                if (!ctx.reduced) ctx.animate();
+                x += 13;
+            }
+            ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);
+        });
 }
 
 void chips(Ui& ui, const std::string& id, std::span<const std::string> options, int current, const Box& box) {
@@ -1352,9 +1430,12 @@ void chips(Ui& ui, const std::string& id, std::span<const std::string> options, 
                 [&te, o](float) { return Vec2{24 + te.width(tx::kChip, o), m::kChipHeight}; },
                 [o, on](PaintContext& ctx) {
                     const Rect r = ctx.rect;
-                    if (on) surface(ctx.canvas, r, Gradient::css(r, 100, {{0, rgb(0x3b8cff)}, {1, rgb(0x1452d6)}}), rgba(160, 205, 255, .8f));
+                    if (on)
+                        surface(ctx.canvas, r, Gradient::css(r, 100, {{0, rgb(0x3b8cff)}, {1, rgb(0x1452d6)}}),
+                                rgba(160, 205, 255, .8f));
                     else surface(ctx.canvas, r, rgba(255, 255, 255, .04f), rgba(255, 255, 255, .14f));
-                    ctx.text.draw(ctx.canvas, tx::kChip, o, {r.x + 12, centred_y(ctx.text, tx::kChip, r)}, on ? rgb(0xffffff) : c::kBlueFaint);
+                    ctx.text.draw(ctx.canvas, tx::kChip, o, {r.x + 12, centred_y(ctx.text, tx::kChip, r)},
+                                  on ? rgb(0xffffff) : c::kBlueFaint);
                 });
     }
 }
@@ -1366,28 +1447,36 @@ void describe_panel(Ui& ui, const std::string& id, const std::string& title, con
     ui.leaf(
         id, b,
         [&te, title, body](float max_w) {
-            const float w = std::min(max_w, 46 + std::max(te.width(tx::kExplainTitle, title), te.width(tx::kExplainText, body)));
-            return Vec2{w, 11 + te.line_height(tx::kExplainTitle) + 5 + te.wrapped_height(tx::kExplainText, body, std::max(1.f, w - 46)) + 12};
+            const float w =
+                std::min(max_w, 46 + std::max(te.width(tx::kExplainTitle, title), te.width(tx::kExplainText, body)));
+            return Vec2{w, 11 + te.line_height(tx::kExplainTitle) + 5 +
+                               te.wrapped_height(tx::kExplainText, body, std::max(1.f, w - 46)) + 12};
         },
         [title, body](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
-            surface(cv, r, Gradient::css(r, 100, {{0, rgba(45, 128, 255, .16f)}, {1, rgba(8, 14, 34, .5f)}}), rgba(140, 190, 255, .3f));
+            surface(cv, r, Gradient::css(r, 100, {{0, rgba(45, 128, 255, .16f)}, {1, rgba(8, 14, 34, .5f)}}),
+                    rgba(140, 190, 255, .3f));
             const Rect accent{r.x + 4, r.y + 8, 4, r.h - 16};
             const Quad aq = sk_rect(r, accent);
             cv.glow(aq, 8, c::kCyan.faded(.5f));
             cv.fill(aq, c::kCyan);
             ctx.text.draw(cv, tx::kExplainTitle, title, {r.x + 26, r.y + 11}, c::kCyan);
             const float y = r.y + 11 + ctx.text.line_height(tx::kExplainTitle) + 5;
-            ctx.text.draw_wrapped(cv, tx::kExplainText, body, {r.x + 26, y, r.w - 46, r.bottom() - y}, DrawText{rgb(0xdbe6f8)});
+            ctx.text.draw_wrapped(cv, tx::kExplainText, body, {r.x + 26, y, r.w - 46, r.bottom() - y},
+                                  TextPaint{rgb(0xdbe6f8)});
         });
 }
 
 void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, const Box& box) {
-    const float h = spec.size == ButtonSize::Tiny ? m::kButtonTinyHeight : spec.size == ButtonSize::Small ? m::kButtonSmallHeight : m::kButtonHeight;
+    const float h = spec.size == ButtonSize::Tiny    ? m::kButtonTinyHeight
+                    : spec.size == ButtonSize::Small ? m::kButtonSmallHeight
+                                                     : m::kButtonHeight;
     const float pad = spec.size == ButtonSize::Tiny ? 13 : spec.size == ButtonSize::Small ? 20 : 26;
     const float gap = spec.size == ButtonSize::Tiny ? 6 : 10;
-    const TextStyle st = spec.size == ButtonSize::Tiny ? tx::kButtonTiny : spec.size == ButtonSize::Small ? tx::kButtonSmall : tx::kButton;
+    const TextStyle st = spec.size == ButtonSize::Tiny    ? tx::kButtonTiny
+                         : spec.size == ButtonSize::Small ? tx::kButtonSmall
+                                                          : tx::kButton;
     Box b = with_height(box, h);
     focus.disabled = focus.disabled || spec.disabled;
     TextEngine& te = ui.text();
@@ -1419,13 +1508,15 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
                 border = mix(rgba(150, 195, 255, .65f), rgb(0xffffff), f);
                 break;
             case ButtonKind::Danger:
-                fill = grad(mix(rgba(255, 42, 85, .14f), rgb(0xff3d66), f), mix(rgba(255, 42, 85, .14f), rgb(0xb80f37), f));
+                fill = grad(mix(rgba(255, 42, 85, .14f), rgb(0xff3d66), f),
+                            mix(rgba(255, 42, 85, .14f), rgb(0xb80f37), f));
                 border = mix(rgba(255, 93, 113, .7f), rgb(0xffffff), f);
                 text_col = mix(rgb(0xffd3da), rgb(0xffffff), f);
                 break;
             default: {
                 const bool blue = spec.half == Half::Blue;
-                const Color fa = blue ? rgba(45, 128, 255, .5f) : rgba(255, 42, 85, .5f), fb = blue ? rgba(20, 82, 214, .4f) : rgba(160, 12, 45, .4f);
+                const Color fa = blue ? rgba(45, 128, 255, .5f) : rgba(255, 42, 85, .5f),
+                            fb = blue ? rgba(20, 82, 214, .4f) : rgba(160, 12, 45, .4f);
                 fill = grad(mix(rgba(8, 10, 18, .55f), fa, f), mix(rgba(8, 10, 18, .55f), fb, f));
                 border = mix(rgba(255, 255, 255, .26f), rgb(0xffffff), f);
                 break;
@@ -1470,7 +1561,8 @@ bool Readout::animating(double now) const {
     return now - changed_ < std::max(theme::motion::kReadoutIn, theme::motion::kReadoutOut);
 }
 
-void Readout::build(Ui& ui, const std::string& id, const Box& box, const std::function<void(const std::string&)>& content) {
+void Readout::build(Ui& ui, const std::string& id, const Box& box,
+                    const std::function<void(const std::string&)>& content) {
     Box b = box;
     b.layout = Layout::Stack;
     b.align = Align::Stretch;
@@ -1499,7 +1591,8 @@ void Readout::build(Ui& ui, const std::string& id, const Box& box, const std::fu
     content(key_);
 }
 
-// ---- dialog band ------------------------------------------------------------------------------------------------------
+// ---- dialog band
+// ------------------------------------------------------------------------------------------------------
 
 BandLayout band_layout(Vec2 size, float top, float height, float share) {
     BandLayout l;
@@ -1540,8 +1633,10 @@ Ui::Guard dialog_band(Ui& ui, const std::string& id, const BandLayout& layout) {
         cv.fill_rect(bb, rgb(0x07080e, .97f));
         const Seam seam{theme::split::kDialog * size.x, (theme::kTopBand + size.y - theme::kBottomBand) / 2, kSeamTan};
         const float y0 = bb.y + 8, y1 = bb.bottom() - 8, pl = theme::kPlateSide, pr = size.x - theme::kPlateSide;
-        const Vec2 cp[4] = {{pl, y0}, {seam.x_at(y0) - theme::kGutter, y0}, {seam.x_at(y1) - theme::kGutter, y1}, {pl, y1}};
-        const Vec2 bp[4] = {{seam.x_at(y0) + theme::kGutter, y0}, {pr, y0}, {pr, y1}, {seam.x_at(y1) + theme::kGutter, y1}};
+        const Vec2 cp[4] = {
+            {pl, y0}, {seam.x_at(y0) - theme::kGutter, y0}, {seam.x_at(y1) - theme::kGutter, y1}, {pl, y1}};
+        const Vec2 bp[4] = {
+            {seam.x_at(y0) + theme::kGutter, y0}, {pr, y0}, {pr, y1}, {seam.x_at(y1) + theme::kGutter, y1}};
         cv.fill(cp, Gradient::linear({pl, 0}, {seam.x_at(y0), 0}, rgb(0x3a0714, .9f), rgb(0x6e0c28, .8f)));
         cv.stroke(cp, 1.2f, rgba(255, 110, 140, .55f));
         cv.fill(bp, Gradient::linear({seam.x_at(y1), 0}, {pr, 0}, rgb(0x0c2a78, .8f), rgb(0x06143c, .9f)));
@@ -1565,7 +1660,8 @@ Ui::Guard dialog_band(Ui& ui, const std::string& id, const BandLayout& layout) {
     return ui.modal(id, b, paint);
 }
 
-// ---- log view -----------------------------------------------------------------------------------------------------------
+// ---- log view
+// -----------------------------------------------------------------------------------------------------------
 
 void LogView::append(std::string text, LogKind kind) {
     lines_.push_back({std::move(text), kind});
@@ -1624,7 +1720,7 @@ void LogView::paint(PaintContext& ctx, const Rect& content, float view_top, floa
             const LogLine& l = lines_[i];
             const Color col = l.kind == LogKind::Command ? c::kCyan : l.kind == LogKind::Error ? rgb(0xff8a99)
                               : l.kind == LogKind::Status ? rgb(0xffffff) : rgb(0xb3bccd);
-            ctx.text.draw_wrapped(ctx.canvas, tx::kLog, l.text, {content.x, y, content.w, h}, DrawText{col});
+            ctx.text.draw_wrapped(ctx.canvas, tx::kLog, l.text, {content.x, y, content.w, h}, TextPaint{col});
         }
         y += h;
         if (y > view_bottom) break;
@@ -1643,8 +1739,11 @@ void log_view(Ui& ui, const std::string& id, LogView& log, const Box& box) {
     f.pad = 4;
     auto bg = [](PaintContext& ctx) {
         ctx.canvas.fill_rect(ctx.rect, rgba(1, 3, 10, .92f));
-        ctx.canvas.stroke(Quad{{{ctx.rect.x, ctx.rect.y}, {ctx.rect.right(), ctx.rect.y}, {ctx.rect.right(), ctx.rect.bottom()}, {ctx.rect.x, ctx.rect.bottom()}}}, 1,
-                          rgba(160, 200, 255, .18f));
+        ctx.canvas.stroke(Quad{{{ctx.rect.x, ctx.rect.y},
+                                {ctx.rect.right(), ctx.rect.y},
+                                {ctx.rect.right(), ctx.rect.bottom()},
+                                {ctx.rect.x, ctx.rect.bottom()}}},
+                          1, rgba(160, 200, 255, .18f));
         ctx.canvas.fill_rect({ctx.rect.x, ctx.rect.y, 3, ctx.rect.h}, c::kBlue);
     };
     auto g = ui.open(id, b, bg, &f);
