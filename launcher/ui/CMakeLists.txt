@@ -88,9 +88,11 @@ if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
     find_program(TTT2_WINE wine)
     if(TTT2_WINE AND WIN32)
         set_property(TARGET launcher_smoke PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
-        # (never on this PC's screen: no display for Wine; the frame is drawn offscreen anyway)
+        # (Never on this PC's screen: no display for Wine, the frame is drawn offscreen anyway; and no menu entries
+        # or file types of a Wine prefix it may make in the desktop's menus: winemenubuilder off.)
         set_tests_properties(launcher_smoke_version launcher_smoke_screenshot PROPERTIES
-            ENVIRONMENT_MODIFICATION "WINEDEBUG=set:-all;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
+            ENVIRONMENT_MODIFICATION
+            "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
     else()
         set_tests_properties(launcher_smoke_version launcher_smoke_screenshot PROPERTIES DISABLED ON)
     endif()

@@ -342,7 +342,7 @@ int check(const SDL_Surface* image) {
             for (int x = std::max(0, x0); x < std::min(image->w, x1); ++x) n += wanted(pixel(x, y)) ? 1 : 0;
         return n;
     };
-    auto near = [](const unsigned char* p, Color c, int tolerance) {
+    auto close_to = [](const unsigned char* p, Color c, int tolerance) {
         return std::abs(p[0] - static_cast<int>(std::lround(c.r * 255))) <= tolerance &&
                std::abs(p[1] - static_cast<int>(std::lround(c.g * 255))) <= tolerance &&
                std::abs(p[2] - static_cast<int>(std::lround(c.b * 255))) <= tolerance;
@@ -362,12 +362,12 @@ int check(const SDL_Surface* image) {
                                            return p[0] > 170 && p[1] > 170 && p[2] > 170;
                                        }),
          400},
-        {"parallelogram fill", count(120, 330, 400, 370, [&](const unsigned char* p) { return near(p, kCrimson, 2); }),
+        {"parallelogram fill", count(120, 330, 400, 370, [&](const unsigned char* p) { return close_to(p, kCrimson, 2); }),
          6000},
         // Its slanted edges: pixels between the background's colour and the fill's (one per row and edge at least).
         {"anti-aliased edges",
          count(20, 302, 70, 398, [&](const unsigned char* p) {
-             return !near(p, kCrimson, 6) && !near(p, kBackground, 6) && p[0] > 20 && p[0] < 200;
+             return !close_to(p, kCrimson, 6) && !close_to(p, kBackground, 6) && p[0] > 20 && p[0] < 200;
          }),
          80},
     };
