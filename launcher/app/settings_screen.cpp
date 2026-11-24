@@ -276,7 +276,29 @@ void App::settings_keys_crimson(const m::SettingsView& sv, const std::string& up
         note(ui, "st/knote", l.tone == m::Tone::kError ? Tone::Bad : Tone::Warn, l.text,
              fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect), "stroke:warn");
     const char* columns[3][2] = {{"D-pad", "Left stick"}, {"Face buttons", "System"}, {"Shoulders", nullptr}};
-    const float weights[3] = {1.1f, 1.3f, 1.f};
+    auto heading = [](const char* g) { return std::string(g) == "Shoulders" ? std::string("L / R / ZL / ZR") : g; };
+    // (The room shared in proportion to what each column needs, its headings and its rows with their whole names:
+    // a narrow window or a large Text size never puts one heading over the next; a heading still too wide closes up
+    // its letters.)
+    auto spec_of = [](const m::KeyRow& k) {
+        KeyRowSpec s;
+        s.icon = "icons/ttt2-input-" + k.input + ".svg";
+        s.name = k.name;
+        s.key = k.keycap.checked ? "…" : k.keycap.label;
+        return s;
+    };
+    float weights[3] = {1, 1, 1};
+    for (int c = 0; c < 3; ++c) {
+        float need = 1;
+        for (const char* g : columns[c]) {
+            if (!g) continue;
+            need = std::max(need, 32 + ui.text().width(tx::kLabel, heading(g)) + 12);
+            for (const m::KeyGroup& kg : sv.groups)
+                if (kg.title == g)
+                    for (const m::KeyRow& k : kg.rows) need = std::max(need, key_row_width(ui.text(), spec_of(k)));
+        }
+        weights[c] = need;
+    }
     auto row = ui.open("st/keys", fit(Box{.layout = Layout::Row, .gap = 14}, SeamFit::CrimsonRect));
     bool first = true;
     const double t = ui.now();
@@ -288,14 +310,11 @@ void App::settings_keys_crimson(const m::SettingsView& sv, const std::string& up
             for (const m::KeyGroup& g : sv.groups)
                 if (g.title == gname) group = &g;
             if (!group) continue;
-            const std::string label = std::string(gname) == "Shoulders" ? "L / R / ZL / ZR" : gname;
+            const std::string label = heading(gname);
             section_label(ui, std::string("st/kl-") + gname, label, Half::Crimson, {},
                           Box{.margin = {0, 0, 0, 6}});
             for (const m::KeyRow& k : group->rows) {
-                KeyRowSpec s;
-                s.icon = "icons/ttt2-input-" + k.input + ".svg";
-                s.name = k.name;
-                s.key = k.keycap.checked ? "…" : k.keycap.label;
+                KeyRowSpec s = spec_of(k);
                 s.capturing = k.keycap.checked;
                 s.swapped = k.note_tone == m::Tone::kOk && !k.note.empty();
                 s.flash_until = k.flash ? t + .4 : 0;

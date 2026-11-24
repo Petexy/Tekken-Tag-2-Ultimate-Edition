@@ -25,7 +25,13 @@ bool running_under_gamescope() {
 float ui_scale(Vec2 pixels, float display, float user_text_scale) {
     if (display <= 0) display = 1;
     const float stage = std::min(pixels.x / display / theme::kStageWidth, pixels.y / display / theme::kStageHeight);
-    return display * std::clamp(stage, 1.f, 2.f) * std::max(.5f, user_text_scale);
+    const float base = display * std::clamp(stage, 1.f, 2.f);
+    const float want = base * std::max(.5f, user_text_scale);
+    if (user_text_scale <= 1) return want;
+    // (Larger text leaves fewer points for the layout: never fewer than the Steam Deck's at 150 %, which every
+    // screen is laid out for. A smaller window keeps the text that much smaller, never smaller than without it.)
+    const float most = std::min(pixels.x / theme::kTextLayoutWidth, pixels.y / theme::kTextLayoutHeight);
+    return std::max(base, std::min(want, most));
 }
 
 Window::~Window() {

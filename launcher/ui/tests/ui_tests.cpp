@@ -946,6 +946,15 @@ TEST(scale_follows_window_size) {
     CHECK_NEAR(ui_scale({3840, 2160}, 1), 2.f, .001f);  // at most twice
     CHECK_NEAR(ui_scale({2560, 1600}, 2), 2.f, .001f);  // a 2x display at the stage's size
     CHECK_NEAR(ui_scale({1280, 800}, 1, 1.25f), 1.25f, .001f);
+    // Text size: the layout never gets smaller than the Steam Deck's 1280x800 at 150 % (853x533 points).
+    CHECK_NEAR(ui_scale({1280, 800}, 1, 1.5f), 1.5f, .001f);
+    CHECK_NEAR(ui_scale({960, 640}, 1, 1.5f), 1.125f, .001f);   // 853x569 points: as large as it can be
+    CHECK_NEAR(ui_scale({960, 640}, 1, 1.25f), 1.125f, .001f);
+    CHECK_NEAR(ui_scale({960, 600}, 1, 1.5f), 1.125f, .001f);
+    CHECK_NEAR(ui_scale({2560, 1600}, 1, 1.5f), 3.f, .001f);     // 853x533 points again
+    CHECK_NEAR(ui_scale({1920, 1080}, 1, 1.5f), 2.025f, .001f);  // 948x533
+    CHECK_NEAR(ui_scale({1920, 1200}, 1.5f, 1.5f), 2.25f, .001f);
+    CHECK_NEAR(ui_scale({800, 500}, 1, 1.5f), 1.f, .001f);       // (never smaller than without a Text size)
 }
 
 }  // namespace

@@ -446,6 +446,25 @@ void runs(Ui& ui, const std::string& id, const TextStyle& style, std::vector<Run
         });
 }
 
+namespace {
+// A section label in `room` points (FEEDBACK / REVIEW2 #9: a large Text size or a narrow column): its letters closer
+// together (down to a third of their spacing), then without its bar, then cut with an ellipsis; never over the
+// neighbour's. `lead`: where the label starts (32 with the bar, 0 without).
+struct FittedLabel {
+    TextStyle style;
+    std::string text;
+    float lead;
+};
+FittedLabel fit_label(TextEngine& te, const std::string& label, float room) {
+    FittedLabel f{tx::kLabel, label, 32};
+    while (f.lead + te.width(f.style, label) > room && f.style.tracking > tx::kLabel.tracking / 3 + .001f)
+        f.style.tracking = std::max(tx::kLabel.tracking / 3, f.style.tracking - .04f);
+    if (f.lead + te.width(f.style, label) > room) f.lead = 0;
+    if (te.width(f.style, label) > room) f.text = te.ellipsize(f.style, label, std::max(0.f, room));
+    return f;
+}
+}  // namespace
+
 void section_label(Ui& ui, const std::string& id, const std::string& label, Half half, const std::string& right,
                    const Box& box) {
     Box b = with_height(box, 20);
@@ -462,15 +481,18 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
             const float cy = r.y + r.h / 2;
+            const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+            const FittedLabel fl = fit_label(ctx.text, label, r.w - (right.empty() ? 0 : rw + 10));
             if (mirrored) {
                 // (Mirrored: the hairline from the left, the label, the bar at the right end; `right` first.)
                 const Rect bar{r.right() - 22, cy - 2, 22, 4};
-                cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
-                cv.fill(skewed(bar, kSeamTan), col);
-                const float w = ctx.text.width(tx::kLabel, label);
-                const float x = r.right() - 32 - w;
-                ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
-                const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+                if (fl.lead > 0) {
+                    cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
+                    cv.fill(skewed(bar, kSeamTan), col);
+                }
+                const float w = ctx.text.width(fl.style, fl.text);
+                const float x = r.right() - fl.lead - w;
+                ctx.text.draw(cv, fl.style, fl.text, {x, centred_y(ctx.text, fl.style, r)}, col);
                 if (!right.empty())
                     ctx.text.draw(cv, tx::kLabelEm, right, {r.x, centred_y(ctx.text, tx::kLabelEm, r)}, rgb(0xe9edf5));
                 const float l0 = r.x + (right.empty() ? 0 : rw + 10), l1 = x - 10;
@@ -480,11 +502,12 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
                 return;
             }
             const Rect bar{r.x, cy - 2, 22, 4};
-            cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
-            cv.fill(skewed(bar, kSeamTan), col);
-            const float x = r.x + 32;
-            const float w = ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
-            const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+            if (fl.lead > 0) {
+                cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
+                cv.fill(skewed(bar, kSeamTan), col);
+            }
+            const float x = r.x + fl.lead;
+            const float w = ctx.text.draw(cv, fl.style, fl.text, {x, centred_y(ctx.text, fl.style, r)}, col);
             const float l0 = x + w + 10, l1 = r.right() - (right.empty() ? 0 : rw + 10);
             if (l1 > l0)
                 cv.fill_rect({l0, cy - .5f, l1 - l0, 1},
@@ -858,21 +881,32 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             // Inner light along the top, shade along the bottom.
             cv.line(q.p[0] + Vec2{0, .5f}, q.p[1] + Vec2{0, .5f}, 1, rgba(255, 255, 255, .45f));
             cv.fill(sk_rect(r, {r.x, r.bottom() - 3, r.w, 3}), rgba(0, 0, 0, .25f));
-            // Content (upright): the word, two small lines, the Accept glyph when focused.
-            const TextStyle big =
-                spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
+            // Content (upright): the word, two small lines, the Accept glyph when focused. The glyph's place stays
+            // free, focused or not; a narrow slab (a small window, a large Text size) makes the word smaller (down to
+            // 60 %) before the small lines are cut.
+            TextStyle big = spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
+            const float pw = prompt_width(ctx.text, ctx.glyphs, Prompt::Accept);
+            const float end = r.right() - 30 - pw - 14;  // (where the glyph's place begins)
             const float bx = r.x + 40;
+            const float lines_w = std::max(ctx.text.width(tx::kSlabSmall, spec.line1),
+                                           ctx.text.width(tx::kSlabSmall, spec.line2));
+            const float least = big.size * .6f;
+            while (big.size > least && bx + ctx.text.width(big, spec.big) + 18 + lines_w > end)
+                big.size = std::max(least, big.size - 4);
             const float by = r.y + (r.h - ctx.text.line_height(big)) / 2;
             ctx.text.draw(cv, big, spec.big, {bx, by + 4}, rgba(0, 0, 0, .22f));
             const float bw = ctx.text.draw(cv, big, spec.big, {bx, by}, rgb(0xffffff));
             const float lh = ctx.text.line_height(tx::kSlabSmall);
             const float sx = bx + bw + 18, sy = r.y + r.h / 2 - lh - 2;
-            ctx.text.draw(cv, tx::kSlabSmall, spec.line1, {sx, sy}, rgba(255, 255, 255, .9f));
-            ctx.text.draw(cv, tx::kSlabSmall, spec.line2, {sx, sy + lh + 4}, rgba(255, 255, 255, .9f));
-            if (f > .01f) {
-                const float pw = prompt_width(ctx.text, ctx.glyphs, Prompt::Accept);
-                draw_prompt(cv, ctx.text, ctx.icons, ctx.glyphs, Prompt::Accept, r.right() - 30 - pw, r.y + r.h / 2, f);
+            const float room = end - sx;
+            for (int i = 0; i < 2 && room >= 40; ++i) {
+                const std::string& l = i == 0 ? spec.line1 : spec.line2;
+                const std::string shown =
+                    ctx.text.width(tx::kSlabSmall, l) > room ? ctx.text.ellipsize(tx::kSlabSmall, l, room) : l;
+                ctx.text.draw(cv, tx::kSlabSmall, shown, {sx, sy + i * (lh + 4)}, rgba(255, 255, 255, .9f));
             }
+            if (f > .01f)
+                draw_prompt(cv, ctx.text, ctx.icons, ctx.glyphs, Prompt::Accept, r.right() - 30 - pw, r.y + r.h / 2, f);
         },
         &focus);
 }
@@ -1255,17 +1289,17 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
     if (!one) prompt(ui, id + "/next", Prompt::SectionNext);
 }
 
+float key_row_width(TextEngine& te, const KeyRowSpec& spec) {
+    return 14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 + std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) +
+           12;
+}
+
 void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus, const Box& box) {
     Box b = with_height(box, m::kKeyRowHeight);
     if (zero(b.margin)) b.margin.bottom = 5;
     TextEngine& te = ui.text();
     ui.leaf(
-        id, b,
-        [&te, spec](float) {
-            return Vec2{14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 +
-                            std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) + 12,
-                        m::kKeyRowHeight};
-        },
+        id, b, [&te, spec](float) { return Vec2{key_row_width(te, spec), m::kKeyRowHeight}; },
         [spec](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
@@ -1283,8 +1317,10 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
             const float kw = std::max(44.f, ctx.text.width(tx::kKeyCap, spec.key) + 18);
             const Rect kc{r.right() - 12 - kw, cy - 13, kw, 26};
             const float x = r.x + 14 + 22 + 10;
-            ctx.text.draw(cv, tx::kKeyName, ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x),
-                          {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
+            // (A row too narrow for even a letter of its name shows the icon and the key only, no lone ellipsis.)
+            const std::string name = ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x);
+            if (name != "…" && name != "...")
+                ctx.text.draw(cv, tx::kKeyName, name, {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
             Color text_col = rgb(0xffffff);
             if (spec.capturing) {
                 const float pulse =

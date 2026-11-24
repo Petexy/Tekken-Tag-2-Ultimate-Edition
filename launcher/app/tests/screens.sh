@@ -12,6 +12,7 @@
 # - F4: a fighter tile's drill-in lock by keys, pad and pointer (the pointer crosses the locked tiles without
 #   taking the focus; a click on a tile unlocks onto it; the blue buttons take clicks);
 # - F3: the blue side shows the focused fighter only (no second fighter's name);
+# - the same walk with Text size 125 and 150 % at 1280x800 and 960x640;
 # - the Steam Controller's double reports (each button is the pad's AND a key Steam types, in either order) on a
 #   tile, Back in a drill-in and on a page, a dialog's opening: one action each;
 # - U4: choosing a key (a key, Esc, the 10 s countdown) and the Steam Controller's double report on a key row
@@ -99,6 +100,17 @@ for size in 1280x800 1920x1080 2560x1440; do
         run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$walk" -- --size "$size" --scale "$scale"
         clean "$h"
         [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 20 ] || fail "f5-$size-$scale: the walk stopped early"
+    done
+done
+# The same walk with a larger Text size (REVIEW2 #9) at the Steam Deck's 1280x800 and at 960x640: laid out for at
+# least the Deck's 1280x800 at 150 % (853x533 points, ui_scale's tests), every frame audited.
+for size in 1280x800 960x640; do
+    for text in 125 150; do
+        h=$(home "text-$size-$text")
+        printf 'text_size=%s\n' "$text" > "$h/.config/ttt2/launcher.ini"
+        run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$walk" -- --size "$size"
+        clean "$h"
+        [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 20 ] || fail "text-$size-$text: the walk stopped early"
     done
 done
 
