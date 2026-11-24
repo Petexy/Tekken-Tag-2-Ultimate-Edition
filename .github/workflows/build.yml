@@ -24,6 +24,7 @@ jobs:
           libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
           libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
           alsa-lib systemd-libs dbus mesa
+        # (gtk4: the GTK launcher, launcher/app, until its ttt2-launcher is the SDL program; then it goes.)
       - uses: actions/checkout@v6
       # (--launcher: SDL's source too, built into the new launcher's release programs)
       - run: python tools/setup_deps.py --launcher
@@ -48,16 +49,68 @@ jobs:
             -DTTT2_LAUNCHER_ONLY=ON -DTTT2_LAUNCHER_SDL=static
           cmake --build build-launcher --parallel 2
           ctest --test-dir build-launcher -L launcher --output-on-failure --timeout 180
-      - name: Windows release launcher
+  launcher:
+    # The launcher's release programs as they are released (ARCHITECTURE C11): the AppImage with SDL built in and its
+    # checks, the Windows .exe cross-built with MinGW-w64 and tested under Wine (no display) as old launchers check it
+    # and as a player starts it.
+    name: Launcher release programs (AppImage, Windows .exe under Wine)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        # (openssl-3: the kit's OpenSSL, which the players' systems have; lld, squashfs-tools: make_appimage.sh;
+        # wine: the .exe's tests)
+        run: >-
+          pacman -Syu --noconfirm --needed git cmake ninja clang lld gcc python
+          python-numpy python-pillow zstd zlib openssl openssl-3 vulkan-headers
+          vulkan-icd-loader sdl3 shaderc mingw-w64-gcc squashfs-tools wine curl
+          libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
+          libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
+          alsa-lib systemd-libs dbus mesa
+      - uses: actions/checkout@v6
+      - run: python tools/setup_deps.py --launcher
+      - name: AppImage of the new launcher
         # (Git refuses a repository another user owns: the checkout's, here in a container run as root.)
+        # (--ui sdl: until launcher/app's ttt2-launcher is the SDL program and sdl is the default)
+        shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
-      - name: Windows launcher program of the new interface (cross-built, SDL built in)
-        if: matrix.compiler == 'gcc'
-        run: >-
-          python launcher/windows/make_launcher_exe.py --cmake-target launcher_smoke
-          --build-dir build-launcher-windows build-linux/launcher_smoke-release.exe
+          mkdir -p build-release
+          launcher/appimage/make_appimage.sh --ui sdl build-release/Ultimate_Launcher-x86_64.AppImage build-appimage
+          launcher/appimage/release_checks.sh --launcher build-appimage/AppDir/usr/bin/ttt2-launcher
+          # What an old launcher asks the new AppImage before it switches to it (here without FUSE).
+          version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
+          said=$(env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS APPIMAGE_EXTRACT_AND_RUN=1 \
+            build-release/Ultimate_Launcher-x86_64.AppImage --version)
+          test "$said" = "ttt2-launcher $version"
+      - name: Windows program of the new launcher (cross-built, SDL built in), its tests under Wine
+        shell: bash
+        env:
+          WINEDEBUG: -all
+          WINEDLLOVERRIDES: winemenubuilder.exe=d
+        run: |
+          export WINEPREFIX="$RUNNER_TEMP/wineprefix"
+          unset DISPLAY WAYLAND_DISPLAY
+          wineboot --init && wineserver -w
+          cmake -S . -B build-launcher-windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw64.cmake -DTTT2_LAUNCHER_ONLY=ON -DTTT2_LAUNCHER_SDL=static
+          cmake --build build-launcher-windows --parallel 2
+          ctest --test-dir build-launcher-windows -L launcher --output-on-failure --timeout 900
+      - name: Windows release launcher, tested under Wine as old launchers check it and as a player starts it
+        shell: bash
+        env:
+          WINEDEBUG: -all
+          WINEDLLOVERRIDES: winemenubuilder.exe=d
+        run: |
+          export WINEPREFIX="$RUNNER_TEMP/wineprefix"
+          unset DISPLAY WAYLAND_DISPLAY
+          python launcher/windows/make_launcher_exe.py build-release/Ultimate_Launcher-x86_64.exe
+          version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
+          # (the program as built, without files: launcher/CMakeLists.txt's TTT2_LAUNCHER_RELEASE_TARGET; ONE LINE AT
+          # THE SWITCH: ttt2-launcher.exe once launcher/app's ttt2-launcher is the SDL program)
+          program=$(ls build-launcher-windows/launcher/launcher_standin.exe)
+          cd launcher/windows && python test_launcher_exe.py "../../$program" "$version" \
+            ../../build-release/Ultimate_Launcher-x86_64.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
@@ -84,12 +137,19 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Windows launcher window smoke test
+      - name: Source ZIP's first start builds the new launcher, which starts (smoke test)
+        # (main.py without --worker: build_launcher.py gets the pinned compiler, CMake, Ninja and SDL 3 as a
+        # player's PC does, builds the launcher, runs it with --ui-smoke-test and waits; its own build folder, so
+        # that its tools are the pinned ones, not this job's)
         shell: pwsh
-        run: >-
-          python launcher/windows/main.py --build-dir build-windows-ci
-          --config "$env:RUNNER_TEMP/ttt2-launcher-test.json"
-          --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
+        run: |
+          python launcher/windows/main.py --build-dir build-windows-bridge `
+            --config "$env:RUNNER_TEMP/ttt2-launcher-test.json" `
+            --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
+          if ($LASTEXITCODE -ne 0) { Get-Content local/launcher-build.log -Tail 40; exit 1 }
+          $said = Get-Content "$env:RUNNER_TEMP/ttt2-launcher-ui.json" -Raw | ConvertFrom-Json
+          # (the stand-in's answer, until launcher/app's ttt2-launcher is the program: a frame was drawn)
+          if ($said.program -eq 'launcher_standin' -and -not $said.frame) { $said; exit 1 }
       - name: Source ZIP first-run runtime check
         shell: cmd
         run: call "Start Ultimate Launcher.cmd" --check
