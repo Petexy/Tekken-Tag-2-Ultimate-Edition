@@ -1,6 +1,7 @@
 #include "app.h"
 #include "utf8_path.h"
 
+#include "game_art.h"
 #include "preflight.h"
 #include "rules.h"
 #include "uninstall.h"
@@ -561,6 +562,7 @@ void App::frame(double t) {
     }
     if (task_was_running_ && !running && !runner.last().cancelled)
         cue(runner.last().ok ? ttt2::app::Cue::TaskDone : ttt2::app::Cue::TaskFailed);
+    if (task_was_running_ && !running) ++portraits_generation_;
 #ifdef _WIN32
     // (What a task changed: the install, the build, the logs. Asked again after each one, C8.)
     if (task_was_running_ && !running) windows_state_again();
@@ -568,6 +570,7 @@ void App::frame(double t) {
     task_was_running_ = running;
     sync_log();
     view_ = model_->view();
+    update_portraits();
     if (drill_ && (drill_->screen != screen_ || picker_ || view_.dialog)) drill_.reset();
 
     // The seam first: this frame is laid out for the split as it is DRAWN now (springing), never for a target or
@@ -611,7 +614,7 @@ void App::frame(double t) {
     }
     if (o_.testing) test_audit(t);
     window_.set_drag_area({0, 0, in.size.x, theme::kTopBand},
-                          {ui_->rect("tabs"), ui_->rect("sound"), ui_->rect("quit"), ui_->rect("frame")});
+                          {ui_->rect("tabs"), ui_->rect("sound"), ui_->rect("frame")});
 
     const Vec2 px = window_.pixels();
     canvas_->begin(window_.scale(), static_cast<int>(px.x), static_cast<int>(px.y));
@@ -761,7 +764,7 @@ void App::top_band() {
     top.align = Align::Center;
     top.w = Size::fixed(size.x);
     top.h = Size::fixed(theme::kTopBand);
-    top.pad = {30, 0, 22, 0};
+    top.pad = {30, 0, 0, 0};  // (the caption buttons sit in the window's top-right corner)
     auto g = ui.open("top", top);
     brand(ui, "brand", "Ultimate", "Launcher");
     int to_update = 0;
@@ -778,10 +781,10 @@ void App::top_band() {
     text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
     icon_button(ui, "sound",
                 {sounds_ ? "stroke:sound-on" : "stroke:sound-off", sounds_ ? "Sound on" : "Sound off", sounds_},
-                Box{.margin = {0, 0, 10, 0}});
-    icon_button(ui, "quit", {"stroke:power", "Quit"});
-    caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), false,
-                    Box{.margin = {10, 0, 0, 0}});
+                Box{.margin = {0, 0, 18, 0}});
+    // Quit is the window's close button (X) in the top-right corner, where Windows puts it (user 2026-11-24).
+    caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), true,
+                    Box{.h = Size::fixed(theme::kTopBand)});
 }
 
 std::string App::focused_label() const {
@@ -1508,6 +1511,87 @@ void App::run_preflight(const fs::path& game, const fs::path& folder, uint64_t g
         });
     });
 #endif
+}
+
+void App::update_portraits() {
+    const auto& status = model_->facts().status;
+    std::string key;
+    if (status && !status->packs_folder.empty()) {
+        key = status->packs_folder;
+        for (const Fighter& f : status->fighters)
+            if (f.installed)
+                key += "|" + f.display + (f.update ? "+u" : "") + (f.outdated ? "+o" : "") + (f.newer ? "+n" : "");
+    }
+    key += "#" + std::to_string(portraits_generation_);
+    // (One read at a time: a change meanwhile is read when it ends.)
+    if (key == portraits_key_ || portraits_loading_) return;
+    portraits_key_ = key;
+    if (!status || status->packs_folder.empty()) {
+        for (auto& [name, art] : portraits_)
+            if (art.texture) textures_->destroy(art.texture);
+        portraits_.clear();
+        return;
+    }
+    struct Read {
+        std::string display;
+        PortraitArt art;
+        std::optional<game_art::Image> image;  // (none: the one shown already is current, or there is none)
+        bool keep = false;
+    };
+    std::map<std::string, std::pair<fs::file_time_type, std::uintmax_t>> have;
+    for (const auto& [name, art] : portraits_) have[name] = {art.mtime, art.size};
+    // Whose: the status's added fighters (display name, pack code: the code finds the pack, else the name).
+    std::vector<std::pair<std::string, std::string>> whose;
+    for (const Fighter& f : status->fighters)
+        if (f.installed) whose.emplace_back(f.display, f.code);
+    const fs::path folder = fs::path(std::u8string(status->packs_folder.begin(), status->packs_folder.end()));
+    portraits_loading_ = true;
+    ++working_;
+    spawn([this, folder, have, whose] {
+        std::vector<Read> out;
+        const std::vector<game_art::Pack> packs = game_art::packs(folder);
+        for (const auto& [display, code] : whose) {
+            const auto pack = std::find_if(packs.begin(), packs.end(), [&](const game_art::Pack& p) {
+                return code.empty() ? p.display == display : p.code == code;
+            });
+            if (pack == packs.end()) continue;
+            Read r;
+            r.display = display;
+            r.art.file = game_art::portrait_file(pack->dir);
+            std::error_code ec;
+            r.art.mtime = fs::last_write_time(r.art.file, ec);
+            if (ec) continue;
+            r.art.size = fs::file_size(r.art.file, ec);
+            if (ec) continue;
+            const auto it = have.find(display);
+            if (it != have.end() && it->second == std::make_pair(r.art.mtime, r.art.size)) r.keep = true;
+            else if (!(r.image = game_art::read_nut(r.art.file))) continue;
+            out.push_back(std::move(r));
+        }
+        post([this, out = std::move(out)]() mutable {
+            --working_;
+            portraits_loading_ = false;
+            std::map<std::string, PortraitArt> next;
+            for (Read& r : out) {
+                auto it = portraits_.find(r.display);
+                if (r.keep && it != portraits_.end()) {
+                    next[r.display] = it->second;
+                    it->second.texture = 0;
+                } else if (r.image) {
+                    r.art.texture = textures_->create(r.image->w, r.image->h, std::move(r.image->rgba));
+                    next[r.display] = r.art;
+                }
+            }
+            for (auto& [name, art] : portraits_)
+                if (art.texture) textures_->destroy(art.texture);
+            portraits_ = std::move(next);
+        });
+    });
+}
+
+TextureId App::portrait_of(const std::string& display) const {
+    const auto it = portraits_.find(display);
+    return it == portraits_.end() ? 0 : it->second.texture;
 }
 
 void App::run_uninstall(const fs::path& folder, UninstallOptions options) {

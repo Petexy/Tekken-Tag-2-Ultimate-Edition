@@ -34,7 +34,7 @@ void chroma_text(Canvas& canvas, TextEngine& text, const TextStyle& style, std::
 void icon(Canvas& canvas, Icons& icons, const std::string& name, const Rect& box, Color color);
 
 // The Tag Split focus highlight: give it to Ui::set_highlight.
-void paint_focus_highlight(Canvas& canvas, const Rect& r, bool skewed, float alpha, double now);
+void paint_focus_highlight(Canvas& canvas, const Rect& r, Shape shape, float alpha, double now);
 
 // ---- prompt glyphs ------------------------------------------------------------------------------------------------
 enum class Prompt : std::uint8_t {
@@ -141,6 +141,10 @@ struct TileSpec {
     TileTone tone = TileTone::Red;
     TileState state = TileState::Added;
     bool busy = false;
+    // The fighter's picture in place of its code (an added fighter's, from its pack): `portrait_uv` is the part of
+    // the texture the tile's upright rectangle shows (its slanted sides show a little more, at the same scale).
+    TextureId portrait = 0;
+    Rect portrait_uv{};
 };
 void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus focus = {});
 // A group heading with counts and action buttons (Activate with each button's id).

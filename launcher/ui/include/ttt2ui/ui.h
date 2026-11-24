@@ -85,6 +85,7 @@ struct Focus {
     bool disabled = false;   // still focusable (dimmed; Accept gives Refused with the item's id)
     int group = 0;           // e.g. -1 crimson list, 1 blue readout: up/down stay in their group
     bool skewed = true;      // the highlight's shape
+    bool straight_left = false;  // ... with an upright left edge (crimson lists: Shape::StraightLeft)
     float pad = theme::metric::kFocusPad;
     bool is_default = false; // focused when nothing else is
     bool adjust = false;     // Left/Right give Change -1/+1 instead of moving (selectors)
@@ -180,7 +181,7 @@ struct FrameInput {
     std::optional<double> ambient;
 };
 
-using HighlightFn = std::function<void(Canvas&, const Rect& r, bool skewed, float alpha, double now)>;
+using HighlightFn = std::function<void(Canvas&, const Rect& r, Shape shape, float alpha, double now)>;
 
 class Ui {
 public:
@@ -352,7 +353,7 @@ private:
     std::string highlight_container_ = "\x01";
     Rect highlight_screen_{};
     float highlight_alpha_ = 0;
-    bool highlight_skewed_ = true;
+    Shape highlight_shape_ = Shape::Skewed;
     int press_node_ = -1;
     int drag_scroller_ = -1;
     std::string anchor_id_;

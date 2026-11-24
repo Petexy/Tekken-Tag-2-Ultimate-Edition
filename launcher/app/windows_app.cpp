@@ -156,7 +156,7 @@ void App::ready_frame(double t) {
     ready_declare();
     ui_->end();
     const std::vector<Event> events = ui_->take_events();
-    window_.set_drag_area({0, 0, in.size.x, theme::kTopBand}, {ui_->rect("quit")});
+    window_.set_drag_area({0, 0, in.size.x, theme::kTopBand}, {ui_->rect("frame")});
     const Vec2 px = window_.pixels();
     canvas_->begin(window_.scale(), static_cast<int>(px.x), static_cast<int>(px.y));
     SDL_SetRenderDrawColor(window_.renderer(), 3, 3, 6, 255);
@@ -173,7 +173,9 @@ void App::ready_frame(double t) {
     first_ = false;
     for (const Event& e : events) {
         const bool accept = e.kind == EventKind::Activate;
-        if (accept && (e.id == "ready:quit" || e.id == "quit")) quit_ = true;
+        if (accept && (e.id == "ready:quit" || e.id == "quit" || e.id == "frame/close")) quit_ = true;
+        else if (accept && e.id == "frame/min") window_.minimise();
+        else if (accept && e.id == "frame/full") window_.toggle_fullscreen();
         else if (accept && e.id == "ready:retry") ready_->retry(now());
         else if (accept && e.id == "ready:log") {
             std::string error;
@@ -196,14 +198,15 @@ void App::ready_declare() {
         top.align = Align::Center;
         top.w = Size::fixed(size.x);
         top.h = Size::fixed(theme::kTopBand);
-        top.pad = {30, 0, 22, 0};
+        top.pad = {30, 0, 0, 0};
         auto g = ui.open("top", top);
         brand(ui, "brand", "Ultimate", "Launcher");
         ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
         TextSpec version{std::string("Launcher ") + TTT2_LAUNCHER_VERSION, tx::kVersion, c::kFaint};
         version.drop = true;
-        text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
-        icon_button(ui, "quit", {"stroke:power", "Quit"});
+        text(ui, "version", version, Box{.margin = {0, 0, 18, 0}, .shrink_order = 3});
+        caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(),
+                        true, Box{.h = Size::fixed(theme::kTopBand)});
     }
     const float sh = stage_->share_now();
     const Seam seam = stage_->layout_seam(sh);

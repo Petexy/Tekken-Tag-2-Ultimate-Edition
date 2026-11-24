@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace ttt2::ui {
@@ -106,6 +107,38 @@ Color Gradient::at(Vec2 p) const {
 Quad skewed(const Rect& r, float tan) {
     const float d = r.h / 2 * tan;
     return {{{r.x + d, r.y}, {r.x + r.w + d, r.y}, {r.x + r.w - d, r.y + r.h}, {r.x - d, r.y + r.h}}};
+}
+
+Quad straight_left(const Rect& r, float tan) {
+    const float d = r.h / 2 * tan;
+    return {{{r.x, r.y}, {r.x + r.w + d, r.y}, {r.x + r.w - d, r.y + r.h}, {r.x, r.y + r.h}}};
+}
+
+Quad shaped(const Rect& r, Shape shape, float tan) {
+    switch (shape) {
+        case Shape::Rect: return skewed(r, 0);
+        case Shape::Skewed: return skewed(r, tan);
+        case Shape::StraightLeft: return straight_left(r, tan);
+    }
+    return skewed(r, tan);
+}
+
+Vec2 shaped_point(const Rect& box, Vec2 p, Shape shape, float tan) {
+    const float dx = (box.y + box.h / 2 - p.y) * tan;  // the right edge's offset at this height
+    switch (shape) {
+        case Shape::Rect: return p;
+        case Shape::Skewed: return {p.x + dx, p.y};
+        case Shape::StraightLeft:
+            // Left edge fixed, right edge moved by dx, everything between in proportion.
+            return {box.w > 0 ? p.x + (p.x - box.x) / box.w * dx : p.x, p.y};
+    }
+    return p;
+}
+
+Quad shaped_part(const Rect& box, const Rect& part, Shape shape, float tan) {
+    return {{shaped_point(box, {part.x, part.y}, shape, tan), shaped_point(box, {part.right(), part.y}, shape, tan),
+             shaped_point(box, {part.right(), part.bottom()}, shape, tan),
+             shaped_point(box, {part.x, part.bottom()}, shape, tan)}};
 }
 
 Canvas::Canvas(SDL_Renderer* renderer, TextureRegistry& textures) : renderer_(renderer), textures_(textures) {}
@@ -411,6 +444,68 @@ void Canvas::textured(TextureId texture, std::span<const Vec2> points, std::span
     const int base = static_cast<int>(xy_.size() / 2);
     for (std::size_t i = 0; i < points.size(); ++i) add_vertex(to_pixels(points[i]), tint, uvs[i]);
     for (int i = 1; i + 1 < static_cast<int>(points.size()); ++i) tri(base, base + i, base + i + 1);
+}
+
+void Canvas::picture(TextureId texture, const Rect& dst, const Rect& uv, std::span<const Vec2> shape,
+                     const std::function<float(Vec2)>& alpha, Color tint, int cells) {
+    if (!texture || shape.size() < 3 || dst.w <= 0 || dst.h <= 0) return;
+    cells = std::clamp(cells, 1, 64);
+    // The shape's winding: inside is to the left of each edge for one, to the right for the other.
+    float area = 0;
+    for (std::size_t i = 0; i < shape.size(); ++i) {
+        const Vec2 a = shape[i], b = shape[(i + 1) % shape.size()];
+        area += a.x * b.y - b.x * a.y;
+    }
+    const float side = area >= 0 ? 1.f : -1.f;
+    std::vector<Vec2> poly, next;
+    use(texture);
+    for (int j = 0; j < cells; ++j)
+        for (int i = 0; i < cells; ++i) {
+            const float x0 = dst.x + dst.w * static_cast<float>(i) / static_cast<float>(cells),
+                        x1 = dst.x + dst.w * static_cast<float>(i + 1) / static_cast<float>(cells),
+                        y0 = dst.y + dst.h * static_cast<float>(j) / static_cast<float>(cells),
+                        y1 = dst.y + dst.h * static_cast<float>(j + 1) / static_cast<float>(cells);
+            poly = {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
+            // (Sutherland-Hodgman: the cell cut by each of the shape's edges.)
+            for (std::size_t e = 0; e < shape.size() && poly.size() >= 3; ++e) {
+                const Vec2 a = shape[e], b = shape[(e + 1) % shape.size()];
+                const auto in = [&](Vec2 p) { return side * ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) >= 0; };
+                next.clear();
+                for (std::size_t k = 0; k < poly.size(); ++k) {
+                    const Vec2 p = poly[k], q = poly[(k + 1) % poly.size()];
+                    const bool ip = in(p), iq = in(q);
+                    if (ip) next.push_back(p);
+                    if (ip != iq) {
+                        const float dp = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x),
+                                    dq = (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+                        const float t = dp / (dp - dq);
+                        next.push_back({p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t});
+                    }
+                }
+                poly.swap(next);
+            }
+            if (poly.size() < 3) continue;
+            // Opacity: the grid corners' values, bilinear inside the cell (so a fade has no steps).
+            const float a00 = alpha({x0, y0}), a10 = alpha({x1, y0}), a01 = alpha({x0, y1}), a11 = alpha({x1, y1});
+            if (a00 <= 0 && a10 <= 0 && a01 <= 0 && a11 <= 0) continue;
+            // A fan around the cell's centre: never two triangles making an upright rectangle, which SDL's software
+            // renderer copies as a rounded rectangle (1-pixel gaps between the cells).
+            Vec2 mid{};
+            for (const Vec2& p : poly) mid = {mid.x + p.x / static_cast<float>(poly.size()), mid.y + p.y / static_cast<float>(poly.size())};
+            const int base = static_cast<int>(xy_.size() / 2);
+            const auto vertex = [&](Vec2 p) {
+                const float u = (p.x - x0) / (x1 - x0), v = (p.y - y0) / (y1 - y0);
+                const float a = (a00 * (1 - u) + a10 * u) * (1 - v) + (a01 * (1 - u) + a11 * u) * v;
+                Color c = tint;
+                c.a *= std::clamp(a, 0.f, 1.f);
+                add_vertex(to_pixels(p), c,
+                           {uv.x + (p.x - dst.x) / dst.w * uv.w, uv.y + (p.y - dst.y) / dst.h * uv.h});
+            };
+            vertex(mid);
+            for (const Vec2& p : poly) vertex(p);
+            const int n = static_cast<int>(poly.size());
+            for (int k = 0; k < n; ++k) tri(base, base + 1 + k, base + 1 + (k + 1) % n);
+        }
 }
 
 void Canvas::glyph_quad(TextureId texture, float x0, float y0, float x1, float y1, float u0, float v0, float u1,

@@ -158,7 +158,7 @@ public:
             top.align = Align::Center;
             top.w = Size::fixed(size.x);
             top.h = Size::fixed(theme::kTopBand);
-            top.pad = {30, 0, 22, 0};
+            top.pad = {30, 0, 0, 0};  // (the caption buttons sit in the window's top-right corner)
             auto g = ui.open("top", top);
             brand(ui, "brand", "Ultimate", "Launcher");
             const int ups = static_cast<int>(std::count_if(
@@ -173,10 +173,9 @@ public:
             text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
             icon_button(ui, "sound",
                         {sound_ ? "stroke:sound-on" : "stroke:sound-off", sound_ ? "Sound on" : "Sound off", sound_},
-                        Box{.margin = {0, 0, 10, 0}});
-            icon_button(ui, "quit", {"stroke:power", "Quit"});
+                        Box{.margin = {0, 0, 18, 0}});
             caption_buttons(ui, "frame", window.can_minimise(), window.can_toggle_fullscreen(), window.fullscreen(),
-                            false, Box{.margin = {10, 0, 0, 0}});
+                            true, Box{.h = Size::fixed(theme::kTopBand)});
         }
         // The screen's halves.
         const Seam seam = stage.layout_seam(stage.share_now());
@@ -1093,7 +1092,7 @@ int run(const std::vector<std::string>& args) {
         ui.end();
         const std::vector<Event> events = ui.take_events();
         window.set_drag_area({0, 0, in.size.x, theme::kTopBand},
-                             {ui.rect("tabs"), ui.rect("sound"), ui.rect("quit"), ui.rect("frame")});
+                             {ui.rect("tabs"), ui.rect("sound"), ui.rect("frame")});
 
         const Vec2 px = window.pixels();
         canvas.begin(window.scale(), static_cast<int>(px.x), static_cast<int>(px.y));

@@ -252,7 +252,7 @@ void App::home_installed(const Box& crimson, const Box& blue) {
             s.mid = s.big.size() > 6;
             s.disabled = !primary->enabled;
             slab(ui, primary->id, s, crimson_focus(true, !primary->enabled),
-                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+                 fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
         menu_row(ui, "fighters",
@@ -327,7 +327,7 @@ void App::home_setup(const Box& crimson, const Box& blue) {
             s.mid = true;
             s.disabled = !setup->enabled;
             slab(ui, "setup", s, crimson_focus(true, !setup->enabled),
-                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+                 fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
         menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
@@ -425,7 +425,7 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
             s.mid = true;
             s.disabled = !install->enabled;
             slab(ui, "install", s, crimson_focus(true, !install->enabled),
-                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+                 fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
         MenuRowSpec one;
@@ -483,7 +483,7 @@ void App::home_unfinished(const Box& crimson, const Box& blue) {
             s.mid = true;
             s.disabled = !r->enabled;
             slab(ui, "resume", s, crimson_focus(true, !r->enabled),
-                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+                 fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
         menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));

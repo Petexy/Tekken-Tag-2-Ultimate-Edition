@@ -4,6 +4,9 @@
 // order is kept.
 #pragma once
 
+#include <cstdint>
+#include <functional>
+
 #include <initializer_list>
 #include <span>
 #include <vector>
@@ -39,6 +42,15 @@ struct Quad {
     Vec2 p[4];
 };
 Quad skewed(const Rect& r, float tan);
+// The crimson lists' shape: the left edge upright (it lines up with the window's straight left edge), the right edge
+// slanted like skewed()'s (it follows the seam).
+Quad straight_left(const Rect& r, float tan);
+// A shape by kind: Rect (upright), Skewed (both sides slanted), StraightLeft (see straight_left).
+enum class Shape : std::uint8_t { Rect, Skewed, StraightLeft };
+Quad shaped(const Rect& r, Shape shape, float tan);
+// A point of `box`'s upright coordinates moved onto its shape (parts drawn inside a shaped box: streaks, accents).
+Vec2 shaped_point(const Rect& box, Vec2 p, Shape shape, float tan);
+Quad shaped_part(const Rect& box, const Rect& part, Shape shape, float tan);
 // x of a skewed box's left/right edge at height y.
 inline float skew_dx(const Rect& r, float y, float tan) { return (r.y + r.h / 2 - y) * tan; }
 
@@ -90,6 +102,11 @@ public:
     // A texture through a convex polygon with texture coordinates per point (the wipe).
     void textured(TextureId texture, std::span<const Vec2> points, std::span<const Vec2> uvs,
                   Color tint = {1, 1, 1, 1});
+    // A picture: the texture's `uv` part laid over `dst`, cut to the convex polygon `shape` (either winding), its
+    // opacity at each point alpha(p) (exact at the corners of a grid of `cells` x `cells` over `dst`, linear
+    // between): soft edges and fades (the added fighters' portraits).
+    void picture(TextureId texture, const Rect& dst, const Rect& uv, std::span<const Vec2> shape,
+                 const std::function<float(Vec2)>& alpha, Color tint = {1, 1, 1, 1}, int cells = 8);
     // One glyph quad in PHYSICAL pixels (text engine), with x shifted by `shear` * (baseline - y) for slanted text.
     void glyph_quad(TextureId texture, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                     Color color, float shear = 0, float baseline = 0);
