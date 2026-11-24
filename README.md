@@ -771,6 +771,13 @@ built into the `ttt2` program). The port also links SDL3 (zlib), shaderc
 (Apache-2.0), the Vulkan loader (Apache-2.0), OpenSSL (Apache-2.0), zstd
 (BSD) and zlib.
 
+The launcher's new interface is made with SDL 3 (zlib; fetched by
+`tools/setup_deps.py --launcher` and built into its release programs),
+stb_truetype and stb_image_write (public domain or MIT), nanosvg (zlib) and
+the Barlow, Barlow Condensed and JetBrains Mono fonts (SIL Open Font License
+1.1), which are in `launcher/ui` with their licenses: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Acknowledgements
 
 - [Cemu](https://github.com/cemu-project/Cemu) and
