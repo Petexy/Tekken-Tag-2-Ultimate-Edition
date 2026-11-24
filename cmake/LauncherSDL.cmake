@@ -66,6 +66,13 @@ target_link_libraries(ttt2_launcher_sdl INTERFACE ttt2_launcher_glibc_floor)
 if(TTT2_LAUNCHER_SDL_MODE STREQUAL "system")
     target_link_libraries(ttt2_launcher_sdl INTERFACE SDL3::SDL3)
     message(STATUS "Launcher interface: the system's SDL ${SDL3_VERSION} (${SDL3_DIR})")
+    # (SDL's imported targets are seen only in the directory that found them and below it: the DLL's path is kept
+    # for programs made in other directories, launcher/standin's and launcher/app's.)
+    if(WIN32 AND TARGET SDL3::SDL3-shared)
+        get_target_property(dll SDL3::SDL3-shared LOCATION)
+        set_property(GLOBAL PROPERTY TTT2_LAUNCHER_SDL_DLL "${dll}")
+        unset(dll)
+    endif()
 else()
     include(ExternalProject)
     file(READ "${TTT2_REPO_ROOT}/dependencies.launcher.lock.json" lock)
@@ -162,6 +169,16 @@ else()
         # (Only what is used is recorded as needed: libraries such as libdl.so.2 only hold glibc's old names.)
         target_link_options(ttt2_launcher_sdl INTERFACE "LINKER:--as-needed")
         target_link_libraries(ttt2_launcher_sdl INTERFACE m ${CMAKE_DL_LIBS} Threads::Threads)
+        # Linked by LLD where there is one and no linker was chosen (as make_appimage.sh links): GNU ld copies the x86
+        # ISA level of the system's startup files into every program, x86-64-v4 on a system built for its own
+        # processor (CachyOS), and glibc then refuses to start it on any processor without AVX-512; LLD writes none
+        # (release_checks.sh checks it).
+        if(NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-fuse-ld=" AND NOT CMAKE_LINKER_TYPE)
+            find_program(TTT2_LD_LLD NAMES ld.lld)
+            if(TTT2_LD_LLD)
+                target_link_options(ttt2_launcher_sdl INTERFACE -fuse-ld=lld)
+            endif()
+        endif()
     endif()
     message(STATUS "Launcher interface: SDL ${revision} built here (static, ${TTT2_LAUNCHER_SDL_PREFIX})")
     unset(lock)
@@ -179,9 +196,10 @@ endif()
 # ttt2_launcher_sdl_runtime(<target>): with the system's SDL on Windows, SDL3.dll is copied beside <target> after it
 # is built (as the game does); elsewhere nothing is needed.
 function(ttt2_launcher_sdl_runtime target)
-    if(WIN32 AND TTT2_LAUNCHER_SDL_MODE STREQUAL "system" AND TARGET SDL3::SDL3-shared)
+    get_property(dll GLOBAL PROPERTY TTT2_LAUNCHER_SDL_DLL)
+    if(WIN32 AND TTT2_LAUNCHER_SDL_MODE STREQUAL "system" AND dll)
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${target}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" $<TARGET_FILE_DIR:${target}>
             VERBATIM)
     endif()
 endfunction()

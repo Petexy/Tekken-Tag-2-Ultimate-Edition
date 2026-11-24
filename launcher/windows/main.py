@@ -1,6 +1,6 @@
-"""Windows Ultimate Launcher. Run through ttt2-launcher.exe or Python 3 + Tk: the window
-(window.py), or with --worker one of its tasks, which the window runs as a program of its own, or with
---query one of the new launcher's questions (query.py: one JSON answer, no window)."""
+"""Windows Ultimate Launcher's Python side. With --worker one of the launcher's tasks, which it runs as a program of
+its own; with --query one of its questions (query.py: one JSON answer); else (the project ZIP's Start Ultimate
+Launcher.cmd, old test builds' .exe) the native launcher built from these files and started (build_launcher.py)."""
 from pathlib import Path
 import argparse
 import sys
@@ -50,14 +50,8 @@ def main():
             print('@error ' + str(error), flush=True)
             return 1
         return 0
-    if args.check:
-        import tkinter  # noqa: F401  (the window needs Tk)
-        print('Windows Ultimate Launcher: Python/Tk and backend available')
-        return 0
-    from window import Window
-    error = Window(args, settings).run()
-    if error: raise error
-    return 0
+    import build_launcher
+    return build_launcher.main(args, settings)
 
 if __name__ == '__main__':
     try: raise SystemExit(main())

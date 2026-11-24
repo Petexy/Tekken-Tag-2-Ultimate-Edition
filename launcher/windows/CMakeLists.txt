@@ -21,6 +21,9 @@ add_test(NAME windows_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRE
 add_test(NAME windows_launcher_update_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_self_update.py)
 add_test(NAME windows_launcher_keys_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_keys.py)
 add_test(NAME windows_launcher_query_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_query.py)
+# The source ZIP's way to the new launcher (main.py without --worker: build_launcher.py).
+add_test(NAME windows_build_launcher_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_build_launcher.py)
 # The release .exe made of this build's launcher: it says its version and
 # unpacks its files (as entry.cpp reads them).
 add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_launcher_exe.py
@@ -28,4 +31,5 @@ add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CU
 # The launcher's own checks are for its developers (CI runs them): a player's
 # setup leaves them out (ctest -LE launcher), as the launcher is already running.
 set_tests_properties(windows_launcher_backend_test windows_first_run_test windows_launcher_update_test
-    windows_launcher_keys_test windows_launcher_query_test windows_launcher_exe_test PROPERTIES LABELS launcher)
+    windows_launcher_keys_test windows_launcher_query_test windows_build_launcher_test windows_launcher_exe_test
+    PROPERTIES LABELS launcher)

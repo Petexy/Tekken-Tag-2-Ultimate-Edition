@@ -21,4 +21,23 @@ add_subdirectory(ui)
 if(NOT TTT2_LAUNCHER_ONLY OR WIN32)
     add_subdirectory(app)
 endif()
+# (The new launcher's stand-in in the release packaging until app/'s ttt2-launcher is the SDL program.)
+add_subdirectory(standin)
 add_subdirectory(appimage)
+
+# The Windows release program, as make_launcher_exe.py makes the release .exe of it (its DEFAULT_CMAKE_TARGET; one
+# line here too: launcher_standin until app/'s ttt2-launcher is the SDL program): windows/test_launcher_exe.py, its
+# version and its files appended as the release has them (only in a build without TTT2_LAUNCHER_PAYLOAD: one with it
+# has its files in it already). Built on Linux, through Wine when there is one (the start as a player's only with
+# WINEPREFIX set to a prefix of the tests' own).
+set(TTT2_LAUNCHER_RELEASE_TARGET launcher_standin)
+if(WIN32 AND TARGET ${TTT2_LAUNCHER_RELEASE_TARGET} AND NOT TTT2_LAUNCHER_PAYLOAD)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME launcher_release_exe_test
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/windows/test_launcher_exe.py
+                    $<TARGET_FILE:${TTT2_LAUNCHER_RELEASE_TARGET}> ${TTT2_LAUNCHER_VERSION}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/windows)
+        set_tests_properties(launcher_release_exe_test PROPERTIES LABELS launcher TIMEOUT 900)
+    endif()
+endif()
