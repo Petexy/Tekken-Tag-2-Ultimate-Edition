@@ -27,7 +27,9 @@ const char* const kUsage =
     "  --scale S          the interface's scale for --screenshot\n"
     "  --frames DIR       after the last test action: frames at --at MS,MS,... (default\n"
     "                     0,50,100,200,400,700) and once settled, each checked; then quits\n"
-    "  --version          prints its version (\"ttt2-launcher <ver>\")\n";
+    "  --version          prints its version (\"ttt2-launcher <ver>\")\n"
+    "  Tests: TTT2_LAUNCHER_TEST_CUES=1 prints each sound cue (\"@cue <name>\"); TTT2_LAUNCHER_TEST_WINDOW=real\n"
+    "  keeps a real window (a headless compositor) instead of drawing offscreen.\n";
 
 void wake() {
     // (A later start was handed over: the loop looks at it. Before SDL is up the event is dropped: the loop looks
@@ -105,6 +107,7 @@ int main(int argc, char** argv) {
     }
     o.testing = !o.screenshot.empty() || !o.frames.empty() || (actions && *actions);
     if (const char* c = std::getenv("TTT2_LAUNCHER_TEST_CUES"); c && *c && std::string(c) != "0") o.trace_cues = true;
+    if (const char* w = std::getenv("TTT2_LAUNCHER_TEST_WINDOW"); w && std::string(w) == "real") o.real_window = true;
     if (const char* shots = std::getenv("TTT2_LAUNCHER_TEST_SHOTS"); shots && *shots) {
         o.shots = shots;
         std::error_code ec;

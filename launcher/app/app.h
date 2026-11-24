@@ -48,6 +48,9 @@ struct Options {
     fs::path frames;
     std::vector<int> frames_at;
     bool trace_cues = false;        // TTT2_LAUNCHER_TEST_CUES: each sound cue as "@cue <name>" (Sound on or off)
+    // TTT2_LAUNCHER_TEST_WINDOW=real: tests in a real window (shown and presented: a headless compositor such as
+    // cage with WLR_BACKENDS=headless) instead of SDL's offscreen driver.
+    bool real_window = false;
     std::unique_ptr<SingleInstance> instance;
 };
 

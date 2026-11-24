@@ -71,7 +71,7 @@ bool App::open_window() {
     const int w = o_.width > 0 ? o_.width : 1280, h = o_.height > 0 ? o_.height : 800;
     wo.size = {static_cast<float>(w), static_cast<float>(h)};
     wo.min_size = o_.testing ? Vec2{320, 240} : Vec2{960, 600};
-    wo.offscreen = o_.testing;
+    wo.offscreen = o_.testing && !o_.real_window;
     wo.forced_scale = o_.scale;
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
@@ -307,7 +307,7 @@ void App::frame(double t) {
     ui_->paint(*canvas_);
     wipe_->end_frame(*canvas_, t);
     canvas_->flush();
-    if (!o_.testing) {
+    if (!o_.testing || o_.real_window) {
         SDL_RenderPresent(window_.renderer());
         if (first_) window_.show();
     }
