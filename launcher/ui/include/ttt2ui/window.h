@@ -35,6 +35,7 @@ struct WindowOptions {
     bool offscreen = false;          // tests / --screenshot: SDL's offscreen driver + the software renderer
     float forced_scale = 0;          // > 0: this UI scale (tests: --scale)
     bool start_fullscreen = false;
+    bool quiet = false;              // no message box when no window opens (a smoke test answers why itself)
 };
 
 // SteamDeck=1, SteamOS=1, XDG_CURRENT_DESKTOP=gamescope or GAMESCOPE_WAYLAND_DISPLAY set.

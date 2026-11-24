@@ -21,6 +21,7 @@
 #include "subprocess.h"
 #include "test_actions.h"
 
+#include "ttt2ui/sound.h"
 #include "ttt2ui/stage.h"
 #include "ttt2ui/widgets.h"
 #include "ttt2ui/window.h"
@@ -58,6 +59,18 @@ struct Options {
     bool real_window = false;
     std::unique_ptr<SingleInstance> instance;
     fs::path files; // Windows' release .exe: the folder its files are in (startup's Start::files)
+    // --ui-smoke-test FILE / TTT2_LAUNCHER_TEST_SMOKE: the first frame drawn, what was found written there as JSON
+    // (smoke_start: this start's facts, JSON members), then the end.
+    fs::path smoke;
+    std::string smoke_start;
+    bool offscreen = false; // TTT2_LAUNCHER_TEST_VIDEO=offscreen (Wine without a display)
+#ifdef _WIN32
+    WindowsArgs windows; // --files, --build-dir, --config (the source ZIP's bridge)
+#else
+    struct {
+        fs::path files, build, config; // (Windows' options: taken and left unused)
+    } windows;
+#endif
 };
 
 // Wakes the loop (an event of its own): posted work or a program's lines are waiting.
@@ -92,7 +105,8 @@ public:
     int run();
     // Work for the UI thread (from any thread: threads' ends, file dialogs); the loop wakes for it.
     void post(std::function<void()> work);
-    // What plays the sound cues (sound_cues.h); called on the UI thread, only while Sound is on.
+    // What plays the sound cues (sound_cues.h); called on the UI thread, only while Sound is on. Without one set
+    // before run(), the window's own player plays them (ui::Sounds: the game's menu sounds, else the launcher's).
     void set_sound_hook(ttt2::app::SoundHook hook) { sound_ = std::move(hook); }
 
 private:
@@ -108,6 +122,12 @@ private:
     void handle(std::vector<m::Effect> effects);
     void go(Screen to);
     void cue(ttt2::app::Cue c);
+    // ---- sounds (app.cpp): the one player behind the cues, kept in step with the Sound setting and the install
+    void start_sounds();
+    void sounds_tick();    // every frame: the setting, the game's folder when it changed, the player's tick
+    void finish_sounds();  // at the end: a Play sound still heard is let finish (the window hidden), then closed
+    static constexpr double kPlayHeard = 1.4; // seconds the Play sound is let finish when the launcher ends
+    fs::path sound_folder() const;
     // The drill-in lock (FEEDBACK F4): `opener` (a crimson item) gave the focus to `target` on the blue side; the
     // crimson half is locked (ui::Box::locked, the stage's veil) until Back or a click on it. drill_out: the focus
     // goes to `to` (a crimson item clicked), else back to the opener.
@@ -222,6 +242,10 @@ private:
     void test_watch_task();
     void test_audit(double now);    // (every frame of a test run: the Tag Split rule; "@audit failed ...")
     void test_capture(double now);  // (--frames)
+    // --ui-smoke-test: before this frame is shown, what it is (video driver, renderer, two pixels) or why there is
+    // none, written once; true once written (the run then ends).
+    bool smoke(const std::string& error = {});
+    bool smoke_done_ = false;
     // press:/pad:/steam:/click:/hover: test actions: input as the devices give it (through the router).
     bool test_input(const std::string& name, const std::vector<std::string>& args, double now);
 
@@ -252,6 +276,11 @@ private:
 
     // toolkit
     ui::Window window_;
+    // The sounds' player (after window_: closed before SDL goes).
+    std::unique_ptr<ui::Sounds> player_;
+    fs::path player_folder_;
+    bool player_folder_set_ = false;
+    double play_heard_until_ = 0; // (SDL's clock, seconds) the Play sound still playing until then
     std::unique_ptr<ui::TextureRegistry> textures_;
     std::unique_ptr<ui::TextEngine> text_;
     std::unique_ptr<ui::Icons> icons_;

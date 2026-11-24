@@ -9,7 +9,7 @@
 # Cases: bootstrap (the first start: the .cmd hidden, its steps read from the log, then Home's Set Up),
 # bootstrap-fail (no download: the failure and Try Again), protocol (another version's files: refused, Releases
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
-# More drilled into), folders (Settings > Folders, Browse with New Folder).
+# More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -23,7 +23,10 @@ WINE=${WINE:-wine}
 for f in "$EXE" "$STUB" "$B/launcher/SDL3.dll"; do [ -f "$f" ] || { echo "run_wine: no $f" >&2; exit 2; }; done
 
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
-export WINEPREFIX=$WORK/prefix WINEDLLOVERRIDES=winemenubuilder.exe=d WINEDEBUG=-all SDL_AUDIO_DRIVER=dummy
+# (No sound reaches a speaker: Wine blanks SDL_AUDIO_DRIVER for Windows programs, so the launcher's tests choose
+# their driver with TTT2_LAUNCHER_TEST_AUDIO, and Wine's own audio drivers are off.)
+export WINEPREFIX=$WORK/prefix WINEDEBUG=-all SDL_AUDIO_DRIVER=dummy TTT2_LAUNCHER_TEST_AUDIO=dummy
+export WINEDLLOVERRIDES="winemenubuilder.exe=d;winepulse.drv=d;winealsa.drv=d;wineoss.drv=d;winecoreaudio.drv=d"
 export HOME=$WORK/home XDG_CONFIG_HOME=$WORK/home/.config XDG_DATA_HOME=$WORK/home/.local/share XDG_CACHE_HOME=$WORK/home/.cache
 mkdir -p "$HOME"
 if [ ! -d "$WINEPREFIX/drive_c" ]; then
@@ -143,6 +146,25 @@ fi
 if want_case folders; then
     make_root folders installed yes
     run folders 0 "tab:settings;focus:sec:folders;press:Return;wait:0.6;focus:fold:data;wait:0.6"
+fi
+
+# Sounds (FEEDBACK F7): Sound on (launcher.ini beside display.ini), SDL's disk audio driver into a file: moving, a
+# drill-in and out, the next tab are heard. GAME_SOUNDS (optional: an installed game's folder, only read, linked
+# in): the game's own sounds are the ones used.
+if want_case sounds; then
+    make_root sounds installed yes
+    printf 'sounds=yes\n' > "$WORK/sounds/root/appdata/TTT2Ultimate/config/launcher.ini"
+    if [ -n "${GAME_SOUNDS:-}" ]; then
+        mkdir -p "$WORK/sounds/root/Games/Tekken Tag Tournament 2/game/content"
+        ln -s "$GAME_SOUNDS/game/content/hdd" "$WORK/sounds/root/Games/Tekken Tag Tournament 2/game/content/hdd"
+    fi
+    run sounds 0 "press:Down;wait:0.3;focus:more;press:Return;wait:0.3;press:Escape;wait:0.3;press:e;wait:2.2;quit" \
+        TTT2_LAUNCHER_TEST_AUDIO=disk SDL_AUDIO_DISK_OUTPUT_FILE="$(winpath "$WORK/sounds/audio.raw")" \
+        TTT2_LAUNCHER_TEST_CUES=1
+    expect sounds "@cue move"
+    expect sounds "@cue tab"
+    [ -s "$WORK/sounds/audio.raw" ] || fail sounds "no sound written (no $WORK/sounds/audio.raw)"
+    if [ -n "${GAME_SOUNDS:-}" ]; then expect sounds "@sounds the game's sounds"; fi
 fi
 
 if [ "$failures" -gt 0 ]; then

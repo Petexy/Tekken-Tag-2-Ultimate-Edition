@@ -54,6 +54,32 @@ Box fitted(Box b, SeamFit f) {
     return b;
 }
 
+// The app's cues (sound_cues.h) as the player's (ttt2ui/sound.h): the same twelve, by name.
+static_assert(static_cast<int>(ttt2::app::Cue::Play) + 1 == kCueCount, "sound_cues.h and ttt2ui/sound.h differ");
+Cue sound_of(ttt2::app::Cue c) {
+    using A = ttt2::app::Cue;
+    switch (c) {
+    case A::Move: return Cue::Move;
+    case A::Accept: return Cue::Accept;
+    case A::Back: return Cue::Back;
+    case A::TabSwitch: return Cue::TabSwitch;
+    case A::SectionSwitch: return Cue::SectionSwitch;
+    case A::Toggle: return Cue::Toggle;
+    case A::Refuse: return Cue::Refuse;
+    case A::DrillIn: return Cue::DrillIn;
+    case A::DrillOut: return Cue::DrillOut;
+    case A::TaskDone: return Cue::TaskDone;
+    case A::TaskFailed: return Cue::TaskFailed;
+    case A::Play: return Cue::Play;
+    }
+    return Cue::Move;
+}
+
+#ifdef _WIN32
+// A UTF-8 folder from the state (Settings > Folders) as a wide path, so that a José in it is kept.
+fs::path utf8_path(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
+#endif
+
 } // namespace
 
 App::App(Options options) : o_(std::move(options)) {
@@ -89,7 +115,8 @@ bool App::open_window() {
     const int w = o_.width > 0 ? o_.width : 1280, h = o_.height > 0 ? o_.height : 800;
     wo.size = {static_cast<float>(w), static_cast<float>(h)};
     wo.min_size = o_.testing ? Vec2{320, 240} : Vec2{960, 600};
-    wo.offscreen = o_.testing && !o_.real_window;
+    wo.offscreen = (o_.testing && !o_.real_window) || o_.offscreen;
+    wo.quiet = !o_.smoke.empty();
     wo.forced_scale = o_.scale;
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
@@ -139,7 +166,7 @@ void App::make_model() {
     const auto data = facts.windows.folders.find("data");
     owned_cache_ = data == facts.windows.folders.end() || data->second.empty()
                        ? fs::path()
-                       : fs::path(data->second) / "launcher" / "dlc-owned.json";
+                       : utf8_path(data->second) / "launcher" / "dlc-owned.json";
     exe_ = answer.exe;
     banner_ = std::string("ttt2-launcher ") + TTT2_LAUNCHER_VERSION + " (Windows): files " +
               win_files_->root.string() + ", python " + facts.python.string();
@@ -221,11 +248,19 @@ void App::folders_from_state(const m::WindowsState& state) {
 // ---------------------------------------------------------------- the loop
 
 int App::run() {
-    if (!open_window()) return 1;
+    if (!open_window()) {
+        if (!o_.smoke.empty()) smoke("no window: " + window_.error());
+        return 1;
+    }
+    start_sounds();
 #ifdef _WIN32
-    if (!windows_ready()) return exit_code_;
+    if (!windows_ready()) {
+        finish_sounds();
+        return exit_code_;
+    }
 #endif
     make_model();
+    sounds_tick();
     const double t0 = now();
     model_->start(t0);
     handle(model_->take_effects());
@@ -239,8 +274,10 @@ int App::run() {
                           readouts_animating(t);
         pump_input(t, !busy && !o_.testing);
         frame(now());
+        sounds_tick();
         if (o_.testing) test_tick(now());
     }
+    finish_sounds();
     model_.reset();
     return exit_code_;
 }
@@ -310,7 +347,8 @@ void App::pump_input(double t, bool wait) {
     if (o_.instance) {
         for (const Forwarded& f : o_.instance->take()) {
             for (const std::string& a : f.args) {
-                if (!a.empty() && a[0] != '-') model_->mutable_facts().chosen_game = normal(a);
+                if (!a.empty() && a[0] != '-')
+                    model_->mutable_facts().chosen_game = normal(fs::path(std::u8string(a.begin(), a.end())));
             }
             SDL_RaiseWindow(window_.sdl());
         }
@@ -405,6 +443,7 @@ void App::frame(double t) {
     ui_->paint(*canvas_);
     wipe_->end_frame(*canvas_, t);
     canvas_->flush();
+    if (!o_.smoke.empty() && smoke()) quit_ = true;
     if (!o_.testing || o_.real_window) {
         SDL_RenderPresent(window_.renderer());
         if (first_) window_.show();
@@ -846,6 +885,7 @@ void App::apply_prompts(int prompts) {
 void App::apply_launcher_settings() {
     const m::LauncherSettings s = model_->launcher_settings();
     sounds_ = s.sounds;
+    if (player_) player_->set_enabled(sounds_); // (at once: turning Sound on plays its Toggle)
     if (s == applied_) return;
     if (s.prompts != applied_.prompts && !forced_glyphs_) apply_prompts(s.prompts);
     if (s.text_size != applied_.text_size) window_.set_user_text_scale(s.text_size / 100.f);
@@ -856,7 +896,66 @@ void App::apply_launcher_settings() {
 
 void App::cue(ttt2::app::Cue c) {
     if (o_.trace_cues) std::fprintf(stderr, "@cue %s\n", ttt2::app::cue_name(c));
-    if (sounds_ && sound_) sound_(c);
+    if (!sounds_ || !sound_) return;
+    sound_(c);
+    if (c == ttt2::app::Cue::Play) play_heard_until_ = SDL_GetTicks() / 1000.0 + kPlayHeard;
+}
+
+// ---------------------------------------------------------------- sounds
+
+void App::start_sounds() {
+    // (Tests never sound: SDL's dummy driver unless the test chose one, e.g. the disk driver into a file. Wine blanks
+    // SDL_AUDIO_DRIVER for Windows programs, so TTT2_LAUNCHER_TEST_AUDIO chooses it there.)
+    if (o_.testing) {
+        const char* test = std::getenv("TTT2_LAUNCHER_TEST_AUDIO");
+        const char* sdl = std::getenv("SDL_AUDIO_DRIVER");
+        const char* driver = test && *test ? test : sdl && *sdl ? sdl : "dummy";
+        SDL_SetHintWithPriority(SDL_HINT_AUDIO_DRIVER, driver, SDL_HINT_OVERRIDE);
+    }
+    player_ = std::make_unique<Sounds>();
+    if (!sound_) sound_ = [this](ttt2::app::Cue c) { player_->play(sound_of(c)); };
+}
+
+// Where the game's menu sounds are read from: the installed game (Linux: find_install's; Windows: --query state's
+// "installed"), else on Windows the extracted title Set Up Game was given; none: the launcher's own sounds.
+fs::path App::sound_folder() const {
+    if (!model_) return {};
+    const m::Facts& f = model_->facts();
+    if (f.install.state == InstallState::kInstalled && !f.install.folder.empty()) return f.install.folder;
+#ifdef _WIN32
+    if (const auto t = f.windows.folders.find("title"); t != f.windows.folders.end() && !t->second.empty()) {
+        const fs::path title = utf8_path(t->second);
+        std::error_code ec;
+        if (fs::is_directory(title / "content" / "hdd", ec)) return title;
+    }
+#endif
+    return {};
+}
+
+void App::sounds_tick() {
+    if (!player_) return;
+    // (The folder before the setting: turning sounds on reads that folder's.)
+    if (const fs::path folder = sound_folder(); !player_folder_set_ || folder != player_folder_) {
+        player_folder_ = folder;
+        player_folder_set_ = true;
+        player_->set_game_folder(folder);
+    }
+    player_->set_enabled(sounds_);
+    player_->tick();
+}
+
+void App::finish_sounds() {
+    if (!player_) return;
+    // The game was started and the launcher ends at once: its Play sound is let finish, without the window.
+    if (player_->voices() > 0 && SDL_GetTicks() / 1000.0 < play_heard_until_) {
+        SDL_HideWindow(window_.sdl());
+        while (player_->voices() > 0 && SDL_GetTicks() / 1000.0 < play_heard_until_) {
+            SDL_Delay(15);
+            player_->tick();
+        }
+    }
+    if (o_.trace_cues) std::fprintf(stderr, "@sounds %s\n", player_->status().c_str());
+    player_.reset();
 }
 
 bool App::drilled() const { return drill_ && drill_->screen == screen_ && !picker_ && !view_.dialog; }
@@ -980,7 +1079,8 @@ void App::on_events(const std::vector<Event>& events) {
                 // (Sound: its cue after the switch, so turning it on is heard.)
             } else if (!tab && !(e.id.starts_with("check:") && check_has_copy(e.id)) &&
                        !(a && (a->kind == m::ActionKind::kSwitch || a->kind == m::ActionKind::kChoice)) &&
-                       !e.id.starts_with("sec:") && !e.id.starts_with("tile:") && !e.id.starts_with("fold:"))
+                       !e.id.starts_with("sec:") && !e.id.starts_with("tile:") && !e.id.starts_with("fold:") &&
+                       e.id != "more") // (More drills in: its own sound, as a fighter tile's)
                 cue(Cue::Accept);
             activate(e.id, e.device);
             if (e.id == "sound" || (a && (a->kind == m::ActionKind::kCheck || a->kind == m::ActionKind::kSwitch ||

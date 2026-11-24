@@ -67,7 +67,10 @@ void App::open_picker(bool folder, const std::string& purpose) {
     fs::path from = folder ? slot_folder_ : f.chosen_game.empty() ? home / "Downloads" : f.chosen_game.parent_path();
     if (purpose.starts_with("folder:") || purpose == "setup-folder") {
         const auto it = f.windows.folders.find(purpose == "setup-folder" ? "install" : purpose.substr(7));
-        from = it == f.windows.folders.end() || it->second.empty() ? home : fs::path(it->second);
+        // (The folders are UTF-8: as a wide path, so that a José in one is kept.)
+        from = it == f.windows.folders.end() || it->second.empty()
+                   ? home
+                   : fs::path(std::u8string(it->second.begin(), it->second.end()));
     }
     picker_ = std::move(p);
     picker_dir(start_folder(from, {home / "Downloads", home}));
@@ -119,7 +122,8 @@ void App::picker_chosen(const fs::path& path) {
     } else if (p.purpose == "setup-folder") {
         handle(model_->chosen_folder(path, now()));
     } else if (p.purpose.starts_with("folder:")) {
-        set_folder(p.purpose.substr(7), path.string());
+        const std::u8string folder = path.u8string(); // (UTF-8, as the state gives them: never the ANSI code page)
+        set_folder(p.purpose.substr(7), std::string(folder.begin(), folder.end()));
         ui_->focus("fold:" + p.purpose.substr(7), true);
     } else {
         slot_folder_ = path;

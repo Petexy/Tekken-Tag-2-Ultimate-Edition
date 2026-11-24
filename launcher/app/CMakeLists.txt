@@ -101,6 +101,17 @@ if(WIN32)
     target_link_options(launcher_win_stub PRIVATE -static)
     set_tests_properties(launcher_app_version PROPERTIES PASS_REGULAR_EXPRESSION "^ttt2-launcher ${TTT2_LAUNCHER_VERSION}")
     set_tests_properties(launcher_app_test launcher_app_version PROPERTIES LABELS launcher)
+    if(TTT2_TOOLS_ONLY)
+        # (The players' Set Up Game build, C1: this program made a release .exe says its version and unpacks its files,
+        # as old launchers' updates check it. A launcher-only build has launcher_release_exe_test instead.)
+        find_package(Python3 COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../windows/test_launcher_exe.py $<TARGET_FILE:ttt2-launcher>
+                ${TTT2_LAUNCHER_VERSION} WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../windows)
+            set_tests_properties(windows_launcher_exe_test PROPERTIES LABELS launcher TIMEOUT 900)
+        endif()
+    endif()
     if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
         find_program(TTT2_WINE wine)
         foreach(t launcher_app_test ttt2-launcher)
@@ -161,5 +172,11 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/screens ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_screens)
     set_tests_properties(launcher_app_screens PROPERTIES TIMEOUT 1200)
+    # The sounds as heard (FEEDBACK F7): SDL's disk audio driver into files, Sound on / off / its button / Play.
+    add_test(NAME launcher_app_sounds
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/sounds.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/sounds ${Python3_EXECUTABLE})
+    list(APPEND _app_tests launcher_app_sounds)
+    set_tests_properties(launcher_app_sounds PROPERTIES TIMEOUT 300)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

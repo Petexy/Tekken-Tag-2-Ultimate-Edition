@@ -42,6 +42,67 @@ bool App::settled(double t) const {
     return t - idle_since_ >= 0.4 && frames_idle_ >= 2;
 }
 
+// --ui-smoke-test FILE (CI's source ZIP check, build_launcher.py) / TTT2_LAUNCHER_TEST_SMOKE (a start as a player's):
+// {"program": "ttt2-launcher", "version", the start's facts, "frame": "video=<driver> renderer=<name> colours=<crimson
+// side>,<blue side>" (or ""), "error": why there is no frame (or "")}. Called before the frame is shown.
+bool App::smoke(const std::string& error) {
+    if (smoke_done_) return true;
+    smoke_done_ = true;
+    std::string frame;
+    if (error.empty()) {
+        const Vec2 px = window_.pixels();
+        std::string colours;
+        for (const float at : {0.08f, 0.92f}) {
+            const SDL_Rect r{static_cast<int>(px.x * at), static_cast<int>(px.y * 0.55f), 1, 1};
+            SDL_Surface* pixel = SDL_RenderReadPixels(window_.renderer(), &r);
+            Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+            if (pixel) SDL_ReadSurfacePixel(pixel, 0, 0, &red, &green, &blue, &alpha);
+            SDL_DestroySurface(pixel);
+            char text[16];
+            std::snprintf(text, sizeof text, "%s%02x%02x%02x", colours.empty() ? "" : ",", red, green, blue);
+            colours += text;
+        }
+        const auto word = [](const char* w) {
+            std::string t = w && *w ? w : "-";
+            std::replace(t.begin(), t.end(), ' ', '_');
+            return t;
+        };
+        frame = "video=" + word(SDL_GetCurrentVideoDriver()) + " renderer=" + word(SDL_GetRendererName(window_.renderer())) +
+                " colours=" + colours;
+    }
+    const auto quoted = [](const std::string& text) {
+        std::string out = "\"";
+        for (const char ch : text) {
+            if (ch == '"' || ch == '\\') out += '\\';
+            if (static_cast<unsigned char>(ch) < 0x20) {
+                char escape[8];
+                std::snprintf(escape, sizeof escape, "\\u%04x", static_cast<unsigned>(ch));
+                out += escape;
+            } else {
+                out += ch;
+            }
+        }
+        return out + "\"";
+    };
+    std::string json = "{\"program\": \"ttt2-launcher\", \"version\": " + quoted(TTT2_LAUNCHER_VERSION);
+    if (!o_.smoke_start.empty()) json += ", " + o_.smoke_start;
+    json += ", \"frame\": " + quoted(frame) + ", \"error\": " + quoted(error) + "}\n";
+#ifdef _WIN32
+    std::FILE* file = _wfopen(o_.smoke.c_str(), L"wb");
+#else
+    std::FILE* file = std::fopen(o_.smoke.c_str(), "wb");
+#endif
+    if (!file || std::fputs(json.c_str(), file) < 0) {
+        const std::u8string name = o_.smoke.u8string();
+        std::fprintf(stderr, "ttt2-launcher: cannot write %s\n", std::string(name.begin(), name.end()).c_str());
+        exit_code_ = 1;
+    }
+    if (file) std::fclose(file);
+    std::fprintf(stderr, "ttt2-launcher: smoke test: %s\n", frame.empty() ? error.c_str() : frame.c_str());
+    if (!error.empty()) exit_code_ = 1;
+    return true;
+}
+
 void App::shot(const std::string& name) {
     if (o_.shots.empty()) return;
     std::string error;

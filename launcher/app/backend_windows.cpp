@@ -71,11 +71,13 @@ fs::path home_folder() {
     return profile.empty() ? fs::path(L"C:\\") : fs::path(profile);
 }
 
-WindowsFiles windows_files(const fs::path& release_files) {
+WindowsFiles windows_files(const fs::path& release_files, const WindowsArgs& args) {
     WindowsFiles w;
     if (!release_files.empty()) {
         w.root = release_files;
         w.release = true;
+    } else if (!args.files.empty()) {
+        w.root = args.files;
     } else {
         // (A CMake build: <project>\build-windows-tools\launcher\ttt2-launcher.exe, or beside main.py's project.)
         fs::path at = program_file().parent_path();
@@ -88,7 +90,8 @@ WindowsFiles windows_files(const fs::path& release_files) {
             if (at == at.parent_path()) break;
         }
     }
-    w.build = w.root / "build-windows-tools";
+    w.build = args.build.empty() ? w.root / "build-windows-tools" : args.build;
+    w.config = args.config;
     const fs::path private_python = w.root / "local" / "windows-tools" / "python-runtime" / "python" / "python.exe";
     if (const std::wstring given = env_wide(L"TTT2_PYTHON"); !given.empty()) {
         w.python = fs::path(given);
@@ -120,7 +123,9 @@ model::Facts windows_start_facts(const WindowsFiles& files, const fs::path& chos
 model::Command first_state_query(const WindowsFiles& files) {
     model::Command c;
     c.argv = {u8(files.python), "-u", u8(files.root / "launcher" / "windows" / "main.py"), "--build-dir",
-              u8(files.build), "--query", "state"};
+              u8(files.build)};
+    if (!files.config.empty()) c.argv.insert(c.argv.end(), {"--config", u8(files.config)});
+    c.argv.insert(c.argv.end(), {"--query", "state"});
     c.cwd = files.root;
     return c;
 }

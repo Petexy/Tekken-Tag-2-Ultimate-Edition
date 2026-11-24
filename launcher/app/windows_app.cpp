@@ -52,7 +52,7 @@ bool App::windows_ready() {
     // (Tests: a files folder as the release .exe's, TTT2_LAUNCHER_TEST_FILES: its first start gets Python.)
     fs::path files = o_.files;
     if (const char* f = std::getenv("TTT2_LAUNCHER_TEST_FILES"); o_.testing && f && *f) files = f;
-    win_files_ = windows_files(files);
+    win_files_ = windows_files(files, o_.windows);
     ready_ = std::make_unique<WindowsReady>(*win_files_, *starter_);
     ready_->start(now());
     stage_->set_target(.5f, false, 0);
@@ -146,6 +146,7 @@ void App::ready_frame(double t) {
     watermark(*canvas_, *text_, "Tag", {in.size.x + 30, in.size.y - theme::kBottomBand + 60});
     ui_->paint(*canvas_);
     canvas_->flush();
+    if (!o_.smoke.empty() && smoke()) quit_ = true; // (the first frame: the ready loop ends, exit 0)
     if (!o_.testing || o_.real_window) {
         SDL_RenderPresent(window_.renderer());
         if (first_) window_.show();

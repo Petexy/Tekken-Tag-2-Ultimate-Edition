@@ -20,15 +20,22 @@ namespace launcher::app {
 // Where the launcher's files are and what runs them.
 struct WindowsFiles {
     fs::path root;   // the launcher's files (main.py's project folder)
-    fs::path build;  // root\build-windows-tools (main.py's --build-dir)
+    fs::path build;  // root\build-windows-tools (main.py's --build-dir), or the --build-dir the launcher was given
+    fs::path config; // the --config the launcher was given (main.py's launcher.json), "" main.py's own
     fs::path python; // TTT2_PYTHON, else the private Python (maybe not there yet), else one on PATH (a CMake build)
     bool release = false;       // the release .exe's files folder (then the private Python is gotten first)
     bool python_needed = false; // the private Python is not there yet: the first start's bootstrap runs first
     fs::path bootstrap_log() const { return root / "local" / "windows-bootstrap.log"; }
 };
-// `release_files`: startup's Start::files ("" not a release .exe). Without it, the folder of this program or one
-// above it that has launcher\windows\main.py (a CMake build: <project>\build-windows-tools\launcher\ttt2-launcher.exe).
-WindowsFiles windows_files(const fs::path& release_files);
+// The program's own folders (the source ZIP's bridge, launcher/windows/build_launcher.py, passes them): --files DIR
+// (these files, no payload), --build-dir DIR and --config FILE (only when not the files' usual ones).
+struct WindowsArgs {
+    fs::path files, build, config;
+};
+// `release_files`: startup's Start::files ("" not a release .exe). Without it, --files, else the folder of this
+// program or one above it that has launcher\windows\main.py (a CMake build:
+// <project>\build-windows-tools\launcher\ttt2-launcher.exe).
+WindowsFiles windows_files(const fs::path& release_files, const WindowsArgs& args = {});
 
 // The facts before --query state answered: Windows' caps, this launcher's version, Python, the files.
 model::Facts windows_start_facts(const WindowsFiles& files, const fs::path& chosen_game);
