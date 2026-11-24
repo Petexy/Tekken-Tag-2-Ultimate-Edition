@@ -102,6 +102,22 @@ std::string make_executable(const fs::path& update, const fs::path& appimage);
 // `update` renamed over `appimage`. Why not, or empty.
 std::string replace_appimage(const fs::path& update, const fs::path& appimage);
 
+// C2's way back: the AppImage an update replaces is kept beside it, hidden, until the new one drew its first frame.
+fs::path previous_file(const fs::path& appimage); // ".<name>.previous"
+// `appimage` kept as previous_file() (a hard link, else a copy). Why not, or empty.
+std::string keep_previous(const fs::path& appimage);
+// It back in its place (renamed over `appimage`). Why not, or empty.
+std::string restore_previous(const fs::path& appimage);
+// After a first frame: the previous one is not needed any more.
+void forget_previous(const fs::path& appimage);
+// The variable a launcher put back in place is opened with: the version that never opened its window.
+inline constexpr const char* kRolledBackVariable = "TTT2_LAUNCHER_ROLLED_BACK";
+// How the updated `appimage` (release `version`) is opened: through /bin/sh, which waits for it. When it ended by a
+// signal (a crash) while previous_file() is still there (no first frame), the previous one is put back and opened
+// with kRolledBackVariable=version (and TTT2_LAUNCHER_AFTER still: it waits for the one that updated, too). (One
+// that cannot open its window puts it back itself: restore_previous.)
+std::vector<std::string> open_with_rollback(const fs::path& appimage, const std::string& version);
+
 // Whether a process still runs: it exists and has not ended (an ended one
 // stays a zombie until its parent has seen it end).
 bool process_alive(int pid);

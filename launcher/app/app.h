@@ -62,6 +62,7 @@ struct Options {
     // --ui-smoke-test FILE / TTT2_LAUNCHER_TEST_SMOKE: the first frame drawn, what was found written there as JSON
     // (smoke_start: this start's facts, JSON members), then the end.
     fs::path smoke;
+    std::string rolled_back; // TTT2_LAUNCHER_ROLLED_BACK (C2): the version an update opened, which never drew
     std::string smoke_start;
     bool offscreen = false; // TTT2_LAUNCHER_TEST_VIDEO=offscreen (Wine without a display)
 #ifdef _WIN32

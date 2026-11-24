@@ -25,6 +25,8 @@ struct UpdateFiles {
     virtual std::string replace(const fs::path& file, const fs::path& appimage) = 0;
     virtual void remove(const fs::path& file) = 0;
     virtual Distro distro() = 0;
+    // C2: `appimage` kept as previous_file() until the new one drew its first frame. Why not, or empty.
+    virtual std::string keep_previous(const fs::path& appimage) = 0;
 };
 
 // The core's (sha256 is the app's: GLib/ZArchive's).
@@ -41,6 +43,7 @@ struct RealUpdateFiles : UpdateFiles {
     }
     void remove(const fs::path& file) override;
     Distro distro() override { return this_distro(); }
+    std::string keep_previous(const fs::path& appimage) override { return launcher::keep_previous(appimage); }
 };
 
 // Errors as a sentence: the first letter in capitals and a period.

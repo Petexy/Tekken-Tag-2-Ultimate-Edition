@@ -36,6 +36,7 @@ struct WindowOptions {
     float forced_scale = 0;          // > 0: this UI scale (tests: --scale)
     bool start_fullscreen = false;
     bool quiet = false;              // no message box when no window opens (a smoke test answers why itself)
+    std::function<std::string()> no_window; // when none opens: more to tell (C2: the version before put back)
 };
 
 // SteamDeck=1, SteamOS=1, XDG_CURRENT_DESKTOP=gamescope or GAMESCOPE_WAYLAND_DISPLAY set.

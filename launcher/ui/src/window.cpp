@@ -107,7 +107,8 @@ bool Window::open(const WindowOptions& o) {
     if (!ok) {
         error_ = first.empty() ? why : first;
         const std::string text = "Ultimate Launcher cannot open its window (" + error_ +
-                                 ").\n\nThe newest launcher is at " + o.releases_url;
+                                 ").\n\nThe newest launcher is at " + o.releases_url +
+                                 (o.no_window ? o.no_window() : std::string());
         std::fprintf(stderr, "%s\n", text.c_str());
         if (!o.offscreen && !o.quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, o.title.c_str(), text.c_str(), nullptr);
         return false;

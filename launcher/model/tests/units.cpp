@@ -347,7 +347,7 @@ struct UpdateRig {
                     r.held = true;
                 else
                     r.lines = {{says, false}};
-            } else if (argv[0] == "/home/player/Ultimate_Launcher-x86_64.AppImage") {
+            } else if (argv.size() > 4 && argv[0] == "/bin/sh" && argv[4] == "/home/player/Ultimate_Launcher-x86_64.AppImage") {
                 opened.push_back(r.command);
                 r.held = true;
             } else if (has("Accept: application/vnd.github+json")) {
@@ -374,6 +374,12 @@ void self_update() {
         CHECK(rig.update.opened());
         CHECK(rig.opened.size() == 1 && rig.opened[0].env.at(kReplacesVariable) == "42");
         CHECK(rig.opened.size() == 1 && rig.opened[0].mode == Command::Mode::kDetached); // (it outlives this one)
+        // (C2: this version kept before the new one is put in its place; the new one opened through the way back.)
+        CHECK((rig.files.steps == std::vector<std::string>{"keep", "replace"}));
+        CHECK(rig.opened.size() == 1 &&
+              rig.opened[0].argv == open_with_rollback("/home/player/Ultimate_Launcher-x86_64.AppImage", "0.9.0"));
+        CHECK(rig.opened.size() == 1 && rig.opened[0].argv[5] ==
+                                            "/home/player/.Ultimate_Launcher-x86_64.AppImage.previous");
     }
     {
         UpdateRig rig;
@@ -427,6 +433,27 @@ void self_update() {
         rig.files.downloader = false;
         const auto refused = rig.update.start(1);
         CHECK(refused && refused->why.starts_with("Downloading needs curl or wget: install curl"));
+    }
+    {
+        // (No copy kept: told in the log, the update goes on.)
+        UpdateRig rig;
+        rig.files.keep_error = "No space left on device";
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK(rig.runner.last().ok && rig.opened.size() == 1);
+        const auto& log = rig.runner.log();
+        CHECK(std::find(log.begin(), log.end(),
+                        "No copy of this version is kept to go back to (No space left on device).") != log.end());
+    }
+    {
+        // (It cannot be replaced: the copy kept goes too.)
+        UpdateRig rig;
+        rig.files.replace_error = "Read-only file system";
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK(!rig.runner.last().ok && rig.opened.empty());
+        CHECK(std::find(rig.files.removed.begin(), rig.files.removed.end(),
+                        fs::path("/home/player/.Ultimate_Launcher-x86_64.AppImage.previous")) != rig.files.removed.end());
     }
     {
         UpdateRig rig;

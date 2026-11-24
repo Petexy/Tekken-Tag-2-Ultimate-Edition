@@ -173,14 +173,19 @@ void SelfUpdate::started(int code, const std::string& out) {
     if (compare_versions(said, version).value_or(1) != 0) {
         return failed("Update failed", "The AppImage released as version " + version + " is version " + said + ".");
     }
+    // (C2: this version stays beside it until the new one drew its first frame, the way back when it cannot.)
+    const fs::path previous = previous_file(*config_.appimage);
+    if (const std::string why = files_.keep_previous(*config_.appimage); !why.empty())
+        runner_.add_log("No copy of this version is kept to go back to (" + why + ").");
     if (const std::string why = files_.replace(file_, *config_.appimage); !why.empty()) {
+        files_.remove(previous);
         return failed("Update failed", "It cannot replace " + path_utf8(*config_.appimage) + " (" + why + ").");
     }
     state_ = State::kIdle;
     runner_.add_log("Version " + version + " is in " + path_utf8(*config_.appimage) + ".");
     std::string error;
-    Command open{{path_utf8(*config_.appimage)}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {},
-                 Command::Mode::kDetached}; // (it outlives this one)
+    Command open{open_with_rollback(*config_.appimage, version), {{kReplacesVariable, std::to_string(config_.pid)}},
+                 {}, {}, {}, Command::Mode::kDetached}; // (it outlives this one)
     auto job = starter_.start(open, {}, &error);
     if (!job) {
         runner_.finish(false, "Updated to " + version + ", but it cannot be opened",

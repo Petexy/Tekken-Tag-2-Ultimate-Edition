@@ -8,6 +8,7 @@
 #include "app.h"
 
 #include "paths.h"
+#include "release.h"
 #include "startup.h"
 #ifdef _WIN32
 #include "win32.h"
@@ -169,6 +170,8 @@ static int launcher_main(int argc, char** argv) {
     program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}, {"--frames", 1}, {"--at", 1},
                        {"--files", 1},      {"--build-dir", 1}, {"--config", 1}, {"--ui-smoke-test", 1}};
     program.unique = !screenshot && !smoke_arg && !(actions && *actions);
+    // (Tests that start it as a player would: a name of their own, so that they never reach a launcher in use.)
+    program.instance_name = environment("TTT2_LAUNCHER_TEST_INSTANCE");
     program.wake = wake;
     st::Start start = st::begin(args, program);
     if (start.exit >= 0) return start.exit;
@@ -176,6 +179,11 @@ static int launcher_main(int argc, char** argv) {
     launcher::app::Options o;
     o.instance = std::move(start.instance);
     o.files = start.files;
+#ifndef _WIN32
+    // (C2: set when an update's new version never drew and this one was put back; not for the programs it starts.)
+    o.rolled_back = environment(launcher::kRolledBackVariable);
+    unsetenv(launcher::kRolledBackVariable);
+#endif
     // (For --ui-smoke-test / TTT2_LAUNCHER_TEST_SMOKE's answer: what this start found, as the release tests read it.)
     {
         std::string facts = "\"pid\": " + std::to_string(
@@ -190,6 +198,7 @@ static int launcher_main(int argc, char** argv) {
             facts += std::string(", \"after_ended\": ") +
                      (st::wait_for_exit(std::strtoll(after.c_str(), nullptr, 10), 0) ? "true" : "false");
         facts += ", \"after_left\": " + json_string(environment("TTT2_LAUNCHER_AFTER"));
+        facts += ", \"rolled_back\": " + json_string(o.rolled_back);
         facts += ", \"args\": [";
         for (size_t i = 0; i < start.args.size(); ++i) facts += (i ? ", " : "") + json_string(start.args[i]);
         facts += "], \"files\": " + json_string(utf8(start.files));

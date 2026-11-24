@@ -115,6 +115,9 @@ bool App::open_window() {
     wo.offscreen = (o_.testing && !o_.real_window) || o_.offscreen;
     wo.quiet = !o_.smoke.empty();
     wo.forced_scale = o_.scale;
+#ifndef _WIN32
+    wo.no_window = appimage_no_window; // (C2: back to the version before an update)
+#endif
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
     window_.update_scale();
@@ -276,6 +279,16 @@ int App::run() {
         std::fprintf(stderr, "@ready restored its own files (their protocol %s)\n", ready_->restored().c_str());
     }
 #endif
+    if (!o_.rolled_back.empty()) {
+        // (C2: the version an update opened ended before its first frame, and this one was put back.)
+        model_->tell("Version " + o_.rolled_back + " did not start",
+                     "Version " + o_.rolled_back + " of the launcher ended before it could open its window on this " +
+                         "PC, so the launcher went back to this version (" + TTT2_LAUNCHER_VERSION +
+                         "). Update offers it again; if it fails again, please tell us on the releases page.",
+                     t0);
+        std::fprintf(stderr, "ttt2-launcher: Version %s did not start: this version (%s) was put back\n",
+                     o_.rolled_back.c_str(), TTT2_LAUNCHER_VERSION);
+    }
     stage_->set_target(share(), tall(), 0);
     stage_->snap();
     last_ = t0;
@@ -460,6 +473,9 @@ void App::frame(double t) {
         SDL_RenderPresent(window_.renderer());
         if (first_) window_.show();
     }
+#ifndef _WIN32
+    if (first_) appimage_first_frame(); // (C2: the version before an update is not needed any more)
+#endif
     first_ = false;
     on_events(events);
 }
