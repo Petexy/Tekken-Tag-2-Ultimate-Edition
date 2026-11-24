@@ -1,0 +1,10 @@
+@test toggle:outfits:kazumi started
+@test toggle:outfits:kazumi ok
+@test toggle:outfits:lucky_chloe started
+@test toggle:outfits:lucky_chloe ok
+@test expand-dlc started
+@test expand-dlc ok
+@test toggle:outfits-all started
+@test toggle:outfits-all ok
+@test quit started
+@test quit ok

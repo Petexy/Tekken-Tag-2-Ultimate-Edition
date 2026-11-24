@@ -1,0 +1,4 @@
+@test get-packages started
+@test get-packages ok Downloaded numpy and Pillow
+@test quit started
+@test quit ok

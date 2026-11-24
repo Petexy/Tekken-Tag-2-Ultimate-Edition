@@ -1,0 +1,4 @@
+@test settings started
+@test settings ok Settings
+@test quit started
+@test quit ok

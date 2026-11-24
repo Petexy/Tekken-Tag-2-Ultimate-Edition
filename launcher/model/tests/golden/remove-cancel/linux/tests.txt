@@ -1,0 +1,4 @@
+@test remove:lucky_chloe started
+@test remove:lucky_chloe failed Removing cancelled: It was stopped: Terminated (code 143, see Details)
+@test quit started
+@test quit ok

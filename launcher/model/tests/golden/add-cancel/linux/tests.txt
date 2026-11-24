@@ -1,0 +1,4 @@
+@test add:kazumi started
+@test add:kazumi failed Adding cancelled: The characters added before stay.
+@test quit started
+@test quit ok
