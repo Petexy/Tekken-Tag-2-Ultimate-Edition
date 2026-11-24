@@ -101,6 +101,14 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
             ok = !rest.empty();
             if (a.name == "tab")
                 ok = rest == "next" || rest == "prev" || rest == "home" || rest == "fighters" || rest == "settings";
+        } else if (a.name == "rows") {
+            // rows:<id prefix>:<points>: the rows of a list (ids with that prefix) in view, each at least that wide.
+            const size_t last = rest.rfind(':');
+            char* end = nullptr;
+            const std::string width = last == std::string::npos ? "" : rest.substr(last + 1);
+            const double points = std::strtod(width.c_str(), &end);
+            ok = last != std::string::npos && last > 0 && !width.empty() && end && *end == '\0' && points >= 0;
+            if (ok) a.args = {rest.substr(0, last), width};
         } else if (a.name == "wait") {
             char* end = nullptr;
             const double seconds = std::strtod(rest.c_str(), &end);

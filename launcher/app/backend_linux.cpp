@@ -82,8 +82,12 @@ void LinuxEnvironment::look(model::Facts& facts) {
     const bool installed = facts.install.state == InstallState::kInstalled;
     facts.game_built = installed ? built_version(facts.install.folder) : std::string();
     facts.icon = installed && there(facts.install.folder / "icon.png");
-    if (!facts.game_started_here)
-        facts.game_running = facts.install.state != InstallState::kNone && program_running(facts.install.folder);
+    if (!facts.game_started_here) facts.game_running = game_runs(facts);
+}
+
+bool LinuxEnvironment::game_runs(const model::Facts& facts) {
+    // (/proc's programs, about a millisecond: the model asks every 2 s while a game started elsewhere runs.)
+    return facts.install.state != InstallState::kNone && program_running(facts.install.folder);
 }
 
 std::optional<fs::path> LinuxEnvironment::install_target(const fs::path& chosen, std::string* why) {

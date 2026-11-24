@@ -23,6 +23,7 @@ class LinuxEnvironment final : public model::Environment {
 public:
     explicit LinuxEnvironment(Places places) : places_(std::move(places)) {}
     void look(model::Facts& facts) override;
+    bool game_runs(const model::Facts& facts) override;
     std::optional<fs::path> install_target(const fs::path& chosen, std::string* why) override;
     void write_started_record(const fs::path& folder, const fs::path& game) override;
     bool started(const fs::path& folder) override;

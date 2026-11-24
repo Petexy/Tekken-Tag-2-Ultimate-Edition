@@ -60,6 +60,35 @@ void test_browser(const std::filesystem::path& scratch) {
     check(std::any_of(ps.begin(), ps.end(), [](const Place& p) { return p.id == "drive:C"; }), "places: drive C:");
 #else
     check(ps.size() >= 2 && ps.front().id == "home" && ps.back().id == "root", "places: Home first, Computer last");
+    // REVIEW2_app #6: hidden names listed only when asked, counted the same way; counts left for later.
+    const auto hidden = list_folder(scratch / "b", false, nullptr, true);
+    check(hidden.size() == 6 && hidden[1].name == ".hidden", "hidden folders listed when asked");
+    fs::create_directories(scratch / "b" / "alpha" / ".git", ec);
+    std::ofstream(scratch / "b" / "alpha" / "readme") << "x";
+    const auto counted = list_folder(scratch / "b", false, nullptr, false);
+    check(counted.size() == 5 && counted[1].items == 1, "a folder's hidden entries are not counted");
+    check(count_items(scratch / "b" / "alpha", true) == 2 && count_items(scratch / "b" / "alpha") == 1,
+          "count_items with and without hidden ones");
+    const auto later = list_folder(scratch / "b", false, nullptr, false, false);
+    check(later.size() == 5 && later[1].items == kNotCounted && later[3].items == -1, "counts left for later");
+    // The places a file manager hides: Steam's, Flatpak apps', Wine prefixes (a folder with drive_c).
+    const fs::path home = scratch / "home";
+    for (const char* d : {".local/share/Steam/steamapps", ".var/app/com.valvesoftware.Steam/data/Steam", ".wine/drive_c",
+                          ".local/share/wineprefixes/tricks/drive_c", "Games/lutris-ttt2/drive_c", "Games/not-a-prefix",
+                          "Faugus/faugus-one/drive_c", "Downloads"})
+        fs::create_directories(home / d, ec);
+    const auto found = places(home, "");
+    std::string ids;
+    // (The drives mounted on the machine running the test are left out.)
+    for (const Place& p : found)
+        if (!p.id.starts_with("drive:")) ids += p.id.substr(0, p.id.starts_with("wine:") ? 5 : std::string::npos) + ",";
+    check(ids == "home,downloads,games,steam,steam-flatpak,flatpak,wine:,wine:,wine:,wine:,root,", "places: " + ids);
+    std::vector<std::string> wines;
+    for (const Place& p : found)
+        if (p.kind == "Wine") wines.push_back(p.name);
+    check(wines == std::vector<std::string>{"Wine", "faugus-one", "lutris-ttt2", "tricks"}, "places: Wine prefixes by name");
+    check(found[3].path == home / ".local/share/Steam" && found[5].path == home / ".var/app", "places: Steam, Flatpak");
+    check(wine_prefixes(home, 2).size() == 2, "wine_prefixes: at most the limit");
 #endif
 }
 

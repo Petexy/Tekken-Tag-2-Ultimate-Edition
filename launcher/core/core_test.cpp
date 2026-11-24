@@ -13,6 +13,8 @@
 #include "test_actions.h"
 #include "uninstall.h"
 
+#include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -530,6 +532,26 @@ void test_system() {
 
     check(run_output({"sh", "-c", "echo hello"}) == std::optional<std::string>("hello\n"), "run: output");
     check(!run_output({"sh", "-c", "exit 3"}) && !run_output({"no-such-program-ttt2"}), "run: failures");
+    // REVIEW2_app #8: the preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
+    // (another thread's, a library's) is not the probe's, and the probe runs with no signal blocked.
+    {
+        const int leaky = ::open("/dev/null", O_RDONLY); // (no O_CLOEXEC on purpose)
+        sigset_t block, old;
+        sigemptyset(&block);
+        sigaddset(&block, SIGTERM);
+        std::optional<std::string> fds, blocked;
+        std::thread worker([&] {
+            ::pthread_sigmask(SIG_BLOCK, &block, &old); // (as a thread may have them)
+            fds = run_output({"sh", "-c", "test -e /proc/self/fd/" + std::to_string(leaky) + " && echo open || echo closed"});
+            blocked = run_output({"sh", "-c", "grep SigBlk /proc/self/status"});
+        });
+        worker.join();
+        check(leaky > 2 && fds == std::optional<std::string>("closed\n"),
+              "run: the launcher's files are closed in the probe (" + fds.value_or("none") + ")");
+        check(blocked && blocked->find("SigBlk:\t0000000000000000") != std::string::npos,
+              "run: no signal blocked in the probe (" + blocked.value_or("none") + ")");
+        ::close(leaky);
+    }
 }
 
 // The compiler as the builder chooses it, with compilers that only say their
@@ -608,6 +630,10 @@ void test_actions() {
           "actions: input as the devices give it (" + error + ")");
     check(!parse_test_actions("tab:sideways", &error) && !parse_test_actions("press", &error),
           "actions: input needs what to press");
+    const auto rows = parse_test_actions("rows:pe::300;rows:pp::0.5", &error);
+    check(rows && rows->size() == 2 && (*rows)[0].args == std::vector<std::string>{"pe:", "300"} &&
+              (*rows)[1].args == std::vector<std::string>{"pp:", "0.5"},
+          "actions: rows of a list in view (" + error + ")");
     const auto shown = parse_test_actions(
         "fullscreen:yes;fullscreen:no;resolution:1920x1080;resolution:AUTO;interpolation:no;interpolation:yes;"
         "input-delay:yes",
@@ -639,7 +665,8 @@ void test_actions() {
                             "async-shaders:1", "async_shaders:yes", "precompile-shaders", "precompile-shaders:on", "resolution",
                             "resolution:", "resolution:1920", "resolution:1366x768",
                             "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all",
-                            "get-packages:numpy"}) {
+                            "get-packages:numpy", "rows", "rows:", "rows:pe:", "rows::300", "rows:pe::x",
+                            "rows:pe::-1"}) {
         check(!parse_test_actions(bad), std::string("actions: rejects ") + bad);
     }
 }

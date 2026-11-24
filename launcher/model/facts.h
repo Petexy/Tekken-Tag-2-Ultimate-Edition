@@ -109,6 +109,7 @@ struct Preflight {
     fs::path game, folder;
     bool running = false;
     std::vector<Check> checks;
+    uint64_t generation = 0; // the request running (or answered last): Effect::generation
 };
 
 // The task that runs (or none), as far as the views need it.

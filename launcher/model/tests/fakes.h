@@ -116,6 +116,11 @@ struct FakeEnvironment final : Environment {
     std::string log_end(const fs::path&) override { return "line one\nline two\nSegmentation fault\n"; }
     bool exists(const fs::path& path) override { return there.count(path.string()) > 0; }
     fs::path build_work() override { return "/home/player/.cache/ttt2/build"; }
+    int game_looks = 0; // game_runs() asked
+    bool game_runs(const Facts& facts) override {
+        ++game_looks;
+        return facts.game_started_here ? facts.game_running : running_outside;
+    }
 };
 
 struct FakeFiles final : UpdateFiles {

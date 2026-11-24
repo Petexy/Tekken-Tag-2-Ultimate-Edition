@@ -82,15 +82,21 @@ fs::path utf8_path(const std::string& text) { return fs::path(std::u8string(text
 
 } // namespace
 
-App::App(Options options) : o_(std::move(options)) {
+App::App(Options options) : o_(std::move(options)), mailbox_(std::make_shared<Mailbox>()) {
 #ifndef _WIN32
     places_ = Places::from_environment();
 #endif
+    mailbox_->app = this;
 }
 
 App::~App() {
-    for (std::thread& t : threads_)
-        if (t.joinable()) t.join();
+    {
+        // (Detached threads post nothing from now on.)
+        std::lock_guard<std::mutex> lock(mailbox_->mutex);
+        mailbox_->app = nullptr;
+    }
+    for (Worker& w : threads_)
+        if (w.thread.joinable()) w.thread.join();
     model_.reset();
     starter_.reset();
     host_.reset();
@@ -102,6 +108,37 @@ void App::post(std::function<void()> work) {
         posted_.push_back(std::move(work));
     }
     wake_loop();
+}
+
+void App::prune_threads() {
+    for (auto it = threads_.begin(); it != threads_.end();) {
+        if (it->done->load()) {
+            if (it->thread.joinable()) it->thread.join(); // (it has returned, or is about to)
+            it = threads_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void App::spawn(std::function<void()> work) {
+    prune_threads();
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    threads_.push_back({std::thread([work = std::move(work), done] {
+                            work();
+                            done->store(true);
+                        }),
+                        done});
+}
+
+void App::run_detached(std::function<void(const Poster& post)> work) {
+    std::thread([box = mailbox_, work = std::move(work)] {
+        const Poster poster = [&box](std::function<void()> w) {
+            std::lock_guard<std::mutex> lock(box->mutex);
+            if (box->app) box->app->post(std::move(w));
+        };
+        work(poster);
+    }).detach();
 }
 
 double App::now() const { return clock_.now(); }
@@ -287,7 +324,7 @@ void App::pump_input(double t, bool wait) {
     bool got;
     if (wait) {
         double wake = std::min({stage_->next_ambient_time(), router_.holding() ? router_.next_repeat_time() : 1e18,
-                                window_.next_pad_poll(), t + 0.25});
+                                window_.next_pad_poll(), model_->next_tick(t), t + 0.25});
         if (toast_until_ > t) wake = std::min(wake, toast_until_);
         const int ms = static_cast<int>(std::clamp((wake - t) * 1000, 0.0, 250.0));
         got = SDL_WaitEventTimeout(&ev, ms);
@@ -315,7 +352,7 @@ void App::pump_input(double t, bool wait) {
         }
         RawEvent raw;
         if (!o_.testing && window_.translate(ev, raw, now()) && !raw.filtered) {
-            router_.feed(raw);
+            if (!shortcut(raw)) router_.feed(raw);
             stage_->note_input(now());
         } else if (o_.testing) {
             window_.translate(ev, raw, now());
@@ -330,7 +367,7 @@ void App::pump_input(double t, bool wait) {
         }
         RawEvent raw = it->second;
         raw.time = now();
-        router_.feed(raw);
+        if (!shortcut(raw)) router_.feed(raw);
         stage_->note_input(now());
         it = test_raw_.erase(it);
     }
@@ -588,6 +625,10 @@ std::vector<Hint> App::hints() const {
             }
         } else if (f == "pk/choose" || f == "pk/choose-here") accept("Choose");
         else if (f == "pk/system") accept("Open");
+        else if (f == "pk/hidden") accept(picker_hidden_ ? "Hide Hidden" : "Show Hidden");
+#ifndef _WIN32
+        if (f != "pk/hidden") h.push_back({Prompt::Context1, picker_hidden_ ? "Hide Hidden" : "Show Hidden"});
+#endif
         h.push_back({Prompt::Back, "Back"});
         return h;
     }
@@ -1036,6 +1077,13 @@ void App::on_events(const std::vector<Event>& events) {
             if (task_screen_ && screen_ == Screen::kHome && !view_.dialog && !picker_) activate("details");
             break;
         case EventKind::Context1:
+            // (The browser: F / X shows or hides the hidden folders, as Ctrl+H.)
+            if (picker_ && !view_.dialog) {
+#ifndef _WIN32
+                picker_toggle_hidden();
+#endif
+                break;
+            }
             // (Fighters: F / X ticks the focused fighter's outfits.)
             if (screen_ == Screen::kFighters && !view_.dialog && e.id.starts_with("tile:")) {
                 const std::string id = "outfits:" + e.id.substr(5);
@@ -1189,7 +1237,7 @@ void App::handle(std::vector<m::Effect> effects) {
             handle(model_->chosen_folder(folder, now()));
             break;
         }
-        case m::Effect::Kind::kRunPreflight: run_preflight(e.path, e.path2); break;
+        case m::Effect::Kind::kRunPreflight: run_preflight(e.path, e.path2, e.generation); break;
         case m::Effect::Kind::kUninstall: run_uninstall(e.path, e.uninstall); break;
         case m::Effect::Kind::kOpenUrl:
         case m::Effect::Kind::kOpenPath: {
@@ -1245,19 +1293,22 @@ void App::handle(std::vector<m::Effect> effects) {
     }
 }
 
-void App::run_preflight(const fs::path& game, const fs::path& folder) {
+void App::run_preflight(const fs::path& game, const fs::path& folder, uint64_t generation) {
 #ifdef _WIN32
     (void)game;
     (void)folder;
+    (void)generation;
 #else
     const fs::path work = places_.build_work();
     ++working_;
-    threads_.emplace_back([this, game, folder, work] {
+    spawn([this, game, folder, work, generation] {
         m::SystemProbe probe;
         std::vector<m::Check> checks = m::run_checks(game, folder, work, probe);
-        post([this, checks = std::move(checks)] {
+        // (The model takes them only for the request they answer: generation.)
+        post([this, checks = std::move(checks), generation] {
             --working_;
-            handle(model_->preflight_done(checks, now()));
+            prune_threads();
+            handle(model_->preflight_done(checks, now(), generation));
         });
     });
 #endif
@@ -1270,10 +1321,11 @@ void App::run_uninstall(const fs::path& folder, UninstallOptions options) {
 #else
     const Places places = places_;
     ++working_;
-    threads_.emplace_back([this, places, folder, options] {
+    spawn([this, places, folder, options] {
         UninstallReport report = uninstall(places, folder, options);
         post([this, report = std::move(report)] {
             --working_;
+            prune_threads();
             model_->uninstall_done(report, now());
         });
     });
