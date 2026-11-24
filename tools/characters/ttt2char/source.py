@@ -14,6 +14,9 @@ convert/voice.py's Clips):
     NO_COLOURS                            the costume colours of a reference face (none: the material's own)
     picture(path)                         a UI picture as (H, W, 4) uint8 (convert/art.py)
     clips(d)                              the fighter's voice clips by kind (convert/voice.Clips' interface)
+    subtitles(d, names, log)              what its subtitles say for its clips of those names: {name: {language:
+                                          text}} (convert/subtitles.py; languages 'en', 'fr', 'de', 'it', 'es',
+                                          'ja'; a clip with no text left out)
     cloth(k, parts, log)                  (Tekken 8) the cloth it simulates as convert/cloth.add takes it
 Tekken7Source wraps the paks (tekken7/), Tekken8Source the store (tekken8/). A definition with TEKKEN8_CODE is a
 Tekken 8 fighter (characters.game_of); source_of() opens the source a definition needs, and Sources keeps one per
@@ -103,6 +106,30 @@ class Tekken7Source:
         from .convert import voice
         return voice.Clips(self.paks, d.TEKKEN7_CODE, d.VOICE_PREFIX)
 
+    # (Tekken 7's subtitle files are inside its moveset archive, read by the running game: tekken7/subtitles.py
+    # gives what was saved of them; Tekken 7's language codes for the subtitle languages)
+    TEKKEN7_LANGUAGES = (('en', 'us'), ('fr', 'fr'), ('de', 'de'), ('it', 'it'), ('es', 'es'), ('ja', 'jp'))
+
+    def subtitles(self, d, names, log=None):
+        """Its clips' subtitles: tekken7/subtitles.lines(code, language) {event name ('mz_s00'): text}, saved in
+        the folder of the files the game read (the paks' `saved`, the importer's --files; else autodump.FILES), {}
+        when not saved (then the donor's poses show no subtitle)."""
+        from .tekken7 import subtitles as text7
+        folder = getattr(self.paks, 'saved', None)
+        out = {}
+        for lang, theirs in self.TEKKEN7_LANGUAGES:
+            try:
+                got = text7.lines(d.TEKKEN7_CODE, theirs, folder) or {}
+            except (InputError, OSError, ValueError, KeyError, IndexError, UnicodeDecodeError) as error:
+                if log:
+                    log('Tekken 7 subtitles of %s (%s) not read: %s' % (d.TEKKEN7_CODE, theirs, error))
+                continue
+            low = {k.lower(): v for k, v in got.items()}
+            for name in names:
+                if low.get(name.lower()):
+                    out.setdefault(name, {})[lang] = low[name.lower()]
+        return out
+
 
 # ------------------------------------------------------------------------------------------------ Tekken 8
 class Tekken8Source:
@@ -186,6 +213,11 @@ class Tekken8Source:
     def clips(self, d):
         from .tekken8 import voice
         return voice.Clips(self.store, getattr(d, 'VOICE', d.TEKKEN8_CODE))
+
+    def subtitles(self, d, names, log=None):
+        """Its intro and win lines' subtitles from Tekken 8's text banks (tekken8/text.py)."""
+        from .tekken8 import text
+        return text.pose_lines(self.store, names, log=log)
 
 
 def material_name(path):

@@ -569,6 +569,7 @@ class NoShared(unittest.TestCase):
                 mock.patch.object(importer, 'tekken7_paks'), \
                 mock.patch.object(importer, 'saved_movesets', return_value={26: 'k', 8: 'h', 22: 'c'}), \
                 mock.patch.object(autodump, 'unsaved_files', return_value=[]), \
+                mock.patch('ttt2char.tekken7.subtitles.saved', return_value=True), \
                 mock.patch.object(importer, 'run', side_effect=lambda f, *a, **k: current_pack(
                     folder, {'kazumi': KAZUMI, 'chloe': CHLOE}[f], {'kazumi': 0, 'chloe': 1}[f])), \
                 mock.patch.object(importer, 'make_shared', side_effect=lambda *a, **k: made.append(1)), \

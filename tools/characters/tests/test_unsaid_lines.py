@@ -151,7 +151,7 @@ class FakeDonor:
 
 
 class PoseSubtitles(unittest.TestCase):
-    """The donor's subtitle (0x8180 in a move's begin properties: Lars's "You think you can stop us?" is 0x2600) is
+    """The donor's subtitle (0x8180 in a move's begin properties: Lars's first intro line is 0x2600) is
     left out of the donor's poses of a kind the fighter has no line of, and only of those."""
 
     END = dict(req=0, id=moveset.TT_END, value=0)

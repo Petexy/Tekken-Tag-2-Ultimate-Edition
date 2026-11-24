@@ -22,6 +22,11 @@
  *     fetch                            reads the queued files as the game reads them (its own file reader, which
  *                                      decodes the files it keeps encrypted): "file <0/1> <n>" then n raw bytes per
  *                                      file, in queue order, then "end"; the queue is emptied
+ *     subtitles <language> <roster id>...
+ *                                      the fighters' battle subtitles (Binary/subtitles/<code>/<language>/<code>_sub.bin
+ *                                      in the game's tkdata.bin), read by the game's own reader of those files, the
+ *                                      language one of jp us br ns fr it de es ru ar tw kr: "file <0/1> <n> <code>"
+ *                                      then n raw bytes per fighter, in order, then "end"
  *     quit                             ends the helper
  * The game's functions are called on a thread of their own (they queue work on the game's own threads, or work on the
  * buffers alone); no address or code comes from the connection.
@@ -58,6 +63,13 @@ static const struct Function FIXUP_MOVESET = {0x140714f40ull, 16, 0x418477E3A11B
 static const struct Function FIXUP_MOVELIST = {0x14075ad40ull, 16, 0xAFAAC7406FA4B2CCull};
 static const struct Function LOAD_FILE = {0x1408276c0ull, 16, 0xFE6C37993E3D21F8ull}; /* (TArray<u8>*, path, flags) */
 static const struct Function FREE = {0x1407cd730ull, 16, 0x5A43178A645AB271ull};
+/* The game's own reader of the files in Binary/tkdata.bin (its loading of a fighter's moveset and of the battle
+ * subtitles goes through it): request(std::vector<request*>*, path) -> request, pushed onto the vector; release(vector,
+ * request) takes it off and lets the game free it (and its data) once read. A request (0x60 bytes): its data @0x48,
+ * size @0x50, state @0x58 (0 reading, 1 not there or unreadable, 2 read); the game writes the state last. */
+static const struct Function REQUEST_FILE = {0x1402ac840ull, 16, 0x814491CCC13CA5C5ull};
+static const struct Function RELEASE_FILE = {0x1402ac9e0ull, 16, 0xF21643C224DBE37Full};
+enum { REQUEST_DATA = 0x48, REQUEST_SIZE = 0x50, REQUEST_STATE = 0x58, READ = 2 };
 static const unsigned long long TASK_MANAGER = 0x1434d6c18ull, FILE_LOADER = 0x1434cdfa0ull;
 /* A fighter record (0x70 bytes): code @0, moveset @0x40, animations @0x48, command list @0x68 (written last); the
  * common record (0x40 bytes): shared animations @0x38. */
@@ -223,7 +235,7 @@ static void attach(void) {
     g_delta = base - PREFERRED_BASE;
     fprintf(stderr, "attach: PID %lu, executable base 0x%llx\n", pid, base); fflush(stderr);
     const struct Function* all[] = {&ALLOCATE, &FIGHTER_INFO, &LOAD_FIGHTER, &LOAD_COMMON, &FIXUP_MOVESET,
-                                    &FIXUP_MOVELIST, &LOAD_FILE, &FREE};
+                                    &FIXUP_MOVELIST, &LOAD_FILE, &FREE, &REQUEST_FILE, &RELEASE_FILE};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; ++i) {
         if (!matches(all[i])) {
             out_printf("error this Tekken 7 build is not the one the helper knows\n");
@@ -426,6 +438,94 @@ static void load(unsigned id) {
     out_printf("%llx %s\n", record, name);
 }
 
+/* The battle subtitles of fighters (roster ids) in one of the game's text languages, as the game reads them for a
+ * fight: Binary/subtitles/<code>/<language>/<code>_sub.bin from its tkdata.bin, through its own reader, the code the
+ * game's own (its fighter info's). "file <0/1> <n> <code>" then n raw bytes per fighter, in order, then "end" (0: the
+ * game has no such file or could not read it, or the fighter is unknown: code "-"). The requests sit on a vector of
+ * the helper's (its room made beforehand: the game never reallocates it) and are released with the game's release,
+ * which frees them once read; the helper's memory is freed only when every call has ended. */
+static const char* const LANGUAGES[] = {"jp", "us", "br", "ns", "fr", "it", "de", "es", "ru", "ar", "tw", "kr"};
+enum { MAX_SUBTITLES = 64, SUBTITLE_PATH = 64, SUBTITLE_WAIT_MS = 30000, MAX_SUBTITLE_BYTES = 16 << 20 };
+
+static void subtitles(const char* language, const unsigned* ids, unsigned count) {
+    int known = 0;
+    for (size_t i = 0; i < sizeof LANGUAGES / sizeof LANGUAGES[0]; ++i) known |= !strcmp(language, LANGUAGES[i]);
+    if (!known || !count || count > MAX_SUBTITLES) {
+        out_printf("error not a language or too many fighters\n");
+        return;
+    }
+    if (!g_checked) {
+        out_printf("error not attached\n");
+        return;
+    }
+    /* the vector {begin, end, capacity} @0, its room @VECTOR_ROOM (one more slot than needed), the paths after */
+    enum { VECTOR_ROOM = 32 };
+    const size_t paths = VECTOR_ROOM + (size_t)(count + 1) * 8, size = paths + (size_t)count * SUBTITLE_PATH;
+    unsigned char* local = calloc(1, size);
+    unsigned char* remote = VirtualAllocEx(g_game, NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!local || !remote) {
+        out_printf("error cannot allocate\n");
+        free(local);
+        return;
+    }
+    const unsigned long long base = (unsigned long long)(size_t)remote;
+    const unsigned long long room = base + VECTOR_ROOM, end_of_room = room + (unsigned long long)(count + 1) * 8;
+    memcpy(local, &room, 8);
+    memcpy(local + 8, &room, 8);
+    memcpy(local + 16, &end_of_room, 8);
+    char codes[MAX_SUBTITLES][4];
+    for (unsigned i = 0; i < count; ++i) {
+        const unsigned long long info = ids[i] <= MAX_FIGHTER ? call(&FIGHTER_INFO, ids[i], 0, 0) : ~0ull;
+        const unsigned long long code = info != ~0ull && info ? read_u64(info + INFO_CODE) : 0;
+        char* name = codes[i];
+        memset(name, 0, 4);
+        if (!code || !read_game(code, name, 4) || name[3]) name[0] = 0;
+        for (const char* c = name; *c; ++c)
+            if (!((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9'))) name[0] = 0;
+        if (name[0])
+            snprintf((char*)local + paths + (size_t)i * SUBTITLE_PATH, SUBTITLE_PATH, "Binary/subtitles/%s/%s/%s_sub.bin",
+                     name, language, name);
+    }
+    SIZE_T done;
+    unsigned long long requests[MAX_SUBTITLES] = {0};
+    const int written = WriteProcessMemory(g_game, remote, local, size, &done);
+    int ended = 1;                            /* (every call ended: the memory is the helper's alone again) */
+    for (unsigned i = 0; written && i < count; ++i) {
+        if (!codes[i][0]) continue;
+        requests[i] = call(&REQUEST_FILE, base, base + paths + (unsigned long long)i * SUBTITLE_PATH, 0);
+        if (requests[i] == ~0ull) {           /* (the call did not end: it may still push onto the vector) */
+            requests[i] = 0;
+            ended = 0;
+        }
+    }
+    unsigned states[MAX_SUBTITLES] = {0};
+    for (DWORD waited = 0;; waited += 20) {
+        int pending = 0;
+        for (unsigned i = 0; i < count; ++i)
+            if (requests[i] && !states[i] && (!read_game(requests[i] + REQUEST_STATE, &states[i], 4) || !states[i]))
+                pending = 1;
+        if (!pending || waited >= SUBTITLE_WAIT_MS) break;
+        Sleep(20);
+    }
+    for (unsigned i = 0; i < count; ++i) {
+        const unsigned long long data = states[i] == READ ? read_u64(requests[i] + REQUEST_DATA) : 0;
+        const unsigned long long n = data ? read_u64(requests[i] + REQUEST_SIZE) : 0;
+        char* bytes = n && n <= MAX_SUBTITLE_BYTES ? malloc((size_t)n) : NULL;
+        const int ok = bytes && read_game(data, bytes, (size_t)n);
+        out_printf("file %d %llu %s\n", ok, ok ? n : 0ull, codes[i][0] ? codes[i] : "-");
+        if (ok) out_write(bytes, (size_t)n);
+        out_flush();
+        free(bytes);
+    }
+    for (unsigned i = 0; i < count; ++i)      /* (one still being read is freed by the game once it is) */
+        if (requests[i] && call(&RELEASE_FILE, base, requests[i], 0) == ~0ull) ended = 0;
+    unsigned long long left[2] = {0, 1};
+    if (ended && (!written || (read_game(base, left, 16) && left[0] == left[1])))
+        VirtualFreeEx(g_game, remote, 0, MEM_RELEASE);
+    out_printf("end\n");
+    free(local);
+}
+
 static void fixup(unsigned long long record, unsigned long long common_record) {
     const unsigned long long moveset = read_u64(record + RECORD_MOVESET);
     const unsigned long long animations = read_u64(record + RECORD_ANIMATIONS);
@@ -530,6 +630,26 @@ static int serve(int port, const char* secret) {
             want(arg);
         } else if (!strcmp(cmd, "fetch")) {
             fetch();
+        } else if (!strcmp(cmd, "subtitles") && sscanf(line, "%*s %7s", arg) == 1) {
+            unsigned ids[MAX_SUBTITLES], n = 0;
+            char* p = line;
+            for (int word = 0; *p && word < 2; ++word) {          /* past "subtitles" and the language */
+                while (*p == ' ') ++p;
+                while (*p && *p != ' ') ++p;
+            }
+            for (;;) {
+                while (*p == ' ') ++p;
+                if (!*p) break;
+                char* after;
+                const unsigned long id = strtoul(p, &after, 10);
+                if (after == p || (*after && *after != ' ') || n == MAX_SUBTITLES) {
+                    n = 0;
+                    break;
+                }
+                ids[n++] = id > MAX_FIGHTER ? MAX_FIGHTER + 1 : (unsigned)id;
+                p = after;
+            }
+            subtitles(arg, ids, n);
         } else {
             out_printf("error %s\n", line);
         }

@@ -18,7 +18,8 @@ import types
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
-    movelist_rows, moveset, outfits, particles, prefabs8, snakes8, sounds, summons8, tagsystem, tiger, voice, wardrobe, weapons
+    movelist_rows, moveset, outfits, particles, prefabs8, snakes8, sounds, subtitles, summons8, tagsystem, tiger, \
+    voice, wardrobe, weapons
 from .tekken7 import tkmvst
 from .tekken8 import sounds as sounds8
 from .tekken7.autodump import FILES, unread
@@ -256,11 +257,15 @@ def spring_file(archives, d, bon, cloth_springs):
     return mop
 
 
-def stand_in_moveset(donor, row, name):
+def stand_in_moveset(donor, row, name, shown=None):
     """The donor's moveset (a TTT2 motbin, data006) as the added fighter's own while it has none (MOVESET_SOURCE
     'donor'): its header's character id fields made its motion row `row` and its name `name`, as
-    moveset.Converter.write makes them; its aliases, tables and embedded motions are the donor's as they are."""
+    moveset.Converter.write makes them; its aliases, tables and embedded motions are the donor's as they are, but
+    its poses' subtitles (shown: the fighter's, subtitles.values for moveset.rewrite_subtitles; None: the donor's as
+    they are)."""
     m = motbin.read(donor)
+    if shown is not None:
+        moveset.rewrite_subtitles(m.tables, shown)
     hdr, strings, blob, slots = motbin.split(m)
     hdr = bytearray(hdr)
     struct.pack_into('>4H', hdr, MOVESET_HEADER_ID, row - 1, (-(row - 1)) & 0xFFFF, row, (-row) & 0xFFFF)
@@ -281,6 +286,18 @@ def _source(d, tekken7, tekken8, files):
         return folder, lambda: sources.open_tekken8(folder)
     paks_dir = tekken7_paks(tekken7)
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
+
+
+def _subtitles(source, d, streams, log):
+    """The fighter's subtitle lines (convert/subtitles.lines_of) for the clips the donor's poses stream (voice.build's
+    streams), from its source's text."""
+    names = sorted({clip[0] for tones in streams.values() for clip in tones.values() if clip[0] != voice.SILENCE})
+    texts = source.subtitles(d, names, log=log) if names and hasattr(source, 'subtitles') else {}
+    said = subtitles.lines_of(streams, texts)
+    log('subtitles: %d lines of its own%s%s' % (len(said), ''.join(
+        '; %d %s "%s"' % (line, v['clip'], v['text']['en']) for line, v in sorted(said.items())),
+        ''.join('; %s: no text' % n for n in names if n not in texts)))
+    return said
 
 
 def _donor_effects(d, donor_xml):
@@ -373,7 +390,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
         if saved8 is not None:              # (Tekken 8: the lines her own moves say, shouts after hers)
             clips.add_lines(saved8[0])
         vlist = voice.voice_list(rpx, d.DONOR)
-        banks, lines, wins, voice_extra, sound_extra = voice.build(
+        banks, lines, wins, voice_extra, sound_extra, streams = voice.build(
             clips, {w: archives.raw(key_of('%s_%s.nus3bank' % (w, d.DONOR))) for w in ('se_Chr', 'se_Dwi', 'rm_Dst',
                                                                                      'rm_Dwi')}, d.CODE, vlist, slot,
             effects.clips if effects else (), saved8 is not None)
@@ -394,11 +411,13 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
             lines.append('WARNING: sound effect not read: %s (%s)' % (what, why))
     for line in lines:
         log('         ' + line)
+    said = _subtitles(source, d, streams, lambda s: log('         ' + s))
+    shown = subtitles.values(said, place['id'])     # (its poses' subtitles: moveset.rewrite_subtitles)
 
     if stand_in(d):
         step('moveset: %s\'s moveset and motions stand in for %s\'s (motion row %d; the command list is %s\'s)'
              % (d.DONOR, d.NAME, place['row'], d.DONOR))
-        moves = stand_in_moveset(archives.entry('data006', d.DONOR_ROW), place['row'], d.MOVESET['name'])
+        moves = stand_in_moveset(archives.entry('data006', d.DONOR_ROW), place['row'], d.MOVESET['name'], shown)
         motions = archives.entry('data005', d.DONOR_ROW)
         xml = itemdb.body_only(donor_xml)
         effect_files = fx.still_named(effect_files, itemdb.effect_files_named(xml))
@@ -412,12 +431,12 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                                                             clips.move_voices(voice.voice_values(
                                                                                 clips, vlist)), slot=slot,
                                                                             named=named8, effects=effects,
-                                                                            unsaid=unsaid)
+                                                                            unsaid=unsaid, shown=shown)
     else:
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
                                                                     voice_extra, opt_anims, part3, bon, log, step,
-                                                                    effects, unsaid=unsaid)
+                                                                    effects, unsaid=unsaid, shown=shown)
 
     lids = face.tekken7_lids(tkmvst.face_animations(own_moveset)) if own_moveset is not None else None
     # (a Tekken 8 fighter: no face animations of its own to measure; its eyes' closing turn measured on the meshes)
@@ -432,6 +451,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     contents.update(banks)
     contents.update(pictures)
     contents.update(shared.source_files(source, d, clips))      # (so that shared/ is made again without its game)
+    if said:                                                    # (its lines for shared/'s subtitle file)
+        contents['%s/%s' % (pack.SOURCE, subtitles.FILE)] = subtitles.dumps(said)
     if gauge.of(d):
         step('gauge: %s\'s gauge and its HUD from %s' % (d.NAME, source.NAME))
         if game_of(d) == 'tekken7':              # (its HUD movie)
@@ -471,10 +492,10 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
 
 
 def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, effect_files, wins, vlist, voice_extra,
-                       opt_anims, part3, bon, log, step, effects=None, unsaid=frozenset()):
+                       opt_anims, part3, bon, log, step, effects=None, unsaid=frozenset(), shown=None):
     """The fighter's own Tekken 7 moveset converted (k: its tkmvst.read), with its effects and command list ->
     (moveset bytes, motion pack bytes, item database, effect files, command list or None). unsaid: the kinds of lines
-    ('intro', 'win') it has none of (its voice)."""
+    ('intro', 'win') it has none of (its voice); shown: its poses' subtitles (subtitles.values)."""
     step('moveset: the id maps from Heihachi in both games')
     h7 = tkmvst.read(heihachi)
     evidence = collections.defaultdict(idmaps.Evidence)
@@ -494,6 +515,7 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
                           archives.entry('data004', 0), maps, usage, place['row'], d)
     _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon)
     c.unsaid = frozenset(unsaid)    # (its poses leave the donor's lines of these kinds out)
+    c.subtitles = shown             # (... and show its own subtitles)
     c.opt_anims, c.part3 = opt_anims, part3
     c.effects = effects
     c.run()
@@ -564,7 +586,7 @@ def _name_moves8(archives, d, k, log):
 
 def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, effect_files, wins, vlist, voice_extra,
                                bon, log, step, voices8=None, slot=None, named=None, effects=None,
-                               unsaid=frozenset()):
+                               unsaid=frozenset(), shown=None):
     """The fighter's own Tekken 8 moveset converted (saved: tekken8_moveset's), with its command list -> (moveset
     bytes, motion pack bytes, item database, effect files, command list or None). Its moves are named from TTT2's
     movesets, the id maps come from those and the other Tekken 8 fighters saved with it (their moves named alike),
@@ -635,6 +657,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         _options(c, archives, d, {voice8.pose_move(n) or n: tone for n, tone in wins.items()}, vlist, voice_extra,
                  tag_states, bon)
         c.unsaid = frozenset(unsaid)    # (its poses leave the donor's lines of these kinds out; its intros say its own)
+        c.subtitles = shown             # (... and show its own subtitles)
         c.voices8 = voices8 or {}           # her moves' Tekken 8 voices -> the TTT2 voices of the same lines
         c.effects = effects                 # her moves' sound effects (tekken8/sounds.py)
         if snakes:                          # (their clips in part 3 of the motion pack, started as a tiger's)

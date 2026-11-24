@@ -1246,11 +1246,11 @@ pack names. A pack: `character.ini` (format, code, donor, sex, slot, chr_tones),
 banks, costume parts in `parts/<kind>/<index>` and its own pictures in
 `art/`. The title's entries that several added fighters change (layouts, the
 big portraits' container, the HUD's pictures, the colour palettes and grid,
-the select screen's name calls) are made by the importer for all installed
-packs together, each fighter at its number, in the folder `shared/keys/`
-(`<key>.bin` a changed copy, `<key>.add` textures appended to a container; a
-copy of a sound bank stays raw, in the original's archive). The port loads
-only packs whose `format` is its own (`kPackFormat`, the importer's
+the select screen's name calls, the subtitle file) are made by the importer
+for all installed packs together, each fighter at its number, in the folder
+`shared/keys/` (`<key>.bin` a changed copy, `<key>.add` textures appended to a
+container; a copy of a sound bank stays raw, in the original's archive). The
+port loads only packs whose `format` is its own (`kPackFormat`, the importer's
 `pack.PACK_FORMAT`) and never a pack's own `keys/`: the earliest packs carried
 title entries made for them alone there, whose texture pages, joined before
 `shared/`'s, moved every added fighter's pictures one place. A pack without a
@@ -1331,6 +1331,21 @@ se_Slt_StartChar (`sub_079E5D64(id, 1)`); the shared folder adds every
 fighter's to a changed copy of it. Between matches the title releases its
 fighters' cached bank files (`sub_07967F58`); the port releases the added
 fighters' then too.
+
+**Its subtitles.** An intro or win pose streams a line (property 0x8300,
+`0x0D000000 | n`: tone n of rm_Dst, `0x0D001000 | n`: of rm_Dwi) and shows a
+subtitle with its own begin property 0x8180 (`id << 8 | k`, `sub_04D32E08`):
+entry `id * 30 + k` of title entry 917395eb, a table of language containers of
+text banks whose only bound is its count (`sub_04D32CA8`: past it, or an empty
+entry, nothing is shown). The donor's poses an added fighter plays kept the
+donor's k, and so the donor's text; the importer gives each fighter lines of
+its own under its select id (line n for rm_Dst tone n, 10 + n for rm_Dwi tone
+n) with the text its source game shows for the clip on that tone (kept in the
+pack's `source/subtitles.json`), points each pose's 0x8180 at the line it
+streams (a pose whose clip has no text shows none), and the shared folder holds
+the file with the count raised to cover every added fighter's id
+(`convert/subtitles.py`). The port's system language is English, so every
+language entry without a text of its own shows the English one.
 
 **Its pictures.** The 2D screens find a fighter's pictures by its UI
 position, its row in tables of 59 (from the select id through `sub_06F0A484`

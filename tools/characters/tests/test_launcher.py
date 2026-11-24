@@ -333,6 +333,7 @@ class Progress(unittest.TestCase):
                     mock.patch('ttt2char.tekken7.pak.Paks'), mock.patch.object(importer, 'tekken7_paks'), \
                     mock.patch.object(importer, 'saved_movesets', return_value={26: 'k', 22: 'c', 8: 'h'}), \
                     mock.patch.object(autodump, 'unsaved_files', return_value=[]), \
+                    mock.patch('ttt2char.tekken7.subtitles.saved', return_value=True), \
                     mock.patch.object(importer, 'run', side_effect=imported), \
                     mock.patch.object(importer, 'make_shared') as shared:
                 code, lines = self.main(['kazumi', 'chloe', '--game', 'g', '--out', d, '--progress']

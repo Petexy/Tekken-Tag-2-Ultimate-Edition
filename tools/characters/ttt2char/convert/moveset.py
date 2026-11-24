@@ -627,9 +627,51 @@ WIN_QUOTE_PROP, WIN_QUOTE_VALUE = 0x82F9, 0x0E003000
 # frames (POSE_VOICES: its shouts and damage voices: Azazel's roars). The win poses keep these: their tones are
 # silent. The subtitle of a pose's line is a property of its own (SUBTITLE_PROP, in the move's begin properties:
 # value fighter id << 8 | line, entry id * 30 + line of the subtitle file 917395eb, shown by sub_04D32E08): the
-# donor's poses of a kind the fighter has no line of leave it out (Lars's "You think you can stop us?").
+# donor's poses of a kind the fighter has no line of leave it out (Lars's first intro line), and the
+# others name the fighter's own line of the clip they stream (rewrite_subtitles; convert/subtitles.py), never the
+# donor's text: by the line the pose streams, not by the donor's subtitle number (Jun's differ from her tones).
 STREAM_LINE_PROP, STREAM_LINE_VALUE = 0x8300, 0x0D000000
 SUBTITLE_PROP = 0x8180
+
+
+def rewrite_subtitles(tables, subtitles, end=None):
+    """Every move's subtitle rows (SUBTITLE_PROP in its begin properties) show the line the move itself streams
+    (its STREAM_LINE_PROP extra property's value): subtitles {that value: the fighter's subtitle value}
+    (convert/subtitles.values); a move streaming no line, or one with no subtitle of the fighter's, loses them.
+    tables: a moveset's (moves, move_begin_props, extra_move_properties); a changed list is a new one at the end of
+    move_begin_props (lists are shared between moves). -> (moves given the fighter's subtitle, moves left without)"""
+    end = TT_END if end is None else end
+    B, P = tables['move_begin_props'], tables['extra_move_properties']
+    made, given, dropped = {}, 0, 0
+    for row in tables['moves']:
+        start = row.get('begin_props')
+        rows, at = [], start
+        while at is not None and at < len(B) and B[at]['id'] != end:
+            rows.append(B[at])
+            at += 1
+        if not any(r['id'] == SUBTITLE_PROP for r in rows):
+            continue
+        stream, at = None, row.get('extraprops')
+        while at is not None and at < len(P) and not (P[at]['id'] == 0 and P[at]['frame'] == 0):
+            if P[at]['id'] == STREAM_LINE_PROP and P[at]['value'] & 0xFF000000 == STREAM_LINE_VALUE:
+                stream = P[at]['value']
+                break
+            at += 1
+        new = subtitles.get(stream) if stream is not None else None
+        if (start, new) not in made:
+            kept = [dict(r, value=new) if r['id'] == SUBTITLE_PROP else dict(r) for r in rows
+                    if r['id'] != SUBTITLE_PROP or new is not None]
+            if not kept:
+                made[(start, new)] = None
+            else:
+                made[(start, new)] = len(B)
+                B += kept + [dict(req=0, id=end, value=0)]
+        row['begin_props'] = made[(start, new)]
+        if new is None:
+            dropped += 1
+        else:
+            given += 1
+    return given, dropped
 POSE_VOICES = (0x82F9, (2, 3))      # (the property, the voice types: shout n, damage voice n; convert/voice.py)
 POSE_KIND = re.compile(r'^[A-Za-z]+_([sw])')     # a donor's pose move: _s.. an intro (la_srm), _w.. a win (la_wnm_1)
 # Tekken 7's tiger (or any other summoned model) plays an animation of its own: 0x828f = the animation's index. TTT2
@@ -1254,6 +1296,7 @@ class Converter:
         self.posed = set()              # the donor's intro and win pose moves playing the fighter's animations
         self.unsaid = frozenset()       # the kinds of lines ('intro', 'win') the fighter has none of (the importer's)
         self.intro_voices = {}          # donor intro part -> the Tekken 7/8 move whose voice it says (own_intro_voices)
+        self.subtitles = None           # {streamed line: the fighter's subtitle} (the importer's; rewrite_subtitles)
         self.usage = usage
         self.stats = collections.Counter()
         self.unmapped = collections.Counter()
@@ -4203,6 +4246,7 @@ class Converter:
             self.block_recovery8()          # Tekken 8's later recovery on block (BLOCK_RECOVERY8)
             self.bake_air8()                # (last: copies of whole moves)
             self.guard_copies_final8()      # (... and the guard copies of the donor's moves, as those are now)
+        self.own_subtitles()                # (the donor's poses, as every copy of them is now)
         # every move belongs to the new motion row
         for n, row in enumerate(self.T['moves']):
             combined = (self.newid << 16) + n - (self.newid - 1)
@@ -4582,6 +4626,15 @@ class Converter:
                 rows.append(dict(r))
             start += 1
         return rows
+
+    def own_subtitles(self):
+        """The donor's intro and win poses show the fighter's own subtitles (self.subtitles: the importer's
+        subtitles.values; None: the donor's moveset's as they are): rewrite_subtitles."""
+        if getattr(self, 'subtitles', None) is None:
+            return
+        given, dropped = rewrite_subtitles(self.T, self.subtitles)
+        self.stats['donor poses showing the fighter\'s own subtitle'] += given
+        self.stats['donor poses without a subtitle (no text of the line they stream)'] += dropped
 
     def unsaid_subtitles(self, start):
         """A donor pose part's begin property list (at `start`) without the donor's subtitles (SUBTITLE_PROP) -> the

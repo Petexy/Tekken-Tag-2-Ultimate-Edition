@@ -22,14 +22,17 @@ $XDG_DATA_HOME/ttt2/characters, else ~/.local/share/ttt2/characters, as the port
                                its art when the pack has this folder)
     colours.json               its player 2 colours (palette number: 1P and 2P colour), for shared/
     source/                    what shared/ takes from its game, saved by its import (shared.source_files): the
-                               pictures (PNG, named after their objects: source_name) and its name call
-                               (name_call.wav), so that shared/ is made again without its game (the port skips it)
+                               pictures (PNG, named after their objects: source_name), its name call
+                               (name_call.wav) and its intro and win lines' subtitles (subtitles.json:
+                               convert/subtitles.py), so that shared/ is made again without its game (the port
+                               skips it)
     <outfit>.nud .nut .bon     optional complete preset bodies, with matching .xml and .mop;
                                character.ini outfits lists their three-letter codes in preview order
                                (up to fourteen). art/costumes.nut then has one texture per preset.
 The packs share `shared/keys/` (made for all of them together, shared.py): changed copies of the title's own entries
 (2D layouts with every added fighter's pictures, the big portraits' container, the costume palettes and colour grid,
-the select screen's name calls; `<key>.bin`) and texture pages to add to its texture containers (`<key>.add`).
+the select screen's name calls, the subtitle file; `<key>.bin`) and texture pages to add to its texture containers
+(`<key>.add`).
 Files a pack leaves out (<code>.mop, .havok.xml: spring bones and cloth collision; <code>.mvl: the practice
 command list; the sound banks) are the donor's (a fighter fighting with its donor's moveset for now, MOVESET_SOURCE
 'donor', has no .mvl: the donor's command list). A pack holds the other game's assets: it is for the player's own
@@ -62,7 +65,7 @@ FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
 SOURCE = 'source'               # a pack's copy of what shared/ takes from its game
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
-REVISION = 9                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
+REVISION = 10                   # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
                                 # 2: tag combos; Reina's throws, bounds and icon; 3: face animations and eyelids;
                                 # 5: main sync; 6: the definitions' bounds alone, Tekken 7's after the Bound Mod:
                                 # screws, tornados and slams no longer bound; 7: hit reactions that keep what they
@@ -74,7 +77,9 @@ REVISION = 9                    # what packs made before lack, for every fighter
                                 # 8: a group cancel row counts its own group's rows, not the source's;
                                 # 9: the item database keeps worn items of the common packs: itemdb.ITEMS;
                                 # the game's wardrobe fitted to the human-sized fighters, their shop list for
-                                # CUSTOMIZE mode: convert/wardrobe.py; Tekken 7's skin as dark as its materials say)
+                                # CUSTOMIZE mode: convert/wardrobe.py; Tekken 7's skin as dark as its materials say;
+                                # 10: the donor's intro and win poses show the fighter's own subtitles, not the
+                                # donor's text: convert/subtitles.py)
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24), then (ROW_CELLS) a new top row

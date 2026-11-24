@@ -186,16 +186,19 @@ def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False
     clips') its moves play as item sounds (convert/sounds.py) -> ({file name: bytes}, report lines, win quotes {Tekken 7
     event name: the se_Dwi tone that plays it (moves play win quotes by tone)}, the shouts' tones appended to se_Chr
     (its voice list's extra entries: shouts number len(donor's shouts) on), the effects' tones appended to se_Chr
-    after them (append_effects; plain_effects: its argument)).
+    after them (append_effects; plain_effects: its argument), the streamed lines {'rm_Dst': {tone: clip}, 'rm_Dwi':
+    {tone: clip}}: the clip each tone the donor's poses stream plays (SILENCE's for a silent one; their subtitles,
+    convert/subtitles.py)).
     se_Chr follows the voice list; the other banks take clips in turn from one round of each kind (rm_Dwi gets a win
     quote se_Dwi has not)."""
-    out, report, wins, extra = {}, [], {}, []
+    out, report, wins, extra, streams = {}, [], {}, [], {}
     counter = {}
     for which, data in donor_banks.items():
         for rate in RATES:
             start = dict(counter)
+            tones = {}
             written, used, placed, extra_here = _build_one(which, data, clips, code, rate, start,
-                                                           vlist if which == 'se_Chr' else None, slot)
+                                                           vlist if which == 'se_Chr' else None, slot, tones)
             # (the title's sound memory is sized for its own banks; appended shouts may add to it)
             if len(written) <= len(data) * 1.02 * (1 + len(extra_here) / max(1, len(vlist))):
                 break
@@ -203,6 +206,8 @@ def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False
         out['%s_%s.nus3bank' % (which, code)] = written
         if which == 'se_Dwi':
             wins = placed
+        if which in ('rm_Dst', 'rm_Dwi'):
+            streams[which] = tones
         if which == 'se_Chr':
             extra = extra_here
         silenced = sum(1 for u in used if u.endswith('<-' + SILENCE))
@@ -218,7 +223,7 @@ def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False
         out['se_Chr_%s.nus3bank' % code] = bank.write()
         report.append('se_Chr_%s: %d sound effects appended (%d Hz), %d KB' % (
             code, len(effects), EFFECT_RATE, len(out['se_Chr_%s.nus3bank' % code]) // 1024))
-    return out, report, wins, extra, effect_tones
+    return out, report, wins, extra, effect_tones, streams
 
 
 def _effect_suffix(j):
@@ -283,15 +288,17 @@ def silence(bank, i):
     return SILENCE, rate, np.zeros((channels, samples), np.int16)
 
 
-def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
+def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0, tones=None):
     """The donor's bank `which` with the clips at sample rate `to` -> (bytes, the tones replaced, {clip name: the
-    tone that plays it}, the shouts' tones appended). A link tone's tones (a stereo pair `..R`/`..L`, or variants)
-    get one clip together. counter: how many clips of each kind earlier banks took (advanced here). vlist: the
-    donor's voice list (se_Chr): its tones first, by the list. With clips whose STORED_ONCE is true (Tekken 8's),
-    tones given the same audio (a clip on several tones, a mono line on both tones of a stereo pair) share one copy
-    of it, as the title's own banks share audio (nus3bank.Bank.source)."""
+    tone that plays it}, the shouts' tones appended); tones (a dict, if given) gets {tone: the clip it plays} of
+    the tones it gives a clip (a link tone's, not its audio tones'). A link tone's tones (a stereo pair `..R`/`..L`,
+    or variants) get one clip together. counter: how many clips of each kind earlier banks took (advanced here).
+    vlist: the donor's voice list (se_Chr): its tones first, by the list. With clips whose STORED_ONCE is true
+    (Tekken 8's), tones given the same audio (a clip on several tones, a mono line on both tones of a stereo pair)
+    share one copy of it, as the title's own banks share audio (nus3bank.Bank.source)."""
     bank = Bank(data)
     used, placed, extra = [], {}, []
+    given = tones if tones is not None else {}
     stored = {} if getattr(clips, 'STORED_ONCE', False) else None     # audio -> the first tone holding it
 
     def kind_of(name):
@@ -322,6 +329,7 @@ def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
                 done.add(k)
         done.add(i)
         placed.setdefault(clip[0], i)
+        given[i] = clip
 
     if vlist:
         kiai = clips.kiai()
@@ -364,6 +372,7 @@ def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
             put(k, clip, side)
             done.add(k)
         placed.setdefault(clip[0], i)
+        given[i] = clip
     for i in range(len(bank.tones)):
         name = bank.name(i)
         if i in done or not name or not bank.has_audio(i) or not bank.audio[i] or kind_of(name)[0] is None:
@@ -374,13 +383,15 @@ def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
         put(i, clip)
         done.add(i)
         placed.setdefault(clip[0], i)
+        given[i] = clip
     # the tones of a kind the fighter has no clip of (link tones' too: their audio tones are named alike) play
     # silence, not the donor's line
     for i in range(len(bank.tones)):
         name = bank.name(i)
         if i in done or not name or not bank.has_audio(i) or not bank.audio[i] or kind_of(name)[0] is None:
             continue
-        put(i, silence(bank, i))
+        given[i] = silence(bank, i)
+        put(i, given[i])
         done.add(i)
     bank.rename('%s_%s' % (which, code), project_id(which, slot))
     return bank.write(), used, placed, extra

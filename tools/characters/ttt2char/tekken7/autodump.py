@@ -16,7 +16,9 @@ Some fighters' files the game keeps encrypted in its paks (Geese Howard's and No
 the helper has the game read them with its own file reader (the one its loading uses), which hands them over decoded,
 and they are saved under their pak paths in a folder of their own (FILES) that the importer reads them from. One the
 game does not hand over plain and whole (a mod's pak may replace it) is named in a warning and not saved: an import
-fails on it only when it needs it.
+fails on it only when it needs it. The fighters' battle subtitles (the texts of their intro and win lines, which only
+the game's own data file has) are read the same way, by the game's reader of that file, and saved below FILES under
+the game's path for them (subtitles.py reads them).
 No menu, key or screen is involved, so the player's key bindings, settings, language or pop-ups do not matter.
 Nothing is written into the game's files, its saves or its prefix (but the helper's copy at C:\\t7helper.exe).
 A session ends what it started and nothing else (Session.close; also on the SIGTERM of the launcher's Cancel, see
@@ -65,6 +67,8 @@ FILE_BATCH = 64                                 # files the game reads at once (
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
 unread = {}                                     # {pak path: why} of the files the game did not read (this run's) ...
 UNREAD_SHOWN = 5                                # ... the ones named in the log (then how many more)
+SUBTITLE_LANGUAGES = ('us',)                    # the battle subtitles saved: English (the language the port shows)
+SUBTITLE_BATCH = 32                             # fighters whose subtitles the game reads at once (the helper: 64)
 
 
 class DumpError(Exception):
@@ -340,6 +344,22 @@ class Helper:
             _, ok, n = line.split()
             d = self._exact(int(n))
             out.append(d if ok == '1' else None)
+
+    def subtitles(self, language, fighters):
+        """The fighters' (roster ids) battle subtitle files in a language of the game's ('us': English) as the game
+        reads them: [(the game's code of the fighter, or None when it does not know the fighter; the file's bytes, or
+        None when the game has none)], in order."""
+        self.send('subtitles %s %s' % (language, ' '.join('%d' % f for f in fighters)))
+        out = []
+        while True:
+            line = self._line()
+            if line == 'end':
+                return out
+            if line.startswith('error'):
+                raise DumpError(line[6:])
+            _, ok, n, code = line.split()
+            d = self._exact(int(n))
+            out.append((None if code == '-' else code, d if ok == '1' else None))
 
     def quit(self):
         try:
@@ -788,6 +808,29 @@ def _save_files(h, paks, entries):
     return failed
 
 
+def _save_subtitles(h, fighters, folder, languages):
+    """Has the game read the fighters' ({roster id: (Tekken 7 code, name)}) battle subtitle files and saves them below
+    `folder` (subtitles.saved_path); a fighter the game has no file of gets an empty one (nothing to ask for again).
+    -> {roster id: why} of the fighters whose files were not saved."""
+    from . import subtitles
+    failed = {}
+    ids = list(fighters)
+    for language in languages:
+        for k in range(0, len(ids), SUBTITLE_BATCH):
+            batch = ids[k:k + SUBTITLE_BATCH]
+            for fid, (code, d) in zip(batch, h.subtitles(language, batch)):
+                if code is None or code.lower() != fighters[fid][0].lower():
+                    failed[fid] = ('Tekken 7 does not know the fighter' if code is None else
+                                   'Tekken 7 calls the fighter %s, not %s' % (code, fighters[fid][0]))
+                    continue
+                path = subtitles.saved_path(fighters[fid][0], language, folder)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path + '.part', 'wb') as f:
+                    f.write(d or b'')
+                os.replace(path + '.part', path)
+    return failed
+
+
 # ---------------------------------------------------------------- dumping
 
 def owned_dlc(t7, helper_exe, run):
@@ -824,11 +867,13 @@ def _until(what, condition, timeout):
     raise DumpError(what)
 
 
-def dump(fighters, out, log=print, cache=None, files=None, paks=None):
+def dump(fighters, out, log=print, cache=None, files=None, paks=None, subtitles=None, saved=None):
     """Dumps the fighters ({roster id: (Tekken 7 code, name)}) into `out` as T7_<name>.tkmvst; Heihachi too (when
     there are any). files: {roster id: (name, [pak entries])}: also saves those encrypted files (from unsaved_files)
     of the fighters, as the game reads them, below paks.saved (the ones it does not read are logged, and kept in
-    `unread`, and the movesets are dumped all the same). -> ({id: path} dumped, {id: reason} skipped)."""
+    `unread`, and the movesets are dumped all the same). subtitles: {roster id: (Tekken 7 code, name)}: also saves
+    those fighters' battle subtitles (SUBTITLE_LANGUAGES) below `saved` (None: paks.saved, else FILES; a fighter's
+    not saved is logged). -> ({id: path} dumped, {id: reason} skipped)."""
     from . import memdump                   # (numpy: the rest of this module works without it)
     if not steam_running():
         raise DumpError('Steam is not running: start it, then try again (Tekken 7 needs it)')
@@ -844,14 +889,16 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     if names:
         names.setdefault(HEIHACHI, ('hei', 'Heihachi'))
     files = {fid: v for fid, v in (files or {}).items() if v[1]}
+    subtitles = dict(subtitles or {})
     skipped = {}
-    for fid in list(names) + list(files):
+    for fid in list(names) + list(files) + list(subtitles):
         if fid in DLC and not owned.get(DLC[fid], False):
             skipped[fid] = 'its DLC is not owned'
     wanted = [fid for fid in names if fid not in skipped]
     files = {fid: v for fid, v in files.items() if fid not in skipped}
+    subtitles = {fid: v for fid, v in subtitles.items() if fid not in skipped}
     dumped = {}
-    if not wanted and not files:
+    if not wanted and not files and not subtitles:
         return dumped, skipped
     log('Starting native Windows Tekken 7 (its window may appear) ...' if os.name == 'nt' else 'Starting Tekken 7 in the background (no window, no sound) ...')
     s = session(t7, helper_exe, run, True)
@@ -868,6 +915,15 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
                     raise
                 time.sleep(1)
         _until('Tekken 7 did not get ready', h.ready, 120)
+        if subtitles:
+            folder = saved or (paks.saved if paks is not None and paks.saved else FILES)
+            try:
+                failed = _save_subtitles(h, subtitles, folder, SUBTITLE_LANGUAGES)
+            except DumpError as e:                      # (the movesets are dumped all the same)
+                failed = {fid: str(e) for fid in subtitles}
+            log('  battle subtitles of %d fighter(s), as the game reads them' % (len(subtitles) - len(failed)))
+            for fid, why in failed.items():
+                log('  WARNING: the subtitles of %s were not saved: %s' % (subtitles[fid][1], why))
         for fid, (name, entries) in files.items():
             log('  %s: %d encrypted files (%d MB), as the game reads them'
                 % (name, len(entries), sum(e.usize for e in entries) >> 20))

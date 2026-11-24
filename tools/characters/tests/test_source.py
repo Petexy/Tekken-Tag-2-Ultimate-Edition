@@ -251,7 +251,7 @@ class RunStandIn(unittest.TestCase):
                 stack.enter_context(p)
             opened = stack.enter_context(mock.patch.object(source, 'open_tekken8', return_value=src))
             build = stack.enter_context(mock.patch.object(importer.voice, 'build',
-                                                          return_value=(dict(banks), [], {}, (), ())))
+                                                          return_value=(dict(banks), [], {}, (), (), {})))
             lines = []
             target = importer.run('reina', None, None, 'g', out, log=lines.append, files='/saved', tekken8='t8', **run)
             yield target, lines, opened, build, made, src, motion
@@ -346,7 +346,7 @@ class RunOwnVoice(unittest.TestCase):
                 stack.enter_context(p)
             stack.enter_context(mock.patch.object(source, 'open_tekken8', return_value=src))
             stack.enter_context(mock.patch.object(importer.voice, 'build', side_effect=lambda *a: (
-                order.append('banks'), (dict(banks), [], {}, (), ()))[1]))
+                order.append('banks'), (dict(banks), [], {}, (), (), {}))[1]))
             values = stack.enter_context(mock.patch.object(importer.voice, 'voice_values', return_value='values'))
             convert = stack.enter_context(mock.patch.object(
                 importer, '_converted_tekken8_moveset', return_value=(b'moves', b'motions', b'<jun/> body', {}, None)))

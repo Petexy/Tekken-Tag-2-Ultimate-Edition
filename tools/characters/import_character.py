@@ -351,10 +351,10 @@ def shared_games(folder, tekken7, tekken8, progress, leaving=()):
 
 def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=True):
     """The Tekken 7 fighters that can be imported: owned (DLC fighters: as Steam tells), their movesets saved
-    (Tekken 7 runs hidden for those not saved yet, and has their encrypted files read, those it reads saved). alone:
-    no other fighter is imported (none of them left fails)."""
+    (Tekken 7 runs hidden for those not saved yet, and has their encrypted files and battle subtitles read, those it
+    reads saved). alone: no other fighter is imported (none of them left fails)."""
     from ttt2char import InputError, importer
-    from ttt2char.tekken7 import autodump
+    from ttt2char.tekken7 import autodump, subtitles
     from ttt2char.tekken7.pak import Paks
     # only fighters the player owns, whichever movesets are already saved (DLC fighters: as Steam tells)
     ids = [importer.definition(f).TEKKEN7_ID for f in fighters]
@@ -382,7 +382,7 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
     except InputError as error:
         progress.fail(str(error))
     have = importer.saved_movesets(movesets)
-    needed, files = {}, {}
+    needed, files, subs = {}, {}, {}
     for fighter in fighters:
         d = importer.definition(fighter)
         if d.TEKKEN7_ID not in have:
@@ -390,19 +390,27 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         entries = autodump.unsaved_files(paks, d.TEKKEN7_CODE)     # (one the game did not read before: again)
         if entries:
             files[d.TEKKEN7_ID] = (d.NAME, entries)
+        if not all(subtitles.saved(d.TEKKEN7_CODE, language, files_folder) for language in autodump.SUBTITLE_LANGUAGES):
+            subs[d.TEKKEN7_ID] = (d.TEKKEN7_CODE, d.NAME)
     if importer.HEIHACHI not in have:                       # (every import needs his)
         needed[importer.HEIHACHI] = ('hei', 'Heihachi')
     if files:
         mod_paks(paks_dir, [e for _, entries in files.values() for e in entries])
-    if needed or files:
-        print('Saving %d Tekken 7 moveset(s) and %d fighter(s)\' encrypted files first (Tekken 7 runs hidden in the '
-              'background for a minute or two) ...' % (len(needed), len(files)))
+    if needed or files or subs:
+        print('Saving %d Tekken 7 moveset(s), %d fighter(s)\' encrypted files and %d fighter(s)\' subtitles first '
+              '(Tekken 7 runs hidden in the background for a minute or two) ...' % (len(needed), len(files), len(subs)))
         progress('step', 'dump', 'Saving what Tekken 7 has only while it runs (it runs hidden in the background for a '
                  'minute or two)')
         try:
-            _, skipped = autodump.dump(needed, movesets, files=files, paks=paks)
+            _, skipped = autodump.dump(needed, movesets, files=files, paks=paks, subtitles=subs, saved=files_folder)
         except autodump.DumpError as error:
-            progress.fail(str(error))
+            if needed or files:
+                progress.fail(str(error))
+            # (only the subtitles were wanted, Steam not running say: the fighters are made without them, their intro
+            # and win poses showing no subtitle; the next import asks again)
+            print('WARNING: the Tekken 7 subtitles of %s were not saved (%s): their intro and win poses show no '
+                  'subtitle' % (', '.join(name for _, name in subs.values()), error))
+            skipped = {}
         who = {fid: name for fid, (_, name) in needed.items()}
         who.update((fid, name) for fid, (name, _) in files.items())
         for fid, why in skipped.items():

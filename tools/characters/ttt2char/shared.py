@@ -2,7 +2,8 @@
 
 Each added fighter changes some of the title's own entries: the 2D layouts (its labels beside Paul's, its select
 grid cell), the big portraits' container, the fights' HUD pictures, the costume palettes and colour grid (its
-player 2 colours) and the select screen's announcer bank (its name call). Packs made one by one would each carry a
+player 2 colours), the select screen's announcer bank (its name call) and the subtitle file (its intro and win
+lines' text: convert/subtitles.py, from its pack's source/subtitles.json). Packs made one by one would each carry a
 copy and the last would win, so these are made here for all installed packs together, each fighter in its place
 (pack.place): after an import, from each pack's `colours.json` (its player 2 colours) and each fighter's pictures
 and name call, which come from its own game (Tekken 7 or Tekken 8): from the copy its import saved in its pack
@@ -16,6 +17,7 @@ import io
 import json
 import os
 import shutil
+import struct
 import types
 import wave
 
@@ -24,7 +26,7 @@ from PIL import Image
 
 from . import InputError, pack, signals
 from .characters import GAMES, game_of
-from .convert import art, colours, voice, wardrobe
+from .convert import art, colours, subtitles, voice, wardrobe
 from .ttt2.archive import key_of
 from .ttt2.nus3bank import wave as wave_file
 
@@ -130,6 +132,32 @@ def name_calls(source_of, archives, fighters, log=None, earlier=None, kept=()):
     return {name: bank} if changed else {}
 
 
+def subtitle_file(archives, fighters, log=None):
+    """The subtitle file with every fighter's lines (its pack's source/subtitles.json) under its select id:
+    {file name: bytes}, or {} when no pack has lines."""
+    lines = {}
+    for slot, d, folder in fighters:
+        if folder is None:
+            continue
+        try:
+            mine = subtitles.read_lines(folder)
+        except (OSError, ValueError, AttributeError) as error:
+            mine = {}
+            if log:
+                log('the subtitles of %s are left out (%s)' % (d.NAME, error))
+        if mine:
+            lines[pack.place(slot)['id']] = mine
+    if not lines:
+        return {}
+    try:
+        made = subtitles.table(archives.read(subtitles.KEY), lines, subtitles.font_glyphs(archives))
+    except (KeyError, ValueError, struct.error) as error:
+        if log:
+            log('no subtitles of the added fighters: the game\'s subtitle file cannot be read (%s)' % error)
+        return {}
+    return {'keys/%08x.bin' % subtitles.KEY: made}
+
+
 def own_sources(fighters, source_of):
     """({code: source}, kept) of fighters [(slot, definition, pack folder)]: the source of each one's pictures and
     name call, its pack's copy (PackSource), else its game's (source_of(d)); kept [(slot, definition)]: those whose
@@ -185,6 +213,7 @@ def build(source_of, archives, rpx, folder, definitions, log=None, leaving=()):
             files['grid.ini'] = b'grid = rows\n'
         files.update(palettes(archives, fighters))
         files.update(name_calls(own, archives, fighters, log=log, earlier=earlier, kept={d.CODE for _, d in kept}))
+        files.update(subtitle_file(archives, fighters, log=log))
     # (A link put there goes, not what it leads to: shared/ is made anew each time, here.)
     for path in (part, old):
         pack.delete_path(path)

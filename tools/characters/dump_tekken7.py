@@ -2,8 +2,8 @@
 """Saves Tekken 7 fighters' movesets (what import_character.py needs from the running game) without you doing
 anything: Tekken 7 runs in the background, with no window and no sound, its own loader loads the fighters while it
 sits on its start-up screens (nothing is pressed), and it is closed again. The files Tekken 7 keeps encrypted (Geese's
-and Noctis's costumes, Noctis's voice) are saved too, as the game reads them (--files). Only fighters your Steam
-account owns are dumped; the others are listed as skipped.
+and Noctis's costumes, Noctis's voice) and the fighters' battle subtitles are saved too, as the game reads them
+(--files). Only fighters your Steam account owns are dumped; the others are listed as skipped.
 
     python3 tools/characters/dump_tekken7.py --all
     python3 tools/characters/dump_tekken7.py kazumi negan
@@ -30,8 +30,8 @@ def main():
     parser.add_argument('--all', action='store_true', help='every fighter the importer knows')
     parser.add_argument('--out', default=paths.movesets(), metavar='FOLDER', help='where the .tkmvst files go (default: %(default)s)')
     parser.add_argument('--files', default=autodump.FILES, metavar='FOLDER',
-                        help='where the files Tekken 7 keeps encrypted go, as the game reads them (default: %(default)s; '
-                             'import_character.py reads them there)')
+                        help='where the files Tekken 7 keeps encrypted and the battle subtitles go, as the game reads them '
+                             '(default: %(default)s; import_character.py reads them there)')
     args = parser.parse_args()
     names = list(importer.CHARACTERS) if args.all else args.fighter
     if not names:
@@ -44,12 +44,15 @@ def main():
     fighters, files = {}, {}
     for n in names:
         d = importer.definition(n)
+        if getattr(d, 'TEKKEN7_ID', None) is None:              # (a Tekken 8 fighter: dump_tekken8.py)
+            continue
         fighters[d.TEKKEN7_ID] = (d.TEKKEN7_CODE, d.NAME)
         entries = autodump.unsaved_files(paks, d.TEKKEN7_CODE)
         if entries:
             files[d.TEKKEN7_ID] = (d.NAME, entries)
     try:
-        dumped, skipped = autodump.dump(fighters, os.path.expanduser(args.out), files=files, paks=paks)
+        dumped, skipped = autodump.dump(fighters, os.path.expanduser(args.out), files=files, paks=paks,
+                                        subtitles=fighters, saved=os.path.expanduser(args.files))
     except autodump.DumpError as e:
         print('error: %s' % e, file=sys.stderr)
         return 1
