@@ -217,10 +217,26 @@ void WindowsReady::tick(double now) {
         WindowsEnvironment env(files_.build);
         progress_ = bootstrap_progress(env.log_end(files_.bootstrap_log()));
         if (code_ != 0 || !there(files_.python)) {
+            // (What went wrong: the log's last run without its own step lines and curl's bar.)
+            std::string said;
+            const std::string log = env.log_end(files_.bootstrap_log());
+            const size_t from = log.rfind("@step check");
+            std::string line;
+            for (const char ch : log.substr(from == std::string::npos ? 0 : from) + "\n") {
+                if (ch != '\n' && ch != '\r') {
+                    line += ch;
+                    continue;
+                }
+                const bool bar = line.find('%') != std::string::npos && line.find("##") != std::string::npos;
+                if (!line.empty() && !line.starts_with("@step") && !bar &&
+                    line.find_first_not_of(" #\t") != std::string::npos)
+                    said += line + "\n";
+                line.clear();
+            }
             return fail({"Cannot get the launcher ready",
                          "Its Python could not be downloaded and checked. Check your internet connection, then try "
                          "again.",
-                         last_lines(env.log_end(files_.bootstrap_log()), 6), files_.bootstrap_log(), true});
+                         last_lines(said, 4), files_.bootstrap_log(), true});
         }
         files_.python_needed = false;
         return run_state(now);

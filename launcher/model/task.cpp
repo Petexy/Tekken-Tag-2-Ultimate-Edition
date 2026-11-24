@@ -352,6 +352,13 @@ TaskView TaskRunner::view() const {
             v.fraction = progress_.fraction();
         }
         v.detail = !started_ ? detail_ : detail;
+        // (Play's own step: the step line repeats the title; say what follows.)
+        if (spec_.kind == TaskKind::kShaders && (v.detail.empty() || v.detail.starts_with(spec_.title)))
+            v.detail = "The game starts once they are ready" +
+                       (progress_.fraction() >= 0
+                            ? " · " + std::to_string(static_cast<int>(progress_.fraction() * 100)) + "%"
+                            : std::string()) +
+                       ".";
         if (cancelled_) {
             v.detail = spec_.kind == TaskKind::kImport
                            ? "Stopping… " + (spec_.hidden.empty() ? std::string("Tekken 7") : spec_.hidden) +

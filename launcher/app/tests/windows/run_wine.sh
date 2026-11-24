@@ -67,7 +67,7 @@ make_root() {
     fi
     local golden=$GOLDEN/installed/case.json
     [ "$answers" = setup ] && golden=$GOLDEN/not-installed/case.json
-    python3 "$HERE/answers.py" "$dir/answers" "$(winpath "$dir/root")" "$answers" "$golden"
+    "${PYTHON:-python3}" "$HERE/answers.py" "$dir/answers" "$(winpath "$dir/root")" "$answers" "$golden"
 }
 
 # run CASE EXPECTED_EXIT ACTIONS [extra env...]: the launcher, its standard error in WORK/CASE/run.log.

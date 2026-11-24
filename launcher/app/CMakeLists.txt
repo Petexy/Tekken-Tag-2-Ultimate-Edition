@@ -111,6 +111,15 @@ if(WIN32)
         if(TTT2_WINE)
             set_tests_properties(launcher_app_test launcher_app_version PROPERTIES ENVIRONMENT_MODIFICATION
                 "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:;DBUS_SESSION_BUS_ADDRESS=unset:")
+            # The program itself under headless Wine against stub tools (its own prefix in the build folder).
+            find_program(TTT2_BASH bash)
+            find_package(Python3 COMPONENTS Interpreter)
+            if(TTT2_BASH AND Python3_Interpreter_FOUND)
+                add_test(NAME launcher_app_wine COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/windows/run_wine.sh
+                    ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/wine-run)
+                set_tests_properties(launcher_app_wine PROPERTIES LABELS launcher TIMEOUT 900
+                    ENVIRONMENT "WINE=${TTT2_WINE};PYTHON=${Python3_EXECUTABLE}")
+            endif()
         else()
             set_tests_properties(launcher_app_test launcher_app_version PROPERTIES DISABLED ON)
         endif()

@@ -32,7 +32,8 @@ def main(out, root, case, golden):
              'branch': None, 'root': root, 'build': w('build-windows-tools'), 'config': w('local', 'windows-launcher.json'),
              'settings': folders, 'defaults': defaults, 'installed': game or None,
              'installed_by': '0.9.0 e82a93f677fe8fc2f5e43ff095ab6a956a5b3406' if installed else '',
-             'icon': None, 'logs': data + '\\logs', 'latest_log': None,
+             'icon': None, 'logs': data + '\\logs',
+             'latest_log': data + '\\logs\\setup-20261124-190000-1.log' if installed else None,
              'display_file': data + '\\config\\display.ini', 'keyboard_file': data + '\\config\\keyboard.ini',
              'play': {'argv': [game + '\\TTT2 Ultimate.exe'], 'cwd': game, 'env': {}, 'log': data + '\\logs\\game-latest.log'}
              if installed else {'problem': 'source'},

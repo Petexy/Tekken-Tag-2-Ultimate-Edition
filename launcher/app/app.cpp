@@ -720,10 +720,17 @@ void App::dialog_band() {
     {
         auto cg = ui.open("dlg/crimson", L.crimson);
         section_label(ui, "dlg/label", label, Half::Crimson, {}, fitted({}, SeamFit::CrimsonRect));
-        text(ui, "dlg/title", TextSpec{.text = d.title, .style = tx::kDialogTitle, .wrap = true},
-             fitted(Box{.margin = {0, 0, 0, d.id == "stop-and-quit" ? 6.f : 14.f}}, SeamFit::CrimsonRect));
-        if (d.id == "stop-and-quit")
-            text(ui, "dlg/sub", TextSpec{"The task is not finished.", tx::kParaSmall, c::kRedDim},
+        // (Set Up Game asks a question, its OK named for what it starts; the Tk window's words stay the model's.)
+        const bool setup = d.id == "setup";
+        const bool sub = d.id == "stop-and-quit" || setup;
+        text(ui, "dlg/title", TextSpec{.text = setup ? "Set up the game now?" : d.title, .style = tx::kDialogTitle,
+                                       .wrap = true},
+             fitted(Box{.margin = {0, 0, 0, sub ? 6.f : 14.f}}, SeamFit::CrimsonRect));
+        if (sub)
+            text(ui, "dlg/sub",
+                 TextSpec{.text = setup ? "It needs internet, at least 30 GB of free space, and a while."
+                                        : "The task is not finished.",
+                          .style = tx::kParaSmall, .color = c::kRedDim, .wrap = true},
                  fitted(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         for (const m::Line& l : d.lines) {
             for (const m::Action& a : l.actions) {
@@ -737,7 +744,7 @@ void App::dialog_band() {
                                              SeamFit::CrimsonRect));
         for (const m::Action& a : d.buttons) {
             ButtonSpec b;
-            b.label = a.label;
+            b.label = a.id == "setup-confirm" ? std::string("Set Up Game") : a.label;
             b.half = Half::Crimson;
             b.disabled = !a.enabled;
             if (a.id == d.cancel) b.prompt = Prompt::Back;

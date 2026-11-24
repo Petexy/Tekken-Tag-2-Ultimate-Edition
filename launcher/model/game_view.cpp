@@ -123,7 +123,10 @@ void installed(const Facts& facts, GameView& v) {
     } else {
         Action play =
             button("play", playing ? "Playing" : "Play", !playing && !task,
-                   playing ? refusal_sentence("The game is running", "Only one can run at a time.") : task_why("play"));
+                   playing ? refusal_sentence("The game is running", "Only one can run at a time.")
+                   : facts.task && facts.task->kind == TaskKind::kShaders
+                       ? std::string("The game starts by itself once its shaders are ready.")
+                       : task_why("play"));
         play.primary = true;
         play.icon = Icon::kPlay;
         play.describe.state = playing ? "Running" : "";

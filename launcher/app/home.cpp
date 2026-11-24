@@ -372,7 +372,9 @@ void App::more_view() {
     section_label(ui, "more/label", "More", Half::Blue, {}, fit(Box{.margin = {0, 6, 0, 8}}, SeamFit::BlueRect));
     for (const m::Action& a : view_.game.more) screen_actions_[a.id] = a;
     more_describe();
-    auto col = ui.open("more/list", fit(Box{.margin = {0, 12, 0, 0}, .gap = 8, .align = Align::End},
+    // (In rows that wrap: six entries never run below the plate.)
+    auto col = ui.open("more/list", fit(Box{.layout = Layout::Row, .margin = {0, 12, 0, 0}, .gap = 10, .line_gap = 10,
+                                            .wrap = true},
                                         SeamFit::BlueRect));
     for (const m::Action& a : view_.game.more) {
         ButtonSpec b;
