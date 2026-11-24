@@ -1039,7 +1039,7 @@ int run(const std::vector<std::string>& args) {
         SDL_Event ev;
         if (!test) {
             const bool busy = ui.animating() || stage.animating() || wipe.active(now) || router.holding() || first;
-            double wake = std::min({stage.next_ambient_time(), router.holding() ? router.next_repeat_time() : 1e18,
+            double wake = std::min({stage.next_ambient_time(now), router.holding() ? router.next_repeat_time() : 1e18,
                                     window.next_pad_poll()});
             const int wait_ms = busy ? 0 : static_cast<int>(std::clamp((wake - now) * 1000, 0.0, 1000.0));
             if (busy ? SDL_PollEvent(&ev) : SDL_WaitEventTimeout(&ev, wait_ms)) {

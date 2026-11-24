@@ -12,6 +12,9 @@ namespace ttt2::ui::theme {
 
 // ---- stage and seam geometry -------------------------------------------------------------------------------------
 constexpr float kStageWidth = 1280, kStageHeight = 800;
+// The smallest layout a larger Text size may give (points): the Steam Deck's 1280x800 at 150 %. Every screen is laid
+// out for it; a window too small for the Text size chosen keeps its text that much smaller (ui_scale).
+constexpr float kTextLayoutWidth = kStageWidth / 1.5f, kTextLayoutHeight = kStageHeight / 1.5f;
 constexpr float kSeamDegrees = 12;
 constexpr float kSeamTan = 0.21255656167f;  // tan(12 degrees): every skewed shape and the seam lean by it
 constexpr float kTopBand = 76;              // the neutral top bar (tabs)

@@ -446,6 +446,25 @@ void runs(Ui& ui, const std::string& id, const TextStyle& style, std::vector<Run
         });
 }
 
+namespace {
+// A section label in `room` points (FEEDBACK / REVIEW2 #9: a large Text size or a narrow column): its letters closer
+// together (down to a third of their spacing), then without its bar, then cut with an ellipsis; never over the
+// neighbour's. `lead`: where the label starts (32 with the bar, 0 without).
+struct FittedLabel {
+    TextStyle style;
+    std::string text;
+    float lead;
+};
+FittedLabel fit_label(TextEngine& te, const std::string& label, float room) {
+    FittedLabel f{tx::kLabel, label, 32};
+    while (f.lead + te.width(f.style, label) > room && f.style.tracking > tx::kLabel.tracking / 3 + .001f)
+        f.style.tracking = std::max(tx::kLabel.tracking / 3, f.style.tracking - .04f);
+    if (f.lead + te.width(f.style, label) > room) f.lead = 0;
+    if (te.width(f.style, label) > room) f.text = te.ellipsize(f.style, label, std::max(0.f, room));
+    return f;
+}
+}  // namespace
+
 void section_label(Ui& ui, const std::string& id, const std::string& label, Half half, const std::string& right,
                    const Box& box) {
     Box b = with_height(box, 20);
@@ -462,15 +481,18 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
             const float cy = r.y + r.h / 2;
+            const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+            const FittedLabel fl = fit_label(ctx.text, label, r.w - (right.empty() ? 0 : rw + 10));
             if (mirrored) {
                 // (Mirrored: the hairline from the left, the label, the bar at the right end; `right` first.)
                 const Rect bar{r.right() - 22, cy - 2, 22, 4};
-                cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
-                cv.fill(skewed(bar, kSeamTan), col);
-                const float w = ctx.text.width(tx::kLabel, label);
-                const float x = r.right() - 32 - w;
-                ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
-                const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+                if (fl.lead > 0) {
+                    cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
+                    cv.fill(skewed(bar, kSeamTan), col);
+                }
+                const float w = ctx.text.width(fl.style, fl.text);
+                const float x = r.right() - fl.lead - w;
+                ctx.text.draw(cv, fl.style, fl.text, {x, centred_y(ctx.text, fl.style, r)}, col);
                 if (!right.empty())
                     ctx.text.draw(cv, tx::kLabelEm, right, {r.x, centred_y(ctx.text, tx::kLabelEm, r)}, rgb(0xe9edf5));
                 const float l0 = r.x + (right.empty() ? 0 : rw + 10), l1 = x - 10;
@@ -480,11 +502,12 @@ void section_label(Ui& ui, const std::string& id, const std::string& label, Half
                 return;
             }
             const Rect bar{r.x, cy - 2, 22, 4};
-            cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
-            cv.fill(skewed(bar, kSeamTan), col);
-            const float x = r.x + 32;
-            const float w = ctx.text.draw(cv, tx::kLabel, label, {x, centred_y(ctx.text, tx::kLabel, r)}, col);
-            const float rw = right.empty() ? 0 : ctx.text.width(tx::kLabelEm, right);
+            if (fl.lead > 0) {
+                cv.glow(skewed(bar, kSeamTan), 8, col.faded(.5f));
+                cv.fill(skewed(bar, kSeamTan), col);
+            }
+            const float x = r.x + fl.lead;
+            const float w = ctx.text.draw(cv, fl.style, fl.text, {x, centred_y(ctx.text, fl.style, r)}, col);
             const float l0 = x + w + 10, l1 = r.right() - (right.empty() ? 0 : rw + 10);
             if (l1 > l0)
                 cv.fill_rect({l0, cy - .5f, l1 - l0, 1},
@@ -809,7 +832,8 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             r = {r.center().x - r.w * s / 2, r.center().y - r.h * s / 2, r.w * s, r.h * s};
             const Quad q = skewed(r, kSeamTan);
             const bool dis = spec.disabled;
-            const float breathe = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / 1.6f);
+            const float breathe =
+                ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.ambient) * 2 * kPi / 1.6f);
             if (!dis) {
                 Rect low = r;
                 low.y += 12;
@@ -830,7 +854,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             cv.fill(q, Gradient::css(r, 100, {{0, col(c::kSlabA)}, {.45f, col(c::kSlabB)}, {1, col(c::kSlabC)}}));
             // Streaks and a sheen running through it (still under Reduce motion).
             if (!dis && !ctx.reduced) {
-                const float t = static_cast<float>(ctx.now);
+                const float t = static_cast<float>(ctx.ambient);
                 static constexpr float kL[6][4] = {{16, 180, 1.1f, 0}, {32, 120, .8f, .3f}, {50, 240, 1.3f, .6f},
                                                    {68, 160, .9f, .1f}, {84, 200, 1.2f, .45f}, {98, 110, .7f, .8f}};
                 for (const auto& l : kL) {
@@ -852,26 +876,37 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
                                 Gradient::linear3({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0), .5f,
                                                   rgba(255, 255, 255, .4f), rgba(255, 255, 255, 0)));
                 }
-                ctx.animate();
+                ctx.loop();
             }
             // Inner light along the top, shade along the bottom.
             cv.line(q.p[0] + Vec2{0, .5f}, q.p[1] + Vec2{0, .5f}, 1, rgba(255, 255, 255, .45f));
             cv.fill(sk_rect(r, {r.x, r.bottom() - 3, r.w, 3}), rgba(0, 0, 0, .25f));
-            // Content (upright): the word, two small lines, the Accept glyph when focused.
-            const TextStyle big =
-                spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
+            // Content (upright): the word, two small lines, the Accept glyph when focused. The glyph's place stays
+            // free, focused or not; a narrow slab (a small window, a large Text size) makes the word smaller (down to
+            // 60 %) before the small lines are cut.
+            TextStyle big = spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
+            const float pw = prompt_width(ctx.text, ctx.glyphs, Prompt::Accept);
+            const float end = r.right() - 30 - pw - 14;  // (where the glyph's place begins)
             const float bx = r.x + 40;
+            const float lines_w = std::max(ctx.text.width(tx::kSlabSmall, spec.line1),
+                                           ctx.text.width(tx::kSlabSmall, spec.line2));
+            const float least = big.size * .6f;
+            while (big.size > least && bx + ctx.text.width(big, spec.big) + 18 + lines_w > end)
+                big.size = std::max(least, big.size - 4);
             const float by = r.y + (r.h - ctx.text.line_height(big)) / 2;
             ctx.text.draw(cv, big, spec.big, {bx, by + 4}, rgba(0, 0, 0, .22f));
             const float bw = ctx.text.draw(cv, big, spec.big, {bx, by}, rgb(0xffffff));
             const float lh = ctx.text.line_height(tx::kSlabSmall);
             const float sx = bx + bw + 18, sy = r.y + r.h / 2 - lh - 2;
-            ctx.text.draw(cv, tx::kSlabSmall, spec.line1, {sx, sy}, rgba(255, 255, 255, .9f));
-            ctx.text.draw(cv, tx::kSlabSmall, spec.line2, {sx, sy + lh + 4}, rgba(255, 255, 255, .9f));
-            if (f > .01f) {
-                const float pw = prompt_width(ctx.text, ctx.glyphs, Prompt::Accept);
-                draw_prompt(cv, ctx.text, ctx.icons, ctx.glyphs, Prompt::Accept, r.right() - 30 - pw, r.y + r.h / 2, f);
+            const float room = end - sx;
+            for (int i = 0; i < 2 && room >= 40; ++i) {
+                const std::string& l = i == 0 ? spec.line1 : spec.line2;
+                const std::string shown =
+                    ctx.text.width(tx::kSlabSmall, l) > room ? ctx.text.ellipsize(tx::kSlabSmall, l, room) : l;
+                ctx.text.draw(cv, tx::kSlabSmall, shown, {sx, sy + i * (lh + 4)}, rgba(255, 255, 255, .9f));
             }
+            if (f > .01f)
+                draw_prompt(cv, ctx.text, ctx.icons, ctx.glyphs, Prompt::Accept, r.right() - 30 - pw, r.y + r.h / 2, f);
         },
         &focus);
 }
@@ -1020,14 +1055,14 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             if (none && !spec.busy) dashed(cv, q, 1, 4, 3, mix(border, rgb(0xffffff), f));
             else cv.stroke(q, 1, mix(border, rgb(0xffffff), f));
             if (checking && !ctx.reduced) {
-                const float ph = std::fmod(static_cast<float>(ctx.now) / 1.3f, 1.f);
+                const float ph = std::fmod(static_cast<float>(ctx.ambient) / 1.3f, 1.f);
                 const float x0 = r.x + r.w * (1.5f - 3 * ph) - r.w * .4f;
                 const float a = std::max(r.x, x0), b2 = std::min(r.right(), x0 + r.w * .8f);
                 if (b2 > a)
                     cv.fill(sk_rect(r, {a, r.y, b2 - a, r.h}),
                             Gradient::linear3({x0, 0}, {x0 + r.w * .8f, 0}, rgba(98, 212, 255, 0), .5f,
                                               rgba(98, 212, 255, .25f), rgba(98, 212, 255, 0)));
-                ctx.animate();
+                ctx.loop();
             }
             // Code and name.
             const Color code_col = notowned   ? rgb(0x7d6a70)
@@ -1254,17 +1289,17 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
     if (!one) prompt(ui, id + "/next", Prompt::SectionNext);
 }
 
+float key_row_width(TextEngine& te, const KeyRowSpec& spec) {
+    return 14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 + std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) +
+           12;
+}
+
 void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus, const Box& box) {
     Box b = with_height(box, m::kKeyRowHeight);
     if (zero(b.margin)) b.margin.bottom = 5;
     TextEngine& te = ui.text();
     ui.leaf(
-        id, b,
-        [&te, spec](float) {
-            return Vec2{14 + 22 + 10 + te.width(tx::kKeyName, spec.name) + 10 +
-                            std::max(44.f, te.width(tx::kKeyCap, spec.key) + 18) + 12,
-                        m::kKeyRowHeight};
-        },
+        id, b, [&te, spec](float) { return Vec2{key_row_width(te, spec), m::kKeyRowHeight}; },
         [spec](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
@@ -1282,16 +1317,19 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
             const float kw = std::max(44.f, ctx.text.width(tx::kKeyCap, spec.key) + 18);
             const Rect kc{r.right() - 12 - kw, cy - 13, kw, 26};
             const float x = r.x + 14 + 22 + 10;
-            ctx.text.draw(cv, tx::kKeyName, ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x),
-                          {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
+            // (A row too narrow for even a letter of its name shows the icon and the key only, no lone ellipsis.)
+            const std::string name = ctx.text.ellipsize(tx::kKeyName, spec.name, kc.x - 10 - x);
+            if (name != "…" && name != "...")
+                ctx.text.draw(cv, tx::kKeyName, name, {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
             Color text_col = rgb(0xffffff);
             if (spec.capturing) {
-                const float pulse = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / .8f);
+                const float pulse =
+                    ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.ambient) * 2 * kPi / .8f);
                 surface(cv, kc,
                         Gradient::css(kc, 100, {{0, brightened(c::kWarn, 1 + .25f * pulse)}, {1, rgb(0xff9a2e)}}),
                         rgb(0xffffff));
                 text_col = rgb(0x1a1000);
-                if (!ctx.reduced) ctx.animate();
+                if (!ctx.reduced) ctx.loop();
             } else if (f > .5f) {
                 surface(cv, kc, Gradient::linear({0, kc.y}, {0, kc.bottom()}, rgb(0xffffff), rgb(0xd9dde8)),
                         spec.swapped ? c::kWarn : rgba(255, 255, 255, .28f));
@@ -1322,14 +1360,14 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
                     cv.fill(q, Gradient::css(r, 100, {{0, rgba(255, 42, 85, .42f)}, {1, rgba(120, 10, 40, .3f)}}));
                     if (!ctx.reduced) {
                         // Moving stripes.
-                        const float off = std::fmod(static_cast<float>(ctx.now) * 45, 20.f);
+                        const float off = std::fmod(static_cast<float>(ctx.ambient) * 45, 20.f);
                         cv.push_clip(r);
                         for (float x = r.x - r.h - 20 - off; x < r.right() + r.h; x += 20) {
                             const Vec2 a = sk(r, {x + 10, r.y}), b2 = sk(r, {x + 10 - r.h * .47f, r.bottom()});
                             cv.line(a, b2, 10 * .9f, rgba(255, 255, 255, .07f));
                         }
                         cv.pop_clip();
-                        ctx.animate();
+                        ctx.loop();
                     }
                     cv.stroke(q, 1, rgba(255, 210, 220, .85f));
                     name_col = icon_col = rgb(0xffffff);
@@ -1433,10 +1471,10 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
         if (tone == Tone::Bad) a = rgb(0x5e0a1f), mid = rgb(0xa8183a), z = rgb(0xff2a55);
         float x0 = 0, x1 = s.user[0];
         if (pulse) {
-            const float t = ctx.reduced ? .5f : .5f - .5f * std::cos(static_cast<float>(ctx.now) * kPi / 1.1f);
+            const float t = ctx.reduced ? .5f : .5f - .5f * std::cos(static_cast<float>(ctx.ambient) * kPi / 1.1f);
             x0 = (-0.4f + 3.1f * t) * .3f;
             x1 = x0 + .3f;
-            if (!ctx.reduced) ctx.animate();
+            if (!ctx.reduced) ctx.loop();
         }
         x0 = std::clamp(x0, 0.f, 1.f), x1 = std::clamp(x1, 0.f, 1.f);
         if (x1 > x0) {
@@ -1471,11 +1509,11 @@ void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bo
             surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
             float x = ctx.rect.x + 13;
             if (dot) {
-                const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.now) * 2 * kPi);
+                const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.ambient) * 2 * kPi);
                 const Vec2 ctr{x + 3.5f, ctx.rect.y + ctx.rect.h / 2};
                 ctx.canvas.radial(ctr, 9, tc.text.faded(.5f * blink));
                 ctx.canvas.circle(ctr, 3.5f, tc.text.faded(blink));
-                if (!ctx.reduced) ctx.animate();
+                if (!ctx.reduced) ctx.loop();
                 x += 13;
             }
             ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);

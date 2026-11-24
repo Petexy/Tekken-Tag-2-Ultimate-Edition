@@ -46,12 +46,14 @@ struct Describe {
     std::string why;               // why it cannot be used now (empty when it can)
     std::string path;              // a full path, when the item has one
     std::vector<std::string> more; // further lines (a command to copy, notes)
+    bool operator==(const Describe&) const = default;
 };
 
 struct Pill {
     std::string text;
     PillKind kind = PillKind::kNeutral;
     std::string explain; // the GTK tooltip
+    bool operator==(const Pill&) const = default;
 };
 
 enum class ActionKind { kButton, kCheck, kSwitch, kChoice, kExpander, kKeycap, kMenu, kMenuItem };
@@ -74,6 +76,7 @@ struct Action {
     std::vector<std::string> choices; // choice: its entries
     int chosen = -1;
     Describe describe;
+    bool operator==(const Action&) const = default;
 };
 
 // A line of a card: a text, a note with its icon, a spinner with its text,
@@ -88,6 +91,7 @@ struct Line {
     std::string title; // kCheck: the check's title; kFile: the file's name
     std::string text;  // kCheck: its detail; kFile: its folder; kCommand: the command
     std::vector<Action> actions;
+    bool operator==(const Line&) const = default;
 };
 
 Line text_line(std::string text, Tone tone = Tone::kNormal, bool small = false);
@@ -100,12 +104,14 @@ struct Banner {
     std::string edition = "ULTIMATE EDITION";
     std::string note;
     bool icon = false; // <install>/icon.png
+    bool operator==(const Banner&) const = default;
 };
 
 struct Header {
     std::string title;           // "Ultimate Launcher" / "Settings"
     std::vector<Action> actions; // back, refresh, update-launcher
     bool update_offered = false; // the Update button stands out (a newer release)
+    bool operator==(const Header&) const = default;
 };
 
 enum class GameState { kNotInstalled, kChecking, kCannotInstall, kInstalling, kNotFinished, kInstalled };
@@ -119,12 +125,14 @@ struct GameView {
     std::vector<Action> actions; // the button row, in order
     size_t spacer = SIZE_MAX;    // actions from this index on are at the row's right end
     std::vector<Action> more;    // Windows: the More menu's entries (the menu button is in `actions`)
+    bool operator==(const GameView&) const = default;
 };
 
 struct Fact {
     std::string name;        // "Tekken 7", "Steam", "Missing"
     std::vector<Line> lines; // its value(s)
     Describe describe;
+    bool operator==(const Fact&) const = default;
 };
 
 struct FighterRow {
@@ -135,6 +143,7 @@ struct FighterRow {
     std::vector<Action> buttons;   // remove:<name>, fighter:<name>
     std::string button_note;       // "Not owned" in place of Add Again / Update
     Describe describe;             // the row's: name, state, explanation
+    bool operator==(const FighterRow&) const = default;
 };
 
 struct DlcBlock {
@@ -143,6 +152,7 @@ struct DlcBlock {
     std::vector<Line> notes;      // what Steam said (inside)
     Action add_owned;             // add-all-owned
     std::vector<FighterRow> rows; // inside
+    bool operator==(const DlcBlock&) const = default;
 };
 
 struct GameGroup {
@@ -152,6 +162,7 @@ struct GameGroup {
     std::vector<Line> notes;  // warnings, stand-ins, updates (with their buttons)
     std::vector<FighterRow> rows;
     std::optional<DlcBlock> dlc; // Tekken 7's DLC (Windows: either game's)
+    bool operator==(const GameGroup&) const = default;
 };
 
 struct CharactersView {
@@ -163,6 +174,7 @@ struct CharactersView {
     std::optional<Action> outfits_all;
     std::vector<Line> outfits_notes;
     std::vector<GameGroup> games;
+    bool operator==(const CharactersView&) const = default;
 };
 
 struct NoticeView {
@@ -171,6 +183,7 @@ struct NoticeView {
     std::string title, detail;
     std::optional<Action> page; // release-page (What's New), when there is a page
     Action update;              // notice-update
+    bool operator==(const NoticeView&) const = default;
 };
 
 // ---------------------------------------------------------------- Settings
@@ -179,6 +192,7 @@ struct SettingRow {
     Action control; // fullscreen, resolution, ...
     std::string name, about;
     std::vector<Line> notes; // automatic note, refresh note
+    bool operator==(const SettingRow&) const = default;
 };
 
 struct KeyRow {
@@ -188,16 +202,19 @@ struct KeyRow {
     std::string note;               // the row's message
     Tone note_tone = Tone::kNormal; // error (refusal) / swapped
     bool flash = false;
+    bool operator==(const KeyRow&) const = default;
 };
 
 struct KeyGroup {
     std::string title;
     std::vector<KeyRow> rows;
+    bool operator==(const KeyGroup&) const = default;
 };
 
 struct FolderRow { // Windows: Settings > Folders
     std::string key, name, hint, value;
     Action browse; // folder:<key>
+    bool operator==(const FolderRow&) const = default;
 };
 
 struct SettingsView {
@@ -224,6 +241,7 @@ struct SettingsView {
     std::string launcher_title = "Ultimate Launcher";
     std::string launcher_about = "How this launcher looks and sounds.";
     std::vector<SettingRow> launcher;
+    bool operator==(const SettingsView&) const = default;
 };
 
 // ---------------------------------------------------------------- the task panel
@@ -237,6 +255,7 @@ struct TaskView {
     Action button;                  // task: Cancel / Stopping… / Close
     std::optional<Action> open_log; // Windows: Open Log
     Action details;                 // details: the log's expander
+    bool operator==(const TaskView&) const = default;
 };
 
 // ---------------------------------------------------------------- dialogs
@@ -250,6 +269,7 @@ struct Dialog {
     std::vector<Action> buttons; // in order; the safe one is `cancel`
     std::string cancel;          // the id Esc / B gives
     std::string default_id;      // the focused one at first
+    bool operator==(const Dialog&) const = default;
 };
 
 } // namespace launcher::model

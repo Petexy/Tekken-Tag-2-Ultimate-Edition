@@ -83,10 +83,16 @@ void InputRouter::emit(Action a, Device d, std::uint32_t id, double press_time, 
     actions_.push_back({a, d, id, press_time, repeat});
 }
 
+bool InputRouter::same_press(Action a, Device d, std::uint32_t id, double t) const {
+    if (a == Action::None) return false;
+    const Last& l = last_[static_cast<int>(a)];
+    return l.time >= 0 && t - l.time < theme::input::kSamePress && (l.device != d || l.device_id != id);
+}
+
 void InputRouter::press(Action a, Device d, std::uint32_t id, int code, double t) {
     if (a == Action::None) return;
+    if (same_press(a, d, id, t)) return;
     Last& l = last_[static_cast<int>(a)];
-    if (l.time >= 0 && t - l.time < theme::input::kSamePress && (l.device != d || l.device_id != id)) return;
     l = {d, id, t};
     last_nav_ = t;
     mouse_travel_ = {};
@@ -141,6 +147,10 @@ void InputRouter::feed(const RawEvent& e) {
         last_device_ = Device::Gamepad;
         last_glyphs_ = e.pad_kind;
         if (capturing_) {
+            // The other order of the same press (U4): a Steam Controller's A is an Enter Steam types AND its pad's
+            // A; the Enter, arriving first, started choosing a key; the pad's report of that same press (pads are
+            // read at the poll: it arrives later) is not B, it changes nothing. By arrival time, as press() does.
+            if (same_press(pad_action(e.code, e.pad_kind), Device::Gamepad, e.device_id, e.time)) return;
             capture_.push_back({CaptureEvent::CancelByPad, 0, false, false, false, false, e.time});
             return;
         }

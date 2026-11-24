@@ -204,5 +204,12 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 $<TARGET_FILE:launcher_slow_folders>)
     list(APPEND _app_tests launcher_app_picker)
     set_tests_properties(launcher_app_picker PROPERTIES TIMEOUT 600)
+    # Left alone, as a player starts it (ARCHITECTURE sec 7, U9): frames only when something changed, ambient motion
+    # at most 30 a second and paused after 20 s, none with Reduce motion or while the game runs: tests/idle.sh.
+    add_test(NAME launcher_app_idle
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/idle.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/idle ${Python3_EXECUTABLE})
+    list(APPEND _app_tests launcher_app_idle)
+    set_tests_properties(launcher_app_idle PROPERTIES TIMEOUT 180)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

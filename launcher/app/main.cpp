@@ -183,7 +183,8 @@ static int launcher_main(int argc, char** argv) {
     program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}, {"--frames", 1}, {"--at", 1},
                        {"--files", 1},      {"--build-dir", 1}, {"--config", 1}, {"--ui-smoke-test", 1}};
     program.unique = !screenshot && !smoke_arg && !(actions && *actions);
-    // (Tests that start it as a player would: a name of their own, so that they never reach a launcher in use.)
+    // (Tests that start it as a player does, side by side (tests/idle.sh): a name of their own, so they never reach a
+    // real launcher nor each other.)
     program.instance_name = environment("TTT2_LAUNCHER_TEST_INSTANCE");
     program.wake = wake;
 #ifndef _WIN32

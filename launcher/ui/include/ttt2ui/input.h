@@ -131,6 +131,11 @@ public:
     void release_all();
     // Something is held that will repeat (the loop must keep ticking).
     bool holding() const;
+    // Whatever the next frame takes from it: actions, capture events, the mouse's motion, presses or wheel.
+    bool pending() const {
+        return !actions_.empty() || !capture_.empty() || mouse_.moved || mouse_.pressed || mouse_.released ||
+               mouse_.wheel != 0;
+    }
     double next_repeat_time() const;
 
 private:
@@ -147,6 +152,8 @@ private:
     Action key_action(const RawEvent& e) const;
     Action pad_action(int button, Glyphs kind) const;
     void emit(Action a, Device d, std::uint32_t id, double press_time, bool repeat);
+    // The same action from another device this soon after it (kSamePress): one press reported twice.
+    bool same_press(Action a, Device d, std::uint32_t id, double t) const;
 
     std::vector<ActionEvent> actions_;
     std::vector<CaptureEvent> capture_;

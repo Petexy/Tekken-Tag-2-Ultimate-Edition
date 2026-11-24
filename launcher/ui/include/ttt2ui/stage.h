@@ -50,8 +50,11 @@ public:
     void set_ambient(bool focused_and_visible) { ambient_on_ = focused_and_visible; }
     void set_frozen(bool frozen) { frozen_ = frozen; }
     void note_input(double now) { last_input_ = now; }
-    // The time the loop must wake for the next ambient frame (infinity when none is due).
-    double next_ambient_time() const;
+    // The time the loop must wake for the next ambient frame, as it is `now` (infinity when none is due).
+    double next_ambient_time(double now) const;
+    // Whether ambient motion runs now (on, not reduced, not frozen, input in the last kAmbientIdlePause seconds):
+    // decorative loops elsewhere (PaintContext::loop) move only while it does.
+    bool ambient_running(double now) const;
 
     void draw(Canvas& canvas, double now);
 
@@ -60,7 +63,6 @@ private:
     void draw_plates(Canvas& canvas);
     void draw_seam_and_bands(Canvas& canvas);
     void render_ambient(Canvas& canvas, double now, float dt);
-    bool ambient_running(double now) const;
 
     TextureRegistry& textures_;
     Random random_;

@@ -25,7 +25,13 @@ bool running_under_gamescope() {
 float ui_scale(Vec2 pixels, float display, float user_text_scale) {
     if (display <= 0) display = 1;
     const float stage = std::min(pixels.x / display / theme::kStageWidth, pixels.y / display / theme::kStageHeight);
-    return display * std::clamp(stage, 1.f, 2.f) * std::max(.5f, user_text_scale);
+    const float base = display * std::clamp(stage, 1.f, 2.f);
+    const float want = base * std::max(.5f, user_text_scale);
+    if (user_text_scale <= 1) return want;
+    // (Larger text leaves fewer points for the layout: never fewer than the Steam Deck's at 150 %, which every
+    // screen is laid out for. A smaller window keeps the text that much smaller, never smaller than without it.)
+    const float most = std::min(pixels.x / theme::kTextLayoutWidth, pixels.y / theme::kTextLayoutHeight);
+    return std::max(base, std::min(want, most));
 }
 
 Window::~Window() {
@@ -233,11 +239,14 @@ void Window::close_pads() {
 }
 
 void Window::pads_tick(double now, bool game_running) {
+    game_running_ = game_running;
     const bool want = focused_ && visible_ && !game_running && now - focus_since_ >= theme::input::kPadInitDelay;
-    if (want && !pads_on_) {
+    if (want && !pads_on_ && !pads_failed_) {
         if (SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
             pads_on_ = true;
             open_pads();
+        } else {
+            pads_failed_ = true;  // (tried again when the focus comes back)
         }
     } else if (!want && pads_on_) {
         close_pads();
@@ -252,7 +261,8 @@ void Window::pads_tick(double now, bool game_running) {
 
 double Window::next_pad_poll() const {
     if (pads_on_) return last_poll_ + (pads_.empty() ? .5 : theme::input::kPadPollInterval);
-    if (focused_ && visible_) return focus_since_ + theme::input::kPadInitDelay;
+    // (When they are opened: not while the game runs, nor after they could not be.)
+    if (focused_ && visible_ && !game_running_ && !pads_failed_) return focus_since_ + theme::input::kPadInitDelay;
     return 1e18;
 }
 
@@ -263,8 +273,10 @@ bool Window::translate(const SDL_Event& e, RawEvent& out, double now) {
     auto to_points = [&](float x, float y) { return Vec2{x * density / scale_, y * density / scale_}; };
     switch (e.type) {
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        // (The first one usually comes after the start, which already counted as focused: the pads stay open.)
+        if (!focused_) focus_since_ = now;
         focused_ = true;
-        focus_since_ = now;
+        pads_failed_ = false;
         return false;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         focused_ = false;

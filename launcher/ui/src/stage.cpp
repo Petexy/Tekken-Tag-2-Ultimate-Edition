@@ -118,9 +118,10 @@ bool SplitStage::ambient_running(double now) const {
     return ambient_on_ && !reduced_ && !frozen_ && now - last_input_ < theme::motion::kAmbientIdlePause;
 }
 
-double SplitStage::next_ambient_time() const {
-    if (!ambient_on_ || reduced_ || frozen_) return 1e18;
-    if (ambient_time_ - last_input_ >= theme::motion::kAmbientIdlePause) return 1e18;
+double SplitStage::next_ambient_time(double now) const {
+    // (Asked with the time it is now: draw() makes an ambient frame only while ambient_running(now), so a frame due
+    // after the pause began would be drawn without one, and asked for again and again.)
+    if (!ambient_running(now)) return 1e18;
     return last_ambient_ + 1.0 / theme::motion::kAmbientHz;
 }
 
@@ -152,8 +153,9 @@ void SplitStage::draw_fields(Canvas& canvas, double now) {
     blue.stops[2] = {1, c::kFieldBlueFar};
     blue.count = 3;
     canvas.fill(blue_pts, blue);
-    // Two drifting glows (still under Reduce motion / frozen).
-    const double t = (reduced_ || frozen_) ? 0 : now;
+    // Two drifting glows (still under Reduce motion / frozen; on the ambient clock: still while it is paused).
+    (void)now;
+    const double t = (reduced_ || frozen_) ? 0 : ambient_time_;
     canvas.radial({W * (150.f / 1280) + static_cast<float>(std::sin(t * .13)) * 40, H * (720.f / 800)}, 600,
                   rgba(230, 20, 60, .26f * li));
     canvas.radial({W * (1150.f / 1280) + static_cast<float>(std::cos(t * .11)) * 40, H * (80.f / 800)}, 600,

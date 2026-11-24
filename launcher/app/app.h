@@ -27,6 +27,7 @@
 #include "ttt2ui/window.h"
 
 #include <atomic>
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <map>
@@ -115,8 +116,15 @@ private:
     // ---- the loop (app.cpp)
     bool open_window();
     void make_model();
-    void pump_input(double now, bool wait);
+    // Reads input and news until `draw_at` (or a wake: ambient frame, repeat, pad poll, the model's tick); whether
+    // anything came that may change the picture.
+    bool pump_input(double now, double draw_at);
     void frame(double now);
+    bool animating(double t) const;
+    bool slowed() const;
+    bool model_changed(double t);
+    double ambient_clock(double t);
+    void test_idle_hooks(double t);
     void declare();
     void on_events(const std::vector<ui::Event>& events);
     void activate(const std::string& id, ttt2::ui::Device device = ttt2::ui::Device::None);
@@ -349,6 +357,17 @@ private:
     bool quit_ = false;
     bool first_ = true;
     double last_ = 0;
+    // When frames are drawn (run()): only on change.
+    static constexpr double kModelTick = .25;  // the model's timers are looked at this often without other news
+    static constexpr double kSlowFrame = .5;   // at most this often while the game has the player or when hidden
+    bool dirty_ = true;
+    double last_drawn_ = -1e9, next_tick_ = 0;
+    double ambient_base_ = 0, ambient_since_ = -1;  // the decorative loops' clock (ambient_clock)
+    // the idle tests' hooks (test_idle_hooks)
+    bool test_idle_read_ = false, test_pad_ = false, test_pad_open_ = false;
+    SDL_JoystickID test_pad_id_ = 0;
+    double test_blur_at_ = -1, presents_t0_ = 0;
+    std::FILE* presents_ = nullptr;
     int last_dy_ = 0;
     std::string readout_key_ = "play";
     int pre_index_ = 0;           // the check the blue side shows (preflight)

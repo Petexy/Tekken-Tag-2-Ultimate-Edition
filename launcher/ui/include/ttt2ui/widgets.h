@@ -180,6 +180,8 @@ struct KeyRowSpec {
     double flash_until = 0;
 };
 void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus = {}, const Box& box = {});
+// The width a key row takes with its whole name (points).
+float key_row_width(TextEngine& te, const KeyRowSpec& spec);
 // A task step with its mini bar (not focusable).
 enum class StepState : std::uint8_t { Pending, Current, Done, Failed };
 struct StepRowSpec {

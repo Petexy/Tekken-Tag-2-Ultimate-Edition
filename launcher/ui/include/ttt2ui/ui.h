@@ -129,6 +129,13 @@ struct PaintContext {
     bool reduced;        // Reduce motion
     Glyphs glyphs;
     bool* more;          // set *more = true while the painting animates (the loop then draws the next frame)
+    // The ambient clock (FrameInput::ambient): endless decorative loops (a sheen, a blinking dot, a pulse, moving
+    // stripes) take their phase from it and call loop(), never animate(). Like the stage's ambient layer (U9) they
+    // never count as animation: the loop draws them at most theme::motion::kAmbientHz times a second, and the clock
+    // stands still (a still picture) while ambient motion is paused, unfocused, hidden or the game runs.
+    double ambient;
+    bool* loops;
+    void loop() { *loops = true; }
     void animate() { *more = true; }
 };
 using PaintFn = std::function<void(PaintContext&)>;
@@ -169,6 +176,8 @@ struct FrameInput {
     MouseState mouse;
     bool reduced_motion = false;
     Glyphs glyphs = Glyphs::Keyboard;
+    // The ambient clock for decorative loops (PaintContext::ambient); unset: `now`.
+    std::optional<double> ambient;
 };
 
 using HighlightFn = std::function<void(Canvas&, const Rect& r, bool skewed, float alpha, double now)>;
@@ -223,6 +232,9 @@ public:
 
     // Queries (after end()).
     bool animating() const { return animating_ || paint_animating_; }
+    // Whether the last paint drew a decorative loop (PaintContext::loop): worth an ambient frame while ambient motion
+    // runs, never a reason to draw at the display's rate.
+    bool looping() const { return paint_looping_; }
     bool has(const std::string& id) const;
     Rect rect(const std::string& id) const;  // screen points; empty when absent
     NodeState* state(const std::string& id);
@@ -346,7 +358,7 @@ private:
     std::string anchor_id_;
     float anchor_y_ = 0;
     bool user_scrolled_ = false;
-    bool animating_ = false, paint_animating_ = false, strict_ids_ = true;
+    bool animating_ = false, paint_animating_ = false, paint_looping_ = false, strict_ids_ = true;
     std::string prefix_;
     std::vector<std::string> prefixes_;
 };

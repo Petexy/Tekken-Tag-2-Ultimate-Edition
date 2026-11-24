@@ -114,7 +114,7 @@ private:
     Rect drag_{};
     std::vector<Rect> buttons_;
     bool gamescope_ = false, focused_ = true, visible_ = true, shown_ = false;
-    bool pads_on_ = false;
+    bool pads_on_ = false, game_running_ = false, pads_failed_ = false;
     double focus_since_ = 0, last_poll_ = 0;
     struct Pad {
         SDL_JoystickID id;

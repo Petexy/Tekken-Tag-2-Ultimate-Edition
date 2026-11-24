@@ -1062,7 +1062,9 @@ void Ui::paint_node(Canvas& canvas, int index) {
                      n.focus && n.focus->disabled,
                      frame_.reduced_motion,
                      frame_.glyphs,
-                     &paint_animating_};
+                     &paint_animating_,
+                     frame_.ambient.value_or(frame_.now),
+                     &paint_looping_};
     if (n.paint) n.paint(ctx);
     const bool clips = n.box.scroll || n.box.clip;
     if (clips) canvas.push_clip(r);
@@ -1116,7 +1118,7 @@ Rect Ui::focus_rect() const {
 }
 
 void Ui::paint(Canvas& canvas) {
-    paint_animating_ = false;
+    paint_animating_ = paint_looping_ = false;
     if (nodes_.empty()) return;
     paint_node(canvas, 0);
     const int fi = node_index(focused_);
@@ -1127,8 +1129,10 @@ void Ui::paint(Canvas& canvas) {
         const Vec2 shift = drawn_shift(fi, &opacity);
         if (opacity > .002f) {
             canvas.push_clip(n.clip.outset(n.focus ? n.focus->pad + 12 : 12).translated(shift));
+            // (Its passing sheen is a decorative loop: on the ambient clock.)
             highlight_paint_(canvas, highlight_screen_.translated(shift), highlight_skewed_,
-                             highlight_alpha_ * opacity, frame_.now);
+                             highlight_alpha_ * opacity, frame_.ambient.value_or(frame_.now));
+            paint_looping_ = true;
             canvas.pop_clip();
         }
     }
