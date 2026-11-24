@@ -24,16 +24,112 @@ std::map<std::string, std::string> importer_environment(const fs::path& kit,
 namespace {
 
 Command script(const Facts& facts, const std::map<std::string, std::string>& env, const char* name) {
-    return Command{{facts.python.string(), (facts.importer / name).string()}, env, {}, {}};
+    return Command{{facts.python.string(), (facts.importer / name).string()}, env, {}, {}, {}};
 }
 
 } // namespace
+
+// ---------------------------------------------------------------- Windows' commands
+
+const char* worker_action(TaskKind kind) {
+    switch (kind) {
+    case TaskKind::kSetup: return "setup";
+    case TaskKind::kBuild: return "build";
+    case TaskKind::kInstallSource: return "install";
+    case TaskKind::kUpdateInstalled: return "update";
+    case TaskKind::kUpdate: return "upgrade";
+    case TaskKind::kLauncherUpdate: return "launcher";
+    case TaskKind::kLauncherFiles: return "files";
+    case TaskKind::kShaders: return "shaders";
+    case TaskKind::kImport: return "import";
+    case TaskKind::kRemove: return "remove";
+    default: return "";
+    }
+}
+
+Command WindowsCommands::query(const Facts& facts, const std::string& name) const {
+    const WindowsState& w = facts.windows;
+    Command c;
+    c.argv = {facts.python.string(),
+              "-u",
+              (w.root / "launcher/windows/main.py").string(),
+              "--build-dir",
+              w.build.string(),
+              "--config",
+              w.config.string(),
+              "--query",
+              name};
+    c.cwd = w.root;
+    return c;
+}
+
+Command WindowsCommands::worker_command(const Facts& facts, const std::string& action,
+                                        const std::vector<std::string>& names, const std::string& outfits) const {
+    const WindowsState& w = facts.windows;
+    static int serial = 0;
+    const std::string stamp_text = stamp ? stamp() : std::to_string(++serial);
+    Command c;
+    c.log_file = w.logs / (action + "-" + stamp_text + ".log");
+    c.cancel_file = w.logs / (action + "-" + stamp_text + ".cancel");
+    c.argv = {facts.python.string(),
+              "-u",
+              (w.root / "launcher/windows/main.py").string(),
+              "--build-dir",
+              w.build.string(),
+              "--config",
+              w.config.string(),
+              "--worker",
+              action,
+              "--cancel-file",
+              c.cancel_file.string(),
+              "--outfits",
+              outfits.empty() ? "none" : outfits};
+    c.argv.insert(c.argv.end(), names.begin(), names.end());
+    c.cwd = w.root;
+    return c;
+}
+
+std::optional<Command> WindowsCommands::status(const Facts& facts) {
+    if (facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
+    return query(facts, "status");
+}
+
+std::optional<Command> WindowsCommands::owned(const Facts& facts) {
+    if (facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
+    return query(facts, "owned");
+}
+
+std::optional<Command> WindowsCommands::main_news(const Facts& facts) {
+    if (facts.python.empty() || facts.windows.root.empty() || facts.build_commit.empty()) return std::nullopt;
+    return query(facts, "main");
+}
+
+Command WindowsCommands::import(const Facts& facts, const std::vector<std::string>& names, const std::string& outfits) {
+    return worker_command(facts, "import", names, outfits);
+}
+
+Command WindowsCommands::remove(const Facts& facts, const std::vector<std::string>& names) {
+    return worker_command(facts, "remove", names, {});
+}
+
+Command WindowsCommands::update(const Facts& facts) { return worker_command(facts, "upgrade", {}, {}); }
+
+Command WindowsCommands::shaders(const Facts& facts) { return worker_command(facts, "shaders", {}, {}); }
+
+std::optional<Command> WindowsCommands::worker(const Facts& facts, TaskKind kind) {
+    const std::string action = worker_action(kind);
+    if (action.empty() || facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
+    return worker_command(facts, action, {}, {});
+}
+
+// ---------------------------------------------------------------- Linux's commands
 
 std::optional<Command> LinuxCommands::status(const Facts& facts) {
     if (facts.importer.empty() || facts.python.empty()) return std::nullopt;
     Command c = script(facts, importer_env, "launcher.py");
     c.argv.push_back("status");
-    if (facts.install.state == InstallState::kInstalled) c.argv.insert(c.argv.end(), {"--game", facts.install.folder.string()});
+    if (facts.install.state == InstallState::kInstalled)
+        c.argv.insert(c.argv.end(), {"--game", facts.install.folder.string()});
     return c;
 }
 
@@ -74,19 +170,20 @@ Command LinuxCommands::packages(const Facts& facts) {
 }
 
 Command LinuxCommands::install(const Facts& facts, const fs::path& game, const fs::path& folder) {
-    return Command{{(facts.kit / "bin/ttt2-build").string(), "install", game.string(), folder.string()}, {}, {}, {}};
+    return Command{
+        {(facts.kit / "bin/ttt2-build").string(), "install", game.string(), folder.string()}, {}, {}, {}, {}};
 }
 
 Command LinuxCommands::update(const Facts& facts) {
-    return Command{{(facts.kit / "bin/ttt2-build").string(), "update", facts.install.folder.string()}, {}, {}, {}};
+    return Command{{(facts.kit / "bin/ttt2-build").string(), "update", facts.install.folder.string()}, {}, {}, {}, {}};
 }
 
 Command LinuxCommands::shaders(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string(), "--precompile"}, {}, {}, {}};
+    return Command{{(facts.install.folder / kProgramName).string(), "--precompile"}, {}, {}, {}, {}};
 }
 
 std::optional<Command> LinuxCommands::play(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log};
+    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}};
 }
 
 // ---------------------------------------------------------------- the model
@@ -98,7 +195,8 @@ LauncherModel::LauncherModel(Facts facts, Parts parts)
         self_update_ = std::make_unique<SelfUpdate>(runner_, parts_.starter, *parts_.update_files, parts_.update);
         self_update_->on_release = [this](const ReleaseAnswer& answer) {
             // (A newer release without its AppImage yet is not offered.)
-            if (answer.none) facts_.newer.reset();
+            if (answer.none)
+                facts_.newer.reset();
             else if (answer.release) {
                 if (compare_versions(answer.release->version, facts_.launcher_version).value_or(0) > 0) {
                     facts_.newer = answer.release;
@@ -202,8 +300,7 @@ void LauncherModel::load_status(double now) {
                  std::string last = status_err_;
                  while (!last.empty() && last.back() == '\n') last.pop_back();
                  if (const size_t at = last.rfind('\n'); at != std::string::npos) last.erase(0, at + 1);
-                 facts_.status_error =
-                     code != 0 && !last.empty() ? last : "its answer is not readable (" + why + ")";
+                 facts_.status_error = code != 0 && !last.empty() ? last : "its answer is not readable (" + why + ")";
              }
              // Steam closed: asked again once it runs again (as another
              // account, maybe); its answer is still shown meanwhile.
@@ -233,7 +330,8 @@ void LauncherModel::check_ownership(double now) {
     // (Each game's DLC is asked through that game, when one of them can be used.)
     bool dlc = false;
     for (const Fighter& f : facts_.status->fighters) {
-        dlc = dlc || (f.dlc != 0 && (f.of(kTekken8) ? facts_.status->tekken8_usable() : facts_.status->tekken7_usable()));
+        dlc =
+            dlc || (f.dlc != 0 && (f.of(kTekken8) ? facts_.status->tekken8_usable() : facts_.status->tekken7_usable()));
     }
     if (!dlc) return;
     const auto command = parts_.commands.owned(facts_);
@@ -242,29 +340,30 @@ void LauncherModel::check_ownership(double now) {
     facts_.owned.state = OwnedState::kChecking;
     facts_.owned.errors.clear();
     std::string error;
-    owned_job_ = parts_.starter.start(
-        *command,
-        {[this](const std::string& line, bool is_error) {
-             if (!is_error) owned_out_ += line + "\n";
-         },
-         [this](int) {
-             Ownership answer = parse_owned(owned_out_);
-             Owned& o = facts_.owned;
-             if (answer.error.empty()) {
-                 // (A game Steam could not be asked through keeps its fighters' last answer.)
-                 for (const auto& [name, owns] : answer.owned) o.answer[name] = owns;
-                 o.errors = std::move(answer.errors);
-                 o.has_answer = true;
-                 o.state = OwnedState::kKnown;
-                 pending_.push_back({Effect::Kind::kSaveOwned, ownership_json(o.answer), {}, {}, {}});
-             } else {
-                 o.error = answer.error;
-                 o.errors = std::move(answer.errors);
-                 o.state = OwnedState::kFailed;
-             }
-             done_job_ = std::move(owned_job_);
-         }},
-        &error);
+    owned_job_ = parts_.starter.start(*command,
+                                      {[this](const std::string& line, bool is_error) {
+                                           if (!is_error) owned_out_ += line + "\n";
+                                       },
+                                       [this](int) {
+                                           Ownership answer = parse_owned(owned_out_);
+                                           Owned& o = facts_.owned;
+                                           if (answer.error.empty()) {
+                                               // (A game Steam could not be asked through keeps its fighters' last
+                                               // answer.)
+                                               for (const auto& [name, owns] : answer.owned) o.answer[name] = owns;
+                                               o.errors = std::move(answer.errors);
+                                               o.has_answer = true;
+                                               o.state = OwnedState::kKnown;
+                                               pending_.push_back(
+                                                   {Effect::Kind::kSaveOwned, ownership_json(o.answer), {}, {}, {}});
+                                           } else {
+                                               o.error = answer.error;
+                                               o.errors = std::move(answer.errors);
+                                               o.state = OwnedState::kFailed;
+                                           }
+                                           done_job_ = std::move(owned_job_);
+                                       }},
+                                      &error);
     if (!owned_job_) {
         facts_.owned.error = error;
         facts_.owned.state = OwnedState::kFailed;
@@ -304,19 +403,19 @@ void LauncherModel::check_main(double now) {
     main_checking_ = true;
     main_out_.clear();
     std::string error;
-    main_job_ = parts_.starter.start(
-        *command,
-        {[this](const std::string& line, bool is_error) {
-             if (!is_error) main_out_ += line + "\n";
-         },
-         [this](int) {
-             main_checking_ = false;
-             // (Quietly: no notice when GitHub cannot be asked now, or does not know this build.)
-             MainNews news = parse_main_news(main_out_);
-             if (news.error.empty()) facts_.main_news = std::move(news);
-             done_job_ = std::move(main_job_);
-         }},
-        &error);
+    main_job_ = parts_.starter.start(*command,
+                                     {[this](const std::string& line, bool is_error) {
+                                          if (!is_error) main_out_ += line + "\n";
+                                      },
+                                      [this](int) {
+                                          main_checking_ = false;
+                                          // (Quietly: no notice when GitHub cannot be asked now, or does not know this
+                                          // build.)
+                                          MainNews news = parse_main_news(main_out_);
+                                          if (news.error.empty()) facts_.main_news = std::move(news);
+                                          done_job_ = std::move(main_job_);
+                                      }},
+                                     &error);
     if (!main_job_) main_checking_ = false;
 }
 
@@ -427,9 +526,10 @@ std::vector<Effect> LauncherModel::play(double now) {
         return {};
     }
     if (facts_.caps.windows && !facts_.windows.play_problem.empty()) {
-        refuse("Cannot start the game", facts_.windows.play_problem == "exe"
-                                            ? "The installed game's program is missing: set it up again."
-                                            : "This development build has no Wii U source: choose it in Settings.",
+        refuse("Cannot start the game",
+               facts_.windows.play_problem == "exe"
+                   ? "The installed game's program is missing: set it up again."
+                   : "This development build has no Wii U source: choose it in Settings.",
                now);
         return {};
     }
@@ -461,18 +561,18 @@ void LauncherModel::launch_game(double now) {
     if (!command) return;
     std::string error;
     const fs::path log = command->log_file;
-    game_job_ = parts_.starter.start(*command,
-                                     {nullptr,
-                                      [this, log](int code) {
-                                          facts_.game_running = facts_.game_started_here = false;
-                                          if (facts_.caps.game_error_report && code != 0 && code != 128 + 15 &&
-                                              code != 128 + 2) {
-                                              facts_.game_error = stopped_text(code, parts_.environment.log_end(log),
-                                                                               log, parts_.environment.exists(log));
-                                          }
-                                          done_job_ = std::move(game_job_);
-                                      }},
-                                     &error);
+    game_job_ = parts_.starter.start(
+        *command,
+        {nullptr,
+         [this, log](int code) {
+             facts_.game_running = facts_.game_started_here = false;
+             if (facts_.caps.game_error_report && code != 0 && code != 128 + 15 && code != 128 + 2) {
+                 facts_.game_error =
+                     stopped_text(code, parts_.environment.log_end(log), log, parts_.environment.exists(log));
+             }
+             done_job_ = std::move(game_job_);
+         }},
+        &error);
     if (!game_job_) {
         facts_.game_error = "The game cannot start: " + error;
         return;
@@ -533,9 +633,11 @@ void LauncherModel::uninstall_done(const UninstallReport& r, double now) {
     }
     std::string detail;
     if (!r.folder_removed && !left.empty()) {
-        detail = "Left in " + facts_.install.folder.string() + ", as they are not the game's: " + joined_most(left, 6) + ".";
+        detail =
+            "Left in " + facts_.install.folder.string() + ", as they are not the game's: " + joined_most(left, 6) + ".";
     }
-    if (!problems.empty()) detail += (detail.empty() ? "" : " ") + std::string("Not deleted: ") + joined_most(problems, 3) + ".";
+    if (!problems.empty())
+        detail += (detail.empty() ? "" : " ") + std::string("Not deleted: ") + joined_most(problems, 3) + ".";
     if (detail.empty()) {
         const UninstallChoice& o = uninstall_;
         detail = o.saves && o.characters ? "Your saves, the added characters and what was saved from Tekken 7 "
@@ -584,9 +686,8 @@ std::vector<Effect> LauncherModel::chosen_folder(const fs::path& chosen, double 
     std::string error;
     const auto folder = parts_.environment.install_target(chosen, &error);
     if (!folder) {
-        refuse("Cannot install into this folder", chosen.lexically_normal().string() + " " + error +
-                                                      ": choose another folder.",
-               now);
+        refuse("Cannot install into this folder",
+               chosen.lexically_normal().string() + " " + error + ": choose another folder.", now);
         return {};
     }
     facts_.game_error.clear();
@@ -655,6 +756,27 @@ void LauncherModel::key_up(int usage, double now) {
 
 void LauncherModel::pick_key(int input, Device device, double now) { keys_.pick(input, device, now); }
 
+bool of_this_os(const Caps& caps, const std::string& id) {
+    const auto among = [&](std::initializer_list<const char*> ids) {
+        for (const char* i : ids) {
+            const std::string_view s = i;
+            if (s.ends_with(':') ? id.starts_with(s) : id == s) return true;
+        }
+        return false;
+    };
+    if (among({"more", "more:", "setup", "setup-confirm", "setup-cancel", "folder:", "save-folders", "performance",
+               "open-keyboard-file", "open-log"})) {
+        return caps.windows;
+    }
+    if (among({"install", "resume", "check-again", "preflight-cancel"})) return caps.install_flow;
+    if (among({"uninstall", "uninstall-saves", "uninstall-characters", "uninstall-cancel", "uninstall-confirm"})) {
+        return caps.uninstall;
+    }
+    if (among({"get-packages"})) return caps.packages_download;
+    if (among({"copy:"})) return caps.prerequisites_listed;
+    return true;
+}
+
 std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     now_ = now;
     said_.clear();
@@ -669,9 +791,12 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     // ---- dialogs first: their buttons
     if (dialog_) {
         const std::string d = dialog_->id;
-        if (id == "uninstall-saves") uninstall_.saves = !uninstall_.saves;
-        else if (id == "uninstall-characters") uninstall_.characters = !uninstall_.characters;
-        else if (id == "uninstall-confirm") return uninstall_confirmed(now);
+        if (id == "uninstall-saves")
+            uninstall_.saves = !uninstall_.saves;
+        else if (id == "uninstall-characters")
+            uninstall_.characters = !uninstall_.characters;
+        else if (id == "uninstall-confirm")
+            return uninstall_confirmed(now);
         else if (id == "remove-all-confirm") {
             dialog_.reset();
             start_remove(to_remove_all(facts_, remove_all_game_), now);
@@ -692,7 +817,13 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         return effects;
     }
 
-    if (id == "refresh") check_again(now);
+    // (Another OS's item: not there to activate, U1.)
+    if (!of_this_os(facts_.caps, id)) {
+        said_ = "no " + id + " to activate";
+        return effects;
+    }
+    if (id == "refresh")
+        check_again(now);
     else if (id == "back") {
         keys_.close();
         page_ = Page::kMain;
@@ -715,12 +846,15 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         const std::string page = facts_.newer ? facts_.newer->page : facts_.main_news ? facts_.main_news->page : "";
         if (!page.empty()) effects.push_back({Effect::Kind::kOpenUrl, page, {}, {}, {}});
     } else if (id == "install" || id == "setup" || id == "more:setup-again") {
-        if (task) refuse("Another task is running", "Wait for it to end, then install.", now);
+        if (task)
+            refuse("Another task is running", "Wait for it to end, then install.", now);
         else if (!facts_.caps.setup_game && !facts_.builder) {
             refuse("Cannot install", "The game builder is missing from this launcher.", now);
-        } else effects.push_back({Effect::Kind::kChooseGame, {}, {}, {}, {}});
+        } else
+            effects.push_back({Effect::Kind::kChooseGame, {}, {}, {}, {}});
     } else if (id == "resume") {
-        if (task) refuse("Another task is running", "Wait for it to end, then install.", now);
+        if (task)
+            refuse("Another task is running", "Wait for it to end, then install.", now);
         else if (parts_.environment.exists(facts_.install.game)) {
             facts_.chosen_game = facts_.install.game;
             return chosen_folder(facts_.install.folder, now);
@@ -737,20 +871,24 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     } else if (id == "preflight-cancel") {
         facts_.preflight.reset();
     } else if (id == "uninstall") {
-        if (task) refuse("Another task is running", "Wait for it to end, then uninstall.", now);
-        else if (facts_.game_running) refuse("The game is running", "Quit it, then uninstall.", now);
+        if (task)
+            refuse("Another task is running", "Wait for it to end, then uninstall.", now);
+        else if (facts_.game_running)
+            refuse("The game is running", "Quit it, then uninstall.", now);
         else {
             uninstall_ = {};
             dialog_ = uninstall_view(facts_, facts_.saves, facts_.saves_custom, uninstall_);
         }
-    } else if (id == "update") start_update(now);
+    } else if (id == "update")
+        start_update(now);
     else if (id == "play") {
         auto e = play(now);
         effects.insert(effects.end(), e.begin(), e.end());
     } else if (id == "open-folder") {
         effects.push_back({Effect::Kind::kOpenPath, {}, facts_.install.folder, {}, {}});
     } else if (id == "get-packages") {
-        if (task) refuse("Another task is running", "Wait for it to end, then download numpy and Pillow.", now);
+        if (task)
+            refuse("Another task is running", "Wait for it to end, then download numpy and Pillow.", now);
         else if (facts_.importer.empty() || facts_.python.empty()) {
             refuse("Cannot download numpy and Pillow", "The character importer or Python 3 is missing.", now);
         } else {
@@ -770,31 +908,46 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     } else if (const auto name = rest("outfits:")) {
         const Fighter* f = fighter(facts_, *name);
         if (f && !task && outfits_choosable(*f, owns(facts_, *f))) facts_.outfits[f->name] = !wants_outfits(facts_, *f);
-    } else if (id == "update-outfits") start_import(outfits_to_change(facts_), now);
+    } else if (id == "update-outfits")
+        start_import(outfits_to_change(facts_), now);
     else if (const auto name = rest("fighter:")) {
         const Fighter* f = fighter(facts_, *name);
-        if (!f) said_ = *name + " is not known";
-        else if (f->installed && !f->outdated && !f->update && !outfits_changed(facts_, *f)) start_remove({f->name}, now);
-        else start_import({f->name}, now);
+        if (!f)
+            said_ = *name + " is not known";
+        else if (f->installed && !f->outdated && !f->update && !outfits_changed(facts_, *f))
+            start_remove({f->name}, now);
+        else
+            start_import({f->name}, now);
     } else if (const auto name = rest("remove:")) {
         start_remove({*name}, now);
-    } else if (id == "add-all") start_import(base_to_add(facts_, kTekken7), now);
-    else if (const auto game = rest("add-all:")) start_import(base_to_add(facts_, *game), now);
+    } else if (id == "add-all")
+        start_import(base_to_add(facts_, kTekken7), now);
+    else if (const auto game = rest("add-all:"))
+        start_import(base_to_add(facts_, *game), now);
     else if (const auto game = rest("remove-all:")) {
         if (!to_remove_all(facts_, *game).empty()) {
             remove_all_game_ = *game;
             dialog_ = remove_all_view(facts_, *game);
         }
-    } else if (id == "update-stand-ins") start_import(to_update(facts_, kTekken8, true), now);
-    else if (id == "update-all") start_import(to_update(facts_, kTekken7), now);
-    else if (const auto game = rest("update-all:")) start_import(to_update(facts_, *game), now);
-    else if (id == "add-all-owned") start_import(owned_to_add(facts_), now);
-    else if (id == "dlc") facts_.dlc_expanded = !facts_.dlc_expanded;
+    } else if (id == "update-stand-ins")
+        start_import(to_update(facts_, kTekken8, true), now);
+    else if (id == "update-all")
+        start_import(to_update(facts_, kTekken7), now);
+    else if (const auto game = rest("update-all:"))
+        start_import(to_update(facts_, *game), now);
+    else if (id == "add-all-owned")
+        start_import(owned_to_add(facts_), now);
+    else if (id == "dlc")
+        facts_.dlc_expanded = !facts_.dlc_expanded;
     else if (id == "task") {
-        if (task) runner_.cancel();
-        else runner_.close();
-    } else if (id == "details") runner_.set_details(!runner_.view().details.checked);
-    else if (const auto command = rest("copy:")) effects.push_back({Effect::Kind::kCopy, *command, {}, {}, {}});
+        if (task)
+            runner_.cancel();
+        else
+            runner_.close();
+    } else if (id == "details")
+        runner_.set_details(!runner_.view().details.checked);
+    else if (const auto command = rest("copy:"))
+        effects.push_back({Effect::Kind::kCopy, *command, {}, {}, {}});
     // ---- Settings
     else if (id == "fullscreen" || id == "interpolation" || id == "input-delay" || id == "async-shaders" ||
              id == "precompile-shaders") {
@@ -817,21 +970,29 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     } else if (id == "restore-keys") {
         keys_.restore(now);
         said_ = keys_.keymap().is_default() ? "the default keys" : "not restored";
-    } else if (id == "sounds") launcher_.sounds = !launcher_.sounds;
-    else if (id == "reduce-motion") launcher_.reduce_motion = !launcher_.reduce_motion;
+    } else if (id == "sounds")
+        launcher_.sounds = !launcher_.sounds;
+    else if (id == "reduce-motion")
+        launcher_.reduce_motion = !launcher_.reduce_motion;
     else if (id == "text-size") {
         const auto at = std::find(std::begin(kTextSizes), std::end(kTextSizes), launcher_.text_size);
         return choose(id, static_cast<int>((at - std::begin(kTextSizes) + 1) % std::size(kTextSizes)), now);
     }
     // ---- Windows
-    else if (id == "more") effects.push_back({Effect::Kind::kOpenMenu, {}, {}, {}, {}});
-    else if (id == "more:build") start_worker(TaskKind::kBuild, "Building the game", now);
-    else if (id == "more:install") start_worker(TaskKind::kInstallSource, "Installing the game", now);
-    else if (id == "more:update") start_worker(TaskKind::kUpdateInstalled, "Updating the installed game", now);
-    else if (id == "more:open-logs") effects.push_back({Effect::Kind::kOpenPath, {}, facts_.windows.logs, {}, {}});
+    else if (id == "more")
+        effects.push_back({Effect::Kind::kOpenMenu, {}, {}, {}, {}});
+    else if (id == "more:build")
+        start_worker(TaskKind::kBuild, "Building the game", now);
+    else if (id == "more:install")
+        start_worker(TaskKind::kInstallSource, "Installing the game", now);
+    else if (id == "more:update")
+        start_worker(TaskKind::kUpdateInstalled, "Updating the installed game", now);
+    else if (id == "more:open-logs")
+        effects.push_back({Effect::Kind::kOpenPath, {}, facts_.windows.logs, {}, {}});
     else if (id == "more:latest-log") {
         if (facts_.windows.latest_log.empty()) {
-            dialog_ = message_view("No log yet", "No task has written a log in " + facts_.windows.logs.string() + " yet.");
+            dialog_ =
+                message_view("No log yet", "No task has written a log in " + facts_.windows.logs.string() + " yet.");
         } else {
             effects.push_back({Effect::Kind::kOpenPath, {}, facts_.windows.latest_log, {}, {}});
         }
@@ -840,7 +1001,8 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     } else if (const auto key = rest("folder:")) {
         effects.push_back({Effect::Kind::kChooseFolder, *key, {}, {}, {}});
     } else if (id == "save-folders") {
-        if (task) refuse("Folders not saved", "Wait for the task to end before changing folders.", now);
+        if (task)
+            refuse("Folders not saved", "Wait for the task to end before changing folders.", now);
         else {
             effects.push_back({Effect::Kind::kSaveFolders, {}, {}, {}, {}});
             folders_note_ = "Saved.";
@@ -882,7 +1044,8 @@ View LauncherModel::view() const {
     }
     v.task = runner_.view();
     v.dialog = dialog_;
-    if (dialog_ && dialog_->id == "uninstall") v.dialog = uninstall_view(facts_, facts_.saves, facts_.saves_custom, uninstall_);
+    if (dialog_ && dialog_->id == "uninstall")
+        v.dialog = uninstall_view(facts_, facts_.saves, facts_.saves_custom, uninstall_);
     return v;
 }
 

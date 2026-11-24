@@ -43,8 +43,10 @@ std::string to_json(const json::Value& v) {
     case json::Value::Type::kNumber: {
         const double n = v.number();
         char b[32];
-        if (std::floor(n) == n && std::fabs(n) < 1e15) std::snprintf(b, sizeof b, "%.0f", n);
-        else std::snprintf(b, sizeof b, "%.17g", n);
+        if (std::floor(n) == n && std::fabs(n) < 1e15)
+            std::snprintf(b, sizeof b, "%.0f", n);
+        else
+            std::snprintf(b, sizeof b, "%.17g", n);
         return b;
     }
     case json::Value::Type::kString: return quoted(v.string());
@@ -55,7 +57,8 @@ std::string to_json(const json::Value& v) {
     }
     case json::Value::Type::kObject: {
         std::string o = "{";
-        for (size_t i = 0; i < v.keys().size(); ++i) o += (i ? ", " : "") + quoted(v.keys()[i]) + ": " + to_json(v.values()[i]);
+        for (size_t i = 0; i < v.keys().size(); ++i)
+            o += (i ? ", " : "") + quoted(v.keys()[i]) + ": " + to_json(v.values()[i]);
         return o + "}";
     }
     }
@@ -65,7 +68,25 @@ std::string to_json(const json::Value& v) {
 // The stand-ins the old app ran with (launcher.py answering the fixture, import_character.py printing its
 // steps), as C++.
 void fixture_answer(const json::Value& c, Run& run) {
-    const auto& argv = run.command.argv;
+    std::vector<std::string> argv = run.command.argv;
+    if (argv.empty()) return;
+    // (Windows: main.py --query X answers as launcher.py X; main.py --worker import|remove runs the importer, whose
+    // lines it passes on; its other workers build.)
+    const auto flag = std::find(argv.begin(), argv.end(), "--query");
+    if (flag != argv.end() && flag + 1 != argv.end()) argv = {argv[0], "launcher.py", *(flag + 1)};
+    const auto worker = std::find(argv.begin(), argv.end(), "--worker");
+    if (worker != argv.end() && worker + 1 != argv.end()) {
+        const std::string action = *(worker + 1);
+        if (action != "import" && action != "remove") {
+            run.lines.push_back({"@step build Building", false});
+            return;
+        }
+        const auto outfits = std::find(argv.begin(), argv.end(), "--outfits");
+        std::vector<std::string> names(outfits + 2, argv.end());
+        argv = {argv[0], "import_character.py"};
+        if (action == "remove") argv.push_back("--remove");
+        argv.insert(argv.end(), names.begin(), names.end());
+    }
     const std::string script = argv.size() > 1 ? fs::path(argv[1]).filename().string() : "";
     if (script == "launcher.py") {
         const std::string what = argv.size() > 2 ? argv[2] : "";
@@ -95,15 +116,16 @@ void fixture_answer(const json::Value& c, Run& run) {
         const json::Value& scripts = c["import_script"];
         const json::Value& plan = !scripts[key].is_null() ? scripts[key] : scripts["*"];
         for (size_t i = 0; i < names.size(); ++i) {
-            run.lines.push_back({"@step fighter " + names[i] + " " + std::to_string(i + 1) + " " +
-                                     std::to_string(names.size()),
-                                 false});
+            run.lines.push_back(
+                {"@step fighter " + names[i] + " " + std::to_string(i + 1) + " " + std::to_string(names.size()),
+                 false});
         }
         run.lines.push_back({"@step shared", false});
         for (const json::Value& l : plan["lines"].items()) run.lines.push_back({l.string(), false});
         run.code = static_cast<int>(plan["exit"].number(0));
         if (run.code == 0) {
-            for (const std::string& n : names) run.lines.push_back({std::string(remove ? "@removed " : "@added ") + n, false});
+            for (const std::string& n : names)
+                run.lines.push_back({std::string(remove ? "@removed " : "@added ") + n, false});
             run.lines.push_back({"@done", false});
         }
         if (c["env"]["TTT2_LAUNCHER_TEST_CANCEL"].is_string()) {
@@ -125,8 +147,10 @@ void fixture_answer(const json::Value& c, Run& run) {
         return;
     }
     if (program == "Tekken Tag Tournament 2") {
-        if (argv.size() > 1 && argv[1] == "--precompile") run.lines.push_back({"@step shaders Preparing shaders", false});
-        else run.held = true; // (the game runs on)
+        if (argv.size() > 1 && argv[1] == "--precompile")
+            run.lines.push_back({"@step shaders Preparing shaders", false});
+        else
+            run.held = true; // (the game runs on)
         return;
     }
     if (program == "curl" || program == "wget") {
@@ -135,7 +159,6 @@ void fixture_answer(const json::Value& c, Run& run) {
     }
 }
 
-
 CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, const ReplayOptions& options) {
     CaseRun out;
     const fs::path home = kHome;
@@ -143,8 +166,10 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
     fs::remove_all(scratch, ec);
     fs::create_directories(scratch, ec);
     const fs::path display_file = scratch / "display.ini", keyboard_file = scratch / "keyboard.ini";
-    if (c["display_ini_dir"].boolean()) fs::create_directories(display_file, ec);
-    else if (c["display_ini"].is_string()) std::ofstream(display_file) << c["display_ini"].string();
+    if (c["display_ini_dir"].boolean())
+        fs::create_directories(display_file, ec);
+    else if (c["display_ini"].is_string())
+        std::ofstream(display_file) << c["display_ini"].string();
     if (c["keyboard_ini"].is_string()) std::ofstream(keyboard_file) << c["keyboard_ini"].string();
 
     Facts facts;
@@ -167,27 +192,43 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
     if (caps.windows) {
         // (As the Tk window's run had them: tests/golden/README.md.)
         const std::string state = c["install"].string();
-        facts.windows.folders = {
-            {"source", ""},
-            {"title", ""},
-            {"install", state == "installed" || state == "unfinished" ? (home / "Games/Tekken Tag Tournament 2").string() : ""},
-            {"data", (home / "TTT2Ultimate").string()},
-            {"packs", (home / "TTT2Ultimate/characters").string()},
-            {"saves", (home / "saves").string()},
-            {"tools", (home / "tools").string()}};
+        facts.windows.folders = {{"source", ""},
+                                 {"title", ""},
+                                 {"install", state == "installed" || state == "unfinished"
+                                                 ? (home / "Games/Tekken Tag Tournament 2").string()
+                                                 : ""},
+                                 {"data", (home / "TTT2Ultimate").string()},
+                                 {"packs", (home / "TTT2Ultimate/characters").string()},
+                                 {"saves", (home / "saves").string()},
+                                 {"tools", (home / "tools").string()}};
         facts.windows.logs = home / "TTT2Ultimate/logs";
     }
 
     FakeEnvironment env;
     const std::string install = c["install"].string();
     const fs::path folder = home / "Games/Tekken Tag Tournament 2";
-    if (install == "installed") env.install = {InstallState::kInstalled, folder, {}};
-    else if (install == "unfinished") env.install = {InstallState::kUnfinished, folder, {}};
+    if (install == "installed")
+        env.install = {InstallState::kInstalled, folder, {}};
+    else if (install == "unfinished")
+        env.install = {InstallState::kUnfinished, folder, {}};
     env.built = c["built"].string();
 
     FakeStarter starter([&c](Run& run) { fixture_answer(c, run); });
-    LinuxCommands commands;
-    commands.game_log = home / ".cache/ttt2/game.log";
+    LinuxCommands linux_commands;
+    linux_commands.game_log = home / ".cache/ttt2/game.log";
+    WindowsCommands windows_commands;
+    int stamps = 0;
+    windows_commands.stamp = [&stamps] { return "20261124-140000-" + std::to_string(++stamps); };
+    Commands& commands = caps.windows ? static_cast<Commands&>(windows_commands) : linux_commands;
+    if (caps.windows) {
+        // (The launcher's files and the game as the Tk run had them.)
+        facts.windows.root = home / "repo";
+        facts.windows.build = home / "repo/build-windows-tools";
+        facts.windows.config = home / "repo/local/windows-launcher.json";
+        if (install == "installed") {
+            facts.windows.play = Command{{(folder / "TTT2 Ultimate.exe").string()}, {}, folder, {}, {}};
+        }
+    }
     KeyFile keys(keyboard_file);
     FakeFiles files;
     LauncherModel::Parts parts{commands, starter, env, keys, nullptr, {}, {}, us_key_label};
@@ -269,8 +310,10 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
             model.activate(a.name, now);
         } else if (a.name == "add") {
             task_step = true;
-            if (a.args.size() == 1) model.activate("fighter:" + a.args[0], now);
-            else out.problems.push_back("add of several: not replayed");
+            if (a.args.size() == 1)
+                model.activate("fighter:" + a.args[0], now);
+            else
+                out.problems.push_back("add of several: not replayed");
         } else if (a.name == "remove") {
             task_step = true;
             model.activate("remove:" + a.args[0], now);
@@ -301,7 +344,8 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         } else if (a.name == "resolution") {
             const auto r = display::resolution_named(a.args[0]).value_or(display::Resolution::kAuto);
             const auto& all = display::kResolutions;
-            model.choose("resolution", static_cast<int>(std::find(std::begin(all), std::end(all), r) - std::begin(all)), now);
+            model.choose("resolution", static_cast<int>(std::find(std::begin(all), std::end(all), r) - std::begin(all)),
+                         now);
         } else if (a.name == "show-uninstall") {
             model.activate("uninstall", now);
             settle();
@@ -333,11 +377,14 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         }
         settle(watch);
         if (task_step && a.name == "play") {
-            out.said.push_back("@test play " + std::string(model.facts().game_error.empty() ? "ok" : "failed " + model.facts().game_error));
+            out.said.push_back("@test play " + std::string(model.facts().game_error.empty()
+                                                               ? "ok"
+                                                               : "failed " + model.facts().game_error));
         } else if (task_step) {
             const TaskResult& r = model.task().last();
-            out.said.push_back("@test " + a.text + " " + (r.ok ? "ok " + r.title
-                                                              : "failed " + r.title + (r.detail.empty() ? "" : ": " + r.detail)));
+            out.said.push_back(
+                "@test " + a.text + " " +
+                (r.ok ? "ok " + r.title : "failed " + r.title + (r.detail.empty() ? "" : ": " + r.detail)));
         }
         shot(label);
     }

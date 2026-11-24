@@ -40,11 +40,11 @@ enum class Icon {
 
 // What the blue side says about the focused item.
 struct Describe {
-    std::string title;   // what it is: "Kazumi Mishima", "Play", "Fullscreen"
-    std::string state;   // how it is: "Added", "Update ready", "On", "W"
-    std::string explain; // what the state means (a pill's explanation), or what the item does
-    std::string why;     // why it cannot be used now (empty when it can)
-    std::string path;    // a full path, when the item has one
+    std::string title;             // what it is: "Kazumi Mishima", "Play", "Fullscreen"
+    std::string state;             // how it is: "Added", "Update ready", "On", "W"
+    std::string explain;           // what the state means (a pill's explanation), or what the item does
+    std::string why;               // why it cannot be used now (empty when it can)
+    std::string path;              // a full path, when the item has one
     std::vector<std::string> more; // further lines (a command to copy, notes)
 };
 
@@ -64,13 +64,13 @@ struct Action {
     ActionKind kind = ActionKind::kButton;
     Icon icon = Icon::kNone;
     bool enabled = true;
-    std::string why;     // why it is disabled now (also in describe.why); empty when it is not, or nothing says
-    std::string tooltip; // what the old app's tooltip said (goldens; the blue side says it in describe)
+    std::string why;          // why it is disabled now (also in describe.why); empty when it is not, or nothing says
+    std::string tooltip;      // what the old app's tooltip said (goldens; the blue side says it in describe)
     bool primary = false;     // suggested-action
     bool destructive = false; // destructive-action / CSS uninstall
     bool flat = false;
-    bool checked = false;      // check, switch, expander (expanded), keycap (waiting for a key)
-    bool inconsistent = false; // check: some of them
+    bool checked = false;             // check, switch, expander (expanded), keycap (waiting for a key)
+    bool inconsistent = false;        // check: some of them
     std::vector<std::string> choices; // choice: its entries
     int chosen = -1;
     Describe describe;
@@ -103,7 +103,7 @@ struct Banner {
 };
 
 struct Header {
-    std::string title; // "Ultimate Launcher" / "Settings"
+    std::string title;           // "Ultimate Launcher" / "Settings"
     std::vector<Action> actions; // back, refresh, update-launcher
     bool update_offered = false; // the Update button stands out (a newer release)
 };
@@ -116,9 +116,9 @@ struct GameView {
     std::string folder; // shown under the title, empty when none
     Pill pill;
     std::vector<Line> body;
-    std::vector<Action> actions;       // the button row, in order
-    size_t spacer = SIZE_MAX;          // actions from this index on are at the row's right end
-    std::vector<Action> more;          // Windows: the More menu's entries (the menu button is in `actions`)
+    std::vector<Action> actions; // the button row, in order
+    size_t spacer = SIZE_MAX;    // actions from this index on are at the row's right end
+    std::vector<Action> more;    // Windows: the More menu's entries (the menu button is in `actions`)
 };
 
 struct Fact {
@@ -129,37 +129,37 @@ struct Fact {
 
 struct FighterRow {
     std::string name, display;
-    std::optional<Action> outfits;  // outfits:<name>
-    std::optional<Pill> pill;       // the state
-    std::string state_text;         // "Owned" / "Not owned" (a DLC's, no pill)
-    std::vector<Action> buttons;    // remove:<name>, fighter:<name>
-    std::string button_note;        // "Not owned" in place of Add Again / Update
-    Describe describe;              // the row's: name, state, explanation
+    std::optional<Action> outfits; // outfits:<name>
+    std::optional<Pill> pill;      // the state
+    std::string state_text;        // "Owned" / "Not owned" (a DLC's, no pill)
+    std::vector<Action> buttons;   // remove:<name>, fighter:<name>
+    std::string button_note;       // "Not owned" in place of Add Again / Update
+    Describe describe;             // the row's: name, state, explanation
 };
 
 struct DlcBlock {
-    Action expander;               // dlc
-    std::vector<Pill> pills;       // "3 of 8 owned", "1 to add again", "2 to update"
-    std::vector<Line> notes;       // what Steam said (inside)
-    Action add_owned;              // add-all-owned
-    std::vector<FighterRow> rows;  // inside
+    Action expander;              // dlc
+    std::vector<Pill> pills;      // "3 of 8 owned", "1 to add again", "2 to update"
+    std::vector<Line> notes;      // what Steam said (inside)
+    Action add_owned;             // add-all-owned
+    std::vector<FighterRow> rows; // inside
 };
 
 struct GameGroup {
-    std::string game;              // kTekken7 / kTekken8
+    std::string game; // kTekken7 / kTekken8
     std::string heading, about;
-    std::vector<Action> head;      // add-all[:tekken8], remove-all:<game>
-    std::vector<Line> notes;       // warnings, stand-ins, updates (with their buttons)
+    std::vector<Action> head; // add-all[:tekken8], remove-all:<game>
+    std::vector<Line> notes;  // warnings, stand-ins, updates (with their buttons)
     std::vector<FighterRow> rows;
-    std::optional<DlcBlock> dlc;   // Tekken 7's DLC (Windows: either game's)
+    std::optional<DlcBlock> dlc; // Tekken 7's DLC (Windows: either game's)
 };
 
 struct CharactersView {
     // An early exit (no importer, no Python, looking, cannot tell): only these lines.
     bool early = false;
-    std::vector<Line> lines;       // early lines, or the notes above the facts
+    std::vector<Line> lines; // early lines, or the notes above the facts
     std::vector<Fact> facts;
-    std::vector<Line> news;        // "Main adds ..."
+    std::vector<Line> news; // "Main adds ..."
     std::optional<Action> outfits_all;
     std::vector<Line> outfits_notes;
     std::vector<GameGroup> games;
@@ -169,24 +169,24 @@ struct NoticeView {
     bool shown = false;
     Icon icon = Icon::kUpdate;
     std::string title, detail;
-    std::optional<Action> page;   // release-page (What's New), when there is a page
-    Action update;                // notice-update
+    std::optional<Action> page; // release-page (What's New), when there is a page
+    Action update;              // notice-update
 };
 
 // ---------------------------------------------------------------- Settings
 
 struct SettingRow {
-    Action control;                // fullscreen, resolution, ...
+    Action control; // fullscreen, resolution, ...
     std::string name, about;
-    std::vector<Line> notes;       // automatic note, refresh note
+    std::vector<Line> notes; // automatic note, refresh note
 };
 
 struct KeyRow {
-    Action keycap;                 // key:<input id>: label = the key's label, or "Press a key…"
-    std::string input;             // the input's id (its icon: ttt2-input-<id>)
+    Action keycap;     // key:<input id>: label = the key's label, or "Press a key…"
+    std::string input; // the input's id (its icon: ttt2-input-<id>)
     std::string name, full;
-    std::string note;              // the row's message
-    Tone note_tone = Tone::kNormal;// error (refusal) / swapped
+    std::string note;               // the row's message
+    Tone note_tone = Tone::kNormal; // error (refusal) / swapped
     bool flash = false;
 };
 
@@ -195,9 +195,9 @@ struct KeyGroup {
     std::vector<KeyRow> rows;
 };
 
-struct FolderRow {                 // Windows: Settings > Folders
+struct FolderRow { // Windows: Settings > Folders
     std::string key, name, hint, value;
-    Action browse;                 // folder:<key>
+    Action browse; // folder:<key>
 };
 
 struct SettingsView {
@@ -229,27 +229,27 @@ struct SettingsView {
 // ---------------------------------------------------------------- the task panel
 
 struct TaskView {
-    bool shown = false;      // the panel is out
-    bool running = false;    // spinner and progress bar
+    bool shown = false;   // the panel is out
+    bool running = false; // spinner and progress bar
     std::string title, detail;
-    bool failed = false;     // the title in red
-    double fraction = -1;    // below 0: unknown (pulsing)
-    Action button;           // task: Cancel / Stopping… / Close
+    bool failed = false;            // the title in red
+    double fraction = -1;           // below 0: unknown (pulsing)
+    Action button;                  // task: Cancel / Stopping… / Close
     std::optional<Action> open_log; // Windows: Open Log
-    Action details;          // details: the log's expander
+    Action details;                 // details: the log's expander
 };
 
 // ---------------------------------------------------------------- dialogs
 
 struct Dialog {
-    std::string id;          // "uninstall", "remove-all", "stop-and-quit", "setup", "refusal", "message"
+    std::string id; // "uninstall", "remove-all", "stop-and-quit", "setup", "refusal", "message"
     std::string title, text;
     // Further texts (paths, notes) and the check boxes (uninstall-saves, uninstall-characters: a line's action),
     // in order.
     std::vector<Line> lines;
-    std::vector<Action> buttons;  // in order; the safe one is `cancel`
-    std::string cancel;      // the id Esc / B gives
-    std::string default_id;  // the focused one at first
+    std::vector<Action> buttons; // in order; the safe one is `cancel`
+    std::string cancel;          // the id Esc / B gives
+    std::string default_id;      // the focused one at first
 };
 
 } // namespace launcher::model

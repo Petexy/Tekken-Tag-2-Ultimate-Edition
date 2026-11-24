@@ -69,9 +69,10 @@ std::string shown_build(const std::string& build) {
 
 std::string set_up_first(const Facts& facts, bool long_form) {
     const char* const verb = facts.caps.setup_game ? "Set up" : "Install";
-    return std::string(verb) + (long_form ? " the game first: the characters are made from it and from your Tekken 7 or "
-                                            "Tekken 8."
-                                          : " the game first: characters are made from it.");
+    return std::string(verb) + (long_form
+                                    ? " the game first: the characters are made from it and from your Tekken 7 or "
+                                      "Tekken 8."
+                                    : " the game first: characters are made from it.");
 }
 
 MovesBlock moves_block(const Facts& facts) {
@@ -118,9 +119,11 @@ bool can_import(const Facts& facts, std::string* why) {
 
 std::string shared_needs(std::string_view other) {
     const std::string name = game_name(other);
-    return "The " + name + " characters added need " + name + " whenever a character is added: what all of them "
+    return "The " + name + " characters added need " + name +
+           " whenever a character is added: what all of them "
            "share is made again, and neither their packs (made by an older version) nor what they share now have "
-           "their pictures. Install " + name + " again, or remove them first.";
+           "their pictures. Install " +
+           name + " again, or remove them first.";
 }
 
 std::string shared_blocker(const Facts& facts, const std::string& game) {
@@ -201,8 +204,10 @@ std::string removable(const Facts& facts, const Fighter& f) {
     for (const Fighter& o : facts.status->fighters) {
         if (o.name != f.name && o.added() && o.needs_game && !facts.status->readable(o.game)) {
             const char* name = game_name(o.game);
-            return std::string(name) + " is needed for the " + name + " characters that stay: what they share is made "
-                   "again from it" + (o.of(f.game) ? ". Remove All removes them all at once." : ".");
+            return std::string(name) + " is needed for the " + name +
+                   " characters that stay: what they share is made "
+                   "again from it" +
+                   (o.of(f.game) ? ". Remove All removes them all at once." : ".");
         }
     }
     return {};

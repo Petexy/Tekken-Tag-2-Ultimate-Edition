@@ -7,6 +7,7 @@
 // say what the player sees. Nothing here draws, starts a process or reads a
 // file.
 
+#include "command.h"
 #include "display.h"
 #include "keymap.h"
 #include "paths.h"
@@ -29,21 +30,21 @@ namespace launcher::model {
 // what both do (kImport, kRemove, kShaders, kUpdate: the game program built
 // again, Windows' "upgrade" worker); the rest exists on one OS only.
 enum class TaskKind {
-    kInstall,        // Linux: ttt2-build install (after the preflight)
-    kUpdate,         // the game program built again (Linux ttt2-build update, Windows worker "upgrade")
-    kImport,         // characters added or updated
-    kRemove,         // characters removed
-    kUninstall,      // Linux: in-process, no Cancel
-    kLauncherUpdate, // the launcher's own update (AppImage, or the Windows worker "launcher")
-    kLauncherFiles,  // Windows: a test build's files from its branch (worker "files")
-    kPackages,       // Linux: numpy and Pillow downloaded
-    kShaders,        // the game's --precompile before Play
-    kSetup,          // Windows: Set Up Game (worker "setup")
-    kBuild,          // Windows: More > Build / Rebuild
-    kInstallSource,  // Windows: More > Install from Wii U Source (worker "install")
-    kUpdateInstalled,// Windows: More > Update Installed Game (worker "update")
-    kBootstrap,      // Windows: the first start's "Getting the launcher ready"
-    kRefusal,        // no task: a refusal shown in the task panel (as a failed one)
+    kInstall,         // Linux: ttt2-build install (after the preflight)
+    kUpdate,          // the game program built again (Linux ttt2-build update, Windows worker "upgrade")
+    kImport,          // characters added or updated
+    kRemove,          // characters removed
+    kUninstall,       // Linux: in-process, no Cancel
+    kLauncherUpdate,  // the launcher's own update (AppImage, or the Windows worker "launcher")
+    kLauncherFiles,   // Windows: a test build's files from its branch (worker "files")
+    kPackages,        // Linux: numpy and Pillow downloaded
+    kShaders,         // the game's --precompile before Play
+    kSetup,           // Windows: Set Up Game (worker "setup")
+    kBuild,           // Windows: More > Build / Rebuild
+    kInstallSource,   // Windows: More > Install from Wii U Source (worker "install")
+    kUpdateInstalled, // Windows: More > Update Installed Game (worker "update")
+    kBootstrap,       // Windows: the first start's "Getting the launcher ready"
+    kRefusal,         // no task: a refusal shown in the task panel (as a failed one)
 };
 const char* task_kind_name(TaskKind kind); // "install", ... (the Windows worker's name where there is one)
 
@@ -70,11 +71,11 @@ struct Caps {
     // Linux: the Missing row (gamescope, pactl, MinGW, a C compiler, numpy/Pillow with Download and the
     // package manager's command). Windows: the worker fetches numpy/Pillow/compiler itself; nothing listed.
     bool prerequisites_listed = false;
-    bool packages_download = false;  // Linux: Download of numpy and Pillow (get_python_packages.py)
-    bool game_error_report = false;  // Linux: "The game stopped with an error (exit code N)..." (Windows: the log)
-    bool game_outside = false;       // Linux: a game started outside the launcher is seen (/proc)
-    bool branch_updates = false;     // Windows: a test build's files from its branch ("Newer changes are on X")
-    std::set<TaskKind> cancellable;  // the tasks whose Cancel works
+    bool packages_download = false; // Linux: Download of numpy and Pillow (get_python_packages.py)
+    bool game_error_report = false; // Linux: "The game stopped with an error (exit code N)..." (Windows: the log)
+    bool game_outside = false;      // Linux: a game started outside the launcher is seen (/proc)
+    bool branch_updates = false;    // Windows: a test build's files from its branch ("Newer changes are on X")
+    std::set<TaskKind> cancellable; // the tasks whose Cancel works
     ClosePolicy close_policy = ClosePolicy::kAskStopAndQuit;
     // The banner's note: "native Linux program" / "native Windows program".
     const char* platform_name = "Linux";
@@ -93,7 +94,7 @@ struct Owned {
     OwnedState state = OwnedState::kUnknown; // asking since Steam last started: not yet, under way, done, failed
     std::map<std::string, bool> answer;      // the last answer: this time's, or the one kept from before
     bool has_answer = false;
-    std::string error;                       // why asking failed
+    std::string error;                         // why asking failed
     std::map<std::string, std::string> errors; // this time's: each game Steam could not be asked through, why
 };
 
@@ -130,15 +131,17 @@ struct TaskFacts {
 // Ids ("0.8.0 <sha>") are given to the model as Facts::game_built / this_build in the kit's form
 // ("0.8.0-<sha>"), so that the Linux rules (built_older, update ready) apply unchanged.
 struct WindowsState {
-    std::string branch;                 // a test build's branch (not main), empty otherwise
-    std::string commit;                 // this build's commit (40 hex), empty when not known (project ZIP)
+    fs::path root, build, config; // the launcher's files, the build folder, launcher.json (main.py's arguments)
+    std::optional<Command> play;  // how the game starts (C8: built by Python), none when it cannot
+    std::string branch;           // a test build's branch (not main), empty otherwise
+    std::string commit;           // this build's commit (40 hex), empty when not known (project ZIP)
     std::map<std::string, std::string> folders; // Settings > Folders: source, title, install, data, packs, saves, tools
-    fs::path logs, latest_log;          // <data>/logs, and its newest *.log (empty: none)
+    fs::path logs, latest_log;                  // <data>/logs, and its newest *.log (empty: none)
     // Why Play cannot start the game: "" (it can), "exe" (the installed game's program is missing),
     // "source" (a development build without its Wii U source).
     std::string play_problem;
-    std::string data_problem;           // "" or "name": the data folder does not end in TTT2Ultimate
-    std::string cannot_replace;         // why the .exe's folder cannot be written to (the OS's words), "" when it can
+    std::string data_problem;   // "" or "name": the data folder does not end in TTT2Ultimate
+    std::string cannot_replace; // why the .exe's folder cannot be written to (the OS's words), "" when it can
 };
 
 // Windows only: what `--query check --action X` answers before a task
@@ -174,10 +177,10 @@ struct Facts {
     std::string build_commit; // this build's commit, empty when not known
 
     // The install.
-    Install install;           // state, folder, the unfinished install's .wua
-    std::string game_built;    // what built the installed program (built_version / installed_by), empty: unknown
-    bool icon = false;         // <folder>/icon.png is there (the banner's)
-    fs::path chosen_game;      // a .wua chosen or given (Linux: shown in the card)
+    Install install;        // state, folder, the unfinished install's .wua
+    std::string game_built; // what built the installed program (built_version / installed_by), empty: unknown
+    bool icon = false;      // <folder>/icon.png is there (the banner's)
+    fs::path chosen_game;   // a .wua chosen or given (Linux: shown in the card)
     std::optional<Preflight> preflight;
     fs::path installing;       // the folder the install that runs goes to
     bool game_running = false; // the installed program runs (started here or elsewhere)
@@ -195,14 +198,14 @@ struct Facts {
     std::map<std::string, bool> outfits; // the outfit boxes clicked, by character
     bool dlc_expanded = false;
 
-    std::optional<TaskFacts> task;           // the task that runs
-    std::optional<MainNews> main_news;       // what main (or a test build's branch) has beyond this build
-    std::optional<Release> newer;            // a newer release GitHub named
-    bool self_update = false;                // AppImage (Linux) / release .exe (Windows): the launcher updates itself
-    bool custom_releases = false;            // TTT2_LAUNCHER_RELEASES set (tests): What's New for any page
-    bool custom_github = false;              // TTT2_LAUNCHER_GITHUB set (tests)
+    std::optional<TaskFacts> task;     // the task that runs
+    std::optional<MainNews> main_news; // what main (or a test build's branch) has beyond this build
+    std::optional<Release> newer;      // a newer release GitHub named
+    bool self_update = false;          // AppImage (Linux) / release .exe (Windows): the launcher updates itself
+    bool custom_releases = false;      // TTT2_LAUNCHER_RELEASES set (tests): What's New for any page
+    bool custom_github = false;        // TTT2_LAUNCHER_GITHUB set (tests)
 
-    WindowsState windows;                    // (Windows only)
+    WindowsState windows; // (Windows only)
 };
 
 } // namespace launcher::model

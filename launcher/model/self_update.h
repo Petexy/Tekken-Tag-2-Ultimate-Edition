@@ -56,9 +56,9 @@ public:
         std::optional<fs::path> appimage; // the AppImage this launcher runs from (none: not one)
         std::string version;              // this launcher's ("0.8.0")
         std::string releases = kLatestRelease;
-        bool custom_releases = false;     // TTT2_LAUNCHER_RELEASES (tests): plain http allowed
-        std::string user_agent;           // "ttt2-launcher/0.8.0"
-        int pid = 0;                      // this launcher's: the new one waits for it to end
+        bool custom_releases = false; // TTT2_LAUNCHER_RELEASES (tests): plain http allowed
+        std::string user_agent;       // "ttt2-launcher/0.8.0"
+        int pid = 0;                  // this launcher's: the new one waits for it to end
     };
 
     SelfUpdate(TaskRunner& runner, Starter& starter, UpdateFiles& files, Config config)

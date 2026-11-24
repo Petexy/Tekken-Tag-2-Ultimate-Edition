@@ -42,7 +42,7 @@ std::optional<Command> SelfUpdate::check_command() {
     if (!config_.appimage) return std::nullopt;
     const auto downloader = files_.find_downloader();
     if (!downloader) return std::nullopt; // (Update says what is missing)
-    return Command{download_command(*downloader, config_.releases, true, {}, config_.user_agent), {}, {}, {}};
+    return Command{download_command(*downloader, config_.releases, true, {}, config_.user_agent), {}, {}, {}, {}};
 }
 
 std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
@@ -53,9 +53,9 @@ std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
     }
     if (runner_.running()) return Refusal{"Another task is running", "Wait for it to end, then update the launcher."};
     if (const std::string why = files_.cannot_replace(*config_.appimage); !why.empty()) {
-        return Refusal{"Cannot update the launcher",
-                       "Its folder, " + config_.appimage->parent_path().string() + ", cannot be written to (" + why +
-                           "): move the AppImage to a folder of yours, then update it."};
+        return Refusal{"Cannot update the launcher", "Its folder, " + config_.appimage->parent_path().string() +
+                                                         ", cannot be written to (" + why +
+                                                         "): move the AppImage to a folder of yours, then update it."};
     }
     const auto downloader = files_.find_downloader();
     if (!downloader) {
@@ -72,7 +72,7 @@ std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
     runner_.begin(spec, now);
     runner_.step("Looking for a newer version");
     state_ = State::kAsking;
-    run({download_command(downloader_, config_.releases, true, {}, config_.user_agent), {}, {}, {}}, false,
+    run({download_command(downloader_, config_.releases, true, {}, config_.user_agent), {}, {}, {}, {}}, false,
         [this](int code, const std::string& out, const std::string& err) { answered(code, out, err); });
     return std::nullopt;
 }
@@ -89,7 +89,7 @@ void SelfUpdate::run(Command command, bool log_out,
                                    (is_error ? *err : *out) += line + "\n";
                                    if (is_error || log_out) runner_.add_log(line);
                                },
-                              [this, out, err, then, serial](int code) {
+                               [this, out, err, then, serial](int code) {
                                    if (serial != serial_ || state_ == State::kIdle) return;
                                    const auto task = runner_.facts();
                                    if (task && task->cancelled) {
@@ -111,7 +111,8 @@ void SelfUpdate::answered(int code, const std::string& out, const std::string& e
     }
     const ReleaseAnswer answer = parse_release(out);
     if (on_release) on_release(answer);
-    if (answer.none || (answer.release && compare_versions(answer.release->version, config_.version).value_or(0) <= 0)) {
+    if (answer.none ||
+        (answer.release && compare_versions(answer.release->version, config_.version).value_or(0) <= 0)) {
         runner_.add_log(answer.none ? "No release is published yet."
                                     : "The newest release is " + answer.release->tag + ".");
         state_ = State::kIdle;
@@ -134,7 +135,7 @@ void SelfUpdate::download(double now) {
     runner_.step("Downloading version " + release_.version);
     state_ = State::kDownloading;
     watch_at_ = release_.size > 0 ? now + kWatchSeconds : -1;
-    run({download_command(downloader_, release_.url, false, file_, config_.user_agent), {}, {}, {}}, true,
+    run({download_command(downloader_, release_.url, false, file_, config_.user_agent), {}, {}, {}, {}}, true,
         [this](int code, const std::string&, const std::string& err) { downloaded(code, err); });
 }
 
@@ -152,7 +153,8 @@ void SelfUpdate::downloaded(int code, const std::string& err) {
                                            " bytes).");
     }
     if (!release_.sha256.empty() && files_.sha256(file_) != release_.sha256) {
-        return failed("Update failed", "The download of version " + version + " is damaged: its SHA-256 is not GitHub's.");
+        return failed("Update failed",
+                      "The download of version " + version + " is damaged: its SHA-256 is not GitHub's.");
     }
     if (!files_.is_appimage(file_)) {
         return failed("Update failed", "What was downloaded for version " + version + " is not an AppImage.");
@@ -164,7 +166,7 @@ void SelfUpdate::downloaded(int code, const std::string& err) {
     state_ = State::kChecking;
     timed_out_ = false;
     deadline_ = now_ + kVersionSeconds;
-    run({{file_.string(), "--version"}, {}, {}, {}}, true,
+    run({{file_.string(), "--version"}, {}, {}, {}, {}}, true,
         [this](int code, const std::string& out, const std::string&) { started(code, out); });
 }
 
@@ -188,7 +190,7 @@ void SelfUpdate::started(int code, const std::string& out) {
     state_ = State::kIdle;
     runner_.add_log("Version " + version + " is in " + config_.appimage->string() + ".");
     std::string error;
-    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}};
+    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {}};
     auto job = starter_.start(open, {}, &error);
     if (!job) {
         runner_.finish(false, "Updated to " + version + ", but it cannot be opened",

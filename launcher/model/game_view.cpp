@@ -28,7 +28,8 @@ Line note_line(Icon icon, std::string text, bool warn, Tone icon_tone) {
 std::string refusal_sentence(const std::string& title, const std::string& why) {
     if (why.empty()) return title + ".";
     std::string lower = why;
-    if (!lower.empty() && lower[0] >= 'A' && lower[0] <= 'Z' && !(lower.size() > 1 && lower[1] >= 'A' && lower[1] <= 'Z')) {
+    if (!lower.empty() && lower[0] >= 'A' && lower[0] <= 'Z' &&
+        !(lower.size() > 1 && lower[1] >= 'A' && lower[1] <= 'Z')) {
         lower[0] = static_cast<char>(lower[0] - 'A' + 'a');
     }
     return title + ": " + lower;
@@ -61,14 +62,14 @@ void installed(const Facts& facts, GameView& v) {
     const bool task = facts.task.has_value();
     v.state = GameState::kInstalled;
     v.folder = facts.install.folder.string();
-    v.pill.text = playing                                             ? "Running"
-                  : task && facts.task->kind == TaskKind::kUpdate     ? "Updating"
-                  : task && facts.task->kind == TaskKind::kUninstall  ? "Uninstalling"
-                                                                      : "Installed";
+    v.pill.text = playing                                            ? "Running"
+                  : task && facts.task->kind == TaskKind::kUpdate    ? "Updating"
+                  : task && facts.task->kind == TaskKind::kUninstall ? "Uninstalling"
+                                                                     : "Installed";
     v.pill.kind = task && !playing ? PillKind::kNeutral : PillKind::kOk;
     if (playing && !facts.game_started_here && facts.caps.game_outside) {
-        Line l = note_line(Icon::kInfo, "It was started outside the launcher. Quit it to update or uninstall it.", false,
-                           Tone::kDim);
+        Line l = note_line(Icon::kInfo, "It was started outside the launcher. Quit it to update or uninstall it.",
+                           false, Tone::kDim);
         l.tone = Tone::kDim;
         l.small = true;
         v.body.push_back(l);
@@ -76,8 +77,9 @@ void installed(const Facts& facts, GameView& v) {
     const bool update = update_ready(facts);
     const std::string older = older_game(facts);
     // (Windows builds it from the .wua chosen in Folders: the Tk window's words.)
-    const std::string again = facts.caps.windows ? " Update builds it again on this PC from your game: a few minutes."
-                                                 : " Update builds it again from the game in its folder: a few minutes.";
+    const std::string again = facts.caps.windows
+                                  ? " Update builds it again on this PC from your game: a few minutes."
+                                  : " Update builds it again from the game in its folder: a few minutes.";
     if (!older.empty()) {
         Line l = note_line(Icon::kWarning, older + again, true);
         l.tone = Tone::kDim;
@@ -117,9 +119,9 @@ void installed(const Facts& facts, GameView& v) {
     if (!older.empty()) {
         update_button(true);
     } else {
-        Action play = button("play", playing ? "Playing" : "Play", !playing && !task,
-                             playing ? refusal_sentence("The game is running", "Only one can run at a time.")
-                                     : task_why("play"));
+        Action play =
+            button("play", playing ? "Playing" : "Play", !playing && !task,
+                   playing ? refusal_sentence("The game is running", "Only one can run at a time.") : task_why("play"));
         play.primary = true;
         play.icon = Icon::kPlay;
         play.describe.state = playing ? "Running" : "";
@@ -151,12 +153,11 @@ void unfinished(const Facts& facts, GameView& v) {
     v.state = GameState::kNotFinished;
     v.folder = facts.install.folder.string();
     v.pill = {"Not finished", PillKind::kWarn, {}};
-    v.body.push_back(text_line(
-        "The install stopped before it was complete. Resume it to finish: the files copied so far are kept.",
-        Tone::kDim));
+    v.body.push_back(
+        text_line("The install stopped before it was complete. Resume it to finish: the files copied so far are kept.",
+                  Tone::kDim));
     if (!facts.game_error.empty()) v.body.push_back(text_line(facts.game_error, Tone::kError));
-    Action resume = button("resume", "Resume", !task && facts.builder,
-                           task ? task_why("install") : kBuilderMissing);
+    Action resume = button("resume", "Resume", !task && facts.builder, task ? task_why("install") : kBuilderMissing);
     resume.primary = true;
     resume.describe.path = facts.install.folder.string();
     v.actions.push_back(resume);
@@ -285,11 +286,16 @@ void more(const Facts& facts, GameView& v) {
 
 GameView game_view(const Facts& facts) {
     GameView v;
-    if (facts.preflight && facts.caps.install_flow) preflight(facts, v);
-    else if (facts.task && facts.task->kind == TaskKind::kInstall && !facts.installing.empty()) installing(facts, v);
-    else if (facts.install.state == InstallState::kInstalled) installed(facts, v);
-    else if (facts.install.state == InstallState::kUnfinished && facts.caps.install_flow) unfinished(facts, v);
-    else not_installed(facts, v);
+    if (facts.preflight && facts.caps.install_flow)
+        preflight(facts, v);
+    else if (facts.task && facts.task->kind == TaskKind::kInstall && !facts.installing.empty())
+        installing(facts, v);
+    else if (facts.install.state == InstallState::kInstalled)
+        installed(facts, v);
+    else if (facts.install.state == InstallState::kUnfinished && facts.caps.install_flow)
+        unfinished(facts, v);
+    else
+        not_installed(facts, v);
     // Settings: always there (U17: the launcher's own settings with any state of the game; the game's when
     // installed, on Windows also before Set Up Game, for its folders).
     if (v.state != GameState::kInstalled && v.state != GameState::kChecking && v.state != GameState::kCannotInstall) {
@@ -368,10 +374,10 @@ NoticeView notice_view(const Facts& facts) {
         const std::string have = facts.caps.windows && facts.newer->version == facts.launcher_version
                                      ? std::string("a test build of it")
                                      : facts.launcher_version;
-        n.detail = "You have " + have + ". Update replaces this " +
-                   (facts.caps.windows ? "launcher" : "AppImage") + " with it and opens it.";
-        page(facts.newer->page, facts.newer->page.starts_with("https://") ||
-                                    (facts.custom_releases && !facts.newer->page.empty()));
+        n.detail = "You have " + have + ". Update replaces this " + (facts.caps.windows ? "launcher" : "AppImage") +
+                   " with it and opens it.";
+        page(facts.newer->page,
+             facts.newer->page.starts_with("https://") || (facts.custom_releases && !facts.newer->page.empty()));
     } else if (facts.self_update && facts.caps.branch_updates && !facts.windows.branch.empty() && facts.main_news &&
                facts.main_news->ahead > 0) {
         const MainNews& news = *facts.main_news;
@@ -405,12 +411,13 @@ Dialog uninstall_view(const Facts& facts, const fs::path& saves, bool saves_cust
     };
     Line s = check("uninstall-saves", "Also delete saves", choice.saves);
     s.actions[0].describe.path = saves.string();
-    if (saves_custom) s.actions[0].describe.more.push_back("Only the game's saves in it are deleted; anything else there stays.");
+    if (saves_custom)
+        s.actions[0].describe.more.push_back("Only the game's saves in it are deleted; anything else there stays.");
     d.lines.push_back(s);
     d.lines.push_back(text_line(saves.string(), Tone::kPath));
     if (saves_custom) {
-        d.lines.push_back(text_line("Only the game's saves in it are deleted; anything else there stays.", Tone::kDim,
-                                    true));
+        d.lines.push_back(
+            text_line("Only the game's saves in it are deleted; anything else there stays.", Tone::kDim, true));
     }
     d.lines.push_back(check("uninstall-characters",
                             "Also delete added characters and what was saved from Tekken 7 and Tekken 8",

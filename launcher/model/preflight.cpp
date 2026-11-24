@@ -14,8 +14,10 @@ bool SystemProbe::exists(const fs::path& path) {
 
 std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, const fs::path& work, Probe& probe) {
     std::vector<Check> checks;
-    if (probe.exists(game)) checks.push_back({true, "Game", game.filename().string(), {}});
-    else checks.push_back({false, "Game", game.string() + " does not exist", {}});
+    if (probe.exists(game))
+        checks.push_back({true, "Game", game.filename().string(), {}});
+    else
+        checks.push_back({false, "Game", game.string() + " does not exist", {}});
 
     const auto missing = probe.missing_cpu_features();
     if (missing.empty()) {
@@ -23,7 +25,8 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
     } else {
         std::string names;
         for (size_t i = 0; i < missing.size() && i < 6; ++i) names += (i ? ", " : "") + missing[i];
-        checks.push_back({false, "Processor",
+        checks.push_back({false,
+                          "Processor",
                           "Lacks " + names + (missing.size() > 6 ? " and more" : "") +
                               ": the game program needs an x86-64-v3 processor (Intel Haswell, AMD Excavator or newer)",
                           {}});
@@ -37,9 +40,12 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
         const std::string command = install_command(distro, {Package::kCompiler});
         if (!why.empty()) why[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(why[0])));
         why += ". The game program is compiled on this PC";
-        if (image_based(distro)) why += ". " + image_based_hint("Clang (or GCC 15 or newer)");
-        else if (command.empty()) why += ": install Clang (or GCC 15 or newer) with your distribution's packages.";
-        else why += ": install Clang with";
+        if (image_based(distro))
+            why += ". " + image_based_hint("Clang (or GCC 15 or newer)");
+        else if (command.empty())
+            why += ": install Clang (or GCC 15 or newer) with your distribution's packages.";
+        else
+            why += ": install Clang with";
         checks.push_back({false, "C++ compiler", why, command});
     }
 
@@ -51,7 +57,8 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
     const auto space = [&](const fs::path& where, uint64_t bytes, const char* title, const std::string& what) {
         const auto free = probe.free_space(where);
         if (!free) return Check{true, title, "Unknown for " + where.string(), {}};
-        return Check{*free >= bytes, title,
+        return Check{*free >= bytes,
+                     title,
                      gigabytes(*free) + " free, about " + gigabytes(bytes) + " needed " + what +
                          (*free >= bytes ? "" : ": make room on that disk, or choose a folder on another"),
                      {}};

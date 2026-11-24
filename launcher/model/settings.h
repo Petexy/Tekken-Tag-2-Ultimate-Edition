@@ -40,8 +40,8 @@ public:
     display::Settings read() const;
 
     const display::Settings& settings() const { return settings_; }
-    const std::string& note() const { return note_; }   // display.ini cannot be read (...)
-    const std::string& error() const { return error_; } // The display settings cannot be saved: ...
+    const std::string& note() const { return note_; }            // display.ini cannot be read (...)
+    const std::string& error() const { return error_; }          // The display settings cannot be saved: ...
     const std::vector<std::string>& log() const { return log_; } // stderr lines of the last load
 
 private:
@@ -147,10 +147,10 @@ private:
     bool as_shown_ = true;
     std::string note_, error_;
     int picking_ = -1;
-    int modifier_ = 0;               // a modifier pressed alone while choosing: taken when let go
-    std::set<int> held_;             // keys down now
-    std::set<int> pressed_since_;    // keys pressed since choosing started
-    double keyboard_from_ = 0;       // keys before this time are not taken (a pad started choosing)
+    int modifier_ = 0;            // a modifier pressed alone while choosing: taken when let go
+    std::set<int> held_;          // keys down now
+    std::set<int> pressed_since_; // keys pressed since choosing started
+    double keyboard_from_ = 0;    // keys before this time are not taken (a pad started choosing)
     Taken taken_;
     std::map<int, RowNote> rows_;
 };
@@ -163,10 +163,10 @@ int usage_of_xkb(int keycode);
 
 struct SettingsInput {
     const DisplayController* display = nullptr;
-    std::vector<Monitor> monitors;  // from the monitor provider (the app's: SDL's displays)
+    std::vector<Monitor> monitors; // from the monitor provider (the app's: SDL's displays)
     const KeyCapture* keys = nullptr;
     LauncherSettings launcher;
-    std::string folders_note;       // Windows: "Saved." for a moment, or why not
+    std::string folders_note; // Windows: "Saved." for a moment, or why not
 };
 
 SettingsView settings_view(const Facts& facts, const SettingsInput& in);

@@ -61,23 +61,56 @@ struct LinuxCommands : Commands {
     std::optional<Command> play(const Facts& facts) override;
     std::optional<Command> worker(const Facts&, TaskKind) override { return std::nullopt; }
 };
+// Windows: what the Tk window ran (spec windows 2.1 and 3.2): `<python> -u <root>/launcher/windows/main.py
+// --build-dir <build> --config <config>` with --query <name> (status, owned, main: one JSON object on the last
+// line) or --worker <action> --cancel-file <logs>/<action>-<stamp>.cancel --outfits <names|none> [names] (its
+// log beside it as .log); Python is facts.python, the folders facts.windows (from --query state), in the
+// launcher's files folder. Play is what --query state answered (C8).
+struct WindowsCommands : Commands {
+    // A task's files' stamp: the app's clock ("20261124-140501-123456", as the Tk window named them).
+    std::function<std::string()> stamp;
+
+    Command query(const Facts& facts, const std::string& name) const;
+    Command worker_command(const Facts& facts, const std::string& action, const std::vector<std::string>& names,
+                           const std::string& outfits) const;
+
+    std::optional<Command> status(const Facts& facts) override;
+    std::optional<Command> owned(const Facts& facts) override;
+    std::optional<Command> main_news(const Facts& facts) override;
+    Command import(const Facts& facts, const std::vector<std::string>& names, const std::string& outfits) override;
+    Command remove(const Facts& facts, const std::vector<std::string>& names) override;
+    Command packages(const Facts&) override { return {}; }                                  // (Linux only)
+    Command install(const Facts&, const fs::path&, const fs::path&) override { return {}; } // (Linux only)
+    Command update(const Facts& facts) override;
+    Command shaders(const Facts& facts) override;
+    std::optional<Command> play(const Facts& facts) override { return facts.windows.play; }
+    std::optional<Command> worker(const Facts& facts, TaskKind kind) override;
+};
+// Whether an element id is one this OS's window has (U1): Windows' More, Set Up Game, Folders, Performance,
+// keyboard.ini and log; Linux's install flow, uninstall, numpy/Pillow download and commands to copy.
+bool of_this_os(const Caps& caps, const std::string& id);
+
+// The worker action of a task kind ("setup", "build", "install", "update", "upgrade", "launcher", "files",
+// "shaders", "import", "remove"), "" for one Windows has none for.
+const char* worker_action(TaskKind kind);
+
 std::map<std::string, std::string> importer_environment(const fs::path& kit,
                                                         const std::function<bool(const fs::path&)>& exists);
 
 // What the app does for the model.
 struct Effect {
     enum class Kind {
-        kChooseGame,     // a .wua (Install…; Windows: Set Up Game's archive): then chosen_game()
-        kChooseFolder,   // where to install (then chosen_folder()); Windows: folder:<key> (text = the key)
-        kRunPreflight,   // run_checks(path, path2, work) off the UI thread: then preflight_done()
-        kUninstall,      // uninstall(places, path, uninstall) off the UI thread: then uninstall_done()
-        kOpenUrl,        // text
-        kOpenPath,       // a folder or a file (path)
-        kCopy,           // text to the clipboard
-        kOpenMenu,       // Windows: More's menu (view().game.more)
-        kSaveOwned,      // Steam's answer kept (text: the JSON) in Places::owned_cache
-        kSaveFolders,    // Windows: Settings > Folders saved (main.py --query save-settings)
-        kOpenUpdated,    // Windows: the updated launcher opened (then opened_updated())
+        kChooseGame,   // a .wua (Install…; Windows: Set Up Game's archive): then chosen_game()
+        kChooseFolder, // where to install (then chosen_folder()); Windows: folder:<key> (text = the key)
+        kRunPreflight, // run_checks(path, path2, work) off the UI thread: then preflight_done()
+        kUninstall,    // uninstall(places, path, uninstall) off the UI thread: then uninstall_done()
+        kOpenUrl,      // text
+        kOpenPath,     // a folder or a file (path)
+        kCopy,         // text to the clipboard
+        kOpenMenu,     // Windows: More's menu (view().game.more)
+        kSaveOwned,    // Steam's answer kept (text: the JSON) in Places::owned_cache
+        kSaveFolders,  // Windows: Settings > Folders saved (main.py --query save-settings)
+        kOpenUpdated,  // Windows: the updated launcher opened (then opened_updated())
         kQuit,
     };
     Kind kind;
@@ -118,7 +151,7 @@ struct View {
 
 class LauncherModel {
 public:
-    static constexpr double kStatusSeconds = 5;        // back in the window: looked at again after this
+    static constexpr double kStatusSeconds = 5;         // back in the window: looked at again after this
     static constexpr double kReleaseSeconds = 6 * 3600; // GitHub asked again after this
 
     struct Parts {
@@ -134,10 +167,10 @@ public:
     LauncherModel(Facts facts, Parts parts);
 
     // ---- events from the app
-    void start(double now);             // the window opened: look, the status, GitHub
-    void tick(double now);              // timers: notes, auto-hide, the update's watch
-    void activated(double now);         // the window active again (6 h: GitHub; 5 s: the status)
-    void deactivated();                 // keys held are forgotten (not a key chosen while tests run)
+    void start(double now);     // the window opened: look, the status, GitHub
+    void tick(double now);      // timers: notes, auto-hide, the update's watch
+    void activated(double now); // the window active again (6 h: GitHub; 5 s: the status)
+    void deactivated();         // keys held are forgotten (not a key chosen while tests run)
     std::vector<Effect> activate(const std::string& id, double now);
     std::vector<Effect> choose(const std::string& id, int index, double now); // a list's entry
     std::vector<Effect> request_close(double now);

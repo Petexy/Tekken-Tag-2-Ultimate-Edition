@@ -76,13 +76,11 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
         o.checked = choosable ? wants_outfits(facts, f) : f.outfits_added;
         o.enabled = choosable && !task;
         const std::string count = std::to_string(f.outfits);
-        o.tooltip = !f.added() || f.update ? "Also make their " + count +
-                                                 " outfits for the costume chooser: adding them takes much longer"
-                    : !choosable           ? (f.outfits_added ? "Their pack has their outfits"
-                                                              : "Their pack has no outfits")
-                    : f.outfits_added      ? "Their pack has their outfits: untick, then Update, to remove them"
-                                           : "Tick, then Update, to add their " + count +
-                                                 " outfits (it takes much longer)";
+        o.tooltip = !f.added() || f.update
+                        ? "Also make their " + count + " outfits for the costume chooser: adding them takes much longer"
+                    : !choosable      ? (f.outfits_added ? "Their pack has their outfits" : "Their pack has no outfits")
+                    : f.outfits_added ? "Their pack has their outfits: untick, then Update, to remove them"
+                                      : "Tick, then Update, to add their " + count + " outfits (it takes much longer)";
         o.why = o.enabled ? "" : task ? task_why("change outfits") : o.tooltip;
         o.describe.title = f.display + ": outfits";
         o.describe.state = o.checked ? "On" : "Off";
@@ -109,11 +107,10 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
                       "They fight with Heihachi's moves until their own can be saved (see above)."};
     } else if (f.added() && newer_on_main(facts, f.name)) {
         const std::string& branch = facts.caps.branch_updates ? facts.windows.branch : std::string();
-        r.pill = branch.empty()
-                     ? Pill{"Newer on main", PillKind::kNeutral,
-                            "Main has an update for them: it comes with the next release."}
-                     : Pill{"Newer on " + branch, PillKind::kNeutral,
-                            branch + " has an update for them: Update the launcher, then them."};
+        r.pill = branch.empty() ? Pill{"Newer on main", PillKind::kNeutral,
+                                       "Main has an update for them: it comes with the next release."}
+                                : Pill{"Newer on " + branch, PillKind::kNeutral,
+                                       branch + " has an update for them: Update the launcher, then them."};
     } else if (f.installed) {
         r.pill = Pill{"Added", PillKind::kOk, {}};
     } else if (f.dlc != 0 && owned) {
@@ -124,8 +121,9 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
     const auto remove_button = [&](const std::string& id) {
         const std::string why = removable(facts, f);
         Action b = button(id, "Remove", !task && installed_game && why.empty(),
-                          !why.empty() ? why : task ? task_why("remove characters")
-                                                    : "The importer, Python 3 or the installed game is missing.",
+                          !why.empty() ? why
+                          : task       ? task_why("remove characters")
+                                       : "The importer, Python 3 or the installed game is missing.",
                           why);
         b.flat = true;
         b.describe.title = "Remove " + f.display;
@@ -133,7 +131,10 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
     };
     const auto add_button = [&](const char* text) {
         const bool can = addable(facts, f);
-        const std::string tip = !usable ? "" : !owned ? unknown_owned_why(facts, f) : can ? "" : not_addable_why(facts, f);
+        const std::string tip = !usable  ? ""
+                                : !owned ? unknown_owned_why(facts, f)
+                                : can    ? ""
+                                         : not_addable_why(facts, f);
         std::string why = tip;
         if (why.empty() && !usable) why = game_why(facts, f.game);
         if (why.empty() && task) why = task_why("add characters");
@@ -143,8 +144,10 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
     };
     if (f.outdated || f.update || outfits_changed(facts, f)) {
         remove_button("remove:" + f.name);
-        if (owned != false) add_button(f.outdated ? "Add Again" : "Update");
-        else r.button_note = "Not owned";
+        if (owned != false)
+            add_button(f.outdated ? "Add Again" : "Update");
+        else
+            r.button_note = "Not owned";
     } else if (f.installed) {
         remove_button("fighter:" + f.name);
     } else if (owned != false) {
@@ -248,18 +251,18 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         const auto base = base_to_add(facts, game);
         std::string why = task ? task_why("add characters") : game_why(facts, game);
         if (why.empty() && base.empty()) why = "Every character that can be added now is added.";
-        Action add_all = button(tekken8 ? "add-all:tekken8" : "add-all", "Add All", usable && !task && !base.empty(),
-                                why);
+        Action add_all =
+            button(tekken8 ? "add-all:tekken8" : "add-all", "Add All", usable && !task && !base.empty(), why);
         add_all.describe.title = "Add All: " + g.heading;
         g.head.push_back(add_all);
     }
     if (const auto all = to_remove_all(facts, game); !all.empty()) {
-        Action remove_all = button("remove-all:" + game, "Remove All", !task && installed_game,
-                                   task_why("remove characters"));
+        Action remove_all =
+            button("remove-all:" + game, "Remove All", !task && installed_game, task_why("remove characters"));
         remove_all.flat = true;
         remove_all.describe.title = "Remove All: " + g.heading;
-        remove_all.describe.explain = std::string(game_name(game)) +
-                                      " is not installed, so they cannot be added again until it is.";
+        remove_all.describe.explain =
+            std::string(game_name(game)) + " is not installed, so they cannot be added again until it is.";
         g.head.push_back(remove_all);
     }
     if (const std::string other = shared_blocker(facts, game); !other.empty() && installed_game) {
@@ -274,10 +277,10 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
     }
     const auto warn_line = [&](const std::vector<const Fighter*>& who, const char* made, const char* todo) {
         if (who.empty()) return;
-        const std::string text = who.size() == 1
-                                     ? who[0]->display + " was made by " + made + " and is not in the game: "
-                                     : std::to_string(who.size()) + " characters were made by " + made +
-                                           " and are not in the game: ";
+        const std::string text =
+            who.size() == 1
+                ? who[0]->display + " was made by " + made + " and is not in the game: "
+                : std::to_string(who.size()) + " characters were made by " + made + " and are not in the game: ";
         g.notes.push_back(note_line(Icon::kWarning, text + todo, true));
     };
     warn_line(outdated, "an older version", "add them again.");
@@ -287,8 +290,10 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         std::vector<const Fighter*> stand_ins, unsaved;
         for (const Fighter& f : s.fighters) {
             if (!f.of(game)) continue;
-            if (f.stand_in) stand_ins.push_back(&f);
-            else if (!f.installed && !f.moveset_saved && owns(facts, f) != false) unsaved.push_back(&f);
+            if (f.stand_in)
+                stand_ins.push_back(&f);
+            else if (!f.installed && !f.moveset_saved && owns(facts, f) != false)
+                unsaved.push_back(&f);
         }
         const MovesBlock block = moves_block(facts);
         if (!stand_ins.empty()) {
@@ -316,12 +321,11 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         }
         if (!unsaved.empty() && block != MovesBlock::kNone && block != MovesBlock::kSteam) {
             const std::string fix = block == MovesBlock::kRun ? s.tekken8_run_error : "install what is missing above";
-            const std::string text =
-                block == MovesBlock::kBuild
-                    ? std::string(kUnknownBuild) + ": added now, " + who_fights(unsaved) +
-                          " with Heihachi's moves until a later version of it can save their own."
-                    : "Their moves cannot be saved from Tekken 8 now: " + fix + ". Added now, " + who_fights(unsaved) +
-                          " with Heihachi's moves until updated.";
+            const std::string text = block == MovesBlock::kBuild
+                                         ? std::string(kUnknownBuild) + ": added now, " + who_fights(unsaved) +
+                                               " with Heihachi's moves until a later version of it can save their own."
+                                         : "Their moves cannot be saved from Tekken 8 now: " + fix + ". Added now, " +
+                                               who_fights(unsaved) + " with Heihachi's moves until updated.";
             g.notes.push_back(note_line(Icon::kInfo, text, false));
         }
     }
@@ -331,8 +335,8 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         if (f.of(game) && f.update && !f.stand_in && owns(facts, f) != false) updates.push_back(&f);
     }
     if (!updates.empty()) {
-        const std::string who = updates.size() == 1 ? updates[0]->display + " was"
-                                                    : std::to_string(updates.size()) + " characters were";
+        const std::string who =
+            updates.size() == 1 ? updates[0]->display + " was" : std::to_string(updates.size()) + " characters were";
         Line line = note_line(Icon::kUpdate,
                               who + " made by an older version: update " + (updates.size() == 1 ? "them" : "them all") +
                                   " to get what this one adds.",
@@ -340,7 +344,7 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         const auto names = to_update(facts, game);
         std::string tip;
         if (usable && names.empty()) {
-            tip = !tekken8                               ? "Start Steam: Tekken 7 needs it"
+            tip = !tekken8                                ? "Start Steam: Tekken 7 needs it"
                   : !owns(facts, *updates[0]).has_value() ? unknown_owned_why(facts, *updates[0])
                                                           : not_addable_why(facts, *updates[0]);
         }
@@ -433,7 +437,8 @@ CharactersView characters_view(const Facts& facts) {
             l.tone = Tone::kDim;
             v.lines.push_back(l);
         } else {
-            v.lines.push_back(text_line("The importer cannot tell what this PC has: " + facts.status_error, Tone::kError));
+            v.lines.push_back(
+                text_line("The importer cannot tell what this PC has: " + facts.status_error, Tone::kError));
         }
         return v;
     }
@@ -555,13 +560,12 @@ CharactersView characters_view(const Facts& facts) {
                                           " from PyPI, Python's package index) into a folder of its own: nothing of "
                                           "the system changes.",
                                       Tone::kDim, true);
-                line.actions.push_back(button("get-packages", "Download", !facts.task,
-                                              task_why("download numpy and Pillow")));
+                line.actions.push_back(
+                    button("get-packages", "Download", !facts.task, task_why("download numpy and Pillow")));
                 needed.lines.push_back(line);
             } else if ((!s.numpy || !s.pillow) && !s.packages_error.empty()) {
-                needed.lines.push_back(text_line("Ultimate Launcher cannot download them itself: " + s.packages_error +
-                                                     ".",
-                                                 Tone::kDim, true));
+                needed.lines.push_back(text_line(
+                    "Ultimate Launcher cannot download them itself: " + s.packages_error + ".", Tone::kDim, true));
             }
             if (!names.empty()) {
                 needed.lines.push_back(
@@ -575,9 +579,9 @@ CharactersView characters_view(const Facts& facts) {
         for (const auto& [name, display] : facts.main_news->fresh) names.push_back(display);
         const std::string& branch = facts.caps.branch_updates ? facts.windows.branch : std::string();
         v.news.push_back(note_line(Icon::kInfo,
-                                   branch.empty() ? "Main adds " + joined(names) + ": they come with the next release."
-                                                  : branch + " adds " + joined(names) +
-                                                        ": Update the launcher to get them.",
+                                   branch.empty()
+                                       ? "Main adds " + joined(names) + ": they come with the next release."
+                                       : branch + " adds " + joined(names) + ": Update the launcher to get them.",
                                    false));
     }
 

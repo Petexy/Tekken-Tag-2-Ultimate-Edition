@@ -34,11 +34,16 @@ bool DisplayController::change(const display::Settings& wanted) {
 
 bool DisplayController::set(std::string_view id, int value) {
     display::Settings wanted = settings_;
-    if (id == "fullscreen") wanted.fullscreen = value != 0;
-    else if (id == "interpolation") wanted.interpolation = value != 0;
-    else if (id == "input-delay") wanted.input_delay = value != 0;
-    else if (id == "async-shaders") wanted.async_shaders = value != 0;
-    else if (id == "precompile-shaders") wanted.precompile_shaders = value != 0;
+    if (id == "fullscreen")
+        wanted.fullscreen = value != 0;
+    else if (id == "interpolation")
+        wanted.interpolation = value != 0;
+    else if (id == "input-delay")
+        wanted.input_delay = value != 0;
+    else if (id == "async-shaders")
+        wanted.async_shaders = value != 0;
+    else if (id == "precompile-shaders")
+        wanted.precompile_shaders = value != 0;
     else if (id == "resolution" && value >= 0 && static_cast<size_t>(value) < std::size(display::kResolutions)) {
         wanted.resolution = display::kResolutions[value];
     } else {
@@ -88,7 +93,8 @@ void KeyCapture::load() {
     note_.clear();
     error_.clear();
     if (!notes.error.empty()) {
-        note_ = "keyboard.ini cannot be read (" + notes.error + "): the game uses its default keys, shown here. "
+        note_ = "keyboard.ini cannot be read (" + notes.error +
+                "): the game uses its default keys, shown here. "
                 "Choosing a key, or Restore Defaults, writes the file anew.";
     } else if (!notes.shared.empty()) {
         std::string keys;
@@ -166,8 +172,8 @@ void KeyCapture::take(int usage, double now) {
         return;
     }
     const Keymap before = keymap_;
-    const Keymap::Bound bound = key_by_usage(usage) ? keymap_.bind(input, usage)
-                                                    : Keymap::Bound{false, -1, "This key cannot be used"};
+    const Keymap::Bound bound =
+        key_by_usage(usage) ? keymap_.bind(input, usage) : Keymap::Bound{false, -1, "This key cannot be used"};
     if (!bound.ok) {
         note_row(input, bound.why, Tone::kError, false, kRefusalSeconds, now);
         taken_ = {false, bound.why};
@@ -276,7 +282,8 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
                                         "The size the game draws at; the picture is scaled to the window or the "
                                         "screen.",
                                         false);
-        for (const display::Resolution r : display::kResolutions) resolution.control.choices.push_back(resolution_label(r));
+        for (const display::Resolution r : display::kResolutions)
+            resolution.control.choices.push_back(resolution_label(r));
         resolution.control.chosen = static_cast<int>(
             std::find(std::begin(display::kResolutions), std::end(display::kResolutions), s.resolution) -
             std::begin(display::kResolutions));
@@ -408,8 +415,8 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
                                 "Short sounds when moving between and choosing items.", in.launcher.sounds);
     SettingRow motion = setting("reduce-motion", ActionKind::kSwitch, "Reduce motion",
                                 "No moving backgrounds, and pages change without sliding.", in.launcher.reduce_motion);
-    SettingRow text = setting("text-size", ActionKind::kChoice, "Text size", "How large this launcher's text is.",
-                              false);
+    SettingRow text =
+        setting("text-size", ActionKind::kChoice, "Text size", "How large this launcher's text is.", false);
     for (const int size : kTextSizes) {
         text.control.choices.push_back(std::to_string(size) + " %");
         if (size == in.launcher.text_size) text.control.chosen = static_cast<int>(text.control.choices.size()) - 1;

@@ -43,8 +43,8 @@ std::string read(const fs::path& file) {
 // ---------------------------------------------------------------- intended differences (golden/INTENDED.md)
 
 // I5 Ids the old app gave no element: new ones (U14).
-const std::vector<std::string> kNewIds = {"refresh", "details", "uninstall-saves", "uninstall-characters",
-                                          "uninstall-cancel", "uninstall-confirm"};
+const std::vector<std::string> kNewIds = {
+    "refresh", "details", "uninstall-saves", "uninstall-characters", "uninstall-cancel", "uninstall-confirm"};
 
 // What the model shows that the old app did not, or differently, on purpose: applied to the golden before
 // comparing, each with its reason (INTENDED.md lists them).
@@ -76,7 +76,8 @@ void intended(Dump& golden, const Dump& model) {
     // I3 Play reads display.ini's "Prepare shaders before playing" when it is pressed (the old app used what
     // Settings last read, nothing before Settings opened): the shaders task's result where the old app had none.
     const Section& task = model.at("task");
-    if (golden["task"].empty() && !task.empty() && task[0].text.count("t") && task[0].text.at("t") == "Shaders are ready") {
+    if (golden["task"].empty() && !task.empty() && task[0].text.count("t") &&
+        task[0].text.at("t") == "Shaders are ready") {
         golden["task"] = task;
     }
     // I1 Settings is always reachable (U17): a gear beside Install/Resume when the game is not installed.
@@ -84,10 +85,12 @@ void intended(Dump& golden, const Dump& model) {
     for (size_t i = 0; i < game.size(); ++i) {
         const auto id = game[i].text.find("id");
         if (id == game[i].text.end() || (id->second != "install" && id->second != "resume")) continue;
-        const bool there = i + 1 < game.size() && game[i + 1].text.count("id") && game[i + 1].text.at("id") == "settings";
+        const bool there =
+            i + 1 < game.size() && game[i + 1].text.count("id") && game[i + 1].text.at("id") == "settings";
         if (!there) {
             game.insert(game.begin() + static_cast<long>(i) + 1,
-                        Element{"button", {{"id", "settings"}, {"icon", "ttt2-settings-symbolic"}, {"tip", "Settings"}},
+                        Element{"button",
+                                {{"id", "settings"}, {"icon", "ttt2-settings-symbolic"}, {"tip", "Settings"}},
                                 {{"s", true}}});
         }
         break;
@@ -129,7 +132,8 @@ void goldens(const fs::path& dir, const fs::path& scratch, const std::string& on
         }
         if (!write.empty()) {
             fs::create_directories(write / name);
-            for (const auto& [shot, dump] : run.dumps) std::ofstream(write / name / (shot + ".json")) << dump_json(dump);
+            for (const auto& [shot, dump] : run.dumps)
+                std::ofstream(write / name / (shot + ".json")) << dump_json(dump);
         }
         std::set<std::string> seen;
         for (const auto& file : fs::directory_iterator(entry.path() / "linux")) {
@@ -165,8 +169,8 @@ void goldens(const fs::path& dir, const fs::path& scratch, const std::string& on
         std::istringstream said(read(entry.path() / "linux/tests.txt"));
         std::vector<std::string> expected;
         for (std::string line; std::getline(said, line);) {
-            for (const char* step : {"@test add:", "@test remove:", "@test update ", "@test play ", "@test get-packages ",
-                                     "@test uninstall:"}) {
+            for (const char* step : {"@test add:", "@test remove:", "@test update ", "@test play ",
+                                     "@test get-packages ", "@test uninstall:"}) {
                 if (line.starts_with(step) && !line.ends_with(" started")) expected.push_back(intended_said(line));
             }
         }
@@ -180,15 +184,14 @@ void goldens(const fs::path& dir, const fs::path& scratch, const std::string& on
 // ---------------------------------------------------------------- 2. what every view keeps to (both OSes)
 
 // Ids only one OS has (U1: the caps decide).
-const std::vector<std::string> kLinuxOnly = {"install", "resume", "check-again", "preflight-cancel", "uninstall",
-                                             "get-packages", "copy:"};
-const std::vector<std::string> kWindowsOnly = {"more", "more:", "setup", "folder:", "save-folders", "performance",
-                                               "open-keyboard-file", "open-log"};
+const std::vector<std::string> kLinuxOnly = {"install",   "resume",       "check-again", "preflight-cancel",
+                                             "uninstall", "get-packages", "copy:"};
+const std::vector<std::string> kWindowsOnly = {
+    "more", "more:", "setup", "folder:", "save-folders", "performance", "open-keyboard-file", "open-log"};
 
 bool listed(const std::string& id, const std::vector<std::string>& list) {
-    return std::any_of(list.begin(), list.end(), [&](const std::string& l) {
-        return l.ends_with(':') ? id.starts_with(l) : id == l;
-    });
+    return std::any_of(list.begin(), list.end(),
+                       [&](const std::string& l) { return l.ends_with(':') ? id.starts_with(l) : id == l; });
 }
 
 void invariants(const std::string& shot, const std::vector<Action>& actions, const Caps& caps) {
@@ -205,7 +208,8 @@ void invariants(const std::string& shot, const std::vector<Action>& actions, con
         // U7: every item has its describe block (the blue side): what it is at least.
         if (a.describe.title.empty()) fail(__FILE__, __LINE__, shot + ": " + a.id + " has no describe block");
         // U7: a disabled item stays, and says why (in the blue side: describe.why).
-        if (!a.enabled && a.describe.why.empty()) fail(__FILE__, __LINE__, shot + ": " + a.id + " is disabled without a why");
+        if (!a.enabled && a.describe.why.empty())
+            fail(__FILE__, __LINE__, shot + ": " + a.id + " is disabled without a why");
     }
 }
 
@@ -248,8 +252,10 @@ std::vector<std::string> minus(const std::multiset<std::string>& a, const std::m
     std::multiset<std::string> rest = b;
     for (const std::string& t : a) {
         const auto it = rest.find(t);
-        if (it == rest.end()) out.push_back(t);
-        else rest.erase(it);
+        if (it == rest.end())
+            out.push_back(t);
+        else
+            rest.erase(it);
     }
     return out;
 }
@@ -258,19 +264,19 @@ std::vector<std::string> minus(const std::multiset<std::string>& a, const std::m
 std::map<std::string, Dump> windows_views(const json::Value& c, const fs::path& scratch) {
     std::map<std::string, Dump> out;
     replay(c, Caps::windows_caps(), scratch, {0, [&](Harness& h) {
-        if (!h.model.facts().dlc_expanded) h.model.activate("dlc", h.now);
-        h.settle();
-        out["00-start"] = flatten(h.model.view());
-        h.model.activate("settings", h.now);
-        out["01-settings"] = flatten(h.model.view());
-    }});
+                                                  if (!h.model.facts().dlc_expanded) h.model.activate("dlc", h.now);
+                                                  h.settle();
+                                                  out["00-start"] = flatten(h.model.view());
+                                                  h.model.activate("settings", h.now);
+                                                  out["01-settings"] = flatten(h.model.view());
+                                              }});
     return out;
 }
 
 // What the model's Windows views say differently from the Tk window, on purpose (golden/INTENDED.md): every
 // difference of the texts must match one of these.
 struct TkDifference {
-    bool tk_only;        // a text Tk showed that the model does not (else: the model's, not Tk's)
+    bool tk_only; // a text Tk showed that the model does not (else: the model's, not Tk's)
     const char* section;
     const char* pattern; // the whole text
     const char* rule;    // INTENDED.md
@@ -293,19 +299,28 @@ const TkDifference kTkDifferences[] = {
     {false, "characters", "Your Steam account owns \\d+ of them: only those can be added\\.", "W6"},
     {true, "characters", "Start Steam to add them: it tells which of them you own\\.", "W6"},
     {false, "characters", "Start Steam to see which DLC you own: only those can be added\\.", "W6"},
-    {false, "characters", "Your Steam account owned \\d+ of them last time Steam was asked\\. Start Steam to add them: it "
-                          "checks again\\.", "W6"},
+    {false, "characters",
+     "Your Steam account owned \\d+ of them last time Steam was asked\\. Start Steam to add them: it "
+     "checks again\\.",
+     "W6"},
     {true, "characters", "Which of them you own is not known yet\\.", "W6"},
     {false, "characters", "Which DLC you own is not known: .*", "W6"},
     {true, "characters", "Steam could not tell which you own \\(.*\\): adding one asks it again\\.", "W6"},
-    {false, "characters", "Steam could not be asked again \\(.*\\)\\. It said last time that your account owns \\d+ of "
-                          "them\\.", "W6"},
-    {true, "characters", "Tekken 7 is not installed\\.|Tekken 8 is not installed in any Steam library|Not installed", "W6"},
+    {false, "characters",
+     "Steam could not be asked again \\(.*\\)\\. It said last time that your account owns \\d+ of "
+     "them\\.",
+     "W6"},
+    {true, "characters", "Tekken 7 is not installed\\.|Tekken 8 is not installed in any Steam library|Not installed",
+     "W6"},
     {false, "characters", "Not installed|Not installed: Tekken 7 and Tekken 8 for PC come from Steam", "W6"},
-    {true, "characters", "Start Steam to add characters: Tekken 7 needs it the first time, and it tells which DLC you "
-                         "own\\.", "W6"},
-    {false, "characters", "Start Steam to add characters: Tekken 7 and Tekken 8 need it the first time, and it tells "
-                          "which DLC you own\\.", "W6"},
+    {true, "characters",
+     "Start Steam to add characters: Tekken 7 needs it the first time, and it tells which DLC you "
+     "own\\.",
+     "W6"},
+    {false, "characters",
+     "Start Steam to add characters: Tekken 7 and Tekken 8 need it the first time, and it tells "
+     "which DLC you own\\.",
+     "W6"},
     {true, "characters", "The importer cannot read the installed game: .*", "W6"},
     {false, "characters", "The importer cannot read it: .*|Game", "W6"},
     {true, "characters", "Importing outfits can drastically prolong adding and updating characters: .*", "W6"},
@@ -316,15 +331,21 @@ const TkDifference kTkDifferences[] = {
     {false, "characters", "\\d+|\\d+ of \\d+ owned|Owned|Not owned", "W7"},
     {false, "characters", ".+ was made by an older version: update them to get what this one adds\\.|Update", "W7"},
     {true, "characters", ".+ was made by an older version: update them to get what this one adds\\.", "W7"},
-    {false, "characters", ".+ fights with Heihachi's moves for now: .*|.+ was made by a newer version of Ultimate "
-                          "Launcher and is not in the game: .*|.+ was made by an older version and is not in the game: "
-                          "add them again\\.|Remove|Remove All", "W7"},
-    {false, "characters", "Their moves cannot be saved from Tekken 8 now: .*|Tekken 8 was updated to a version that "
-                          "Ultimate Launcher cannot save moves from yet: .*", "W7"},
+    {false, "characters",
+     ".+ fights with Heihachi's moves for now: .*|.+ was made by a newer version of Ultimate "
+     "Launcher and is not in the game: .*|.+ was made by an older version and is not in the game: "
+     "add them again\\.|Remove|Remove All",
+     "W7"},
+    {false, "characters",
+     "Their moves cannot be saved from Tekken 8 now: .*|Tekken 8 was updated to a version that "
+     "Ultimate Launcher cannot save moves from yet: .*",
+     "W7"},
     // W8 Linux's sentence with Windows' action.
     {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},
-    {false, "characters", "Set up the game first: the characters are made from it and from your Tekken 7 or Tekken "
-                          "8\\.", "W8"},
+    {false, "characters",
+     "Set up the game first: the characters are made from it and from your Tekken 7 or Tekken "
+     "8\\.",
+     "W8"},
 };
 
 const TkDifference* tk_intended(bool tk_only, const std::string& section, const std::string& text) {
@@ -361,8 +382,9 @@ void tk_goldens(const fs::path& dir, const fs::path& scratch) {
                             ++intended;
                             continue;
                         }
-                        fail(__FILE__, __LINE__, shot + " " + section + (tk_only ? ": Tk said, the model does not: "
-                                                                                 : ": the model says, Tk did not: ") + t);
+                        fail(__FILE__, __LINE__,
+                             shot + " " + section +
+                                 (tk_only ? ": Tk said, the model does not: " : ": the model says, Tk did not: ") + t);
                     }
                 }
             }
@@ -409,8 +431,10 @@ int main(int argc, char** argv) {
     fs::path write;
     for (int i = 3; i + 1 < argc; i += 2) {
         const std::string flag = argv[i];
-        if (flag == "--case") only = argv[i + 1];
-        else if (flag == "--write") write = argv[i + 1];
+        if (flag == "--case")
+            only = argv[i + 1];
+        else if (flag == "--write")
+            write = argv[i + 1];
         else if (flag == "--tk-report") {
             tk_report(golden, scratch / "tk", argv[i + 1] == std::string("all") ? "" : argv[i + 1]);
             return 0;
@@ -428,7 +452,9 @@ int main(int argc, char** argv) {
         tk_goldens(golden, scratch / "tk");
         units(golden, scratch / "units");
     }
-    if (failures) std::fprintf(stderr, "%d failed\n", failures);
-    else std::printf("all passed\n");
+    if (failures)
+        std::fprintf(stderr, "%d failed\n", failures);
+    else
+        std::printf("all passed\n");
     return failures ? 1 : 0;
 }

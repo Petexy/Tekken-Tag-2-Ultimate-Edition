@@ -31,8 +31,8 @@ Caps Caps::linux_caps() {
     c.packages_download = true;
     c.game_error_report = true;
     c.game_outside = true;
-    c.cancellable = {TaskKind::kInstall,  TaskKind::kUpdate,   TaskKind::kImport,        TaskKind::kRemove,
-                     TaskKind::kPackages, TaskKind::kShaders,  TaskKind::kLauncherUpdate};
+    c.cancellable = {TaskKind::kInstall,  TaskKind::kUpdate,  TaskKind::kImport,        TaskKind::kRemove,
+                     TaskKind::kPackages, TaskKind::kShaders, TaskKind::kLauncherUpdate};
     c.close_policy = ClosePolicy::kAskStopAndQuit;
     c.platform_name = "Linux";
     return c;

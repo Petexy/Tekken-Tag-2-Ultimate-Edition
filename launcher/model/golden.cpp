@@ -75,7 +75,10 @@ struct Out {
     }
     void label(const std::string& t, Tone tone = Tone::kNormal, const std::string& tip = {}) {
         // (A path's label has it as its tooltip too: it may be cut short.)
-        if (!t.empty()) add("label", {{"t", t}, {"tone", tone_name(tone)}, {"tip", tone == Tone::kPath && tip.empty() && path_tips ? t : tip}});
+        if (!t.empty())
+            add("label", {{"t", t},
+                          {"tone", tone_name(tone)},
+                          {"tip", tone == Tone::kPath && tip.empty() && path_tips ? t : tip}});
     }
     void pill(const Pill& p) { add("pill", {{"t", p.text}, {"pill", pill_name(p.kind)}, {"tip", p.explain}}); }
     void icon(Icon i, Tone tone) {
@@ -88,14 +91,19 @@ struct Out {
             add("check", {{"id", a.id}, {"t", a.label}, {"tip", a.tooltip}},
                 {{"on", a.checked}, {"mixed", a.inconsistent}, {"s", a.enabled}});
             break;
-        case ActionKind::kSwitch: add("switch", {{"id", a.id}, {"tip", a.tooltip}}, {{"on", a.checked}, {"s", a.enabled}}); break;
+        case ActionKind::kSwitch:
+            add("switch", {{"id", a.id}, {"tip", a.tooltip}}, {{"on", a.checked}, {"s", a.enabled}});
+            break;
         case ActionKind::kChoice:
             add("choice",
-                {{"id", a.id}, {"t", a.chosen >= 0 && a.chosen < static_cast<int>(a.choices.size()) ? a.choices[a.chosen] : ""},
+                {{"id", a.id},
+                 {"t", a.chosen >= 0 && a.chosen < static_cast<int>(a.choices.size()) ? a.choices[a.chosen] : ""},
                  {"tip", a.tooltip}},
                 {{"s", a.enabled}});
             break;
-        case ActionKind::kExpander: add("expander", {{"id", a.id}, {"t", expander_text ? a.label : ""}}, {{"on", a.checked}}); break;
+        case ActionKind::kExpander:
+            add("expander", {{"id", a.id}, {"t", expander_text ? a.label : ""}}, {{"on", a.checked}});
+            break;
         case ActionKind::kMenuItem: break; // (in a menu: not drawn)
         default: {
             std::string cls = a.primary ? "primary" : a.destructive ? "destructive" : a.flat ? "flat" : "";
@@ -292,9 +300,12 @@ std::optional<Dump> parse_dump(std::string_view text, std::string* error) {
             for (size_t i = 0; i < v.keys().size(); ++i) {
                 const std::string& key = v.keys()[i];
                 const json::Value& value = v.values()[i];
-                if (key == "k") e.kind = value.string();
-                else if (value.type() == json::Value::Type::kBool) e.flags[key] = value.boolean();
-                else e.text[key] = value.string();
+                if (key == "k")
+                    e.kind = value.string();
+                else if (value.type() == json::Value::Type::kBool)
+                    e.flags[key] = value.boolean();
+                else
+                    e.text[key] = value.string();
             }
             section.push_back(e);
         }
@@ -328,7 +339,8 @@ std::string escaped(const std::string& t) {
 std::string element_text(const Element& e) {
     std::string s = "{\"k\": \"" + e.kind + "\"";
     for (const char* key : {"id", "t", "icon", "tone", "pill", "tip", "cls"}) {
-        if (const auto it = e.text.find(key); it != e.text.end()) s += std::string(", \"") + key + "\": \"" + escaped(it->second) + "\"";
+        if (const auto it = e.text.find(key); it != e.text.end())
+            s += std::string(", \"") + key + "\": \"" + escaped(it->second) + "\"";
     }
     for (const auto& [k, v] : e.text) {
         if (std::string("id t icon tone pill tip cls").find(k) == std::string::npos) {

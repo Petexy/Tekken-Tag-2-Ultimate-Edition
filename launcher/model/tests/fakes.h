@@ -20,7 +20,7 @@ struct Run {
     std::vector<std::pair<std::string, bool>> lines; // (line, stderr)
     int code = 0;
     bool terminated = false;
-    bool held = false;      // not ended until released (a task stopped by Cancel)
+    bool held = false; // not ended until released (a task stopped by Cancel)
     int terminate_code = 143;
     size_t next = 0;
 };
@@ -108,7 +108,9 @@ struct FakeEnvironment final : Environment {
         }
         return chosen / "Tekken Tag Tournament 2";
     }
-    void write_started_record(const fs::path& folder, const fs::path& game) override { records.emplace_back(folder, game); }
+    void write_started_record(const fs::path& folder, const fs::path& game) override {
+        records.emplace_back(folder, game);
+    }
     bool started(const fs::path&) override { return started_flag; }
     void forget_started_record() override { ++forgot; }
     std::string log_end(const fs::path&) override { return "line one\nline two\nSegmentation fault\n"; }

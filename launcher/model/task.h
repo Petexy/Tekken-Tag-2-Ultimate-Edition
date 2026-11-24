@@ -18,16 +18,6 @@
 
 namespace launcher::model {
 
-// A program to run: its arguments, the variables added to the launcher's
-// environment, its folder (empty: the launcher's) and, on Windows, its log.
-struct Command {
-    std::vector<std::string> argv;
-    std::map<std::string, std::string> env;
-    fs::path cwd;
-    fs::path log_file;
-    bool operator==(const Command&) const = default;
-};
-
 // "$ <argv>" as the log shows it: an argument with a space in quotes.
 std::string command_text(const std::vector<std::string>& argv);
 
@@ -79,8 +69,8 @@ struct TaskEnd {
     std::vector<std::string> added;   // @added / @removed
     std::vector<std::string> skipped; // "<name>: <why>"
     std::vector<std::pair<std::string, std::string>> stand_ins;
-    std::string last_step;            // Windows launcher tasks: the last step said
-    std::string updated;              // Windows: @launcher-updated <version>
+    std::string last_step; // Windows launcher tasks: the last step said
+    std::string updated;   // Windows: @launcher-updated <version>
 };
 TaskResult task_result(const Caps& caps, const TaskSpec& spec, const TaskEnd& end,
                        const std::function<std::string(const std::string&)>& display);

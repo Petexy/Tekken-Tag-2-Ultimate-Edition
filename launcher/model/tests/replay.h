@@ -17,10 +17,10 @@
 namespace launcher::model::testing {
 
 struct CaseRun {
-    std::map<std::string, Dump> dumps; // "00-start", "01-add-kazumi-running", ...
+    std::map<std::string, Dump> dumps;                  // "00-start", "01-add-kazumi-running", ...
     std::map<std::string, std::vector<Action>> actions; // each dump's focusable items
-    std::vector<std::string> said;     // "@test <step> ok|failed <text>" for task steps
-    std::vector<std::string> problems; // what the replay could not do
+    std::vector<std::string> said;                      // "@test <step> ok|failed <text>" for task steps
+    std::vector<std::string> problems;                  // what the replay could not do
 };
 
 // The model of a replay and what it was given, for a test to go on with.
@@ -30,11 +30,11 @@ struct Harness {
     FakeEnvironment& env;
     double& now;
     std::function<void()> settle; // every program's lines and end delivered, then a tick
-    std::vector<Effect>& effects;  // what the model wanted done after programs ended (take_effects)
+    std::vector<Effect>& effects; // what the model wanted done after programs ended (take_effects)
 };
 
 struct ReplayOptions {
-    int steps = -1; // only the first n steps (-1: all)
+    int steps = -1;                       // only the first n steps (-1: all)
     std::function<void(Harness&)> at_end; // after the steps
 };
 

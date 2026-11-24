@@ -54,9 +54,8 @@ std::string stopped_why(const Caps& caps, int code) {
     if (caps.windows) return "See Details, or Open Log to send it for help.";
     if (code > 128 && code < 128 + 65) {
         const char* name = signal_name(code - 128);
-        return std::string("It was stopped: ") +
-               (name ? name : "Real-time signal " + std::to_string(code - 128 - 34)) + " (code " +
-               std::to_string(code) + ", see Details)";
+        return std::string("It was stopped: ") + (name ? name : "Real-time signal " + std::to_string(code - 128 - 34)) +
+               " (code " + std::to_string(code) + ", see Details)";
     }
     return "It stopped with code " + std::to_string(code) + " (see Details)";
 }
@@ -111,15 +110,17 @@ TaskResult task_result(const Caps& caps, const TaskSpec& spec, const TaskEnd& en
         for (const auto& [name, reason] : end.stand_ins) {
             std::string said = reason;
             while (!said.empty() && said.back() == '.') said.pop_back();
-            detail += (detail.empty() ? "" : " ") + display(name) + " fights with Heihachi's moves for now: " + said +
-                      ".";
+            detail +=
+                (detail.empty() ? "" : " ") + display(name) + " fights with Heihachi's moves for now: " + said + ".";
         }
         if (!end.skipped.empty()) detail += (detail.empty() ? "" : " ") + ("Skipped " + joined(end.skipped) + ".");
         break;
     case TaskKind::kRemove:
         // (Intended: a cancel says so calmly; the GTK app gave the generic why, "It was stopped: Terminated".)
-        title = ok ? "Removed " + spec.subject : cancelled ? "Removing cancelled" : "Removing " + spec.subject + " failed";
-        detail = ok ? "They are gone from the select screen next time the game starts."
+        title = ok          ? "Removed " + spec.subject
+                : cancelled ? "Removing cancelled"
+                            : "Removing " + spec.subject + " failed";
+        detail = ok          ? "They are gone from the select screen next time the game starts."
                  : cancelled ? "The characters removed before stay removed, the others are kept."
                              : why;
         break;
@@ -154,14 +155,15 @@ TaskResult task_result(const Caps& caps, const TaskSpec& spec, const TaskEnd& en
     case TaskKind::kUpdateInstalled:
     case TaskKind::kBootstrap: {
         // (Windows only: window.py's words.)
-        const char* done = spec.kind == TaskKind::kSetup           ? "The game is set up"
-                           : spec.kind == TaskKind::kBuild         ? "The game is built"
-                           : spec.kind == TaskKind::kInstallSource ? "The game is installed"
+        const char* done = spec.kind == TaskKind::kSetup             ? "The game is set up"
+                           : spec.kind == TaskKind::kBuild           ? "The game is built"
+                           : spec.kind == TaskKind::kInstallSource   ? "The game is installed"
                            : spec.kind == TaskKind::kUpdateInstalled ? "The installed game is updated"
                                                                      : "The launcher is ready";
         if (ok) {
             title = done;
-            detail = spec.kind == TaskKind::kBuild || spec.kind == TaskKind::kBootstrap ? "" : "Click Play to start it.";
+            detail =
+                spec.kind == TaskKind::kBuild || spec.kind == TaskKind::kBootstrap ? "" : "Click Play to start it.";
         } else if (cancelled) {
             title = "Cancelled";
             detail = "Completed extraction data is kept.";
@@ -267,9 +269,7 @@ void TaskRunner::line(const std::string& text, bool is_error) {
     if (progress_.feed(l)) started_ = true;
 }
 
-bool TaskRunner::cancellable() const {
-    return running_ && !cancelled_ && caps_.cancellable.count(spec_.kind) > 0;
-}
+bool TaskRunner::cancellable() const { return running_ && !cancelled_ && caps_.cancellable.count(spec_.kind) > 0; }
 
 void TaskRunner::cancel() {
     if (!cancellable() || !job_) return;
@@ -342,7 +342,8 @@ TaskView TaskRunner::view() const {
         std::string detail = progress_.step();
         if (!progress_.detail().empty()) detail += (detail.empty() ? "" : " · ") + progress_.detail();
         if (progress_.fraction() >= 0) {
-            detail += (detail.empty() ? "" : " · ") + std::to_string(static_cast<int>(progress_.fraction() * 100)) + "%";
+            detail +=
+                (detail.empty() ? "" : " · ") + std::to_string(static_cast<int>(progress_.fraction() * 100)) + "%";
             v.fraction = progress_.fraction();
         }
         v.detail = !started_ ? detail_ : detail;
@@ -354,10 +355,10 @@ TaskView TaskRunner::view() const {
         }
         v.button.label = cancelled_ ? "Stopping…" : "Cancel";
         v.button.enabled = cancellable();
-        v.button.why = cancelled_ ? "It is stopping."
+        v.button.why = cancelled_                           ? "It is stopping."
                        : spec_.kind == TaskKind::kUninstall ? "An uninstall cannot be stopped half-way."
-                       : !v.button.enabled ? "This task cannot be stopped half-way."
-                                           : "";
+                       : !v.button.enabled                  ? "This task cannot be stopped half-way."
+                                                            : "";
     } else {
         v.detail = detail_;
         v.button.label = "Close";

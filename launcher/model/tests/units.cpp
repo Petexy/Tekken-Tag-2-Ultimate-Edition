@@ -107,7 +107,7 @@ void keys() {
     k.key_down(kShift, false, now - 1); // (Shift held before ...)
     k.stop();
     k.pick(bottom, Device::kKeyboard, now);
-    k.key_up(kShift, now);              // (... let go after: not taken)
+    k.key_up(kShift, now); // (... let go after: not taken)
     CHECK_EQ(k.picking(), bottom);
 
     // A again on the same keycap stops.
@@ -231,9 +231,8 @@ void task_runner() {
         return s;
     };
     double now = 10;
-    starter.set_script([](Run& r) {
-        r.lines = {{"@step fighter kazumi 1 1", false}, {"@added kazumi", false}, {"@done", false}};
-    });
+    starter.set_script(
+        [](Run& r) { r.lines = {{"@step fighter kazumi 1 1", false}, {"@added kazumi", false}, {"@done", false}}; });
     CHECK(t.start(import("Adding Kazumi Mishima"), now));
     CHECK(t.running());
     CHECK(t.cancellable());
@@ -342,8 +341,10 @@ struct UpdateRig {
             const auto& argv = r.command.argv;
             const auto has = [&](const std::string& a) { return std::find(argv.begin(), argv.end(), a) != argv.end(); };
             if (has("--version")) {
-                if (version_hangs) r.held = true;
-                else r.lines = {{says, false}};
+                if (version_hangs)
+                    r.held = true;
+                else
+                    r.lines = {{says, false}};
             } else if (argv[0] == "/home/player/Ultimate_Launcher-x86_64.AppImage") {
                 opened.push_back(r.command);
                 r.held = true;
@@ -477,8 +478,9 @@ void preflight() {
     CHECK_EQ(checks.size(), size_t(5));
     CHECK_EQ(failed_check(checks), std::string("Game: /home/player/TTT2.wua does not exist"));
     CHECK(checks[1].detail.starts_with("Lacks avx2, bmi2, fma: the game program needs an x86-64-v3 processor"));
-    CHECK_EQ(checks[2].detail, std::string("No C++ compiler was found. The game program is compiled on this PC: install "
-                                           "Clang with"));
+    CHECK_EQ(checks[2].detail,
+             std::string("No C++ compiler was found. The game program is compiled on this PC: install "
+                         "Clang with"));
     CHECK_EQ(checks[2].command, std::string("sudo pacman -S --needed clang"));
     CHECK(checks[3].detail.ends_with("needed (the game): make room on that disk, or choose a folder on another"));
     CHECK_EQ(checks[4].title, std::string("Free space for building"));
@@ -505,155 +507,219 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
 
     current = "refresh coalescing";
     replay(installed, Caps::linux_caps(), scratch / "a", {0, [](Harness& h) {
-        const int before = count_started(h.starter, "status");
-        CHECK_EQ(before, 1);
-        // Asked three times while the first answer is coming: once more after it, not three times.
-        h.model.activate("refresh", h.now);
-        h.model.activate("refresh", h.now);
-        h.model.activate("refresh", h.now);
-        CHECK(h.model.facts().status_loading);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "status"), before + 2);
-        CHECK(!h.model.facts().status_loading);
-        // Back in the window: looked at again after 5 s, not before.
-        h.now += 1;
-        h.model.activated(h.now);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "status"), before + 2);
-        h.now += LauncherModel::kStatusSeconds + 1;
-        h.model.activated(h.now);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "status"), before + 3);
-        // GitHub (main's news) again only after hours.
-        const int main = count_started(h.starter, "main");
-        h.now += LauncherModel::kReleaseSeconds + 1;
-        h.model.activated(h.now);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "main"), main + 1);
-    }});
+                                                              const int before = count_started(h.starter, "status");
+                                                              CHECK_EQ(before, 1);
+                                                              // Asked three times while the first answer is coming:
+                                                              // once more after it, not three times.
+                                                              h.model.activate("refresh", h.now);
+                                                              h.model.activate("refresh", h.now);
+                                                              h.model.activate("refresh", h.now);
+                                                              CHECK(h.model.facts().status_loading);
+                                                              h.settle();
+                                                              CHECK_EQ(count_started(h.starter, "status"), before + 2);
+                                                              CHECK(!h.model.facts().status_loading);
+                                                              // Back in the window: looked at again after 5 s, not
+                                                              // before.
+                                                              h.now += 1;
+                                                              h.model.activated(h.now);
+                                                              h.settle();
+                                                              CHECK_EQ(count_started(h.starter, "status"), before + 2);
+                                                              h.now += LauncherModel::kStatusSeconds + 1;
+                                                              h.model.activated(h.now);
+                                                              h.settle();
+                                                              CHECK_EQ(count_started(h.starter, "status"), before + 3);
+                                                              // GitHub (main's news) again only after hours.
+                                                              const int main = count_started(h.starter, "main");
+                                                              h.now += LauncherModel::kReleaseSeconds + 1;
+                                                              h.model.activated(h.now);
+                                                              h.settle();
+                                                              CHECK_EQ(count_started(h.starter, "main"), main + 1);
+                                                          }});
 
     current = "ownership asked";
     replay(installed, Caps::linux_caps(), scratch / "a", {0, [](Harness& h) {
-        CHECK_EQ(count_started(h.starter, "owned"), 1);
-        CHECK(h.model.facts().owned.state == OwnedState::kKnown);
-        // Not again on a refresh once known.
-        h.model.activate("refresh", h.now);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "owned"), 1);
-    }});
+                                                              CHECK_EQ(count_started(h.starter, "owned"), 1);
+                                                              CHECK(h.model.facts().owned.state == OwnedState::kKnown);
+                                                              // Not again on a refresh once known.
+                                                              h.model.activate("refresh", h.now);
+                                                              h.settle();
+                                                              CHECK_EQ(count_started(h.starter, "owned"), 1);
+                                                          }});
     current = "ownership not asked without Steam";
-    replay(fixture(golden, "steam-closed"), Caps::linux_caps(), scratch / "a", {0, [](Harness& h) {
-        CHECK_EQ(count_started(h.starter, "owned"), 0);
-    }});
+    replay(fixture(golden, "steam-closed"), Caps::linux_caps(), scratch / "a",
+           {0, [](Harness& h) { CHECK_EQ(count_started(h.starter, "owned"), 0); }});
     current = "ownership asked again after it failed";
-    replay(fixture(golden, "owned-failed"), Caps::linux_caps(), scratch / "a", {0, [](Harness& h) {
-        CHECK_EQ(count_started(h.starter, "owned"), 1);
-        h.model.activate("refresh", h.now);
-        h.settle();
-        CHECK_EQ(count_started(h.starter, "owned"), 2);
-    }});
+    replay(fixture(golden, "owned-failed"), Caps::linux_caps(), scratch / "a",
+           {0, [](Harness& h) {
+                CHECK_EQ(count_started(h.starter, "owned"), 1);
+                h.model.activate("refresh", h.now);
+                h.settle();
+                CHECK_EQ(count_started(h.starter, "owned"), 2);
+            }});
 
     current = "Play reads display.ini when pressed";
     replay(installed, Caps::linux_caps(), scratch / "b", {0, [&](Harness& h) {
-        std::ofstream(scratch / "b/display.ini") << "precompile_shaders = yes\n";
-        h.model.activate("play", h.now);
-        CHECK(h.model.task().running());
-        CHECK(h.model.task().spec().kind == TaskKind::kShaders);
-        CHECK(count_started(h.starter, "--precompile") == 1);
-        h.settle();
-        CHECK(h.model.facts().game_started_here);
-    }});
+                                                              std::ofstream(scratch / "b/display.ini")
+                                                                  << "precompile_shaders = yes\n";
+                                                              h.model.activate("play", h.now);
+                                                              CHECK(h.model.task().running());
+                                                              CHECK(h.model.task().spec().kind == TaskKind::kShaders);
+                                                              CHECK(count_started(h.starter, "--precompile") == 1);
+                                                              h.settle();
+                                                              CHECK(h.model.facts().game_started_here);
+                                                          }});
 
     current = "close while a task runs (Linux)";
-    replay(fixture(golden, "add-ok"), Caps::linux_caps(), scratch / "c", {0, [](Harness& h) {
-        h.starter.set_script([](Run& r) {
-            r.lines = {{"@step fighter kazumi 1 1", false}};
-            r.held = true;
-        });
-        h.model.activate("fighter:kazumi", h.now);
-        CHECK(h.model.task().running());
-        CHECK(h.model.request_close(h.now).empty());
-        CHECK(h.model.view().dialog && h.model.view().dialog->id == "stop-and-quit");
-        // Keep running: nothing stops.
-        h.model.activate("keep-running", h.now);
-        CHECK(!h.model.view().dialog);
-        CHECK(h.model.task().running());
-        h.model.request_close(h.now);
-        h.model.activate("stop-and-quit", h.now);
-        h.settle();
-        CHECK(!h.model.task().running());
-        CHECK(std::any_of(h.effects.begin(), h.effects.end(),
-                          [](const Effect& e) { return e.kind == Effect::Kind::kQuit; }));
-    }});
+    replay(fixture(golden, "add-ok"), Caps::linux_caps(), scratch / "c",
+           {0, [](Harness& h) {
+                h.starter.set_script([](Run& r) {
+                    r.lines = {{"@step fighter kazumi 1 1", false}};
+                    r.held = true;
+                });
+                h.model.activate("fighter:kazumi", h.now);
+                CHECK(h.model.task().running());
+                CHECK(h.model.request_close(h.now).empty());
+                CHECK(h.model.view().dialog && h.model.view().dialog->id == "stop-and-quit");
+                // Keep running: nothing stops.
+                h.model.activate("keep-running", h.now);
+                CHECK(!h.model.view().dialog);
+                CHECK(h.model.task().running());
+                h.model.request_close(h.now);
+                h.model.activate("stop-and-quit", h.now);
+                h.settle();
+                CHECK(!h.model.task().running());
+                CHECK(std::any_of(h.effects.begin(), h.effects.end(),
+                                  [](const Effect& e) { return e.kind == Effect::Kind::kQuit; }));
+            }});
     current = "close while a task runs (Windows)";
-    replay(fixture(golden, "add-ok"), Caps::windows_caps(), scratch / "c", {0, [](Harness& h) {
-        h.starter.set_script([](Run& r) { r.held = true; });
-        h.model.activate("fighter:kazumi", h.now);
-        CHECK(h.model.task().running());
-        CHECK(h.model.request_close(h.now).empty());
-        CHECK(h.model.view().dialog && h.model.view().dialog->id != "stop-and-quit");
-        CHECK(h.model.task().running());
-    }});
+    replay(fixture(golden, "add-ok"), Caps::windows_caps(), scratch / "c",
+           {0, [](Harness& h) {
+                h.starter.set_script([](Run& r) { r.held = true; });
+                h.model.activate("fighter:kazumi", h.now);
+                CHECK(h.model.task().running());
+                CHECK(h.model.request_close(h.now).empty());
+                CHECK(h.model.view().dialog && h.model.view().dialog->id != "stop-and-quit");
+                CHECK(h.model.task().running());
+            }});
     current = "close with nothing running";
     replay(installed, Caps::linux_caps(), scratch / "c", {0, [](Harness& h) {
-        const auto e = h.model.request_close(h.now);
-        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kQuit);
-    }});
+                                                              const auto e = h.model.request_close(h.now);
+                                                              CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kQuit);
+                                                          }});
 
     current = "the uninstall dialog's ids";
-    replay(installed, Caps::linux_caps(), scratch / "d", {0, [](Harness& h) {
-        h.model.activate("uninstall", h.now);
-        auto d = h.model.view().dialog;
-        CHECK(d && d->id == "uninstall");
-        h.model.activate("uninstall-saves", h.now);
-        h.model.activate("uninstall-characters", h.now);
-        const auto all = actions_of(h.model.view());
-        int on = 0;
-        for (const Action& a : all) on += (a.id == "uninstall-saves" || a.id == "uninstall-characters") && a.checked;
-        CHECK_EQ(on, 2);
-        const auto e = h.model.activate("uninstall-confirm", h.now);
-        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kUninstall);
-    }});
+    replay(installed, Caps::linux_caps(), scratch / "d",
+           {0, [](Harness& h) {
+                h.model.activate("uninstall", h.now);
+                auto d = h.model.view().dialog;
+                CHECK(d && d->id == "uninstall");
+                h.model.activate("uninstall-saves", h.now);
+                h.model.activate("uninstall-characters", h.now);
+                const auto all = actions_of(h.model.view());
+                int on = 0;
+                for (const Action& a : all)
+                    on += (a.id == "uninstall-saves" || a.id == "uninstall-characters") && a.checked;
+                CHECK_EQ(on, 2);
+                const auto e = h.model.activate("uninstall-confirm", h.now);
+                CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kUninstall);
+            }});
 
     current = "a refused add says why";
-    replay(fixture(golden, "older-game"), Caps::linux_caps(), scratch / "e", {0, [](Harness& h) {
-        h.model.activate("fighter:kazumi", h.now);
-        CHECK(!h.model.task().running());
-        CHECK_EQ(h.model.task().view().title, std::string("Cannot add characters"));
-    }});
+    replay(fixture(golden, "older-game"), Caps::linux_caps(), scratch / "e",
+           {0, [](Harness& h) {
+                h.model.activate("fighter:kazumi", h.now);
+                CHECK(!h.model.task().running());
+                CHECK_EQ(h.model.task().view().title, std::string("Cannot add characters"));
+            }});
 
     current = "install flow";
-    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h", {0, [](Harness& h) {
-        auto e = h.model.activate("install", h.now);
-        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseGame);
-        e = h.model.chosen_game("/home/player/TTT2.wua", h.now);
-        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseFolder);
-        e = h.model.chosen_folder("/home/player/Games", h.now);
-        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kRunPreflight);
-        CHECK(h.model.facts().preflight && h.model.facts().preflight->running);
-        CHECK(h.model.view().game.state == GameState::kChecking);
-        // A check failed: said, shown, and nothing starts.
-        h.model.preflight_done({{false, "Game", "/home/player/TTT2.wua does not exist", {}}}, h.now);
-        CHECK_EQ(h.model.said(), std::string("Game: /home/player/TTT2.wua does not exist"));
-        CHECK(!h.model.task().running());
-        bool again = false;
-        for (const Action& a : actions_of(h.model.view())) again = again || a.id == "check-again";
-        CHECK(again);
-        // All pass: the install starts (its started record first, for Resume).
-        h.model.activate("check-again", h.now);
-        h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now);
-        CHECK(h.model.task().running());
-        CHECK(h.model.task().spec().kind == TaskKind::kInstall);
-        CHECK_EQ(h.env.records.size(), size_t(1));
-        const auto& argv = h.model.task().spec().command.argv;
-        CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
-    }});
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
+           {0, [](Harness& h) {
+                auto e = h.model.activate("install", h.now);
+                CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseGame);
+                e = h.model.chosen_game("/home/player/TTT2.wua", h.now);
+                CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseFolder);
+                e = h.model.chosen_folder("/home/player/Games", h.now);
+                CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kRunPreflight);
+                CHECK(h.model.facts().preflight && h.model.facts().preflight->running);
+                CHECK(h.model.view().game.state == GameState::kChecking);
+                // A check failed: said, shown, and nothing starts.
+                h.model.preflight_done({{false, "Game", "/home/player/TTT2.wua does not exist", {}}}, h.now);
+                CHECK_EQ(h.model.said(), std::string("Game: /home/player/TTT2.wua does not exist"));
+                CHECK(!h.model.task().running());
+                bool again = false;
+                for (const Action& a : actions_of(h.model.view())) again = again || a.id == "check-again";
+                CHECK(again);
+                // All pass: the install starts (its started record first, for Resume).
+                h.model.activate("check-again", h.now);
+                h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now);
+                CHECK(h.model.task().running());
+                CHECK(h.model.task().spec().kind == TaskKind::kInstall);
+                CHECK_EQ(h.env.records.size(), size_t(1));
+                const auto& argv = h.model.task().spec().command.argv;
+                CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
+            }});
+
+    current = "Windows' commands";
+    {
+        Facts f;
+        f.caps = Caps::windows_caps();
+        f.python = "/w/python/python.exe";
+        f.windows.root = "/w/files";
+        f.windows.build = "/w/files/build-windows-tools";
+        f.windows.config = "/w/files/local/windows-launcher.json";
+        f.windows.logs = "/w/TTT2Ultimate/logs";
+        WindowsCommands w;
+        w.stamp = [] { return std::string("20261124-140501-123456"); };
+        const Command import = w.import(f, {"kazumi", "geese"}, "geese");
+        const std::vector<std::string> expected = {"/w/python/python.exe",
+                                                   "-u",
+                                                   "/w/files/launcher/windows/main.py",
+                                                   "--build-dir",
+                                                   "/w/files/build-windows-tools",
+                                                   "--config",
+                                                   "/w/files/local/windows-launcher.json",
+                                                   "--worker",
+                                                   "import",
+                                                   "--cancel-file",
+                                                   "/w/TTT2Ultimate/logs/import-20261124-140501-123456.cancel",
+                                                   "--outfits",
+                                                   "geese",
+                                                   "kazumi",
+                                                   "geese"};
+        CHECK(import.argv == expected);
+        CHECK_EQ(import.log_file.string(), std::string("/w/TTT2Ultimate/logs/import-20261124-140501-123456.log"));
+        CHECK_EQ(import.cwd.string(), std::string("/w/files"));
+        const auto status = w.status(f);
+        CHECK(status && status->argv.size() == 9 && status->argv[7] == "--query" && status->argv[8] == "status");
+        CHECK(!w.main_news(f)); // (no commit known: a project ZIP)
+        CHECK(w.worker(f, TaskKind::kSetup)->argv[8] == "setup");
+        CHECK(w.worker(f, TaskKind::kUpdate)->argv[8] == "upgrade");
+        CHECK(w.worker(f, TaskKind::kUpdateInstalled)->argv[8] == "update");
+        CHECK(!w.worker(f, TaskKind::kUninstall));
+        CHECK(w.remove(f, {"kazumi"}).argv.back() == "kazumi");
+    }
+    replay(fixture(golden, "add-ok"), Caps::windows_caps(), scratch / "i",
+           {0, [](Harness& h) {
+                h.model.activate("fighter:kazumi", h.now);
+                CHECK(h.model.task().running());
+                CHECK(!h.model.task().spec().command.cancel_file.empty());
+                h.settle();
+                CHECK(h.model.task().last().ok);
+                CHECK_EQ(h.model.task().last().title, std::string("Added Kazumi Mishima"));
+                // Linux-only items are not there to activate.
+                h.model.activate("get-packages", h.now);
+                CHECK_EQ(h.model.said(), std::string("no get-packages to activate"));
+                h.model.activate("uninstall", h.now);
+                CHECK(!h.model.view().dialog);
+            }});
 
     current = "unknown ids";
     replay(installed, Caps::linux_caps(), scratch / "f", {0, [](Harness& h) {
-        h.model.activate("no-such-thing", h.now);
-        CHECK_EQ(h.model.said(), std::string("no no-such-thing to activate"));
-    }});
+                                                              h.model.activate("no-such-thing", h.now);
+                                                              CHECK_EQ(h.model.said(),
+                                                                       std::string("no no-such-thing to activate"));
+                                                          }});
 }
 
 int activated = 0;
@@ -674,25 +740,28 @@ void every_id(const fs::path& golden, const fs::path& scratch, const Caps& caps)
         // Settings' too (the same page in every case but for the game's state and the files: in three; its
         // switches write files, slow on a disk).
         if (name == "installed" || name == "not-installed" || name == "settings-files") {
-            replay(c, caps, scratch / "g", {0, [&](Harness& h) {
-                h.model.activate("settings", h.now);
-                for (const Action& a : actions_of(h.model.view())) {
-                    if (!a.id.empty() && std::find(ids.begin(), ids.end(), a.id) == ids.end()) ids.push_back(a.id);
-                }
-            }});
+            replay(c, caps, scratch / "g",
+                   {0, [&](Harness& h) {
+                        h.model.activate("settings", h.now);
+                        for (const Action& a : actions_of(h.model.view())) {
+                            if (!a.id.empty() && std::find(ids.begin(), ids.end(), a.id) == ids.end())
+                                ids.push_back(a.id);
+                        }
+                    }});
         }
         for (const std::string& id : ids) {
-            const bool settings = std::find_if(first.actions.at("00-start").begin(), first.actions.at("00-start").end(),
-                                               [&](const Action& a) { return a.id == id; }) ==
-                                  first.actions.at("00-start").end();
-            replay(c, caps, scratch / "g", {0, [&](Harness& h) {
-                if (settings) h.model.activate("settings", h.now);
-                h.model.activate(id, h.now);
-                ++activated;
-                if (h.model.said().starts_with("no ") && h.model.said().ends_with(" to activate")) {
-                    fail(__FILE__, __LINE__, id + ": " + h.model.said());
-                }
-            }});
+            const bool settings =
+                std::find_if(first.actions.at("00-start").begin(), first.actions.at("00-start").end(),
+                             [&](const Action& a) { return a.id == id; }) == first.actions.at("00-start").end();
+            replay(c, caps, scratch / "g",
+                   {0, [&](Harness& h) {
+                        if (settings) h.model.activate("settings", h.now);
+                        h.model.activate(id, h.now);
+                        ++activated;
+                        if (h.model.said().starts_with("no ") && h.model.said().ends_with(" to activate")) {
+                            fail(__FILE__, __LINE__, id + ": " + h.model.said());
+                        }
+                    }});
         }
     }
 }
