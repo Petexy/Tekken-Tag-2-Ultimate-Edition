@@ -54,10 +54,16 @@ bool App::windows_ready() {
     if (const char* f = std::getenv("TTT2_LAUNCHER_TEST_FILES"); o_.testing && f && *f) files = f;
     win_files_ = windows_files(files, o_.windows);
     ready_ = std::make_unique<WindowsReady>(*win_files_, *starter_);
-    ready_->start(now());
     stage_->set_target(.5f, false, 0);
     stage_->snap();
     last_ = now();
+    // (A smoke start, --ui-smoke-test: its first frame, then the end, before anything is started: no Python is
+    // downloaded, no state asked.)
+    if (!o_.smoke.empty()) {
+        ready_frame(now());
+        if (quit_) return false;
+    }
+    ready_->start(now());
     std::string shot_step;
     double terminal_since = -1;
     while (!quit_) {
