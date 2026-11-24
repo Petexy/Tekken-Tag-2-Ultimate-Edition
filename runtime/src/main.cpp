@@ -5,10 +5,13 @@
 #include "cafe/sysmem.h"
 #include "cafe/vfs.h"
 
+#include "gpu/backend.h"
+
 #include "host/audio.h"
 #include "host/window.h"
 #include "install.h"
 #include "title/controllers.h"
+#include "title/paint.h"
 #include "title/presentation.h"
 #include "title/roster.h"
 #include "title/solo_ghost.h"
@@ -34,6 +37,7 @@ void usage(const char* argv0) {
                  "usage: %s [GAME]\n"
                  "       %s --install [GAME [FOLDER]] [--no-launcher]\n"
                  "       %s --update [FOLDER]\n"
+                 "       %s --precompile\n"
                  "  GAME is the title's .wua archive, or a folder with code/,\n"
                  "  content/ and meta/; without it the installed game runs.\n"
                  "  --install copies the game, this executable and its icon into\n"
@@ -44,8 +48,9 @@ void usage(const char* argv0) {
                  "  come from $XDG_CONFIG_HOME/ttt2/display.ini (default\n"
                  "  ~/.config/ttt2/display.ini; the launcher's Settings write it),\n"
                  "  read when the game starts. TTT2_FULLSCREEN, TTT2_SCALE and\n"
-                 "  TTT2_FPS win over it.\n",
-                 argv0, argv0, argv0);
+                 "  TTT2_FPS win over it. --precompile makes ready the shaders the\n"
+                 "  game has used on this computer, without starting it.\n",
+                 argv0, argv0, argv0, argv0);
 }
 
 // Objects the game imports as data are created by the library that owns
@@ -76,6 +81,7 @@ int main(int argc, char** argv) {
     if (argc >= 2 && (std::strcmp(argv[1], "--install") == 0 || std::strcmp(argv[1], "--update") == 0)) {
         return install::run(std::vector<std::string>(argv + 1, argv + argc));
     }
+    if (argc == 2 && std::strcmp(argv[1], "--precompile") == 0) return cafe::gpu::precompile_shaders();
     if (argc >= 2 && (std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0)) {
         usage(argv[0]);
         return 0;
@@ -114,8 +120,10 @@ int main(int argc, char** argv) {
     init_data_imports();
     title::prepare_presentation();
     title::prepare_controllers();
+    title::prepare_paint();
     title::prepare_roster();
     title::prepare_solo_ghost_battle();
+    title::prepare_customize_select();
     std::fprintf(stderr, "ttt2: loaded image, entry 0x%08X, %zu/%zu guest entries compiled\n",
                  image.entry_point, cafe_program_info.compiled_entries,
                  cafe_program_info.total_entries);

@@ -18,6 +18,10 @@ and KO screams (0x80) its clips of those kinds. Shouts past the donor's count be
 port adds to the fighter's voice list (character.ini `voice_extra`). voice_values gives each clip's number in these
 banks (Tekken 8's moves name the line they say instead, tekken8/voice.py: the converter plays it by that number).
 
+A donor's tone of a kind the fighter has no clip of (Tekken 8's Azazel has no intro line, win quote or name call)
+keeps none of the donor's voice: it plays silence as long as the donor's line (SILENCE), never the donor speaking for
+the fighter.
+
 The select screen's announcer calls are tones of one shared bank, se_Slt_StartChar: a link tone
 `sel_syvo_name_<code>` per fighter plays its audio tones `lnk_sel_syvo_name_<code>[_Copy]`. name_call() appends the
 added fighter's three (the runtime gives its select id the link tone's sound).
@@ -53,6 +57,7 @@ VOICE_LISTS = 0x107D44EC        # 63 x {entries*, count, fighter}; an entry 16 B
 SOUND_TABLE = 0x107D4AC0        # by sound id {tone, bank id, group, flags}
 KIAI, DAMAGE, KO = 0x20, 0x40, 0x80
 SHOUT_VOICE, DAMAGE_VOICE = 2, 3        # a move's voice value: type << 24 | n (shout n, damage voice n)
+SILENCE = '(silence)'                   # the clip a tone of a kind the fighter has no clip of plays (silence())
 
 
 def tone_kind(name):
@@ -200,8 +205,11 @@ def build(clips, donor_banks, code, vlist, slot, effects=(), plain_effects=False
             wins = placed
         if which == 'se_Chr':
             extra = extra_here
-        report.append('%s_%s: %d tones of its own%s, %d Hz, %d KB (the donor\'s %d KB)'
-                      % (which, code, len(used), ' (%d shouts appended)' % len(extra_here) if extra_here else '',
+        silenced = sum(1 for u in used if u.endswith('<-' + SILENCE))
+        report.append('%s_%s: %d tones of its own%s%s, %d Hz, %d KB (the donor\'s %d KB)'
+                      % (which, code, len(used) - silenced,
+                         ' (%d shouts appended)' % len(extra_here) if extra_here else '',
+                         ', %d of the donor\'s lines silent (no clip of their kind)' % silenced if silenced else '',
                          rate, len(written) // 1024, len(data) // 1024))
     effect_tones = []
     if effects:
@@ -261,6 +269,18 @@ def voice_values(clips, vlist):
     for n in range(len(slots) if hurt else 0):
         out.setdefault(hurt[(len(hurt) - 1 - n) % len(hurt)][0], DAMAGE_VOICE << 24 | n)
     return out
+
+
+def unsaid(clips):
+    """The kinds of lines ('intro', 'win') the fighter has no clip of (its intro lines and win quotes are SILENCE)."""
+    kinds = getattr(clips, 'kinds', None)
+    return {kind for kind in ('intro', 'win') if isinstance(kinds, dict) and not kinds.get((kind, None))}
+
+
+def silence(bank, i):
+    """A clip of silence as long as tone i of the bank (its rate, channels and samples)."""
+    rate, channels, samples = bank.format(i)
+    return SILENCE, rate, np.zeros((channels, samples), np.int16)
 
 
 def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
@@ -352,7 +372,16 @@ def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
         if clip is None:
             continue
         put(i, clip)
+        done.add(i)
         placed.setdefault(clip[0], i)
+    # the tones of a kind the fighter has no clip of (link tones' too: their audio tones are named alike) play
+    # silence, not the donor's line
+    for i in range(len(bank.tones)):
+        name = bank.name(i)
+        if i in done or not name or not bank.has_audio(i) or not bank.audio[i] or kind_of(name)[0] is None:
+            continue
+        put(i, silence(bank, i))
+        done.add(i)
     bank.rename('%s_%s' % (which, code), project_id(which, slot))
     return bank.write(), used, placed, extra
 

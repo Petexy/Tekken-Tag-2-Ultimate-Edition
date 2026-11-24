@@ -52,6 +52,37 @@ the reachability bound sound.
   took the "gpu" thread from 7 % to 44 % of a core in the kernel during a
   fight. Unasked, a kernel set to "madvise" (SteamOS) gives it none and one
   set to "always" only while whole 2 MiB blocks are free (after a boot).
+  A PC short of free memory takes the huge pages away again: the GPU's reads
+  are no use the kernel sees, so it splits them to swap the memory out and
+  each submission reads it back as 4 KiB pages. At 240 Hz the presentation
+  thread (a submission per refresh) then went from 13 % to 45-63 % of a core,
+  the extra frames were skipped and the title ran at 52-55 frames/s. A
+  thread ("memory", `keep_guest_memory_fast`) therefore reads a byte of
+  every page of the imported ranges once a second and gives the blocks
+  without a huge page one (`MADV_COLLAPSE`, Linux 6.1; the kernel's page map,
+  `PAGEMAP_SCAN` from Linux 6.7, says which). A block made over moves memory
+  under the GPU's mapping: the driver waits for the GPU and each submission
+  that overlaps the change starts again and maps the whole range anew. On a
+  PC short of memory the kernel also compacts memory for every block, so
+  blocks made one after another held the game at 3-10 frames/s while it
+  caught up, or stopped it. The compaction is therefore done first on a
+  64 MB reserve of the thread's own; its blocks are given back one at a time
+  right before a block of the ranges is made over, in bursts of up to 0.1 s
+  with a second between them. Passes that make none, or in which the
+  kernel says it has no memory (even if they make a few), wait 1, 2, 4,
+  then 8 s: each such answer costs a round of compaction and reclaim that
+  takes the coldest pages of the PC, and on a PC that short a pass a second
+  pushed the game's own code and data out of memory for minutes (27-55
+  frames/s, worse than without the thread). A block the kernel turns down
+  in three passes in a row (busy: a driver that pins the memory it imports;
+  or refused) is left alone, as asking again would fail every pass for as
+  long as the game runs; four of them, in turn, are asked again 30 s later,
+  then after 60, 120 and every 240 s, and one made gives all a fresh start
+  (`runtime/src/memory_keeper.h`, tested by `memory_keeper_test`). The log's
+  "memory:" lines say how the memory stands at the start, when huge pages
+  are missing, every ten seconds while more come back, and when it is whole
+  again; each kind of failure (no free memory, the memory limit, pinned or
+  refused blocks) once.
 - Every guest load and store is a volatile access (`ppc_ops.h`): guest memory
   is shared between guest threads, so the compiler must perform each access
   in program order. With plain loads clang compiled a guest spin-wait
@@ -300,7 +331,10 @@ attachment formats and blend state.
   tiled into guest memory by the retirement thread once it finished,
   before the CPU can see that it has. The staging memory is CPU-cached
   where the driver has such memory: read element by element from
-  write-combined memory, the tiling kept that thread ~12% busy.
+  write-combined memory, the tiling kept that thread ~12% busy. Larger
+  ones are copied back only while the title says it reads them
+  (`gpu::set_cpu_read_targets`): CUSTOMIZE > PAINT's 256 x 256 targets
+  (below, Paint without a GamePad).
 - Detiling (`gpu/tiling.cpp`) uses addrlib once per 8×8 micro tile: in
   thin single-sample modes every micro tile has the same internal layout
   (verified against per-element addrlib, `TTT2_CHECK_TILING=1`).
@@ -453,6 +487,59 @@ attachment formats and blend state.
   alike share a module, and with it their pipelines: a 40-second fight
   made 1,124 modules of 182 different translations and 1,115 pipelines,
   each compiled by the driver on a first run (now 182 and 168).
+- A first use stops the gpu thread for the translation (about 0.05 ms),
+  the GLSL compile when the SPIR-V is not on disk (about 5 ms) and the
+  driver's pipeline compile when the pipeline cache does not have it
+  (about 20 ms, some over 100): the frame is late. With display.ini's
+  `async_shaders = yes` (off by default; `TTT2_ASYNC_SHADERS=1` or `0`
+  wins) a draw of the 3D scene has the last two done on a few worker
+  threads (`vulkan/jobs.h`; a quarter of the processor's threads, 1 to 4)
+  and is left out until its pipeline is there, so a thing seen for the
+  first time appears a few frames late instead. Translation and the
+  lookups stay on the gpu thread; a module or pipeline carries its job
+  until that thread has seen it done. What the caches hold is still made
+  at once and nothing is left out for it: SPIR-V from disk, and pipelines
+  the pipeline cache already has (asked with
+  `VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED`), so with warm
+  caches the setting changes nothing. A draw is left out only where that
+  delays a part of the picture and nothing else; any other has what it
+  needs made on the gpu thread at once, exactly as without the setting
+  (`Renderer::draw` decides before it asks for the shaders). That is a
+  stream-out draw (the fighters' skinning writes memory later draws and
+  the title read); a draw of a replay (an extra frame draws what its frame
+  drew, and leaves out what that left out: `DrawRecord::skipped`); a draw
+  that is not depth-tested (the passes that make or compose whole images:
+  blur, glow, copies, the menus' and the HUD's layers); a draw into a
+  target that the frame before did not draw into (a scene's first frame,
+  and pictures drawn once and kept, which would stay without it); a draw
+  into a target that is written back to the title's memory (the title
+  would read a picture without it), and every draw while the title reads
+  larger targets back (`gpu::cpu_read_targets`: CUSTOMIZE's PAINT, whose
+  canvas it reads and saves); and any
+  draw once its frame has sent four new pipelines to the workers, or
+  while as many are in the making as two a worker (a new scene needs
+  dozens at once, and shows its first frame late rather than mostly
+  empty). The rule is `may_leave_out` (`gpu/vulkan/leave_out.h`, with
+  its test). What is left for the workers is
+  what comes up inside a scene; measured (a Practice fight from an empty
+  cache, a 6-core desktop, also pinned to 4 cores) that was a few frames
+  of 35 to 40 ms, while the long frames (a scene's first, 1.5 s; new
+  skinning shaders, 100 to 250 ms) are of the kinds that wait, so the
+  setting gained nothing that could be told from run-to-run noise there.
+  `TTT2_TRACE_SHADERS=1` logs each first use with its class and what it
+  cost, every frame over 25 ms, and totals every ten seconds.
+- Every pipeline made is also noted in the cache directory's
+  `pipelines.list`, a line of what it takes to make it again without the
+  game (its shaders by the names of their SPIR-V files, the layout's
+  bindings, formats, blending and the other baked state). `ttt2
+  --precompile` makes all of them into the pipeline cache on every
+  processor thread but one, with no window and without starting the
+  title, and prints the launchers' task lines; the launchers run it
+  before the game when Settings' "Prepare shaders before playing" is on
+  (display.ini's `precompile_shaders`, which the game itself does not
+  use). It knows only what the game has shown on that computer: no list
+  comes with the port. Its use is after a graphics driver update, when the
+  SPIR-V is still good and the driver's compiled pipelines are not.
 
 ## Presentation on a computer
 
@@ -921,6 +1008,66 @@ delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
 
+## Paint without a GamePad
+
+CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
+stylus touches its screen; the pad's buttons only pick tools, and nothing
+else draws. The title's input library (`sub_08DCE6F4`, its touch pad
+`NU::InputTouchPadDrc`) reads `VPADRead(0, …, 16)` and puts each sample's
+`VPADGetTPCalibratedPoint` (the picture as 1280 x 720, y down) into its
+queue; the paint screen (`tk::CustomizeRealtimePaint`, the `DRC_paint_mc`
+layouts) draws a stroke along the touched points that fall on the model.
+The port reported a GamePad (VPADRead succeeds, `GX2GetSystemDRCMode` 1)
+whose touch screen was never touched, so the mode opened and drew nothing.
+In this mode the title draws the same picture on both screens (the
+captures' TV and GamePad images are identical, tool rows, pickers, the
+thumbnail shot and its questions included), so the window shows all there
+is to see and touch.
+
+The port gives it a touch screen from what a computer has
+(`title/paint.cpp`, `host/window.cpp`, `host/touch_screen.h`):
+
+- **The mouse**: its left button held over the window's picture touches
+  the picture's point under it (the window's points times the display's
+  pixel density, through the same letterbox as the present path, nothing
+  on the black bars). A touch screen's taps (a Steam Deck's) arrive as such
+  clicks.
+- **A gamepad**: the right stick moves a cursor drawn over the picture (the
+  overlay's pointer layer, a ring that fills while it touches) and ZR
+  touches. Full deflection crosses the picture's height in 1.25 s, the
+  speed growing with the square of the deflection for fine strokes. The
+  cursor shows from the stick's first move (at once when a drawing tool is
+  chosen and a gamepad was used last) until the mouse moves.
+
+Only while the paint screen is open: the customize manager
+(`**0x107A71EC`) holds the paint object at +0x6A7D8 (behind
+`getRealtimePaintStatus`, `begin/endRealtimePaint`: `sub_0250373C`,
+`sub_02503A78`, `sub_02503AB8`), whose word at +60 is the mode's state (1
+in CUSTOMIZE's menus, 4 the first question, 5 the paint screen, 8 a moment
+as the paint position is taken, 7 the thumbnail shot and its questions)
+and at +68 the tool row (0 pen, 1 eraser, 2 history, 3 PAINT POSITION).
+In states 5 and 8 the mouse touches; the stick's cursor also needs a tool
+other than PAINT POSITION, where a touch draws nothing and the right stick
+turns the camera, so the title keeps the stick there. With a drawing tool,
+gamepads' right sticks and ZR reach the title no more, nor does the
+keyboard's ZR (it has no stick to move the cursor, so it touches nothing).
+The cursor is drawn where the touch just given to the title is (after the
+update that moves it, not one update behind). Elsewhere the mouse does nothing and the stick and ZR are the
+title's. Nothing is set: these inputs work only where the title would
+otherwise wait for a GamePad, so the launchers have no setting for them.
+`TTT2_TRACE_PAINT=1` logs the state and tool as they change.
+
+The strokes are drawn on the GPU into 256 x 256 RGBA8 targets (256 KiB),
+which the title reads with the CPU to keep them on the model and save
+them. Larger than the renderer copies back by itself (64 KiB), they never
+reached guest memory, so the strokes vanished as the paint screen closed
+(the thumbnail shot, the menus and fights showed none). While the paint
+object's state is above 1 (from PAINT's first question to the thumbnail
+shot), `title/paint.cpp` asks the renderer to copy back colour targets at
+the title's size of up to 256 KiB too (`gpu::set_cpu_read_targets`);
+elsewhere nothing changes. The painted slot then saves with the rest of
+the customization (`08_NNN_0.BIN`) and shows in fights.
+
 ## Solo Ghost Battle
 
 The Offline menu has SOLO GHOST BATTLE below GHOST BATTLE: Ghost Battle
@@ -1031,6 +1178,27 @@ fighter's code with the title's key registry (`*0x107A3FB4`: per code, the
 keys of its body files and part packs by type) and chara master
 (`*0x107A71E8`), the way the title registers its own.
 
+**Its play record.** The player's rank, wins and losses with each fighter
+are a row of the player's profile: 63 rows of 76 bytes by select id (profile
++9216), saved with it; the profile's other saved fields (the player's totals
+among them) follow the table. A profile is also a side of the match set-up:
+picking a team copies each member's row into the member's block
+(`sub_04FA571C`, the id capped at 62), a fight counts in the block, and
+`sub_04FA5928` writes the block back to the row of the member's id byte. For
+an added fighter that was a row past the table. The port keeps an added
+fighter's row itself, in a file of its own, `<save folder>/records/<code>.bin`
+(76 bytes, the title's layout; `title/record_store.h`), named by the pack's
+code because select ids move when packs are added or removed: the member's
+block is filled from it at the pick, taken back into it after a fight (the
+title's own write-back runs on ZAKO B's row, which is then put back as it
+was), and the menus are answered from it: the natives
+`ProfileGetCharacterRank`/`Wins`/`Loses` (`sub_085B1D30` and the two after
+it) and the select screen's plates (`sub_06F48E08`, which finds the fighter
+from its UI position, Paul's for an added fighter: at its two questions the
+answer is a row nobody is shown with, ZAKO B's or ZAKO A's, holding the
+added fighter's row until the plates are done). The title's save is not
+changed: it loads in a build without this and the other way round.
+
 **Its cell.** The select grid (`0x107B7668`, 32-byte cells: fighter, the
 cells the cursor moves to, column and row) has 62 cells; it grows over the
 following, unused grid of the PlayStation 3's smaller roster. The added
@@ -1052,11 +1220,20 @@ under the grid, stretches the '?' panel over four rows and drops the
 show the background); `shared/grid.ini` (`grid = rows`) tells the port,
 which then moves the '?' cell up, the cursor's row 1 down 65
 (`0x10531388`) and the button guide (one object every menu shares, placed
-by `sub_04DC6A48`) down 40 while the grid is on screen. Every row is a
+by `sub_04DC6A48`) down 40 while the grid is on screen (the fights' select,
+and the menus' grids that are scripts, known by the menus' current frame:
+`script_grid_shown`). Every row is a
 ring left and right and every column a ring up and down, in column and
 row order, as the title's own cells are
 (rebuilt from the cells' columns and rows, this reproduces the title's
 links exactly). A slot with no fighter has a random cell nothing moves to;
+with the new row the title's top row has lost its '?' (the title knows its
+three '?' cells by their index, so there is none to add): the cell after
+the last added one stands in its place, joined like any other, and a
+cursor that moves onto it rests on the '?' above instead, remembering that
+it is at the lower place, from where it moves on along the title's top row
+(`select_grid.h`, `sub_033E4704`; on a '?' the cursor is one frame over
+the whole column);
 the grilles over the top row's ends are hidden where a cell sits.
 
 **Its files.** The pack's files reach the title as entries added to data100
@@ -1183,10 +1360,184 @@ key nobody requested makes the chooser assert. The added fighter has one
 costume: the list function reads its row (the donor's costume 1) in the
 place of Paul's, its pictures (the pack's `art/costumes.nut`, else the
 donor's) have their key lent to that place only while the chooser's
-functions run, and the chooser leaves out the customisation slots (made per
-fighter in a mode the added fighter is not in). Opening the chooser notes the
-fighter under the cursor (`sub_02669380`, which asserts an id below 63): an
-added fighter is noted as its donor.
+functions run. Opening the chooser loads the fighter's saved customizations
+(`sub_02669380`, which asserts an id below 63: the title's save has one
+file per select id, 63 of them, in a full directory). An added fighter's are
+the port's own file, `<save folder>/customize/<code>.bin`, in the title's
+layout (ten 4096-byte records and the slots' pictures, 256,400 bytes;
+`title/customize_store.h`), named by the pack's code because select ids move
+when packs are added or removed: the load request never reaches the save, the
+buffer's update (`sub_02669BAC`) fills the buffer from that file or leaves it
+empty, and the save (`sub_02669264`) of a buffer that holds an added fighter
+writes that file, a temporary file renamed over it, and nothing else. The
+donor's file is not involved. The chooser's builder (`sub_033E3460`) then
+lists, after the costumes, the slots that file has filled (the title lists
+all five, filled or not), each with the slot's picture or, for a slot without one
+(written by `tools/characters/customize_slot.py`, a developer's tool), the
+fighter's first costume picture; confirming one goes the title's own way
+(`sub_033E3208`: the record into the match set-up, which the fight's loader
+hands to the character manager), on the fighter's first body. The developer
+switch `TTT2_TEST_SAVE_SLOT=<slot>=<code or #id>:<record text>` stores a
+record into a slot and makes the title's save call once, for testing the
+saving before a menu calls it.
+
+**Its wardrobe.** A human-sized fighter, from Tekken 7 or Tekken 8, is given the title's own
+Customize outfits at import (`convert/wardrobe.py`, whose opening text says
+how the title dresses a fighter and what is done to follow it): the outfits
+of its donor (women Jun's, men Lars's: every shop row of the donor that
+dresses the upper or the lower body, read from the player's game; there is
+no list of garments or of fighters), re-posed to the fighter's joints, with
+the donor's bare body cut the ways garments leave it showing, its skin
+textures in the tone of the fighter's own face, the neck drawn into the
+fighter's own head and its top ring bound to the bones as that head's rim is
+(or the seam opens when the head bows), and arms, legs and trunk made as thick as the fighter's
+where its own outfits bare enough skin to measure that (Akuma's arms are
+half again as thick as Lars's, Noctis's a sixth thinner; a limb within an
+eighth of the donor's is left as it is). The fighter's own outfit becomes
+the default items' parts, so a garment in a slot replaces that half of it.
+With nothing equipped the fighter must look and move as it did before the
+wardrobe: a part's spring bones are its own (the body's springs never move
+them), so each piece carries the body's spring entries for the chains it
+holds (its `pi` file), whole chains with the chains tied to them; and its
+skeleton keeps every bone at the body's index (all the body's bones up to
+the last spring bone it needs: a chain bone at another index is posed from
+the wrong bone, long needles out of Reina's jacket). Such skeletons list
+many spring bones, and a body's skeleton and the parts worn on it may list
+216 of them in all at most (more crashed the fight while it loaded:
+Miary Zo's 255, Geese's Houou outfit's 257): a body that would go over keeps
+its outfit whole as before the wardrobe, and a shop row that would is left
+out (`wardrobe.WORN_EXTRA`). The hair stays with the body, so a definition
+can list its hair's chains last (`CLOTH_ORDER = 'hair_last'`: Miary Zo's
+lower piece keeps 47 spring bones instead of 105, her stock outfit 197).
+A coat's side hung from the upper arm's
+helper turns with the arm and, with the arms lowered in CUSTOMIZE, crossed
+the body like wings; a definition can hang such chains from another bone
+(`CLOTH_PARENT`, bind kept: Katarina's from the chest). A coat's sleeves,
+short chains on the forearms modelled along them, draped to hang straight
+down in the T-pose stood out sideways as torn flaps from the lowered arms
+and left the forearms bare in a fight; a definition can keep the chains
+of the arm joints it names as modelled (`CLOTH_SLEEVES`: Katarina's
+forearms). CUSTOMIZE fills a new
+record with the colours of the fighter it lends its lists from (Lars,
+Jun), whose registers an added fighter's own colours also use, so while
+a record is applied to an added fighter a colour equal to that fighter's
+default for a register the added fighter has a colour of its own for is
+taken as the default (its own palette row; roster.cpp, `sub_065D2B0C`).
+A definition's one option is `WARDROBE = False`: no wardrobe, and so no
+shop list, for that fighter (no definition sets it now). The rules leave out the rest by themselves: a fighter not
+of the donor's size (a joint more than 200 mm from the donor's: Gigas,
+Fahkumram), one whose body is not an upper piece, a lower piece and a face
+(a Tekken 7 preset outfit in one piece keeps its body whole and shows as it is),
+a fighter imported on its stand-in, a garment whose own bones are numbered
+like bones of the fighter's body. A Tekken 8 costume is one mesh, so the
+wardrobe step makes it two (`split_piece`): each polygon's islands (a
+jacket, a boot, a buckle, an arm's skin) go whole to the half of the body
+that holds most of their weights, a coat with its tails to the chest, a belt
+to the hips; only bare skin that runs through the waist is cut, and a 2P
+colour layer goes where the cloth under it went. The lower piece's skin ends
+where its own cloth ends (`_waistline`): the hips' weights reach the navel,
+and a belly left with the trousers showed through the hem of a top worn over
+them. A Tekken 8 torso also lies some 3 cm further forward on its joints than
+the title's, so where the fighter's own outfit bares the waist all the way
+round, the source's bare body and garments are moved onto that waist
+(`Waist`: the difference measured direction by direction, running out to
+nothing at the neck's root and under the hips); otherwise a garment worn with
+the fighter's own other half is cut through by the bare belly. The head, hair, worn
+head items, weapons and summoned things stay in the body model, so they
+show with any garment. Azazel is left out by the size rule (a joint two
+metres from Lars's). Two things had to give way for this: Miary Zo's snake
+parent bone is numbered 597, not 599 (598 and 599 are the swaying bust bones
+of the women's tops), and a texture file's textures now end on 16 bytes when
+another follows (the title walks the file rounding up; a 4 x 4 texture
+before the copied skin textures stopped the fight from loading). A pack without a shop list cannot be
+entered in CUSTOMIZE: the cursor passes its cell and the importer draws its
+face grey in that grid (in `shared/`, which every import makes again). The
+pack also gets `wardrobe.txt`, one line per shop row with the row's record
+text (its items by equip slot and its default colours), for the developer's
+tools below; the game does not read it. Every pack's item database,
+a giant's too, keeps the donor's worn items that need only the title's
+common packs (`itemdb.ITEMS`: a pair of glasses now), under the donor's
+indices. All of this is in `pack.REVISION` 9: every pack made before is
+offered for an update.
+
+**Its CUSTOMIZE mode.** The mode's character select is not the fights'
+select screen: its grid is an Xtal script in the interfaces' file (entry
+`B43EB78F`, class `CharacterSelectCursor`: a table of 3 x 22 fighters, a
+"may the cursor stop here" test, the cursor's place) and four direction
+handlers (compiled Xtal) in the menus' file. The shared layouts draw an
+added fighter's face in that grid too, and move the grid a row down when it
+has the new top row, which the script knew nothing of: the faces could not
+be picked, and with the new row the cursor was drawn a row above the cell it
+was on. At start-up (`prepare_customize_select`, `title/customize_grid.h`)
+the class's four methods are renamed and new ones answer for the added
+fighters' cells first (a fighter whose pack has a shop list can be entered;
+the others' cells are passed by the cursor), and the frame's handlers are
+replaced by source text that steps through the grid's own columns and rows.
+A pack's shop list (`shop.bxml`, the title's format, written by
+`convert/wardrobe.py`) holds the rows of the fighter its wardrobe was fitted
+from whose items the pack's item database has, under that fighter's item
+ids. Inside the mode (`sub_02A86B80`, `sub_02A8F5DC`) the added fighter is
+that fighter's select id with its own body code (its first preset outfit's
+when it has presets, the body a saved slot is worn on): every table by id is
+read in bounds, names, prices, owned and unlocked items are that fighter's
+(an item bought for one is bought for both), and the shop list's parser
+(`sub_026466F0`) gets the pack's list in place of the title's. The costume
+panel lists the five slots of the added fighter's own file only (its
+costumes are whole bodies, not records), and the mode's save writes that
+file, with the slot's picture.
+The title's save call has no failure of its own, so a save the disk refuses
+is said on the screen by the port (`framedata::notice`: a box in the title's
+fonts over the picture, the overlay Practice's panels use), and again when
+a later try has written it. The mode's two other screens with a character
+grid, REGISTER TAG and TOUCH SELECT, are the title's own code with the
+fights' grid, where the cursor stands on an added fighter's cell as on any
+other; both keep their picks in the title's save by select id and read
+tables of 63 fighters by it (the tag screen's costume panel never finished
+loading for an added fighter and took no more input). A confirm on an added
+fighter's cell is taken out of the screen's events there (`sub_0267499C`,
+`sub_02675C18`, `sub_0239C4B8`) and the notice says why. The other screens
+that place their cursor through the class (the profile's character
+information, the gallery's ending movies) keep handlers of their own over
+the title's 3 x 22 cells: no added cell can be reached there, and the class
+now draws their cursor a row down with the new top row, as the layouts do.
+
+**Testing its wardrobe.** Three developer switches, off unless set, none of
+them a player's option: `TTT2_TEST_CUSTOMIZE=<code or #id>:<record text>`
+(`title/test_record.h`) puts items and colours into that fighter's working
+record on the select screen when its costume is confirmed through the
+chooser, so a fight in a garment needs no menu and no save (the text of a
+row of the pack's `wardrobe.txt` after the fighter's default items);
+`TTT2_TEST_SAVE_SLOT` (above) stores a record into a saved slot through the
+title's save call; `tools/characters/customize_slot.py` writes a slot into
+the port's file of a copied save. There is no switch that gives gold: the
+mode sells at the title's prices, so a path through BUY ITEM starts from a
+save that has gold (earned in the title's own modes) or that owns the items
+already. What a change here must still show, on a hidden run with frames
+looked at: the mode's grid (the cursor on an added fighter's cell in each
+row, past the grey ones), an item bought, worn, coloured and saved, the slot
+in the fights' costume chooser with its picture, a fight in it, and the
+donor's own save file unchanged; for the importer a garment upper alone and
+a garment lower alone on the fighter's own other half, not only whole sets.
+Known flaws: item pictures, names and prices are the donor's, and the
+fighter's own pieces carry the title's generic names; a slot is worn on the
+fighter's first body whichever outfit it was made on; with the new top row
+the grid's outermost columns touch the screen's edges; a man without bare
+skin to measure keeps Lars's build under a garment (Victor, Clive); only the
+waist of a Tekken 8 body is followed, not its chest; garments with bones
+numbered like the fighter's own are missing from its list (three of Leroy's
+tops); a fighter's summoned things were not looked at beside every garment.
+
+**Its colours and the colour grid.** The title's costume colours are cells
+of one grid (entry `05ADD6D5`, 32 x 64 cells), and CUSTOMIZE's colour picker
+and the items' default colours use every cell of it. The importer gives each
+added fighter's player 1 and player 2 colours cells of a copy of that grid
+(`shared/keys/05add6d5.bin`) and names them in the palettes under the
+fighter's select id. The port does not put that copy in the title's place
+(with twenty fighters it changed hundreds of the picker's colours, for the
+title's own fighters too: a garment went white or black as its hue was
+turned): it keeps the copy, marks the colour numbers of the added fighters'
+palette rows as they are read (`sub_06839C28`) and answers a marked number
+from the copy where the title turns a number into a colour (`sub_06321C7C`).
 
 **Its outfits.** A pack may hold up to 14 complete bodies besides its own
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
@@ -1197,7 +1548,8 @@ Outfits boxes; all by default); the preset of the fighter's own costume is its o
 the only one with 2P colour layers (palette entries go by select id, which
 outfits share). The chooser then lists the donor's costume 1 once per outfit
 and the pick (`sub_033E265C`) chooses the body; 14 entries is the chooser's
-room (its customisation rows stop there, `033E379C`). Each outfit is
+room (its customisation rows stop there, `033E379C`: with 9 outfits all five
+saved slots fit, with 10 to 13 the first 4 to 1 filled ones, with 14 none). Each outfit is
 registered as a body of its own (registry and chara master) under a private
 32-bit key from 0x10000, never a select id: the chara master's lookup by code
 (`sub_0209506C`) gives back the fighter's id, the loader (`sub_044BE1EC`) asks
@@ -1468,7 +1820,21 @@ Arts and Drives, power crush armour, screws) are left out, and the moves
 that bound are the definition's (Tekken 7's after the Tekken 7 Bound Mod):
 they get TTT2's bound entry and Tag Assault twins.
 The donor's intros and win poses stay (their camera animations end the
-intro and the win screen) and play the fighter's animations. The command
+intro and the win screen) and play the fighter's animations. A tag team's
+win is played in parts the two movesets hand to each other (the winner's
+pose, the partner's, both together), each part handing over with a move
+property at the frame the donor's pose ended; an added fighter's pose is
+several times longer, so the runtime ends its part at the hand-over, as
+the donor's ended, and holds the hand-over until the move is left
+(`title/win_pose.h`: handed over mid-pose, the answer came before the
+winner waited for it and the win screen never ended). The win poses'
+camera animations are the donor's too, made for the donor's pose: the
+runtime moves each shot of one added fighter by as far as his head is from
+where a man's head would stand over the pose's place, and turns a shot
+that still looks past him until his head is inside the picture
+(`title/win_shot.h`: the shot showed the floor the donor would have walked
+to, or the fighter's legs at its edge; a pose that runs off is followed
+as far as it goes, a stride a frame). The command
 list is converted from Tekken 7's (both games keep an MVLT
 file of names, commands in nine languages and demos given as pad inputs).
 The voice is decoded from Tekken 7's Wwise banks (IMA ADPCM), re-encoded as
@@ -1829,7 +2195,8 @@ The window shows the TV image (F11 toggles fullscreen; display.ini, below,
 says how it starts). Keyboard, by default: W/A/S/D the D-pad up, left,
 down, right; face buttons by place, I top (the Wii U's X), J left (Y), K
 bottom (B), L right (A); H/`;` L/R, U/O ZL/ZR, Enter +, Backspace −, Home
-HOME, the arrows the left stick; SDL gamepads map by button position. Keys
+HOME, the arrows the left stick; SDL gamepads map by button position. The
+mouse is the GamePad's touch screen in CUSTOMIZE > PAINT only (above). Keys
 are SDL scancodes (USB HID usages: a key's place on the keyboard, whatever
 its layout prints on it), taken from `$XDG_CONFIG_HOME/ttt2/keyboard.ini`
 (`~/.config` when the variable is unset or not absolute) by
@@ -1914,7 +2281,11 @@ the primary display's height in pixels) and `interpolation = yes` or `no`
 window opens on refreshes at 100 Hz or more, compared exactly, 60 below;
 no: 60 always) and `input_delay = yes` or `no` (default no: fighters act on
 a button in the frame the game reads it; yes: two frames later, as the Wii
-U game does; see [Input delay](#input-delay)).
+U game does; see [Input delay](#input-delay)), `async_shaders = yes` or
+`no` (default no; yes: shaders compile in the background and what is seen
+for the first time may appear a few frames late) and `precompile_shaders =
+yes` or `no` (default no; yes: the launcher runs `ttt2 --precompile`
+before it starts the game).
 Booleans also take `true`/`false`, `on`/`off` and `1`/`0`, and values (not
 names) may be in any case; an unknown name or a bad value is left out with
 a warning, keeping that setting's default, and of a name given twice the
@@ -1994,9 +2365,12 @@ debugging:
 | `TTT2_CAPTURE=<dir>` | TV/GamePad images as PNG every `TTT2_CAPTURE_INTERVAL` seconds (default 5) |
 | `TTT2_CAPTURE_SEQUENCE=<n>` | with `TTT2_CAPTURE`, also every image shown for the next n frames after each capture, in order (`seq_<capture>_<frame>_<n>.png`, the real image last) |
 | `TTT2_TRACE_AT=<s>`, `TTT2_TRACE_FRAME=<n>` | log every command of one frame; with `TTT2_CAPTURE`, save all its render targets |
-| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run) |
+| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run). Items that last: `40:touch/400/300/600/320/1.5` touches the GamePad's screen at 400,300 of its 1280 x 720 picture and draws a line to 600,320 in 1.5 s; `40:mouse/0.5/0.5/0.6/0.5/1` moves the mouse with its left button held over the window (fractions of its size); `40:rstick/1/0/0.5` holds the right stick; `40:hold/zr/2` holds a button |
+| `TTT2_TRACE_INPUT=1` | log when each scripted press begins (seconds after start-up, as `TTT2_CAPTURE_START` counts) |
+| `TTT2_TRACE_PAINT=1` | CUSTOMIZE > PAINT's state and tool as they change, with times |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
+| `TTT2_TEST_CUSTOMIZE=<code>:<record>`, `TTT2_TEST_SAVE_SLOT=<slot>=<code>:<record>` | an added fighter's customization record worn without CUSTOMIZE mode, or stored into a saved slot (Added fighters, testing its wardrobe) |
 | `TTT2_DUMP_SHADERS=<dir>` | shader binaries, draw registers and generated GLSL |
 | `TTT2_DUMP_TEXTURES=<dir>` | every texture loaded from memory, as PNG |
 | `TTT2_TRACE_TARGETS=1`, `TTT2_WATCH=<hex address>` | render target creation; writes and loads touching an address |
@@ -2010,6 +2384,12 @@ debugging:
 | `TTT2_DISPLAY_HZ=<hz>` | report this refresh rate for the window's display (tests the rate check) |
 | `TTT2_FULLSCREEN=1` | start fullscreen (another value: windowed; over display.ini) |
 | `TTT2_INPUT_DELAY=0..15` | frames a fighter waits before acting on a button, in place of the game's own 2 (over display.ini's input_delay) |
+| `TTT2_KEEP_MEMORY=0` | leave the memory the GPU reads to the kernel (no "memory" thread) |
+| `TTT2_TRACE_MEMORY=1` | the "memory" thread's passes: time, blocks, megabytes on huge pages |
+| `TTT2_ASYNC_SHADERS=1` or `0` | compile shaders in the background or as they are needed (over display.ini's async_shaders) |
+| `TTT2_SHADER_THREADS=<n>` | worker threads for shaders (also `--precompile`'s) |
+| `TTT2_LATE_PIPELINES=<n>` | new pipelines a frame may leave to the workers (4) |
+| `TTT2_TRACE_SHADERS=1` | first uses of shaders and pipelines: their class, their cost, frames over 25 ms, totals every 10 s |
 | `TTT2_TRACE_INTERP=1`, `TTT2_TRACE_PACING=1` | draw matching, carried targets; frame readiness, swap times after the vblank |
 | `TTT2_PROFILE_AT=<s>` | GPU time of every operation of one frame |
 | `TTT2_EVICT=0` | keep the textures and render targets the title stopped using (freed after 30 s otherwise) |
@@ -2034,7 +2414,7 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |

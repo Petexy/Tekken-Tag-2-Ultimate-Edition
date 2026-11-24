@@ -3,6 +3,7 @@
 
 #include "gpu/vulkan/renderer.h"
 
+#include "gpu/gpu.h"
 #include "gpu/latte.h"
 #include "gpu/looks.h"
 #include "gpu/still_draws.h"
@@ -14,12 +15,16 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <type_traits>
 
 namespace cafe::gpu::vk {
@@ -33,8 +38,14 @@ uint64_t fnv(const void* data, size_t size, uint64_t h = 0xCBF29CE484222325ull) 
     return h;
 }
 
+double now_ms() {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 void report_once(const char* what, uint32_t value) {
+    static std::mutex mutex; // (pipelines are created on workers too)
     static std::vector<std::pair<std::string, uint32_t>> seen;
+    const std::lock_guard lock(mutex);
     for (const auto& s : seen) {
         if (s.first == what && s.second == value) return;
     }
@@ -166,11 +177,73 @@ const char* dump_directory() {
     return dir;
 }
 
-} // namespace
+// The functions below run on the gpu thread or on a worker (jobs.h): they
+// touch nothing of the renderer's.
 
-// ------------------------------------------------------- pipeline cache
+VkShaderModule create_module(VkDevice device, const std::vector<uint32_t>& spirv) {
+    VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+    mci.codeSize = spirv.size() * 4;
+    mci.pCode = spirv.data();
+    VkShaderModule module = VK_NULL_HANDLE;
+    return vkCreateShaderModule(device, &mci, nullptr, &module) == VK_SUCCESS ? module : VK_NULL_HANDLE;
+}
 
-void Renderer::load_pipeline_cache() {
+// GLSL to SPIR-V (kept in the disk cache) to a module; null when it fails.
+VkShaderModule compile_module(VkDevice device, shaderc_compiler* compiler, bool vertex, const std::string& glsl,
+                              uint64_t glsl_hash, uint64_t program_hash) {
+    const char* kind = vertex ? "vs" : "ps";
+    shaderc_compile_options_t options = shaderc_compile_options_initialize();
+    shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+    // The driver optimises; SPIR-V optimisation only costs compile time.
+    shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_zero);
+    shaderc_compilation_result_t result =
+        shaderc_compile_into_spv(compiler, glsl.data(), glsl.size(), vertex ? shaderc_vertex_shader : shaderc_fragment_shader,
+                                 kind, "main", options);
+    shaderc_compile_options_release(options);
+    if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+        std::fprintf(stderr, "ttt2: gpu: cannot compile %s %016llx:\n%s\n", kind,
+                     static_cast<unsigned long long>(program_hash), shaderc_result_get_error_message(result));
+        shaderc_result_release(result);
+        return VK_NULL_HANDLE;
+    }
+    const auto* bytes = reinterpret_cast<const uint32_t*>(shaderc_result_get_bytes(result));
+    const std::vector<uint32_t> spirv(bytes, bytes + shaderc_result_get_length(result) / 4);
+    shaderc_result_release(result);
+    store_cached_spirv(glsl_hash, spirv);
+    return create_module(device, spirv);
+}
+
+VkPipelineLayout create_layout(const Context& ctx, uint32_t vs_textures, uint32_t ps_textures, bool vs_registers,
+                               bool ps_registers) {
+    std::vector<VkDescriptorSetLayoutBinding> bindings;
+    bindings.push_back({abi::kDrawConstantsBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
+                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
+    if (vs_registers) bindings.push_back({abi::kVsRegistersBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr});
+    if (ps_registers) bindings.push_back({abi::kPsRegistersBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
+    for (uint32_t slot = 0; slot < abi::kTextureSlots; ++slot) {
+        if (vs_textures & (1u << slot)) {
+            bindings.push_back({abi::kVsTextureBinding + slot, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr});
+        }
+        if (ps_textures & (1u << slot)) {
+            bindings.push_back({abi::kPsTextureBinding + slot, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
+        }
+    }
+    VkDescriptorSetLayoutCreateInfo dci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    dci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    dci.bindingCount = static_cast<uint32_t>(bindings.size());
+    dci.pBindings = bindings.data();
+    VkDescriptorSetLayout set_layout;
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &dci, nullptr, &set_layout));
+    VkPipelineLayoutCreateInfo lci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    lci.setLayoutCount = 1;
+    lci.pSetLayouts = &set_layout;
+    VkPipelineLayout layout;
+    VK_CHECK(vkCreatePipelineLayout(ctx.device, &lci, nullptr, &layout));
+    return layout;
+}
+
+// The pipeline cache, from and to the cache directory's pipelines.bin.
+VkPipelineCache open_pipeline_cache(VkDevice device) {
     std::vector<char> data;
     if (!cache_directory().empty()) {
         std::ifstream in(cache_directory() / "pipelines.bin", std::ios::binary | std::ios::ate);
@@ -183,24 +256,197 @@ void Renderer::load_pipeline_cache() {
     VkPipelineCacheCreateInfo pci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     pci.initialDataSize = data.size();
     pci.pInitialData = data.empty() ? nullptr : data.data();
-    if (vkCreatePipelineCache(ctx_.device, &pci, nullptr, &pipeline_cache_) != VK_SUCCESS) {
+    VkPipelineCache cache = VK_NULL_HANDLE;
+    if (vkCreatePipelineCache(device, &pci, nullptr, &cache) != VK_SUCCESS) {
         pci.initialDataSize = 0; // stale or from another driver
         pci.pInitialData = nullptr;
-        VK_CHECK(vkCreatePipelineCache(ctx_.device, &pci, nullptr, &pipeline_cache_));
+        VK_CHECK(vkCreatePipelineCache(device, &pci, nullptr, &cache));
     }
+    return cache;
 }
 
-void Renderer::save_pipeline_cache() {
-    if (new_pipelines_ == 0 || cache_directory().empty()) return;
-    new_pipelines_ = 0;
+void write_pipeline_cache(VkDevice device, VkPipelineCache cache) {
     size_t size = 0;
-    if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, nullptr) != VK_SUCCESS || size == 0) return;
+    if (vkGetPipelineCacheData(device, cache, &size, nullptr) != VK_SUCCESS || size == 0) return;
     std::vector<char> data(size);
-    if (vkGetPipelineCacheData(ctx_.device, pipeline_cache_, &size, data.data()) != VK_SUCCESS) return;
+    if (vkGetPipelineCacheData(device, cache, &size, data.data()) != VK_SUCCESS) return;
     const std::filesystem::path path = cache_directory() / "pipelines.bin";
     std::ofstream(path.string() + ".tmp", std::ios::binary).write(data.data(), static_cast<std::streamsize>(size));
     std::error_code ec;
     std::filesystem::rename(path.string() + ".tmp", path, ec);
+}
+
+// The pipelines the game has needed on this computer, one a line in the
+// cache directory's pipelines.list: what it takes to make each again
+// without the game running (its shaders by the names of their SPIR-V in
+// the cache, the layout's bindings, the state it bakes in), so that
+// precompile_shaders() can make them all ahead. After a graphics driver
+// update the SPIR-V is still good and the driver's part is not: the list
+// is what brings that back before a fight needs it.
+constexpr size_t kListNumbers = 28;
+constexpr const char* kListTag = "p1";
+
+std::string list_line(const PipelineKey& k) {
+    std::string line = kListTag;
+    const auto put = [&](uint64_t v) {
+        char text[20];
+        std::snprintf(text, sizeof(text), " %llx", static_cast<unsigned long long>(v));
+        line += text;
+    };
+    put(k.vs->glsl_hash);
+    put(k.ps->glsl_hash);
+    put(k.vs->info.texture_mask);
+    put(k.ps->info.texture_mask);
+    put(k.vs->info.uses_registers);
+    put(k.ps->info.uses_registers);
+    put(k.color_count);
+    put(k.depth);
+    for (const VkFormat f : k.colors) put(f);
+    for (const uint32_t b : k.blend) put(b);
+    put(k.write_mask);
+    put(k.polygon_mode);
+    put(k.topology_class);
+    put(k.depth_clamp);
+    return line;
+}
+
+bool parse_list_line(const std::string& line, uint64_t numbers[kListNumbers]) {
+    const char* p = line.c_str();
+    if (line.compare(0, 3, std::string(kListTag) + " ") != 0) return false;
+    p += 2;
+    for (size_t i = 0; i < kListNumbers; ++i) {
+        char* end = nullptr;
+        numbers[i] = std::strtoull(p, &end, 16);
+        if (end == p) return false;
+        p = end;
+    }
+    while (*p == ' ' || *p == '\r') ++p;
+    return *p == '\0';
+}
+
+std::vector<std::string> read_pipeline_list() {
+    std::vector<std::string> lines;
+    if (cache_directory().empty()) return lines;
+    std::ifstream in(cache_directory() / "pipelines.list");
+    for (std::string line; std::getline(in, line);) {
+        if (!line.empty()) lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+// (The gpu thread's: a pipeline not in the list yet is added to it.)
+void note_pipeline(const PipelineKey& k) {
+    static std::unordered_set<std::string> seen = [] {
+        const std::vector<std::string> lines = read_pipeline_list();
+        return std::unordered_set<std::string>(lines.begin(), lines.end());
+    }();
+    if (cache_directory().empty() || k.vs->glsl_hash == 0 || k.ps->glsl_hash == 0) return;
+    std::string line = list_line(k);
+    if (!seen.insert(line).second) return;
+    line += '\n';
+    // (One write of a whole line, at once: the game ends without notice.)
+    if (std::FILE* f = std::fopen((cache_directory() / "pipelines.list").string().c_str(), "ab")) {
+        std::fwrite(line.data(), 1, line.size(), f);
+        std::fclose(f);
+    }
+}
+
+// `flags`: VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT asks
+// for the pipeline only if the cache has it (VK_PIPELINE_COMPILE_REQUIRED
+// otherwise, at once).
+VkResult create_pipeline(VkDevice device, VkPipelineCache cache, const PipelineKey& k, VkPipelineLayout layout,
+                         VkPipelineCreateFlags flags, VkPipeline* pipeline) {
+    VkPipelineShaderStageCreateInfo stages[2]{};
+    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = k.vs->module;
+    stages[0].pName = "main";
+    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = k.ps->module;
+    stages[1].pName = "main";
+    VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+    ia.topology = k.topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+                  : k.topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+                                          : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+    vp.viewportCount = 1;
+    vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    rs.polygonMode = k.polygon_mode == 0 ? VK_POLYGON_MODE_POINT : k.polygon_mode == 1 ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+    rs.depthClampEnable = k.depth_clamp ? VK_TRUE : VK_FALSE;
+    rs.lineWidth = 1.0f;
+    VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    VkPipelineColorBlendAttachmentState attachments[8]{};
+    for (uint32_t i = 0; i < k.color_count; ++i) {
+        VkPipelineColorBlendAttachmentState& a = attachments[i];
+        a.colorWriteMask = k.colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
+        if (k.blend[i]) {
+            const uint32_t b = k.blend[i];
+            a.blendEnable = VK_TRUE;
+            a.srcColorBlendFactor = blend_factor(b & 0x1F);
+            a.colorBlendOp = blend_op((b >> 5) & 7);
+            a.dstColorBlendFactor = blend_factor((b >> 8) & 0x1F);
+            if ((b >> 29) & 1) {
+                a.srcAlphaBlendFactor = blend_factor((b >> 16) & 0x1F);
+                a.alphaBlendOp = blend_op((b >> 21) & 7);
+                a.dstAlphaBlendFactor = blend_factor((b >> 24) & 0x1F);
+            } else {
+                a.srcAlphaBlendFactor = a.srcColorBlendFactor;
+                a.alphaBlendOp = a.colorBlendOp;
+                a.dstAlphaBlendFactor = a.dstColorBlendFactor;
+            }
+        }
+    }
+    VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+    cb.attachmentCount = k.color_count;
+    cb.pAttachments = attachments;
+    static const VkDynamicState kDynamic[] = {
+        VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_DEPTH_BIAS,
+        VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+        VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_CULL_MODE, VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP, VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
+        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_OP, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
+        VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
+    };
+    VkPipelineDynamicStateCreateInfo dyn{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    dyn.dynamicStateCount = static_cast<uint32_t>(std::size(kDynamic));
+    dyn.pDynamicStates = kDynamic;
+    VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    ri.colorAttachmentCount = k.color_count;
+    ri.pColorAttachmentFormats = k.colors;
+    ri.depthAttachmentFormat = k.depth;
+    ri.stencilAttachmentFormat = has_stencil(k.depth) ? k.depth : VK_FORMAT_UNDEFINED;
+    VkGraphicsPipelineCreateInfo gci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    gci.pNext = &ri;
+    gci.flags = flags;
+    gci.stageCount = 2;
+    gci.pStages = stages;
+    gci.pVertexInputState = &vi;
+    gci.pInputAssemblyState = &ia;
+    gci.pViewportState = &vp;
+    gci.pRasterizationState = &rs;
+    gci.pMultisampleState = &ms;
+    gci.pDepthStencilState = &ds;
+    gci.pColorBlendState = &cb;
+    gci.pDynamicState = &dyn;
+    gci.layout = layout;
+    *pipeline = VK_NULL_HANDLE;
+    return vkCreateGraphicsPipelines(device, cache, 1, &gci, nullptr, pipeline);
+}
+
+} // namespace
+
+// ------------------------------------------------------- pipeline cache
+
+void Renderer::load_pipeline_cache() { pipeline_cache_ = open_pipeline_cache(ctx_.device); }
+
+void Renderer::save_pipeline_cache() {
+    if (cache_directory().empty() || new_pipelines_.exchange(0) == 0) return;
+    write_pipeline_cache(ctx_.device, pipeline_cache_);
 }
 
 // ---------------------------------------------------------------- shaders
@@ -239,15 +485,27 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     if (stage == Stage::kVertex && fetch_address != 0) fetch = program(fetch_address, fetch_size, fetch_hash);
     const uint64_t keys[3] = {program_hash, fetch_hash, environment_key(env)};
     const uint64_t key = fnv(keys, sizeof(keys));
-    if (auto it = shaders_.find(key); it != shaders_.end()) return it->second;
+    // (A module still compiling in the background is returned as it is,
+    // its job set; one that failed there counts as failed from now on.)
+    const auto settled = [](const ShaderModule* m) -> const ShaderModule* {
+        if (m == nullptr) return nullptr;
+        if (m->job && JobPool::done(m->job)) m->job.reset();
+        return m->job || m->module != VK_NULL_HANDLE ? m : nullptr;
+    };
+    if (auto it = shaders_.find(key); it != shaders_.end()) return settled(it->second);
     const ShaderModule*& entry = shaders_[key]; // stays null if the shader fails
     const char* kind = stage == Stage::kVertex ? "vs" : "ps";
     TranslatedShader info;
     std::string error;
+    const double translate_start = trace_shaders_ ? now_ms() : 0;
     if (!translate(*p, fetch, env, info, error)) {
         std::fprintf(stderr, "ttt2: gpu: cannot translate %s %016llx: %s\n", kind,
                      static_cast<unsigned long long>(program_hash), error.c_str());
         return nullptr;
+    }
+    if (trace_shaders_) {
+        ++frame_costs_.translated;
+        frame_costs_.translate_ms += now_ms() - translate_start;
     }
     if (const char* dir = dump_directory()) {
         char name[128];
@@ -270,37 +528,47 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     };
     uint64_t code = glsl_hash;
     for (auto it = modules_.find(code); it != modules_.end(); it = modules_.find(++code)) {
-        if (same(it->second->info)) return entry = it->second.get();
-    }
-    // SPIR-V is cached on disk by the GLSL it came from.
-    std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash);
-    if (spirv.empty()) {
-        shaderc_compile_options_t options = shaderc_compile_options_initialize();
-        shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
-        // The driver optimises; SPIR-V optimisation only costs compile time.
-        shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_zero);
-        shaderc_compilation_result_t result = shaderc_compile_into_spv(
-            compiler_, info.glsl.data(), info.glsl.size(),
-            stage == Stage::kVertex ? shaderc_vertex_shader : shaderc_fragment_shader, kind, "main", options);
-        shaderc_compile_options_release(options);
-        if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
-            std::fprintf(stderr, "ttt2: gpu: cannot compile %s %016llx:\n%s\n", kind,
-                         static_cast<unsigned long long>(program_hash), shaderc_result_get_error_message(result));
-            shaderc_result_release(result);
-            return nullptr;
-        }
-        const auto* bytes = reinterpret_cast<const uint32_t*>(shaderc_result_get_bytes(result));
-        spirv.assign(bytes, bytes + shaderc_result_get_length(result) / 4);
-        shaderc_result_release(result);
-        store_cached_spirv(glsl_hash, spirv);
+        if (same(it->second->info)) return settled(entry = it->second.get());
     }
     auto module = std::make_unique<ShaderModule>();
     module->info = std::move(info);
-    VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    mci.codeSize = spirv.size() * 4;
-    mci.pCode = spirv.data();
-    VK_CHECK(vkCreateShaderModule(ctx_.device, &mci, nullptr, &module->module));
-    entry = module.get();
+    module->glsl_hash = glsl_hash;
+    ShaderModule* const m = module.get();
+    const bool vertex = stage == Stage::kVertex;
+    const double start = trace_shaders_ ? now_ms() : 0;
+    // SPIR-V is cached on disk by the GLSL it came from.
+    if (const std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash); !spirv.empty()) {
+        m->module = create_module(ctx_.device, spirv);
+        if (m->module == VK_NULL_HANDLE) fatal("Vulkan: a shader module could not be created");
+        m->cached = true;
+        if (trace_shaders_) {
+            ++frame_costs_.loaded;
+            frame_costs_.load_ms += now_ms() - start;
+        }
+    } else if (async_shaders_ && !compile_inline_) {
+        // The compiler runs on a worker; the draws wait for it or are left
+        // out meanwhile (draw()). The module's text and handle are the
+        // job's until the job is done.
+        const bool trace = trace_shaders_;
+        m->job = jobs_.submit([this, m, vertex, glsl_hash, program_hash, trace] {
+            const double begin = now_ms();
+            m->module = compile_module(ctx_.device, compiler_, vertex, m->info.glsl, glsl_hash, program_hash);
+            const double ms = now_ms() - begin;
+            ++worker_shaders_;
+            worker_shader_us_ += static_cast<uint64_t>(ms * 1000);
+            if (trace) std::fprintf(stderr, "shaders: job: %s %016llx compiled in %.1f ms\n", vertex ? "vs" : "ps",
+                                    static_cast<unsigned long long>(glsl_hash), ms);
+        });
+        if (trace_shaders_) ++frame_costs_.queued;
+    } else {
+        m->module = compile_module(ctx_.device, compiler_, vertex, m->info.glsl, glsl_hash, program_hash);
+        if (trace_shaders_) {
+            ++frame_costs_.compiled;
+            frame_costs_.compile_ms += now_ms() - start;
+        }
+        if (m->module == VK_NULL_HANDLE) return nullptr;
+    }
+    entry = m;
     modules_.emplace(code, std::move(module));
     return entry;
 }
@@ -312,32 +580,7 @@ VkPipelineLayout Renderer::pipeline_layout(uint32_t vs_textures, uint32_t ps_tex
     const uint64_t key = uint64_t{vs_textures} | (uint64_t{ps_textures} << 18) | (uint64_t{vs_registers} << 36) |
                          (uint64_t{ps_registers} << 37);
     if (auto it = layouts_.find(key); it != layouts_.end()) return it->second;
-    std::vector<VkDescriptorSetLayoutBinding> bindings;
-    bindings.push_back({abi::kDrawConstantsBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
-    if (vs_registers) bindings.push_back({abi::kVsRegistersBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr});
-    if (ps_registers) bindings.push_back({abi::kPsRegistersBinding, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
-    for (uint32_t slot = 0; slot < abi::kTextureSlots; ++slot) {
-        if (vs_textures & (1u << slot)) {
-            bindings.push_back({abi::kVsTextureBinding + slot, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr});
-        }
-        if (ps_textures & (1u << slot)) {
-            bindings.push_back({abi::kPsTextureBinding + slot, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
-        }
-    }
-    VkDescriptorSetLayoutCreateInfo dci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    dci.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-    dci.bindingCount = static_cast<uint32_t>(bindings.size());
-    dci.pBindings = bindings.data();
-    VkDescriptorSetLayout set_layout;
-    VK_CHECK(vkCreateDescriptorSetLayout(ctx_.device, &dci, nullptr, &set_layout));
-    VkPipelineLayoutCreateInfo lci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    lci.setLayoutCount = 1;
-    lci.pSetLayouts = &set_layout;
-    VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(ctx_.device, &lci, nullptr, &layout));
-    layouts_[key] = layout;
-    return layout;
+    return layouts_[key] = create_layout(ctx_, vs_textures, ps_textures, vs_registers, ps_registers);
 }
 
 const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
@@ -369,98 +612,93 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
 
     const uint64_t key = fnv(&k, sizeof(k));
     auto& entry = pipelines_[key];
-    if (entry) return entry->pipeline ? entry.get() : nullptr;
+    if (entry) {
+        // (Still being created in the background: returned with its job set.)
+        if (entry->job && JobPool::done(entry->job)) entry->job.reset();
+        return entry->job || entry->pipeline ? entry.get() : nullptr;
+    }
     entry = std::make_unique<Pipeline>();
     entry->vs = vs;
     entry->ps = ps;
     entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
                                     ps->info.uses_registers);
-
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vs->module;
-    stages[0].pName = "main";
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = ps->module;
-    stages[1].pName = "main";
-    VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-                  : topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
-                                        : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-    rs.polygonMode = k.polygon_mode == 0 ? VK_POLYGON_MODE_POINT : k.polygon_mode == 1 ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
-    rs.depthClampEnable = k.depth_clamp ? VK_TRUE : VK_FALSE;
-    rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    VkPipelineColorBlendAttachmentState attachments[8]{};
-    for (uint32_t i = 0; i < color_count; ++i) {
-        VkPipelineColorBlendAttachmentState& a = attachments[i];
-        a.colorWriteMask = colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
-        if (k.blend[i]) {
-            const uint32_t b = k.blend[i];
-            a.blendEnable = VK_TRUE;
-            a.srcColorBlendFactor = blend_factor(b & 0x1F);
-            a.colorBlendOp = blend_op((b >> 5) & 7);
-            a.dstColorBlendFactor = blend_factor((b >> 8) & 0x1F);
-            if ((b >> 29) & 1) {
-                a.srcAlphaBlendFactor = blend_factor((b >> 16) & 0x1F);
-                a.alphaBlendOp = blend_op((b >> 21) & 7);
-                a.dstAlphaBlendFactor = blend_factor((b >> 24) & 0x1F);
-            } else {
-                a.srcAlphaBlendFactor = a.srcColorBlendFactor;
-                a.alphaBlendOp = a.colorBlendOp;
-                a.dstAlphaBlendFactor = a.dstColorBlendFactor;
+    Pipeline* const p = entry.get();
+    note_pipeline(k);
+    const double start = trace_shaders_ ? now_ms() : 0;
+    if (compile_inline_) {
+        // (Shaders an earlier draw left to the workers: needed now.)
+        for (const ShaderModule* m : {vs, ps}) {
+            if (!m->job) continue;
+            const double begin = now_ms();
+            jobs_.finish(m->job);
+            m->job.reset();
+            ++frame_costs_.waits;
+            frame_costs_.wait_ms += now_ms() - begin;
+        }
+        if (vs->module == VK_NULL_HANDLE || ps->module == VK_NULL_HANDLE) return nullptr; // (a shader failed)
+    } else {
+        // What the caches already hold is made here, at once, and no draw
+        // goes without it: the pipeline cache answers "only if cached"
+        // where the device can ask that, else shaders that both came from
+        // the disk cache are taken to have their pipeline cached as well.
+        const bool compiled = !vs->job && !ps->job;
+        if (compiled && ctx_.pipeline_cache_control) {
+            const VkResult r = create_pipeline(ctx_.device, pipeline_cache_, k, p->layout,
+                                               VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT, &p->pipeline);
+            if (trace_shaders_) {
+                ++frame_costs_.hits;
+                frame_costs_.hit_ms += now_ms() - start;
+            }
+            if (r == VK_SUCCESS) return p;
+            p->pipeline = VK_NULL_HANDLE;
+            if (r != VK_PIPELINE_COMPILE_REQUIRED) {
+                std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
+                return nullptr;
             }
         }
+        if (!(compiled && !ctx_.pipeline_cache_control && vs->cached && ps->cached)) {
+            // On a worker, after the shaders' own jobs (the job keeps them:
+            // the gpu thread drops a module's as soon as it is done).
+            const bool trace = trace_shaders_;
+            ++pipeline_jobs_;
+            ++frame_late_pipelines_;
+            p->job = jobs_.submit([this, p, k, trace, vs_job = vs->job, ps_job = ps->job] {
+                struct Leave {
+                    std::atomic<uint32_t>& count;
+                    ~Leave() { --count; }
+                } leave{pipeline_jobs_};
+                if (vs_job) jobs_.finish(vs_job);
+                if (ps_job) jobs_.finish(ps_job);
+                if (k.vs->module == VK_NULL_HANDLE || k.ps->module == VK_NULL_HANDLE) return; // (a shader failed)
+                const double begin = now_ms();
+                const VkResult r = create_pipeline(ctx_.device, pipeline_cache_, k, p->layout, 0, &p->pipeline);
+                const double ms = now_ms() - begin;
+                if (r != VK_SUCCESS) {
+                    std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
+                    p->pipeline = VK_NULL_HANDLE;
+                    return;
+                }
+                ++new_pipelines_;
+                ++worker_pipelines_;
+                worker_pipeline_us_ += static_cast<uint64_t>(ms * 1000);
+                if (trace) std::fprintf(stderr, "shaders: job: pipeline created in %.1f ms\n", ms);
+            });
+            if (trace_shaders_) ++frame_costs_.queued;
+            return p;
+        }
     }
-    VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = color_count;
-    cb.pAttachments = attachments;
-    static const VkDynamicState kDynamic[] = {
-        VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_DEPTH_BIAS,
-        VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
-        VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_CULL_MODE, VK_DYNAMIC_STATE_FRONT_FACE,
-        VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE, VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,
-        VK_DYNAMIC_STATE_DEPTH_COMPARE_OP, VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE,
-        VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE, VK_DYNAMIC_STATE_STENCIL_OP, VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE,
-        VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE, VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE,
-    };
-    VkPipelineDynamicStateCreateInfo dyn{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dyn.dynamicStateCount = static_cast<uint32_t>(std::size(kDynamic));
-    dyn.pDynamicStates = kDynamic;
-    VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    ri.colorAttachmentCount = color_count;
-    ri.pColorAttachmentFormats = colors;
-    ri.depthAttachmentFormat = depth;
-    ri.stencilAttachmentFormat = has_stencil(depth) ? depth : VK_FORMAT_UNDEFINED;
-    VkGraphicsPipelineCreateInfo gci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    gci.pNext = &ri;
-    gci.stageCount = 2;
-    gci.pStages = stages;
-    gci.pVertexInputState = &vi;
-    gci.pInputAssemblyState = &ia;
-    gci.pViewportState = &vp;
-    gci.pRasterizationState = &rs;
-    gci.pMultisampleState = &ms;
-    gci.pDepthStencilState = &ds;
-    gci.pColorBlendState = &cb;
-    gci.pDynamicState = &dyn;
-    gci.layout = entry->layout;
-    const VkResult r = vkCreateGraphicsPipelines(ctx_.device, pipeline_cache_, 1, &gci, nullptr, &entry->pipeline);
+    const VkResult r = create_pipeline(ctx_.device, pipeline_cache_, k, p->layout, 0, &p->pipeline);
     ++new_pipelines_;
+    if (trace_shaders_) {
+        ++frame_costs_.pipelines;
+        frame_costs_.pipeline_ms += now_ms() - start;
+    }
     if (r != VK_SUCCESS) {
         std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
-        entry->pipeline = VK_NULL_HANDLE;
+        p->pipeline = VK_NULL_HANDLE;
         return nullptr;
     }
-    return entry.get();
+    return p;
 }
 
 // ----------------------------------------------------------------- draws
@@ -572,6 +810,12 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     draw_video_chunks_ = 0;
     // Interpolation: every draw of a frame and of its replays, in order.
     const uint32_t draw_index = logging_ ? begin_draw_record(regs, d) : 0;
+    // (A draw its frame left out while its shaders compiled: not in the
+    // frame's picture, so not in its replays'.)
+    if (replaying_ && logging_ && draw_index < frame_records_[current_record_].draws.size() &&
+        frame_records_[current_record_].draws[draw_index].skipped) {
+        return;
+    }
     const uint32_t instances = std::max<uint32_t>(d.num_instances, 1);
 
     // Primitive type: Vulkan topology, or a conversion through indices.
@@ -631,7 +875,61 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     // index is taken, so the draws after it still match the frame's.
     if (replaying_ && stream_out && (rasterizer_discard || (color_count == 0 && depth == nullptr))) return;
 
+    // Shaders compiled in the background: whether this draw may be left
+    // out while its pipeline (or a shader of it) is made on a worker, to
+    // appear once that is there. Only where that delays a part of the
+    // picture and nothing else:
+    //  - not a stream-out draw: it writes memory (the fighters' skinned
+    //    vertices) that later draws and the title read;
+    //  - not in a replay: an extra frame draws what its frame drew;
+    //  - a depth-tested draw, a thing in the 3D scene: the others are the
+    //    passes that make or compose whole images (blur, glow, copies, the
+    //    menus' and the HUD's layers), where a draw left out is a black or
+    //    broken picture;
+    //  - into targets the frame before drew into as well, so the next
+    //    frames draw it again: a picture drawn once and kept (rendered to
+    //    a texture at a load) would stay without it;
+    //  - into targets the title does not read: one written back to its
+    //    memory (targets.cpp) would hand it a picture without the draw.
+    //    And none at all while the title reads larger targets back
+    //    (gpu::cpu_read_targets: CUSTOMIZE's PAINT, whose canvas is what
+    //    it reads, changes and saves; a stroke left out would be missing
+    //    from the fighter for good).
+    // (gpu/vulkan/leave_out.h; its test names each case.)
+    // Any other draw has what it needs made at once, on this
+    // thread, as without the setting. So has a draw that may be left out
+    // once the frame has sent four new pipelines to the workers, or while
+    // as many are in the making as two a worker: a new scene needs dozens
+    // at once, and its first frames with most of it missing would be worse
+    // than its one late frame, which comes where the title changes scenes
+    // anyway; what a fight brings up on the way (a hit's sparks, a move's
+    // trail) comes in ones and twos.
+    bool redrawn = true, may_skip = false, cpu_reads = cpu_read_targets() != 0;
+    const bool depth_tested = depth != nullptr && (depth_control & 2);
+    if (async_shaders_ || trace_shaders_) {
+        if (!replaying_) {
+            const auto drawn = [&](const Target* target) {
+                if (target == nullptr) return;
+                Target& t = *const_cast<Target*>(target);
+                if (t.drawn_frame != frame_number_) {
+                    t.redrawn = t.drawn_frame + 1 == frame_number_;
+                    t.drawn_frame = frame_number_;
+                }
+                redrawn = redrawn && t.redrawn;
+                cpu_reads = cpu_reads || t.write_back;
+            };
+            for (uint32_t i = 0; i < color_count; ++i) drawn(colors[i]);
+            drawn(depth);
+        }
+        may_skip = may_leave_out({.stream_out = stream_out, .replaying = replaying_, .depth_tested = depth_tested,
+                                  .redrawn = redrawn, .cpu_reads = cpu_reads});
+    }
+    compile_inline_ = !(async_shaders_ && may_skip && frame_late_pipelines_ < max_frame_late_pipelines_ &&
+                        pipeline_jobs_.load() < max_late_pipelines_);
+    may_skip = may_skip && async_shaders_;
+
     // Shaders.
+    const ShaderCosts costs_before = frame_costs_;
     ShaderEnvironment vs_env, ps_env;
     build_environment(regs.value, Stage::kVertex, vs_env);
     build_environment(regs.value, Stage::kPixel, ps_env);
@@ -654,6 +952,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         VkSampler sampler;
         bool scaled;
     };
+    bool samples_target = false; // a texture that a render target's content came from
     Bound vs_textures[abi::kTextureSlots]{}, ps_textures[abi::kTextureSlots]{};
     const auto bind_textures = [&](const ShaderModule* s, uint32_t resource_base, uint32_t sampler_base,
                                    uint32_t border_base, Bound* out) {
@@ -680,6 +979,7 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
                 return false;
             }
             out[slot] = {t->view, sampler(sampler_words, border, (s->info.shadow_mask >> slot) & 1), t->scale > 1};
+            samples_target = samples_target || t->source != nullptr;
         }
         return true;
     };
@@ -697,6 +997,39 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
         report_once("draw skipped: pipeline could not be created", 0);
         ++skipped_draws_;
         return;
+    }
+    if (trace_shaders_ && !replaying_ &&
+        (frame_costs_.translated != costs_before.translated || frame_costs_.pipelines != costs_before.pipelines ||
+         frame_costs_.hits != costs_before.hits || frame_costs_.queued != costs_before.queued)) {
+        std::fprintf(stderr, "shaders: first use, frame %llu: prim 0x%X count %u, %s%s%s%s, color 0x%08X %ux%u, depth 0x%08X control 0x%08X blend 0x%02X: %s\n",
+                     static_cast<unsigned long long>(frame_number_), r(reg::VGT_PRIMITIVE_TYPE), d.count,
+                     stream_out ? "stream-out" : depth_tested ? "depth-tested" : "flat",
+                     rasterizer_discard ? ", no raster" : "", samples_target ? ", samples a target" : "",
+                     redrawn ? ", redrawn" : ", not drawn the frame before",
+                     colors[0] ? colors[0]->address : 0, colors[0] ? colors[0]->pitch : 0, colors[0] ? colors[0]->height : 0,
+                     depth ? depth->address : 0, depth_control, (r(reg::CB_COLOR_CONTROL) >> 8) & 0xFF,
+                     !may_skip ? "waits" : compile_inline_ ? "waits (many in the making)" : "may be left out");
+    }
+    if (pipe->job) {
+        if (may_skip) {
+            if (logging_ && draw_index < frame_records_[current_record_].draws.size()) {
+                frame_records_[current_record_].draws[draw_index].skipped = true;
+            }
+            ++skipped_draws_;
+            ++frame_costs_.skipped;
+            return;
+        }
+        // (Run here if no worker has taken it yet, its shaders' too.)
+        const double start = now_ms();
+        jobs_.finish(pipe->job);
+        pipe->job.reset();
+        ++frame_costs_.waits;
+        frame_costs_.wait_ms += now_ms() - start;
+        if (pipe->pipeline == VK_NULL_HANDLE) {
+            report_once("draw skipped: pipeline could not be created", 0);
+            ++skipped_draws_;
+            return;
+        }
     }
 
     // Per-draw constants.
@@ -1264,6 +1597,198 @@ void Renderer::draw(const Registers& regs, const Draw& d) {
     if (depth && ((depth_control >> 2) & 1 || stencil)) {
         const_cast<Target*>(depth)->written = now;
         note_target_written(depth);
+    }
+}
+
+} // namespace cafe::gpu::vk
+
+// `ttt2 --precompile`: every pipeline of the cache directory's list made
+// into the pipeline cache, on all processors but one, with no window and
+// no game: what the game then asks for is there already. On standard
+// output, the launchers' task lines (`@step`, `@progress done total`,
+// `@done`) and a summary.
+int cafe::gpu::precompile_shaders() {
+    using namespace vk;
+    const double begin = now_ms();
+    if (cache_directory().empty()) {
+        std::printf("@error There is no cache folder to keep shaders in\n");
+        return 1;
+    }
+    const std::vector<std::string> lines = read_pipeline_list();
+    if (lines.empty()) {
+        std::printf("Nothing to prepare yet: the game notes the shaders it uses as it is played on this computer.\n@done\n");
+        return 0;
+    }
+    std::printf("@step shaders Preparing shaders\n");
+    std::fflush(stdout);
+    Context ctx;
+    {
+        // (No window: the surface extension only because the device's
+        // swapchain extension, which the renderer's device has, wants it.)
+        uint32_t count = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+        std::vector<VkExtensionProperties> available(count);
+        vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data());
+        std::vector<const char*> extensions;
+        for (const VkExtensionProperties& e : available) {
+            if (std::strcmp(e.extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0) extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+        }
+        ctx.init(extensions);
+    }
+    const VkPipelineCache cache = open_pipeline_cache(ctx.device);
+
+    struct Work {
+        PipelineKey key;
+        VkPipelineLayout layout;
+    };
+    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> modules; // by SPIR-V name; no handle: not in the cache
+    std::unordered_map<uint64_t, VkPipelineLayout> layouts;
+    std::vector<Work> work;
+    size_t unusable = 0, without_shaders = 0;
+    const auto module = [&](uint64_t hash) -> const ShaderModule* {
+        auto& m = modules[hash];
+        if (!m) {
+            m = std::make_unique<ShaderModule>();
+            if (const std::vector<uint32_t> spirv = load_cached_spirv(hash); !spirv.empty()) {
+                m->module = create_module(ctx.device, spirv);
+            }
+        }
+        return m->module != VK_NULL_HANDLE ? m.get() : nullptr;
+    };
+    std::unordered_set<std::string> seen;
+    for (const std::string& line : lines) {
+        uint64_t n[kListNumbers];
+        if (!parse_list_line(line, n) || n[6] > 8 || !seen.insert(line).second) {
+            ++unusable;
+            continue;
+        }
+        Work w;
+        std::memset(&w.key, 0, sizeof(w.key));
+        w.key.vs = module(n[0]);
+        w.key.ps = module(n[1]);
+        if (w.key.vs == nullptr || w.key.ps == nullptr) {
+            ++without_shaders;
+            continue;
+        }
+        const uint64_t layout_key = (n[2] & 0x3FFFF) | ((n[3] & 0x3FFFF) << 18) | ((n[4] & 1) << 36) | ((n[5] & 1) << 37);
+        auto [it, fresh] = layouts.try_emplace(layout_key, VK_NULL_HANDLE);
+        if (fresh) {
+            it->second = create_layout(ctx, static_cast<uint32_t>(n[2] & 0x3FFFF), static_cast<uint32_t>(n[3] & 0x3FFFF),
+                                       n[4] & 1, n[5] & 1);
+        }
+        w.layout = it->second;
+        w.key.color_count = static_cast<uint32_t>(n[6]);
+        w.key.depth = static_cast<VkFormat>(n[7]);
+        for (size_t i = 0; i < 8; ++i) {
+            w.key.colors[i] = static_cast<VkFormat>(n[8 + i]);
+            w.key.blend[i] = static_cast<uint32_t>(n[16 + i]);
+        }
+        w.key.write_mask = static_cast<uint32_t>(n[24]);
+        w.key.polygon_mode = static_cast<uint32_t>(n[25]);
+        w.key.topology_class = static_cast<uint32_t>(n[26]);
+        w.key.depth_clamp = static_cast<uint32_t>(n[27]);
+        work.push_back(w);
+    }
+
+    // (What pipelines.bin held: the driver may find pipelines in a cache of
+    // its own as well, which this file then lacks.)
+    size_t held = 0;
+    vkGetPipelineCacheData(ctx.device, cache, &held, nullptr);
+    std::atomic<size_t> next{0}, done{0}, there{0}, made{0}, failed{0};
+    const auto worker = [&] {
+        for (size_t i = next++; i < work.size(); i = next++) {
+            const Work& w = work[i];
+            VkPipeline pipeline = VK_NULL_HANDLE;
+            VkResult r = VK_PIPELINE_COMPILE_REQUIRED;
+            if (ctx.pipeline_cache_control) {
+                r = create_pipeline(ctx.device, cache, w.key, w.layout, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT,
+                                    &pipeline);
+                if (r == VK_SUCCESS) ++there;
+            }
+            if (r == VK_PIPELINE_COMPILE_REQUIRED) {
+                r = create_pipeline(ctx.device, cache, w.key, w.layout, 0, &pipeline);
+                if (r == VK_SUCCESS) ++made;
+            }
+            if (r != VK_SUCCESS) ++failed;
+            else vkDestroyPipeline(ctx.device, pipeline, nullptr);
+            ++done;
+        }
+    };
+    unsigned count = std::max(std::thread::hardware_concurrency(), 2u) - 1;
+    if (const char* n = std::getenv("TTT2_SHADER_THREADS")) count = static_cast<unsigned>(std::clamp(std::atoi(n), 1, 64));
+    std::vector<std::thread> threads;
+    for (unsigned i = 0; i < count; ++i) threads.emplace_back(worker);
+    for (size_t shown = SIZE_MAX; done < work.size();) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (const size_t now = done; now != shown) {
+            std::printf("@progress %zu %zu\n", now, work.size());
+            std::fflush(stdout);
+            shown = now;
+        }
+    }
+    for (std::thread& t : threads) t.join();
+    size_t holds = 0;
+    vkGetPipelineCacheData(ctx.device, cache, &holds, nullptr);
+    if (made != 0 || holds > held) write_pipeline_cache(ctx.device, cache);
+    std::printf("@progress %zu %zu\n", work.size(), work.size());
+    std::printf("Prepared in %.1f s on %u threads: %zu pipelines of %zu shaders (%zu made now, %zu were there%s); "
+                "left out: %zu whose shaders are not in the cache, %zu lines not understood, %zu the driver refused\n@done\n",
+                (now_ms() - begin) / 1000.0, count, work.size(), modules.size(), made.load(), there.load(),
+                ctx.pipeline_cache_control ? "" : ": the device cannot tell", without_shaders, unusable, failed.load());
+    std::fflush(stdout);
+    return 0;
+}
+
+namespace cafe::gpu::vk {
+
+void Renderer::ShaderCosts::add(const ShaderCosts& o) {
+    translated += o.translated, loaded += o.loaded, compiled += o.compiled, pipelines += o.pipelines, hits += o.hits;
+    queued += o.queued, waits += o.waits, skipped += o.skipped;
+    translate_ms += o.translate_ms, load_ms += o.load_ms, compile_ms += o.compile_ms, pipeline_ms += o.pipeline_ms;
+    hit_ms += o.hit_ms, wait_ms += o.wait_ms;
+}
+
+// TTT2_TRACE_SHADERS, at each swap: the frame's time on the gpu thread
+// (swap to swap) and what first uses of shaders cost in it.
+void Renderer::trace_shader_frame() {
+    const double now = now_ms();
+    const double took = trace_last_swap_ != 0 ? now - trace_last_swap_ : 0;
+    trace_last_swap_ = now;
+    const ShaderCosts& c = frame_costs_;
+    static constexpr double kLong[4] = {25.0, 33.4, 50.0, 100.0};
+    for (int i = 0; i < 4; ++i) {
+        if (took > kLong[i]) {
+            ++long_frames_[i];
+            if (c.any()) ++long_compile_frames_[i];
+        }
+    }
+    longest_frame_ = std::max(longest_frame_, took);
+    if (c.any() || took > kLong[0]) {
+        std::fprintf(stderr, "shaders: frame %llu took %.1f ms: translated %u (%.1f ms), loaded %u (%.1f ms), compiled %u (%.1f ms), "
+                             "pipelines %u (%.1f ms), cached pipelines %u (%.1f ms), queued %u, waited for %u (%.1f ms), left out %u draws\n",
+                     static_cast<unsigned long long>(frame_number_), took, c.translated, c.translate_ms, c.loaded, c.load_ms,
+                     c.compiled, c.compile_ms, c.pipelines, c.pipeline_ms, c.hits, c.hit_ms, c.queued, c.waits, c.wait_ms,
+                     c.skipped);
+    }
+    total_costs_.add(c);
+    frame_costs_ = {};
+    static double last_totals = now;
+    if (now - last_totals >= 10000.0) {
+        last_totals = now;
+        const ShaderCosts& t = total_costs_;
+        std::fprintf(stderr, "shaders: totals at frame %llu: translated %u (%.1f ms), loaded %u (%.1f ms), compiled %u (%.1f ms), "
+                             "pipelines %u (%.1f ms), cached pipelines %u (%.1f ms), queued %u, waited for %u (%.1f ms), left out %u draws; "
+                             "jobs: %llu shaders (%.1f ms), %llu pipelines (%.1f ms); frames over 25/33.4/50/100 ms: %llu/%llu/%llu/%llu "
+                             "(with first uses: %llu/%llu/%llu/%llu), longest %.1f ms\n",
+                     static_cast<unsigned long long>(frame_number_), t.translated, t.translate_ms, t.loaded, t.load_ms, t.compiled,
+                     t.compile_ms, t.pipelines, t.pipeline_ms, t.hits, t.hit_ms, t.queued, t.waits, t.wait_ms, t.skipped,
+                     static_cast<unsigned long long>(worker_shaders_.load()), worker_shader_us_.load() / 1000.0,
+                     static_cast<unsigned long long>(worker_pipelines_.load()), worker_pipeline_us_.load() / 1000.0,
+                     static_cast<unsigned long long>(long_frames_[0]), static_cast<unsigned long long>(long_frames_[1]),
+                     static_cast<unsigned long long>(long_frames_[2]), static_cast<unsigned long long>(long_frames_[3]),
+                     static_cast<unsigned long long>(long_compile_frames_[0]), static_cast<unsigned long long>(long_compile_frames_[1]),
+                     static_cast<unsigned long long>(long_compile_frames_[2]), static_cast<unsigned long long>(long_compile_frames_[3]),
+                     longest_frame_);
     }
 }
 

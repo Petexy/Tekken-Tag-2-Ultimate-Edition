@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <chrono>
 #include <functional>
+#include <list>
 #include <cerrno>
 #include <cstring>
 #include <map>
@@ -36,8 +37,44 @@ std::mutex g_mutex;
 // Archives served with entries replaced or added (set_archive_entries), by
 // the relative path without extension, lower case: the entries asked for so
 // far, and the archive rebuilt with them.
-std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> g_overlay_entries;
+std::map<std::string, std::map<uint32_t, std::shared_ptr<const title::archive::Source>>> g_overlay_entries;
 std::map<std::string, std::shared_ptr<const title::archive::Rebuilt>> g_overlays;
+
+// Entries made when they are read (ArchiveEntry::make), the ones read last:
+// the title reads an entry in a few pieces, one entry after another, so a
+// few megabytes serve every read of an entry from one making of it.
+constexpr uint64_t kMadeLimit = 48u << 20; // bytes kept (one entry at least)
+struct Made {
+    const title::archive::Source* entry;
+    std::shared_ptr<const std::vector<uint8_t>> stored;
+};
+std::recursive_mutex g_made_mutex; // (making an entry may read another archive's made entry)
+std::list<Made> g_made;            // newest first
+
+// The bytes of an entry that is made when read; null if it cannot be made.
+std::shared_ptr<const std::vector<uint8_t>> made_entry(const title::archive::Source& entry) {
+    std::lock_guard lock(g_made_mutex);
+    for (auto it = g_made.begin(); it != g_made.end(); ++it) {
+        if (it->entry != &entry) continue;
+        g_made.splice(g_made.begin(), g_made, it);
+        return g_made.front().stored;
+    }
+    auto bytes = entry.make();
+    if (!bytes || bytes->size() != entry.size) {
+        static bool told = false;
+        if (!told) std::fprintf(stderr, "ttt2: warning: an added archive entry could not be read again (a file of a character pack changed or went away?)\n");
+        told = true;
+        return nullptr;
+    }
+    auto stored = std::make_shared<const std::vector<uint8_t>>(std::move(*bytes));
+    g_made.push_front(Made{&entry, stored});
+    uint64_t kept = 0;
+    for (auto it = g_made.begin(); it != g_made.end();) {
+        kept += it->stored->size();
+        it = kept > kMadeLimit && it != g_made.begin() ? g_made.erase(it) : std::next(it);
+    }
+    return stored;
+}
 
 struct File {
     bool archive = false;
@@ -309,18 +346,42 @@ void watch_entry_reads(std::function<void(uint32_t)> reader) {
     g_entry_readers.push_back(std::move(reader));
 }
 
-bool set_archive_entries(const std::string& archive, const std::map<uint32_t, std::vector<uint8_t>>& stored) {
+bool set_archive_entries(const std::string& archive, std::map<uint32_t, ArchiveEntry> added) {
+    {
     std::lock_guard lock(g_mutex);
     const auto ofs = read_underlying(archive + ".ofs", UINT64_MAX);
     const auto header = read_underlying(archive + ".bin", title::archive::kPayload);
     if (!ofs || !header) return false;
-    std::map<uint32_t, std::vector<uint8_t>> entries = g_overlay_entries[lower(archive)];
-    for (const auto& [hash, data] : stored) entries[hash] = data;
+    // (the entries so far and the new ones share their bytes with the rebuilt archive: nothing is copied)
+    auto entries = g_overlay_entries[lower(archive)];
+    for (auto& [hash, entry] : added) {
+        auto source = std::make_shared<title::archive::Source>();
+        if (entry.make) {
+            source->size = entry.size;
+            source->make = std::move(entry.make);
+        } else {
+            entry.stored.shrink_to_fit();
+            *source = title::archive::held(std::move(entry.stored));
+        }
+        entries[hash] = std::move(source);
+    }
     auto rebuilt = title::archive::rebuild(*ofs, *header, entries);
     if (!rebuilt) return false;
     g_overlay_entries[lower(archive)] = std::move(entries);
     g_overlays[lower(archive)] = std::make_shared<const title::archive::Rebuilt>(std::move(*rebuilt));
+    }
+    // The made entries kept are found by their address: one replaced just now
+    // may be freed and its address given to another. (After g_mutex: making an
+    // entry takes the two the other way round.)
+    std::lock_guard lock(g_made_mutex);
+    g_made.clear();
     return true;
+}
+
+bool set_archive_entries(const std::string& archive, const std::map<uint32_t, std::vector<uint8_t>>& stored) {
+    std::map<uint32_t, ArchiveEntry> entries;
+    for (const auto& [hash, data] : stored) entries[hash].stored = data;
+    return set_archive_entries(archive, std::move(entries));
 }
 
 void open_game(const fs::path& source) {
@@ -346,6 +407,8 @@ void set_save_root(const fs::path& root) {
     std::error_code ec;
     fs::create_directories(root, ec);
 }
+
+const fs::path& save_root() { return g_save_root; }
 
 std::optional<std::vector<uint8_t>> read_whole(std::string_view path) {
     int32_t handle;
@@ -441,14 +504,21 @@ Status read_file(int32_t handle, void* buffer, uint64_t size, std::optional<uint
             transferred = want;
         } else if (file.overlay) {
             auto* out = static_cast<uint8_t*>(buffer);
-            for (const title::archive::Piece& piece : file.overlay->bin) {
+            const auto& pieces = file.overlay->bin; // in the order of `at`, end to end
+            auto piece = std::upper_bound(pieces.begin(), pieces.end(), file.position,
+                                          [](uint64_t at, const title::archive::Piece& p) { return at < p.at; });
+            if (piece != pieces.begin()) --piece;
+            for (; piece != pieces.end() && transferred < want; ++piece) {
                 const uint64_t at = file.position + transferred;
-                if (transferred >= want) break;
-                if (piece.at + piece.size <= at || piece.at > at) continue;
-                const uint64_t n = std::min(want - transferred, piece.at + piece.size - at);
-                if (piece.data) {
-                    std::memcpy(out + transferred, piece.data->data() + (at - piece.at), n);
-                } else if (read_underlying(file, piece.source + (at - piece.at), n, out + transferred) != n) {
+                if (piece->at + piece->size <= at || piece->at > at) continue;
+                const uint64_t n = std::min(want - transferred, piece->at + piece->size - at);
+                if (piece->entry) { // an entry's bytes, held or made now; its padding and what cannot be made: zeros
+                    const auto data = piece->entry->data ? piece->entry->data : made_entry(*piece->entry);
+                    const uint64_t from = at - piece->at, have = data ? data->size() : 0;
+                    const uint64_t copied = from < have ? std::min(n, have - from) : 0;
+                    if (copied != 0) std::memcpy(out + transferred, data->data() + from, copied);
+                    std::memset(out + transferred + copied, 0, n - copied);
+                } else if (read_underlying(file, piece->source + (at - piece->at), n, out + transferred) != n) {
                     break;
                 }
                 transferred += n;

@@ -198,4 +198,16 @@ int main() {
     assert(!holds_sessions(supported("elz"), true) && !holds_sessions(supported("rei"), true) &&
            !holds_sessions(supported("mrz"), true));
     assert(!holds_sessions(supported("mrx"), false)); // Akuma: no sessions at all
+
+    // A move is read only when it is a row of the fighter's present moveset
+    // (while a stage loads, the pointer of the fight before is still there).
+    using cafe::title::eliza_assist::move_of_moveset;
+    const uint32_t com = cafe::title::eliza_assist::kMovesetMagic, moves = 0x33EAE1E4;
+    assert(move_of_moveset(com, moves, 2693, moves));
+    assert(move_of_moveset(com, moves, 2693, moves + 2692 * 0x70));
+    assert(!move_of_moveset(com, moves, 2693, moves + 2693 * 0x70)); // the table after it
+    assert(!move_of_moveset(com, moves, 2693, moves + 0x20));        // not a row
+    assert(!move_of_moveset(com, moves, 2693, moves - 0x70));
+    assert(!move_of_moveset(0x58E71400, 0x10000000, 403177472, 0x364519D0)); // a freed moveset
+    assert(!move_of_moveset(com, 0, 5, 0x70) && !move_of_moveset(com, moves, 0, moves));
 }

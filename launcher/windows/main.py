@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'upgrade', 'import', 'remove',
-                                                 'launcher', 'files'))
+                                                 'launcher', 'files', 'shaders'))
     parser.add_argument('--cancel-file', type=Path)
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')

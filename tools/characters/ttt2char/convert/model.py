@@ -359,7 +359,11 @@ def bake_albedo(eff, textures, grey=False):
     Hair (pass 1): lo = sat(BaseLowerContrast); s = (min(Up, 0) + min(Lo, 0) + 1) / (1 - (sat(Up) + sat(Lo)));
         albedo = sat((T - lo) s - min(Lo, 0)) * Color01; Noctis's (HairTipsAdd, a fixed gradient texture G):
         albedo = sat(T + HairTipsAdd G) * Color01.
-    Skin: lerp(D, luma(D), Desaturation) * Multiply (the view-dependent terms left out).
+    Skin (M_CH_skin_wet_SSP): lerp(D, luma(D), Desaturation) * Multiply (the view-dependent terms left out).
+        The other skin bases with the same terms (its _metallic one, M_CH_skin_wet, M_CH_skin_wet_ao_SSP) are baked
+        as the texture alone, as every released pack was: Tekken 7 draws Leroy (0.18) and Akuma (0.4) darker and
+        Noctis (0.8) warmer, but taking their terms changes how those fighters look in their own outfits, which
+        the wardrobe must not do (Noctis came out tanned); that is a change of its own.
     Anything else: its colour texture as it is.
     grey: a colour-customisable material's colour texture taken by its brightness alone (D's luma), its colours giving
     the hue (a definition's GREY: Noctis's outfit, blue-grey in Tekken 7 where its textures are mauve)."""
@@ -1002,6 +1006,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         # cloth Tekken 7 simulates: chains of bones like Lars's coat tails (cloth.py); a definition's CLOTH = False:
         # none
         cloths = cloth.find(paks, k, worn, log) if getattr(d, 'CLOTH', True) else []
+        for c in cloths if getattr(d, 'CLOTH_SLEEVES', ()) else ():
+            c['sleeves'] = tuple(d.CLOTH_SLEEVES)    # (a coat's sleeves along these arm joints: not draped, cloth.rig)
     if cloths:                                   # (the room the other extra bones leave: weapons up to 4 each)
         from . import snakes8, prefabs8          # (a definition's own SKELETON_BONES: Miary Zo's, with her snakes')
         room = getattr(d, 'SKELETON_BONES', cloth.SKELETON) - len(donor['names']) - sum(
@@ -1020,6 +1026,8 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
     else:
         cloth_chains = []
     cloth_chains = cloth_chains + bone_chains
+    if getattr(d, 'CLOTH_ORDER', None) == 'hair_last':
+        cloth_chains = cloth.hair_last(cloth_chains)
     skel = skeleton.build(k['bones'], donor)
     weight_maps = {tag: skeleton.weight_map(k['bones'], skel['names'], lambda i, tag=tag: tag)[0]
                    for tag, _ in worn}
@@ -1038,6 +1046,7 @@ def _convert(source, archives, d, slot=0, log=print, standing=None, weapons=None
         parents = [int(weight_maps[c['part']][c['parent']]) for c in cloth_chains]
         if (getattr(d, 'TEKKEN8', None) or {}).get('long_cloth'):
             parents = cloth.long_cloth_parents(cloth_chains, parents, skel['names'], d.TEKKEN8['long_cloth'])
+        parents = cloth.hang_from(cloth_chains, parents, skel['names'], getattr(d, 'CLOTH_PARENT', None))
         s0 = k['prims'][0]
         body = np.zeros(len(s0['pos']), bool)
         body[np.concatenate([p['tris'].reshape(-1) for p in k['prims']])] = True

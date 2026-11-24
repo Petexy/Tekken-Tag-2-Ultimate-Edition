@@ -505,6 +505,21 @@ HIT_NOW = 46                                         # TTT2: the move's attack h
 WHIFF8 = 48                                          # Tekken 8: the move's attack missed
 BLOCK_NOW = 49                                       # TTT2: the opponent blocked it (until his guard reaction starts)
 HELD = {HIT_NOW: 1, BLOCK_NOW: 2}                    # the latch's value for each
+# Recovery on block (BLOCK_RECOVERY8): Tekken 8's property 0x8401 with value 1 (as the move starts) sets the attacker's
+# +0xE5C to value2 (TKMovesets' SetValueE54OrE5C: value 0 sets +0xE54 instead), the frames the move recovers later
+# when it was blocked. Wavu's block advantage is the data's (the block reaction's end row - (the move's end row - its
+# first active frame)) less value2 for each of Miary Zo's six moves with it and a Wavu entry (d+1+2 and d/f+1,1,1+2 3,
+# f+3+4,2 and d/b+2,3 2, BAO.4 4, BAO.2 6: "Recovers 3f faster on hit"), the same as the data's for every other one
+# (89 named moves of hers and Reina's; her 3,2 and b+4 have value 0 only). TTT2 has no such state, and 0x8401 no
+# counterpart. A hit or a whiff keeps the move as converted (its end row, its clip played out while the fighter can
+# act); a block (49, in the move's active frames) goes on in a copy of the move whose end row is value2 frames
+# later, keeping the frame count (the same clip from that frame on), as TTT2's own moves recovering later on block
+# do (Law's Lw_2RLKiCDE -> Lw_2RLKiCDE_G, end row 55 -> 59; Lw_rk00 -> Lw_rk00E): the copy has no active frames,
+# no voice, no start or begin properties and of its property rows only those after its last active frame (the
+# move played the others: a summon again, a second sound)
+BLOCK_RECOVERY8 = {'t7': None, 't8': (0x8401, 1)}
+CONTINUE_EXTRA = tagcombo.KEEP_FRAMES | 1          # the copy goes on from the frame (TTT2's and Tekken 8's own rows)
+BLOCKED_SUFFIX = 'G'                               # the copy's name: the move's and G (guarded)
 # Electrics (the Mishimas' Electric Wind God Fist and its like). TTT2's own (Kazuya's Kz_shoryu_S; Heihachi's, Jin's
 # and Devil Jin's alike) carry: 0x8192 = 1 from the start (ELECTRIC_PROP: player +928 bit 0x2000, the electric spark
 # of sub_03AE2254), the common spark sound at frame 2 (0x82f9 0x0100002b: se_Btl_Battle's RES_BANK_SPK_L01, the same
@@ -605,6 +620,18 @@ UNSAID8, SILENT_SHOUT = 0x02009986, 0x020003E7
 # A win quote: TTT2's win poses play a tone of the fighter's se_Dwi bank with this property (value | tone); Tekken 7
 # plays its win quote by the pose's name. The donor's poses stay, with the animation of the quote at their tone.
 WIN_QUOTE_PROP, WIN_QUOTE_VALUE = 0x82F9, 0x0E003000
+# The donor's intros say an intro line (STREAM_LINE_PROP, STREAM_LINE_VALUE | n: line n of its rm_Dst bank, streamed)
+# and its match win poses a long win quote (STREAM_LINE_VALUE | 0x1000: its rm_Dwi bank's). A fighter with no intro
+# line (Converter.unsaid; convert/voice.py: those tones are silent; Tekken 8's Azazel has no intro line or win quote)
+# leaves the donor's lines out of the donor's intros it plays, and they say what its own intro move says at the same
+# frames (POSE_VOICES: its shouts and damage voices: Azazel's roars). The win poses keep these: their tones are
+# silent. The subtitle of a pose's line is a property of its own (SUBTITLE_PROP, in the move's begin properties:
+# value fighter id << 8 | line, entry id * 30 + line of the subtitle file 917395eb, shown by sub_04D32E08): the
+# donor's poses of a kind the fighter has no line of leave it out (Lars's "You think you can stop us?").
+STREAM_LINE_PROP, STREAM_LINE_VALUE = 0x8300, 0x0D000000
+SUBTITLE_PROP = 0x8180
+POSE_VOICES = (0x82F9, (2, 3))      # (the property, the voice types: shout n, damage voice n; convert/voice.py)
+POSE_KIND = re.compile(r'^[A-Za-z]+_([sw])')     # a donor's pose move: _s.. an intro (la_srm), _w.. a win (la_wnm_1)
 # Tekken 7's tiger (or any other summoned model) plays an animation of its own: 0x828f = the animation's index. TTT2
 # plays an animation of a fighter's extra (OPT) bones from part 3 of its motion pack with 0x82de = 0x4000 + its
 # index there (0x82df does the same in win poses only, 0x82e0 under another condition: Devil Jin's wings); the added
@@ -940,10 +967,28 @@ FLOAT8 = ('airborne_start', 'airborne_end', 'ground_fall')
 FLOAT8_NEAR = 4                   # frames a TTT2 launch may float longer or shorter (no TTT2 name)
 LYING = re.compile(r'^dw(?:DWN|KAM)_\d\d([UD])')       # the lying states a fall ends in: face up (U) or down (D)
 GUARD_FROM8, TT_GUARD_FROM = 0x81ec, 0x80ea
+# A move's state (its vuln word, the same bits in both games: TTT2's walks forward 0x10842, back 0x21052, stance 0x1952;
+# 0x10 guards highs and mids standing, 0x8 lows crouching) decides whether a hit is guarded while it plays. Tekken 8's
+# boss Azazel walks, dashes and steps in a state of his own, 0xe81a in its low bits (standing with both guards, and
+# 0xe000, which no TTT2 move has): moving forward he guarded highs, mids and lows, until he did a move (the user,
+# 2026-11-23: "his perma-armor that autoblocks"). No other of Tekken 8's 40 fighters has it: their same walks are
+# 0x10842 and 0x21052, their dashes 0x10842 or 0x90842. So the state becomes theirs (vuln8): moving forward standing
+# and guarding nothing (0x842), back or still standing and guarding highs and mids (0x1052); the direction bits over
+# it stay
+BOSS_GUARD8 = 0xE81A
+BOSS_GUARD8_AS = (0x842, 0x1052)                # (forward, otherwise)
+BOSS_GUARD8_FORWARD = 0x10000                  # the walks' and dashes' forward bit (back: 0x20000)
 # the reaction slots of an opponent on its feet (the downed, wall-slumped and guard slots are left as they were)
 STANDING_SLOTS = frozenset(('standing', 'default', 'crouch', 'ch', 'crouch_ch', 'left', 'crouch_left', 'right',
                             'crouch_right', 'back', 'crouch_back'))
 ANIM_KEY_BYTES = 256                 # animations are matched by a hash of their first bytes
+
+
+def vuln8(v):
+    """A Tekken 8 move's vuln as a TTT2 move's: the boss's guarding state (BOSS_GUARD8) as an ordinary fighter's."""
+    if v & 0xFFFF != BOSS_GUARD8:
+        return v
+    return v & ~0xFFFF | BOSS_GUARD8_AS[0 if v & BOSS_GUARD8_FORWARD else 1]
 
 
 def state_flags(moveset):
@@ -1207,6 +1252,8 @@ class Converter:
         self.posed_hands = {}           # donor pose part -> (Tekken 8 move, holding its last frame) (pose_sequence)
         self.hand8_shapes = {}          # hand shapes frame -> its values (hands8_generic)
         self.posed = set()              # the donor's intro and win pose moves playing the fighter's animations
+        self.unsaid = frozenset()       # the kinds of lines ('intro', 'win') the fighter has none of (the importer's)
+        self.intro_voices = {}          # donor intro part -> the Tekken 7/8 move whose voice it says (own_intro_voices)
         self.usage = usage
         self.stats = collections.Counter()
         self.unmapped = collections.Counter()
@@ -1914,6 +1961,60 @@ class Converter:
                 {'condition': now, 'param': 0}] + tests + [{'condition': LATCH_PROP['ttt2'] + 3 * k, 'param': value},
                                                            {'condition': TT_END, 'param': 0}])
         return dict(self.action_row(self._hit_sets[k, value], 1), win_end=32767)
+
+    def block_recovery8(self):
+        """BLOCK_RECOVERY8: each of the fighter's moves recovering later on block gets a copy (its clip, the converted
+        cancel list with the end row that much later, no active frames, the property rows after its last active one)
+        and, in its active frames, an automatic row into the copy on a block (49) keeping the frame count."""
+        spec = BLOCK_RECOVERY8[self.game]
+        if not spec:
+            return
+        prop, selector = spec
+        P, E = self.T['extra_move_properties'], self.T['cancel_extras']
+        lists, blocked, go_on = {}, None, None
+        for i, mv in enumerate(self.k.tables['moves']):
+            if i not in self.newidx:
+                continue
+            extra = max((x['value2'] for _, x in self.k.iter_list('extra_move_properties', mv.get('extraprops'),
+                                                                   lambda x: x['id'] == 0 and x['frame'] == 0)
+                         if x['id'] == prop and x['value'] == selector and x['frame'] >= 0x8000), default=0)
+            if extra <= 0:
+                continue
+            idx = self.newidx[i]
+            move = self.T['moves'][idx]
+            cl = [dict(c) for c in tagsystem.cancels(self.T, move['cancel'])]
+            if not cl or cl[-1]['direction'] != M.LIST_END or not 0 < cl[-1]['win_start'] < 0x7FFF:
+                self.stats['Tekken 8 recovery on block: moves without an end row (left as they are)'] += 1
+                continue
+            fa, la, end = move['first_active'], move['last_active'], cl[-1]
+            if not 0 < fa <= la < end['win_start']:
+                self.stats['Tekken 8 recovery on block: moves without active frames before the end row (left as '
+                           'they are)'] += 1
+                continue
+            if blocked is None:
+                blocked = tagsystem.write(self.T, 'requirements', [{'condition': BLOCK_NOW, 'param': 0},
+                                                                   {'condition': TT_END, 'param': 0}])
+                go_on = next((n for n, x in enumerate(E) if x['value'] == CONTINUE_EXTRA), None)
+                if go_on is None:
+                    go_on = len(E)
+                    E.append(dict(value=CONTINUE_EXTRA))
+            if (move['cancel'], extra) not in lists:
+                late = dict(end, win_start=end['win_start'] + extra,
+                            start_frame=end['start_frame'] + extra if end['start_frame'] == end['win_start']
+                            else end['start_frame'])
+                lists[move['cancel'], extra] = tagsystem.write(self.T, 'cancels', cl[:-1] + [late])
+            later = [dict(x) for x in tagsystem.props(self.T, move['extraprops'])
+                     if la < x['frame'] < PLAIN_FRAME] if move['extraprops'] is not None else []
+            copy = dict(move, name=self.string(self.move_name(idx) + BLOCKED_SUFFIX),
+                        cancel=lists[move['cancel'], extra], first_active=0, last_active=0, begin_props=None,
+                        voiceclip=None, extraprops=len(P) if later else None)
+            if later:
+                P += later + [dict(frame=0, id=0, value=0)]
+            self.T['moves'].append(copy)
+            into = dict(end, direction=0, button=0, win_start=fa, win_end=la, start_frame=fa,
+                        move_id=len(self.T['moves']) - 1, req=blocked, extradata=go_on)
+            move['cancel'] = tagsystem.write(self.T, 'cancels', cl[:-1] + [into, end])
+            self.stats['Tekken 8 recovery on block: moves recovering later when blocked'] += 1
 
     def conv_reqs(self, i, overrides=None):
         """A Tekken 7 requirement list -> (the new list's index, ok); ok False: the list can never be true."""
@@ -2665,7 +2766,9 @@ class Converter:
             self.stats['Tekken 8 trails left out (no clip or weapon)'] += 1
             return
         rows.append(dict(frame=f, id=EFFECT_PROP, value=0))
-        self.trail_rows.append((rows[-1], (self.k.anim_ref(move)[0], start, frames, v), trail))
+        key = (self.k.anim_ref(move)[0], start, frames, v)
+        skip = self.trail_sampler.skip_of(move) if hasattr(self.trail_sampler, 'skip_of') else 0
+        self.trail_rows.append((rows[-1], key + (('skip', skip),) if skip else key, trail))   # (as its clip plays)
         self.stats['Tekken 8 trails'] += 1
 
     def disk8_rows(self, rows, f, idv, v, req, move):
@@ -3926,8 +4029,12 @@ class Converter:
 
     def anim8(self, i):
         """The TTT2 animation id of Tekken 8 move i (ANIMATIONS): a 'G' move's of the same key, else the provider's
-        (appended when it gives bytes), else the donor stance's."""
+        (appended when it gives bytes), else the donor stance's. A move that starts its clip at a later frame (motbin
+        anim_skip) asks for the clip from there: its own animation."""
         ref = tuple(self.k.anim_ref(i))
+        skip = self.anim_skip8(i)
+        if skip:
+            ref += (skip,)
         if ref not in self.anim_id:
             if ref[0] in self.generic_anim:
                 aid = self.generic_anim[ref[0]]
@@ -3954,6 +4061,16 @@ class Converter:
             self.anim_id[ref] = aid
         return self.anim_id[ref]
 
+    def anim_skip8(self, i):
+        """The frames of its clip Tekken 8 move i's animation leaves out (motbin anim_skip): none for a clip a 'G' move
+        plays (the donor's) or one the provider gives whole (Animations.played)."""
+        key, bank = self.k.anim_ref(i)[:2]
+        skip = self.k.anim_skip(i) if bank is not None and hasattr(self.k, 'anim_skip') else 0
+        if not skip or key in self.generic_anim:
+            return 0
+        played = getattr(self.animations, 'played', None)
+        return played(key, skip) if played is not None else skip
+
     def move_anim(self, i):
         """The TTT2 animation id of the fighter's move i."""
         return self.anim(self.k.tables['moves'][i]['anim']) if self.game == 't7' else self.anim8(i)
@@ -3974,7 +4091,8 @@ class Converter:
     def conv_move(self, i):
         mv = self.k.tables['moves'][i]
         return dict(name=self.string(self.ttt2_name(i)), anim_name=self.string(self.k.anim_name(i)),
-                    anim=self.move_anim(i), vuln=mv['vuln'], hitlevel=mv['hitlevel'], cancel=None, cancel2=0,
+                    anim=self.move_anim(i), vuln=vuln8(mv['vuln']) if self.game == 't8' else mv['vuln'],
+                    hitlevel=mv['hitlevel'], cancel=None, cancel2=0,
                     c2_int=0, cancel3=0, c3_int=0, cancel4=0, c4_int=0, transition=0, m_56=mv['m_56'],
                     move_id_hi=0, move_id_lo=0, hit_condition=None, anim_len=0,
                     airborne_start=mv['airborne_start'], airborne_end=mv['airborne_end'],
@@ -4028,6 +4146,7 @@ class Converter:
         for i in keep:
             self.link_move(i, counterpart)
         self.link_queued(counterpart)
+        self.own_intro_voices()
         self.rebuild_hubs()
         self.own_transitions()
         self.link_queued(counterpart)          # Tekken 7 generic movement states the last two reached
@@ -4081,6 +4200,7 @@ class Converter:
             self.throw_pairs8()             # (THROW_PAIRS8: after the hand-offs, which may copy clips)
         self.flag8_rows()                   # Tekken 8's flag slots: the properties that set or test them (FLAG8)
         if self.game == 't8':
+            self.block_recovery8()          # Tekken 8's later recovery on block (BLOCK_RECOVERY8)
             self.bake_air8()                # (last: copies of whole moves)
             self.guard_copies_final8()      # (... and the guard copies of the donor's moves, as those are now)
         # every move belongs to the new motion row
@@ -4432,6 +4552,76 @@ class Converter:
                     row['anim'] = self.hold(t7, frames)
                     self.stats['donor pose parts holding her pose'] += 1
                     self.posed_hands[m] = (t7, True)
+        kind = POSE_KIND.match(d.move_name(j))
+        if kind and {'s': 'intro', 'w': 'win'}[kind.group(1).lower()] in self.unsaid:
+            for m in order:
+                self.T['moves'][m]['begin_props'] = self.unsaid_subtitles(self.T['moves'][m]['begin_props'])
+        if kind and kind.group(1).lower() == 's' and 'intro' in self.unsaid:     # (a win pose's quote: silent tones)
+            for m in order:
+                self.T['moves'][m]['extraprops'] = self.unsaid_lines(self.T['moves'][m]['extraprops'], [])
+            first = next((m for m in order if not d.anim_name(m).startswith('co_dummy')), None)
+            if first is not None:
+                self.intro_voices[first] = t7              # (own_intro_voices: once its moves are linked)
+
+    def own_intro_voices(self):
+        """The donor's intros a fighter with no intro line plays (pose_sequence): their first part says what the
+        fighter's own intro move says, at its frames (after the links: a converted move's properties are made
+        there)."""
+        for m, t7 in self.intro_voices.items():
+            row = self.T['moves'][m]
+            row['extraprops'] = self.unsaid_lines(row['extraprops'], self.own_voices(t7))
+
+    def own_voices(self, t7):
+        """The voice rows (POSE_VOICES) of Tekken 7/8 move t7 as converted: [(frame, id, value)] dicts."""
+        new = self.newidx.get(t7)
+        start = self.T['moves'][new]['extraprops'] if new is not None else None
+        table, rows = self.T['extra_move_properties'], []
+        while start is not None and start < len(table) and not (table[start]['id'] == 0 and table[start]['frame'] == 0):
+            r = table[start]
+            if r['id'] == POSE_VOICES[0] and r['value'] >> 24 in POSE_VOICES[1]:
+                rows.append(dict(r))
+            start += 1
+        return rows
+
+    def unsaid_subtitles(self, start):
+        """A donor pose part's begin property list (at `start`) without the donor's subtitles (SUBTITLE_PROP) -> the
+        list's index (`start` when nothing changes, None when nothing is left)."""
+        table, rows = self.T['move_begin_props'], []
+        at = start
+        while at is not None and at < len(table) and table[at]['id'] != TT_END:
+            rows.append(dict(table[at]))
+            at += 1
+        kept = [r for r in rows if r['id'] != SUBTITLE_PROP]
+        if len(kept) == len(rows):
+            return start
+        self.stats['donor pose parts: the donor\'s subtitles left out (no line of the fighter\'s)'] += len(rows) - len(kept)
+        if not kept:
+            return None
+        out = len(table)
+        table += kept + [dict(req=0, id=TT_END, value=0)]
+        return out
+
+    def unsaid_lines(self, start, own):
+        """A donor pose part's property list (at `start`) without the donor's lines (STREAM_LINE_PROP's, win quotes),
+        with the fighter's own voice rows `own` among its frames -> the list's index (`start` when nothing changes)."""
+        table, rows = self.T['extra_move_properties'], []
+        at = start
+        while at is not None and at < len(table) and not (table[at]['id'] == 0 and table[at]['frame'] == 0):
+            rows.append(dict(table[at]))
+            at += 1
+        kept = [r for r in rows if not (r['id'] == STREAM_LINE_PROP and r['value'] & 0xFF000000 == STREAM_LINE_VALUE or
+                                        r['id'] == WIN_QUOTE_PROP and r['value'] & 0xFFFFF000 == WIN_QUOTE_VALUE)]
+        if len(kept) == len(rows) and not own:
+            return start
+        self.stats['donor pose parts: the donor\'s lines left out (no line of the fighter\'s)'] += len(rows) - len(kept)
+        for r in own:                   # (among the frames, as the direct damage rows are put)
+            kept.insert(next((n for n, x in enumerate(kept) if r['frame'] < x['frame'] < 0x8000), len(kept)), r)
+            self.stats['donor intros: voice rows of the fighter\'s own intro'] += 1
+        if not kept:
+            return None
+        out = len(table)
+        table += kept + [dict(frame=0, id=0, value=0)]
+        return out
 
     def handoffs8(self):
         """Tekken 8: a converted clip keeps HARA_ROT1 upright, TTT2's lying (and other) moves hold the body's

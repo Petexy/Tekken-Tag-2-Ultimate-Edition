@@ -54,21 +54,45 @@
 // Azazel stoops, his head 2.2 to 2.4 m up as he stands, and comes down from
 // the sky in his intro.)
 //
+// An added fighter of a man's size has the win poses' camera animations go
+// with him (title/win_shot.h, win_scene() below): the donor's shot is made
+// for the donor's pose, and his own goes elsewhere.
+//
+// The intros stand each fighter before an LED wall (an effect of the
+// "entry" scene: sub_07AD75C8 sets it up for a side, sub_07AD60F0, and
+// places it, 6 m behind the fighter and as big as a man's shots need). The
+// effect takes its place and size once, as it starts: moving it later does
+// not move what is drawn. A giant's scaled intro shots looked past it: a lit
+// band or rectangle in black, with him over its edges. A giant's wall is
+// placed as it is set up as his shots are: about his head, as much bigger
+// (giant_wall(): the same scaling of the scene about the same points shows
+// what a man's shot shows), and kWallMargin bigger again (his shots also
+// turn to his head and go back for a close-up).
+//
 // The KO's slow motion and replays (tcb_camera_replay_t) and the throws'
 // camera (tcb_camera_throw_t) frame a man from a man's distance: with a
 // giant in the fight their shots go up and back until both fighters are in
 // the picture (contain()).
 //
-// Fights without such a fighter, and every other camera (tcb_camera_win_t),
-// are the title's own.
+// The round call ("ROUND 1", "READY", "FIGHT": tcb_camera_win_t in its
+// states 0x11 to 0x13, sub_061A9D34) comes round the two fighters to where
+// the fight's camera is, at its distance but at the title's own height for
+// two men: its shot goes up by what the fight's camera went up, and the call
+// from above (0x12), which comes down level with its point, comes down to
+// the fight camera's tilt: it ends where that begins (title/round_call.h).
+//
+// Fights without such a fighter, and the win camera's other states (the win
+// scene), are the title's own.
 //
 // TTT2_TRACE_CAMERA=1 logs each change; 2 also every camera the
 // 2-character camera makes.
 
 #include "title/fight_camera.h"
+#include "title/round_call.h"
 
 #include "title/giant_body.h"
 #include "title/roster.h"
+#include "title/win_shot.h"
 
 #include "cafe/ppc_ops.h"
 
@@ -78,6 +102,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <string_view>
 #include <vector>
 
 namespace cafe::title::fight_camera {
@@ -158,10 +183,13 @@ Extent body_extent(uint8_t* base, uint32_t player) {
 }
 float body_top(uint8_t* base, uint32_t player) { return body_extent(base, player).top; }
 
-// How fast a giant's lowest point rises (mm a frame; his frames: his move's frame or his move changes).
+// How fast a giant's lowest point rises (mm a frame; his frames: his move's frame or his move changes). A rise counts
+// from its second frame on: what it rose in one frame and not the next is a new pose (his body's spheres take the
+// round's stance a frame after the round puts him in place: 0.33 m up from the intro's last pose, and the round
+// call's second frame went 2.5 m further out for that frame).
 struct Rise {
     uint32_t move = 0, frame = 0;
-    float lowest = NAN, speed = 0;
+    float lowest = NAN, rose = 0, speed = 0;
 };
 std::map<uint32_t, Rise> g_rises; // by fighter
 
@@ -169,12 +197,54 @@ float rising(uint8_t* base, uint32_t player, float lowest) {
     Rise& r = g_rises[player];
     const uint32_t move = ppc::ld32(base, player + kPlayerMove), frame = ppc::ld32(base, player + kPlayerMoveFrame);
     if (move != r.move || frame != r.frame) {
-        r.speed = std::isnan(r.lowest) ? 0.0f : std::clamp(lowest - r.lowest, 0.0f, 1000.0f);
+        const float rose = std::isnan(r.lowest) ? 0.0f : std::clamp(lowest - r.lowest, 0.0f, 1000.0f);
+        r.speed = std::min(rose, r.rose);
+        r.rose = rose;
         r.move = move;
         r.frame = frame;
         r.lowest = lowest;
     }
     return r.speed;
+}
+
+// A fighter's body's middle across the floor: the mean of his spheres (inside a move his body runs up to a metre
+// ahead of or behind his position, which the title moves on at the move's end), or his position while his spheres
+// are still where the title took him from: they follow a new place (a round's start, his position more than a metre
+// away at once) only a frame later, and at the start of a round after a knockout 10 m away the camera went out to
+// its 15 m limit for the round call's first frame. (The camera runs several times in that frame, his move changing
+// in between: so it goes by his spheres, which stay as they were until they follow.)
+struct Place {
+    float x = NAN, z = NAN, stale_x = NAN, stale_z = NAN;
+};
+std::map<uint32_t, Place> g_places; // by fighter
+
+void body_middle(uint8_t* base, uint32_t player, float& x, float& z) {
+    float mx = 0, mz = 0;
+    int n = 0;
+    for (uint32_t i = 0; i < kBodySphereCount; ++i) {
+        const uint32_t at = player + kBodySpheres + kBodySphereSize * i;
+        const float sx = ldf(base, at), sz = ldf(base, at + 8);
+        if (!std::isfinite(sx) || !std::isfinite(sz)) continue;
+        mx += sx;
+        mz += sz;
+        ++n;
+    }
+    const float px = ldf(base, player), pz = ldf(base, player + 8);
+    Place& q = g_places[player];
+    if (std::hypot(px - q.x, pz - q.z) > 1000) { // (put in a new place: his spheres where he was)
+        q.stale_x = mx;
+        q.stale_z = mz;
+    }
+    q.x = px;
+    q.z = pz;
+    if (n && mx == q.stale_x && mz == q.stale_z) {
+        x = px;
+        z = pz;
+        return;
+    }
+    q.stale_x = q.stale_z = NAN;
+    x = n ? mx / n : px;
+    z = n ? mz / n : pz;
 }
 
 // The giants the 2-character camera frames now (while it runs).
@@ -200,6 +270,10 @@ float picture_aspect(uint8_t* base) {
     }
     return 16.0f / 9;
 }
+
+// How far up the 2-character camera's last result went for a giant (mm; 0: it was the title's own).
+// g_level: that camera's eye over the point it looks at.
+float g_lift = 0, g_level = 0;
 
 // The 2-character camera's result `camera` with the giants in it.
 void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const float heights[2]) {
@@ -230,19 +304,9 @@ void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const flo
         const Extent body = body_extent(base, p);
         const float lowest = std::isfinite(body.bottom) ? std::max(body.bottom, floor) : floor;
         top = std::max({top, lowest + rising(base, p, lowest) * kLead + heights[k], body.top + heights[k] * kOverBody});
-        // (his body's middle across the floor, the mean of his spheres: inside a move his body runs up to a metre
-        // ahead of or behind his position, which the title moves on at the move's end)
-        float mx = 0, mz = 0;
-        int n = 0;
-        for (uint32_t i = 0; i < kBodySphereCount; ++i) {
-            const uint32_t at = p + kBodySpheres + kBodySphereSize * i;
-            const float sx = ldf(base, at), sz = ldf(base, at + 8);
-            if (!std::isfinite(sx) || !std::isfinite(sz)) continue;
-            mx += sx;
-            mz += sz;
-            ++n;
-        }
-        const float x = (n ? mx / n : ldf(base, p)) - target[0], z = (n ? mz / n : ldf(base, p + 8)) - target[2];
+        float mx, mz; // (his body's middle across the floor)
+        body_middle(base, p, mx, mz);
+        const float x = mx - target[0], z = mz - target[2];
         const float side = std::fabs(x * right[0] + z * right[1]), depth = x * forward[0] + z * forward[2];
         needed = std::max(needed, (side + heights[k] * kInFromSide) / wide - depth);
     }
@@ -263,6 +327,8 @@ void frame(uint8_t* base, uint32_t camera, const uint32_t fighters[2], const flo
         return;
     }
     const float middle = bottom + needed * high; // the picture's bottom kept
+    g_lift = middle - target[1];
+    g_level = -forward[1] * needed;
     for (int k = 0; k < 3; ++k) {
         const float t = target[k] + (k == 1 ? middle - target[1] : 0);
         stf(base, camera + kCameraTarget + 4 * k, t);
@@ -422,6 +488,34 @@ void contain(uint8_t* base, uint32_t camera, const View& view) {
                      ppc::ld32(base, g_pair[1] + kPlayerSelectId), lift, back, eye[0], eye[1], eye[2], fov);
 }
 
+// The round call's shot (the win camera's, +304 eye, +320 the point it looks at, as it comes round the two fighters
+// in play) with a giant among them: up by what the fight's camera went up, its eye only as it comes down to that
+// camera's height (round_call.h).
+constexpr uint32_t kWinShot = 304, kWinTarget = 320, kWinState = 408;
+constexpr uint32_t kCallFromAbove = 0x12;
+
+void round_call_after(uint8_t* base, uint32_t camera) {
+    bool giant = false;
+    for (const uint32_t p : g_pair)
+        if (is_player(base, p) && height_of(p) > 0) giant = true;
+    if (!giant) return;
+    float eye[3], target[3];
+    for (int k = 0; k < 3; ++k) {
+        eye[k] = ldf(base, camera + kWinShot + 4 * k);
+        target[k] = ldf(base, camera + kWinTarget + 4 * k);
+    }
+    const uint32_t state = ppc::ld32(base, camera + kWinState);
+    const float over = eye[1] - target[1]; // (the title's own)
+    if (!round_call::raise(eye, target, g_lift, g_level)) return;
+    if (state == kCallFromAbove) eye[1] = target[1] + round_call::from_above(over, g_lift, g_level);
+    stf(base, camera + kWinShot + 4, eye[1]);
+    stf(base, camera + kWinTarget + 4, target[1]);
+    if (trace())
+        std::fprintf(stderr, "ttt2: camera: round call with a giant (sid %u %u, state %u): up %.0f, level %.0f (eye %.0f %.0f %.0f, point %.0f %.0f %.0f)\n",
+                     ppc::ld32(base, g_pair[0] + kPlayerSelectId), ppc::ld32(base, g_pair[1] + kPlayerSelectId), state,
+                     g_lift, g_level, eye[0], eye[1], eye[2], target[0], target[1], target[2]);
+}
+
 // A camera animation's camera playing for a giant: its shot as the animation made it (restored before its next frame,
 // so the camera never runs on a scaled shot), scaled about his place on the floor as its animation started.
 struct Motion {
@@ -429,8 +523,62 @@ struct Motion {
     float centre[3] = {}, head[3] = {};
     float shot[6] = {};
     bool scaled = false;
+    uint32_t move = 0; // (win_scene)
+    float seen[3] = {}; // (win_scene) his head as last read
 };
 std::map<uint32_t, Motion> g_motions; // by camera
+
+// The intros' LED wall: the effect of the wall's object (sub_07AD75C8's scene +608, the effect at +228); an effect's
+// place (+944, or +1028 for one its file marks so: +92 bit 0x80, as sub_08BE5688 puts it) and scale (+1024,
+// sub_08BE5FC4's: its matrix's, sub_08BDE41C) count as it starts.
+constexpr uint32_t kSceneWall = 608, kWallEffect = 228;
+constexpr uint32_t kEffectFile = 932, kEffectScale = 1024, kEffectPlace = 944, kEffectPlaceMarked = 1028;
+constexpr uint32_t kFileFlags = 92, kFileMarked = 0x80;
+constexpr uint32_t kPlayerActive = 7808; // 0: the side's first member is out, its partner plays (sub_05C5EF14)
+constexpr float kWallMargin = 1.4f;      // the giant's wall this much bigger again, about his head
+
+// The wall of a side's intro (sub_07AD75C8 set it up for the side's fighter in play): for a giant, placed and sized
+// as his intro shots are scaled (motion_after(): what a man's shot has at a man's head, his shot has at his head,
+// his body's size times as far).
+void giant_wall(uint8_t* base, uint32_t scene, uint32_t side) {
+    if (side > 1) return;
+    uint32_t player = ppc::ld32(base, kSidePlayers + 4 * side);
+    if (player && !ppc::ld32(base, player + kPlayerActive)) player = ppc::ld32(base, player + kPlayerPartner);
+    if (!is_player(base, player)) return;
+    const float scale = giant_body::scale_of(player);
+    if (!(scale > 1)) return;
+    const uint32_t wall = ppc::ld32(base, scene + kSceneWall);
+    const uint32_t effect = wall ? ppc::ld32(base, wall + kWallEffect) : 0;
+    const uint32_t file = effect ? ppc::ld32(base, effect + kEffectFile) : 0;
+    if (!file) return;
+    const uint32_t at = ppc::ld32(base, file + kFileFlags) & kFileMarked ? kEffectPlaceMarked : kEffectPlace;
+    const float centre[3] = {ldf(base, player), ldf(base, player + kPlayerFloor), ldf(base, player + 8)};
+    // His head: as his standing pose has it (the highest of his spheres; a man's head grown by his size if that is
+    // not between a man's and that).
+    float head[3] = {centre[0], centre[1] + kManHead * scale, centre[2]}, highest = -INFINITY;
+    for (uint32_t i = 0; i < kBodySphereCount; ++i) {
+        const uint32_t s = player + kBodySpheres + kBodySphereSize * i;
+        const float c[3] = {ldf(base, s), ldf(base, s + 4), ldf(base, s + 8)};
+        if (std::isfinite(c[0]) && std::isfinite(c[1]) && std::isfinite(c[2]) && c[1] > highest) {
+            highest = c[1];
+            if (c[1] - centre[1] > kManHead && c[1] - centre[1] < kManHead * scale) std::copy(c, c + 3, head);
+        }
+    }
+    float place[3];
+    for (int k = 0; k < 3; ++k) {
+        const float from = centre[k] + (k == 1 ? kManHead : 0);
+        place[k] = head[k] + scale * (ldf(base, effect + at + 4 * k) - from);
+    }
+    const float was = ldf(base, effect + kEffectScale), grown = was * scale * kWallMargin;
+    if (!std::isfinite(place[0]) || !std::isfinite(place[1]) || !std::isfinite(place[2]) || !std::isfinite(grown)) return;
+    if (trace())
+        std::fprintf(stderr, "ttt2: camera: the intro's LED wall for a giant (sid %u, head %.0f %.0f %.0f): %.0f %.0f %.0f "
+                     "scale %.2f (the title's %.0f %.0f %.0f scale %.2f)\n", ppc::ld32(base, player + kPlayerSelectId),
+                     head[0], head[1], head[2], place[0], place[1], place[2], grown, ldf(base, effect + at),
+                     ldf(base, effect + at + 4), ldf(base, effect + at + 8), was);
+    for (int k = 0; k < 3; ++k) stf(base, effect + at + 4 * k, place[k]);
+    stf(base, effect + kEffectScale, grown);
+}
 
 void motion_before(uint8_t* base, uint32_t camera) {
     const auto it = g_motions.find(camera);
@@ -442,11 +590,65 @@ void motion_before(uint8_t* base, uint32_t camera) {
     it->second.scaled = false;
 }
 
+// The win scene's shot of an added fighter of a man's size (title/win_shot.h): the donor's camera animation, made
+// for the donor's pose, goes with the fighter's own. -> whether the camera's shot is such a one (its Motion is then
+// kept: motion_before puts the animation's shot back before the camera's next frame).
+constexpr uint32_t kPlayerAlone = 1012; // nonzero: no team (+172 is set all the same)
+constexpr uint32_t kHeadSphere = 8;     // of a fighter's 14: its head's
+
+bool win_scene(uint8_t* base, uint32_t camera, uint32_t player) {
+    if (!is_player(base, player) || added_slot(player) < 0) return false;
+    const uint32_t move = ppc::ld32(base, player + kPlayerMove), name = move ? ppc::ld32(base, move) : 0;
+    if (!name) return false;
+    const char* text = reinterpret_cast<const char*>(base + name);
+    if (!win_shot::films_one(std::string_view(text, strnlen(text, 64)), ppc::ld32(base, player + kPlayerAlone) != 0))
+        return false;
+
+    Motion& m = g_motions[camera];
+    const uint32_t frame = ppc::ld32(base, camera + kMotionFrame);
+    const bool starts = m.player != player || m.move != move || frame < m.frame;
+    m.player = player, m.move = move, m.frame = frame, m.scaled = false;
+    // Where the shot expects a head (a man's, over the fighter's place: its pose leaves that where it is) and where
+    // his is (his place's, until his body's spheres are his pose's: they are the last scene's for a frame).
+    const float expected[3] = {ldf(base, player), ldf(base, player + kPlayerFloor) + win_shot::kManHead, ldf(base, player + 8)};
+    const uint32_t at = player + kBodySpheres + kBodySphereSize * kHeadSphere;
+    float head[3] = {ldf(base, at), ldf(base, at + 4), ldf(base, at + 8)};
+    if (starts) std::copy(expected, expected + 3, m.seen);
+    if (win_shot::plausible(expected, m.seen, head)) std::copy(head, head + 3, m.seen);
+    else std::copy(expected, expected + 3, head);
+    for (int k = 0; k < 3; ++k) m.head[k] = starts ? expected[k] : m.head[k] + kHeadEase * (head[k] - m.head[k]);
+    for (int k = 0; k < 3; ++k) {
+        m.shot[k] = ldf(base, camera + kMotionShot + 4 * k);
+        m.shot[3 + k] = ldf(base, camera + kMotionTarget + 4 * k);
+    }
+    for (float v : m.shot)
+        if (!std::isfinite(v)) return true;
+    float eye[3], target[3];
+    std::copy(m.shot, m.shot + 3, eye);
+    std::copy(m.shot + 3, m.shot + 6, target);
+    const float fov = ldf(base, camera + kMotionFov);
+    win_shot::follow(eye, target, expected, m.head);
+    // (his head as it is, not as the shot's move has eased it: a pose that runs leaves the eased one behind)
+    const bool turned = win_shot::keep(eye, target, head, fov, picture_aspect(base));
+    for (int k = 0; k < 3; ++k) {
+        stf(base, camera + kMotionShot + 4 * k, eye[k]);
+        stf(base, camera + kMotionTarget + 4 * k, target[k]);
+    }
+    m.scaled = true;
+    if (trace() && (trace() >= 2 || starts || frame % 10 == 0))
+        std::fprintf(stderr, "ttt2: camera: win shot for sid %u frame %u%s: head %.0f %.0f %.0f, expected %.0f %.0f %.0f%s, fov %.1f: eye %.0f %.0f %.0f target %.0f %.0f %.0f -> eye %.0f %.0f %.0f target %.0f %.0f %.0f\n",
+                     ppc::ld32(base, player + kPlayerSelectId), frame, starts ? " (starts)" : "", m.head[0], m.head[1],
+                     m.head[2], expected[0], expected[1], expected[2], turned ? ", turned" : "", fov, m.shot[0],
+                     m.shot[1], m.shot[2], m.shot[3], m.shot[4], m.shot[5], eye[0], eye[1], eye[2], target[0],
+                     target[1], target[2]);
+    return true;
+}
+
 void motion_after(uint8_t* base, uint32_t camera) {
     const uint32_t player = ppc::ld32(base, camera + kMotionPlayer);
     const float height = is_player(base, player) ? height_of(player) : 0;
     if (height <= 0) {
-        g_motions.erase(camera);
+        if (!win_scene(base, camera, player)) g_motions.erase(camera);
         return;
     }
     Motion& m = g_motions[camera];
@@ -578,6 +780,13 @@ PPC_FUNC(sub_05FBE5B4) {
     motion_after(base, camera);
 }
 
+PPC_FUNC(sub_07AD75C8_orig); // the intros' LED wall of a side (r3 the entry scene, r4 the side): set up and placed
+PPC_FUNC(sub_07AD75C8) {
+    const uint32_t scene = ctx.r[3], side = ctx.r[4];
+    sub_07AD75C8_orig(ctx, base);
+    giant_wall(base, scene, side);
+}
+
 PPC_FUNC(sub_060B44E4_orig); // the replay camera's frame (r3 the camera): the KO's slow motion, replays
 PPC_FUNC(sub_060B44E4) {
     const uint32_t camera = ctx.r[3];
@@ -597,6 +806,15 @@ PPC_FUNC(sub_06130C84) {
     if (playing) contain(base, camera, kThrowView);
 }
 
+PPC_FUNC(sub_061A9D34_orig); // the win camera's frame in the round call (r3 the camera; its states 0x11 to 0x13)
+PPC_FUNC(sub_061A9D34) {
+    const uint32_t camera = ctx.r[3];
+    sub_061A9D34_orig(ctx, base);
+    // (still calling: the frame that ends the round call puts the camera's idle shot there)
+    if (const uint32_t state = ppc::ld32(base, camera + kWinState); state >= 0x11 && state <= 0x13)
+        round_call_after(base, camera);
+}
+
 PPC_FUNC(sub_05FB6FEC_orig); // a fighter's focus point (r3 out: x y z, r4 &fighter)
 PPC_FUNC(sub_05FB6FEC) {
     const uint32_t out = ctx.r[3], player = ctx.r[4] ? ppc::ld32(base, ctx.r[4]) : 0;
@@ -611,7 +829,7 @@ PPC_FUNC(sub_05FC085C_orig); // the 2-character camera (r3 out, r4 r5 cameras, r
 PPC_FUNC(sub_05FC085C) {
     const uint32_t camera = ctx.r[3], fighters[2] = {ctx.r[6], ctx.r[7]};
     const float heights[2] = {height_of(fighters[0]), height_of(fighters[1])};
-    if (fighters[0] && fighters[1]) g_pair[0] = fighters[0], g_pair[1] = fighters[1];
+    if (fighters[0] && fighters[1]) g_pair[0] = fighters[0], g_pair[1] = fighters[1], g_lift = 0;
     // (Without both fighters and their moves the title makes no camera: sub_05FC085C returns at once.)
     const bool giant = fighters[0] && fighters[1] && (heights[0] > 0 || heights[1] > 0) &&
                        ppc::ld32(base, fighters[0] + kPlayerMove) && ppc::ld32(base, fighters[1] + kPlayerMove);

@@ -339,6 +339,7 @@ class RunOwnVoice(unittest.TestCase):
                    mock.patch.object(importer.face, 'retarget', side_effect=lambda moves, motions, *rest: (
                        moves, motions, 0, {})),
                    mock.patch.object(importer.weapons, 'of_skeleton', return_value=()),
+                   mock.patch.object(importer.wardrobe, 'for_pack', return_value={}),
                    mock.patch.object(importer, '_shared')]
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:
             for p in patches:

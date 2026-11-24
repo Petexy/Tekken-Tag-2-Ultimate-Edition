@@ -67,6 +67,11 @@ void show(std::vector<Quad> quads, double seconds, std::shared_ptr<const Scene> 
 void set_hud_atlas(std::shared_ptr<const Atlas> atlas);
 void show_hud(std::vector<Quad> quads, double seconds);
 
+// The pointer layer: quads of their own atlas, drawn over everything else
+// (title/paint.cpp's cursor for the GamePad's touch screen).
+void set_pointer_atlas(std::shared_ptr<const Atlas> atlas);
+void show_pointer(std::vector<Quad> quads, double seconds);
+
 // For the renderer.
 struct State {
     std::shared_ptr<const Atlas> atlas;
@@ -75,6 +80,8 @@ struct State {
     std::shared_ptr<const Window> window;           // null: none
     std::shared_ptr<const Atlas> hud_atlas;
     std::shared_ptr<const std::vector<Quad>> hud_quads; // null: nothing to draw
+    std::shared_ptr<const Atlas> pointer_atlas;
+    std::shared_ptr<const std::vector<Quad>> pointer_quads; // null: nothing to draw
 };
 State current(); // the quads, solids and window only while they are to be drawn
 // The windows shown lately, newest first: the frame the renderer renders

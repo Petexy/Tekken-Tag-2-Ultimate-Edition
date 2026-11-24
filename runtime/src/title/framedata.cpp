@@ -1166,19 +1166,40 @@ void publish(uint8_t* base, const Fighter now[2]) {
     gpu::overlay::show(std::move(l.quads), 0.25, std::move(scene), std::move(window));
 }
 
-} // namespace
-
-void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
-    if (g.failed || !fighters[0] || !fighters[1]) return;
+// The atlas, built at the first use; false if the game's fonts are not where expected.
+bool have_atlas() {
     static bool atlas_built = false;
     if (!atlas_built) {
         atlas_built = true;
         if (!build_atlas()) {
             std::fprintf(stderr, "ttt2: warning: the game's fonts are not where expected; no frame data panels\n");
             g.failed = true;
-            return;
         }
     }
+    return !g.failed;
+}
+
+} // namespace
+
+void notice(const std::vector<std::string>& lines, double seconds) {
+    if (lines.empty() || !have_atlas()) return;
+    constexpr float kPx = 19, kLine = 26, kTop = 64, kPadX = 30, kPadY = 16;
+    float width = 0;
+    for (const std::string& line : lines) width = std::max(width, Layout::width(g_atlas.labels, kPx, line));
+    const float x0 = (gpu::overlay::kWidth - width) / 2 - kPadX, x1 = (gpu::overlay::kWidth + width) / 2 + kPadX;
+    const float y1 = kTop + 2 * kPadY + kLine * static_cast<float>(lines.size());
+    Layout l;
+    l.panel(1, x0, kTop, x1, y1);
+    float y = kTop + kPadY + kPx;
+    for (const std::string& line : lines) {
+        l.text(g_atlas.labels, kPx, (gpu::overlay::kWidth - Layout::width(g_atlas.labels, kPx, line)) / 2, y, line, kValue);
+        y += kLine;
+    }
+    gpu::overlay::show(std::move(l.quads), seconds);
+}
+
+void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
+    if (!fighters[0] || !fighters[1] || !have_atlas()) return;
     const Fighter now[2] = {read(base, fighters[0]), read(base, fighters[1])};
     // Other fighters loaded (a new Practice round): a new session.
     if (g.have_previous && (now[0].moveset != g.previous[0].moveset || now[1].moveset != g.previous[1].moveset)) {

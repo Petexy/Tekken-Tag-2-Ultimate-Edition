@@ -27,6 +27,10 @@ namespace cafe::title {
 // After vfs::open_game and the image load, before the title runs.
 void prepare_roster();
 
+// After prepare_roster and prepare_solo_ghost_battle: CUSTOMIZE mode's character select with the added fighters'
+// cells (title/customize_grid.h).
+void prepare_customize_select();
+
 // The added fighter (its number: its pack's slot) a fighter (a player
 // struct) is, or -1.
 int added_slot(uint32_t player);

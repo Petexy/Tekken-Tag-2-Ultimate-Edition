@@ -81,7 +81,9 @@ const Named& named(Resolution resolution) {
 std::string summary(const Settings& s) {
     return std::string("fullscreen ") + (s.fullscreen ? "yes" : "no") + ", resolution " +
            std::string(name_of(s.resolution)) + ", interpolation " + (s.interpolation ? "yes" : "no") +
-           ", input delay " + (s.input_delay ? "yes" : "no");
+           ", input delay " + (s.input_delay ? "yes" : "no") + ", shaders in the background " +
+           (s.async_shaders ? "yes" : "no") + ", shaders prepared by the launcher " +
+           (s.precompile_shaders ? "yes" : "no");
 }
 
 bool set(const char* value) { return value != nullptr && *value != '\0'; }
@@ -133,9 +135,10 @@ std::pair<int, int> window_size(int desktop_width, int desktop_height, float den
 }
 
 Parsed parse(std::string_view text) {
-    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kInputDelay, kNames };
+    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kInputDelay, kAsyncShaders, kPrecompile, kNames };
     static constexpr std::array<std::string_view, kNames> kIds{"fullscreen", "resolution", "interpolation",
-                                                               "input_delay"};
+                                                               "input_delay", "async_shaders",
+                                                               "precompile_shaders"};
     Parsed parsed;
     std::array<size_t, kNames> set_on{}; // the line that gave each setting its value
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3); // a byte order mark from an editor
@@ -177,7 +180,9 @@ Parsed parse(std::string_view text) {
             }
             (which == kFullscreen      ? parsed.settings.fullscreen
              : which == kInterpolation ? parsed.settings.interpolation
-                                       : parsed.settings.input_delay) = *on;
+             : which == kInputDelay    ? parsed.settings.input_delay
+             : which == kAsyncShaders  ? parsed.settings.async_shaders
+                                       : parsed.settings.precompile_shaders) = *on;
         }
         // The earlier line is the one left out.
         if (set_on[which] != 0) {
@@ -204,6 +209,10 @@ std::string format(const Settings& settings) {
             "  # yes: 120 frames per second on displays of 100 Hz and more\n";
     text += std::string("input_delay = ") + (settings.input_delay ? "yes" : "no") +
             "  # yes: two frames between a button press and the game acting on it, as on the Wii U\n";
+    text += std::string("async_shaders = ") + (settings.async_shaders ? "yes" : "no") +
+            "  # yes: shaders compile in the background; new things may appear a few frames late\n";
+    text += std::string("precompile_shaders = ") + (settings.precompile_shaders ? "yes" : "no") +
+            "  # yes: the launcher prepares the shaders seen on this computer before the game starts\n";
     return text;
 }
 
@@ -260,9 +269,9 @@ Loaded load(const fs::path& file) {
 }
 
 Active resolve(const Settings& settings, const char* fullscreen, const char* scale, const char* fps,
-               const char* input_delay, std::vector<std::string>& log) {
+               const char* input_delay, const char* async_shaders, std::vector<std::string>& log) {
     Active active{settings.fullscreen, scale_of(settings.resolution), settings.interpolation ? 0u : 60u,
-                  settings.input_delay ? std::nullopt : std::optional<uint32_t>(0)};
+                  settings.input_delay ? std::nullopt : std::optional<uint32_t>(0), settings.async_shaders};
     if (set(fullscreen)) {
         active.fullscreen = std::string_view(fullscreen) == "1";
         log.push_back(std::string("display: TTT2_FULLSCREEN=") + fullscreen + ": " +
@@ -297,6 +306,16 @@ Active resolve(const Settings& settings, const char* fullscreen, const char* sca
         } else {
             log.push_back(std::string("display: TTT2_INPUT_DELAY=") + input_delay + " is not 0 to " +
                           std::to_string(kMaxInputDelay) + " frames, ignored");
+        }
+    }
+    if (set(async_shaders)) {
+        const std::string_view text = async_shaders;
+        if (text == "1" || text == "0") {
+            active.async_shaders = text == "1";
+            log.push_back(std::string("display: TTT2_ASYNC_SHADERS=") + async_shaders + ": shaders compile " +
+                          (active.async_shaders ? "in the background" : "as they are needed"));
+        } else {
+            log.push_back(std::string("display: TTT2_ASYNC_SHADERS=") + async_shaders + " is not 1 or 0, ignored");
         }
     }
     return active;

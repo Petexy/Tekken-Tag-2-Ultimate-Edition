@@ -10,8 +10,9 @@ SHORT_NAME = 'MIARY ZO'       # her name on the 2D screens (TTT2 shows short nam
 TEKKEN8_ID = 40               # her FighterId in Tekken 8 (autodump.ROSTER; a DLC fighter)
 TEKKEN8_CODE = 'wkz'          # her code in Tekken 8's files (Character/Item/model/unique/wkz/)
 CODE = 'mzo'                  # her three-letter code in the pack (not a code TTT2 or another added fighter has)
-REVISION = 1                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
-                              # f,f+2,2 after a block, tornado hits that launch, Tag in a juggle's d+2 / d/f+1,1,2
+REVISION = 2                  # the beta testers' fixes: Tekken 8's hit reactions, counter-hit and facing tests,
+                              # f,f+2,2 after a block, tornado hits that launch, Tag in a juggle's d+2 / d/f+1,1,2;
+                              # round 2: Tekken 8's extra recovery on block (d+1+2 -17), Baobab 1,4's bound
 SEX = 'female'
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of hers (the face animations set the face
@@ -50,6 +51,9 @@ VERTEX_BUDGET = 56000
 # the waist cloths 34, the 12 strands at her shins 24), her weapons and points 21, her snakes 23
 SKELETON_BONES = 307
 CLOTH_BONES = 124
+# her hair's chains after the waist cloths': her lower wardrobe piece keeps the body's bones up to its last chain bone,
+# and with the hair's 58 first her stock outfit listed 255 extra bones, more than a fight loads (it was left whole)
+CLOTH_ORDER = 'hair_last'
 
 # ------------------------------------------------------------------------------------------------ summons
 # Her summoned objects (convert/summons8.py): Tekken 8 shows them with property 0x8410, value bit 1 << n = summon n,
@@ -86,9 +90,11 @@ WEAPONS = [
     {'mesh': _HORN, 'bone': 'horn', 'joint': 'Head', 'parent': 'ATAMA_jnt', 'summon': 3, 'weights': ('Head',),
      'points': {0x23: ('tip', 1)}},
     # the snakes' own bones hang under this one (SNAKES['parent']): at her forearm, shown with them (summon 4);
-    # numbered 599, before theirs (OPT 600..): the game makes its bones' world matrices in number order, and theirs
-    # made before their parent's would be a frame behind her arm (convert/snakes8.py)
-    {'bone': 'snakes', 'parent': 'UDE_R_jnt', 'still': True, 'summon': 4, 'number': 599},
+    # numbered 597, before theirs (OPT 600..): the game makes its bones' world matrices in number order, and theirs
+    # made before their parent's would be a frame behind her arm (convert/snakes8.py). Not 598 or 599: those are
+    # the swaying bust bones of the women's tops in Tekken Tag Tournament 2's wardrobe (the common skeleton they
+    # are bound to), and a garment whose bones are numbered like bones of her body is not offered (convert/wardrobe.py)
+    {'bone': 'snakes', 'parent': 'UDE_R_jnt', 'still': True, 'summon': 4, 'number': 597},
 ]
 # Her snakes (convert/snakes8.py): Tekken 8's Org actor on her right forearm, its own mesh and skeleton, its 16 clips
 # (the MissileAnimData table's) started by her moves (0x83aa, stopped by 0x83ab) -> extra bones OPT 600.. under the
@@ -184,9 +190,10 @@ MOVESET = {
                (r'^ju_w', 'anim', ['wkz_w%02d' % k for k in range(3)])],        # win poses
     # TTT2 bounds (Tekken 8 has none, and her tornados do not become any): an air hit slams the opponent into the
     # floor once per juggle (convert/move_overrides.py). d+2 Famakin'naina, d/f+1,1,2's last hit (Famakin'ny Ala),
-    # b+1+2 Ampinga Afo, Morengy Miroso 1+2 (Tafika Maitso) and ws3 Daka Manorana; d+2 and d/f+1,1,2 go on from frame
-    # 24 in a copy of themselves under Tekken 8's requirement 126, which bounds alike. (Moves no name is known for are
-    # named by their key, 'key:<+0x00>': it stays when an update of Tekken 8 adds moves, their index does not.)
+    # b+1+2 Ampinga Afo, Morengy Miroso 1+2 (Tafika Maitso), ws3 Daka Manorana and Baobab Mihira 1,4's last hit
+    # (Hiran'ny Vonikazo); d+2 and d/f+1,1,2 go on from frame 24 in a copy of themselves under Tekken 8's requirement
+    # 126, which bounds alike. (Moves no name is known for are named by their key, 'key:<+0x00>': it stays when an
+    # update of Tekken 8 adds moves, their index does not.)
     'bounds': {
         'Wkz_2RP': True,       # d+2
         'key:feef0f9b': True,         # d+2, its copy
@@ -195,5 +202,9 @@ MOVESET = {
         'Wkz_4WP': True,       # b+1+2
         'Wkz_6LK_WP': True,    # MOR 1+2
         'key:d55d0c73': True,         # ws3
+        'key:f4a757fe': True,         # Baobab Mihira 1,4, last hit
     },
+    # the command list's bound icon for Baobab Mihira 1,4 (its last hit: the 4, the entry's second press): BAO.1 goes on
+    # to the 4's kicks by automatic rows the command walk does not follow
+    'bound_entries': {'TEXT_208_MOVELIST_NAME_WKZ_073': ('key:f4a757fe', 2)},
 }

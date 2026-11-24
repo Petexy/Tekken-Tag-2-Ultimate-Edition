@@ -101,6 +101,21 @@ target_link_libraries(title_test PRIVATE cafe_title)
 target_compile_options(title_test PRIVATE -Wall -Wextra)
 add_test(NAME title_test COMMAND title_test)
 
+# The GamePad's touch screen on a computer: window points as points of the
+# picture (letterboxing, scale), the stick's cursor (host/touch_screen.h).
+add_executable(touch_screen_test touch_screen_test.cpp)
+target_include_directories(touch_screen_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(touch_screen_test PRIVATE cxx_std_20)
+target_compile_options(touch_screen_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME touch_screen_test COMMAND touch_screen_test)
+
+# Exported Cafe OS functions' arguments past r10 come from the caller's stack (cafe/export.h).
+add_executable(export_abi_test export_abi_test.cpp)
+target_include_directories(export_abi_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)
+target_compile_features(export_abi_test PRIVATE cxx_std_20)
+target_compile_options(export_abi_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME export_abi_test COMMAND export_abi_test)
+
 add_executable(damage_scaling_test damage_scaling_test.cpp)
 target_include_directories(damage_scaling_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 target_compile_options(damage_scaling_test PRIVATE -Wall -Wextra)
@@ -143,6 +158,27 @@ target_compile_features(memory_model_test PRIVATE cxx_std_20)
 target_compile_options(memory_model_test PRIVATE -O2 -march=x86-64-v3 -Wno-unused-label)
 add_test(NAME memory_model_test COMMAND memory_model_test)
 
+# The thread keeping the memory the GPU reads on huge pages leaves its
+# contents alone (Linux: the memory module's own program, six seconds).
+if(NOT WIN32)
+    add_executable(guest_memory_keeper_test guest_memory_keeper_test.cpp
+        ${CMAKE_SOURCE_DIR}/runtime/src/memory.cpp)
+    target_include_directories(guest_memory_keeper_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)
+    target_compile_features(guest_memory_keeper_test PRIVATE cxx_std_20)
+    target_compile_options(guest_memory_keeper_test PRIVATE -O2 -Wall -Wextra -Wpedantic)
+    find_package(Threads REQUIRED)
+    target_link_libraries(guest_memory_keeper_test PRIVATE Threads::Threads)
+    add_test(NAME guest_memory_keeper_test COMMAND guest_memory_keeper_test)
+endif()
+
+# Its rule (which blocks it asks the kernel for, how long it waits, what it
+# tells the log) on made-up answers: no kernel needed.
+add_executable(memory_keeper_test memory_keeper_test.cpp)
+target_include_directories(memory_keeper_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(memory_keeper_test PRIVATE cxx_std_20)
+target_compile_options(memory_keeper_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME memory_keeper_test COMMAND memory_keeper_test)
+
 # The character importer's formats (tools/characters; synthetic data, no game
 # files). Needs Python 3 with numpy and Pillow.
 find_package(Python3 COMPONENTS Interpreter QUIET)
@@ -164,6 +200,13 @@ target_compile_features(outfit_menu_test PRIVATE cxx_std_20)
 target_compile_options(outfit_menu_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME outfit_menu_test COMMAND outfit_menu_test)
 
+# Which draws may be left out while their shader is made in the background (gpu/vulkan/leave_out.h).
+add_executable(leave_out_test leave_out_test.cpp)
+target_include_directories(leave_out_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(leave_out_test PRIVATE cxx_std_20)
+target_compile_options(leave_out_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME leave_out_test COMMAND leave_out_test)
+
 # Eliza's scoped native Tag Assault lifetime; no game assets required.
 add_executable(eliza_assist_test eliza_assist_test.cpp)
 target_include_directories(eliza_assist_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
@@ -177,6 +220,20 @@ target_compile_features(noctis_assault_test PRIVATE cxx_std_20)
 target_compile_options(noctis_assault_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME noctis_assault_test COMMAND noctis_assault_test)
 
+# The select grid's rings and the '?' two rows share; made-up grids.
+add_executable(select_grid_test select_grid_test.cpp)
+target_include_directories(select_grid_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(select_grid_test PRIVATE cxx_std_20)
+target_compile_options(select_grid_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME select_grid_test COMMAND select_grid_test)
+
+# An added fighter's play record (title/record_store.h): the port's own file per fighter code; made-up rows.
+add_executable(record_store_test record_store_test.cpp)
+target_include_directories(record_store_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(record_store_test PRIVATE cxx_std_20)
+target_compile_options(record_store_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME record_store_test COMMAND record_store_test)
+
 # Meshes the motion blur leaves out (title/unblurred.h); a made-up NUD.
 add_executable(unblurred_test unblurred_test.cpp)
 target_include_directories(unblurred_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
@@ -184,9 +241,49 @@ target_compile_features(unblurred_test PRIVATE cxx_std_20)
 target_compile_options(unblurred_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME unblurred_test COMMAND unblurred_test)
 
+# The round call's camera with a giant in the fight (title/round_call.h); made-up fighters.
+add_executable(round_call_test round_call_test.cpp)
+target_include_directories(round_call_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(round_call_test PRIVATE cxx_std_20)
+target_compile_options(round_call_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME round_call_test COMMAND round_call_test)
+
 # Fades of a Tekken 8 fighter's summoned weapons (title/summon_fade.h); made-up values.
 add_executable(summon_fade_test summon_fade_test.cpp)
 target_include_directories(summon_fade_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
 target_compile_features(summon_fade_test PRIVATE cxx_std_20)
 target_compile_options(summon_fade_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME summon_fade_test COMMAND summon_fade_test)
+
+# The developer's customization record (title/test_record.h); made-up items and colours.
+add_executable(test_record_test test_record_test.cpp)
+target_include_directories(test_record_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(test_record_test PRIVATE cxx_std_20)
+target_compile_options(test_record_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME test_record_test COMMAND test_record_test)
+
+# An added fighter's saved customizations (title/customize_store.h): the port's own file per fighter code.
+add_executable(customize_store_test customize_store_test.cpp)
+target_include_directories(customize_store_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(customize_store_test PRIVATE cxx_std_20)
+target_compile_options(customize_store_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME customize_store_test COMMAND customize_store_test)
+
+# CUSTOMIZE mode's character grid with the added fighters' cells (title/customize_grid.h); a made-up script.
+add_executable(customize_grid_test customize_grid_test.cpp)
+target_include_directories(customize_grid_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(customize_grid_test PRIVATE cxx_std_20)
+target_compile_options(customize_grid_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME customize_grid_test COMMAND customize_grid_test)
+
+add_executable(win_pose_test win_pose_test.cpp)
+target_include_directories(win_pose_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(win_pose_test PRIVATE cxx_std_20)
+target_compile_options(win_pose_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME win_pose_test COMMAND win_pose_test)
+
+add_executable(win_shot_test win_shot_test.cpp)
+target_include_directories(win_shot_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(win_shot_test PRIVATE cxx_std_20)
+target_compile_options(win_shot_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME win_shot_test COMMAND win_shot_test)

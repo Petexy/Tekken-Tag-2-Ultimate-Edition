@@ -1,4 +1,5 @@
 #include "title/roster.h"
+#include "title/record_store.h"
 #include "title/solo_ghost.h"
 #include "title/eliza_assist.h"
 #include "title/fight_camera.h"
@@ -6,10 +7,17 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/summon_fade.h"
+#include "title/customize_grid.h"
+#include "title/customize_store.h"
+#include "title/menudata.h"
+#include "title/win_pose.h"
+#include "title/presentation.h"
+#include "title/test_record.h"
 #include "title/unblurred.h"
 #include "gpu/still_draws.h"
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
+#include "title/framedata.h"
 #include "title/warp.h"
 #include "outfit_menu.h"
 
@@ -19,6 +27,7 @@
 #include "cafe/vfs.h"
 #include "gx2/hooks.h"
 #include "title/archive.h"
+#include "title/select_grid.h"
 
 #include <zlib.h>
 
@@ -27,6 +36,7 @@
 #include <atomic>
 #include <bit>
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -59,6 +69,7 @@ struct Traces {
     bool assist_follow = std::getenv("TTT2_TRACE_ASSIST_FOLLOW") != nullptr;
     bool projectiles = std::getenv("TTT2_TRACE_PROJECTILES") != nullptr;
     bool effect_marks = std::getenv("TTT2_TRACE_EFFECT_MARKS") != nullptr; // effects that stay, effects at weapons
+    bool records = std::getenv("TTT2_TRACE_RECORDS") != nullptr;           // the added fighters' play records
 };
 const Traces& traces() {
     static const Traces read;
@@ -134,6 +145,7 @@ constexpr uint32_t kRandomCell = 54, kCursorRowOne = 0x10531388;
 constexpr float kRowsCursorRow = 148.0f + 65.0f;
 bool g_grid_rows = false;       // shared/grid.ini `grid = rows`: the grid with the new top row
 constexpr uint32_t kFirstAddedCell = 62;
+std::optional<select_grid::RandomTwin> g_random_twin; // the '?' of the new top row and of the title's top row
 constexpr uint32_t kSpacers[2] = {0x1053138C, 0x105314CC}; // the grilles over the top row's ends: left, right
 constexpr uint32_t kFreeBanks[] = {1, 122, 233, 253};
 
@@ -159,6 +171,7 @@ constexpr const char* kMotionName = ".motion", *kMovesetName = ".moveset", *kMov
 // The packs its item database takes costume parts from (attributes mi, ti,
 // bi, pi): a part is the pack's key extended by its index; an added fighter's
 // packs are `<code>/parts/<kind>`. In a pack: `parts/<kind>/<index>.<extension>`.
+constexpr const char* kShopFile = "shop.bxml"; // a pack's shop list (convert/wardrobe.py SHOP_FILE)
 constexpr const char* kPartKinds[] = {"model", "texture", "bone", "mop"};
 
 // A fighter's sound banks (NUS3BANKs, stored raw in the sound archives):
@@ -285,6 +298,9 @@ struct Added {
     uint64_t rest_summons = 0;      // the summons out when no move says otherwise (bit n: summon n)
     std::vector<Outfit> outfits;
     std::vector<std::string> unblurred; // meshes TTT2's motion blur leaves out (title/unblurred.h)
+    std::vector<uint8_t> shop;      // its shop list (the pack's shop.bxml): what CUSTOMIZE mode offers it; empty:
+                                    // the mode stays closed for it
+    uint32_t shop_fighter = 0;      // the title's fighter the list is of (its rows, item ids and names)
 };
 std::vector<Added> g_added;
 std::map<uint32_t, int> g_outfit_ids;
@@ -604,6 +620,95 @@ std::optional<std::vector<uint8_t>> read_file(const fs::path& path) {
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
 }
 
+// ------------------------------------------------------------------ entries made when they are read
+//
+// The packs' files are not read when the game starts: with every fighter's
+// preset outfits and wardrobe a set of packs is gigabytes, and held as
+// archive entries (as they were, compressed, each alo/ file once more per
+// outfit) it took more memory than a PC may have free. An entry only
+// promises its size, which the index needs, and reads its file when the
+// title reads the entry; it is stored uncompressed (archive::store), since
+// only then does its size follow from the file's.
+
+using Flags = std::array<uint8_t, 8>;
+constexpr const char* kUpdateArchive = "content/hdd/data100";
+
+// A file as an entry: its contents behind an NRCZ header with `flags`.
+vfs::ArchiveEntry file_entry(const fs::path& path, uint64_t size, uint32_t key, const Flags& flags) {
+    vfs::ArchiveEntry entry;
+    entry.size = archive::stored_size(size);
+    entry.make = [path, size, key, flags]() -> std::optional<std::vector<uint8_t>> {
+        const auto contents = read_file(path);
+        if (!contents || contents->size() != size) return std::nullopt;
+        uint8_t raw[8];
+        std::copy(flags.begin(), flags.end(), raw);
+        return archive::store(*contents, key, raw);
+    };
+    return entry;
+}
+
+// A file as a raw entry (a sound bank).
+vfs::ArchiveEntry raw_file_entry(const fs::path& path, uint64_t size) {
+    vfs::ArchiveEntry entry;
+    entry.size = size;
+    entry.make = [path]() { return read_file(path); };
+    return entry;
+}
+
+// The size of a regular file, if it is one.
+std::optional<uint64_t> pack_file_size(const fs::path& path) {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return std::nullopt;
+    const uint64_t size = fs::file_size(path, ec);
+    if (ec) return std::nullopt;
+    return size;
+}
+
+// The first bytes of a stored entry of the title.
+std::vector<uint8_t> read_stored_start(const Located& at, size_t size) {
+    int32_t handle = 0;
+    if (vfs::open_file("/vol/" + at.archive + ".bin", "r", handle) != vfs::kOk) return {};
+    std::vector<uint8_t> stored(std::min<uint64_t>(at.entry.size, size));
+    uint64_t transferred = 0;
+    vfs::read_file(handle, stored.data(), stored.size(), archive::kPayload + at.entry.offset, transferred);
+    vfs::close_file(handle);
+    stored.resize(transferred);
+    return stored;
+}
+
+// What a title's entry says of itself without being read whole: the size of
+// its contents and its NRCZ flags (zero if it is stored as it is).
+struct Described {
+    uint64_t size = 0;
+    Flags flags{};
+};
+std::optional<Described> describe_entry(const std::map<uint32_t, Located>& located, uint32_t key) {
+    const auto it = located.find(key);
+    if (it == located.end()) return std::nullopt;
+    std::vector<uint8_t> start = read_stored_start(it->second, 16);
+    if (start.size() != std::min<uint64_t>(it->second.entry.size, 16)) return std::nullopt;
+    archive::scramble(start.data(), start.size(), key);
+    Described d;
+    d.size = it->second.entry.size;
+    if (start.size() == 16 && std::memcmp(start.data(), "NRCZ", 4) == 0) {
+        d.size = uint32_t{start[4]} << 24 | uint32_t{start[5]} << 16 | uint32_t{start[6]} << 8 | start[7];
+        std::copy(start.begin() + 8, start.end(), d.flags.begin());
+    }
+    return d;
+}
+
+// The contents of the entry `key` of the title's archive `archive_name`, found
+// by the archive's index as it is now (other entries of it may have been
+// replaced since the game started, which moves the ones behind them).
+std::optional<std::vector<uint8_t>> read_title_contents(const std::string& archive_name, uint32_t key) {
+    const auto ofs = vfs::read_whole("/vol/" + archive_name + ".ofs");
+    const auto index = ofs ? archive::parse_index(*ofs) : std::nullopt;
+    const archive::Entry* e = index ? index->find(key) : nullptr;
+    if (!e) return std::nullopt;
+    auto stored = read_stored(Located{archive_name, *e});
+    return stored ? archive::unpack(std::move(*stored), key) : std::nullopt;
+}
+
 // A texture container (NTP3: "NTP3", u16 version, u16 count at 6, then the
 // textures from 16 on, each starting with its u32 total size) with the
 // textures of `add`, another one, after its own. The 2D layouts take their
@@ -666,20 +771,6 @@ std::optional<uint32_t> motion_row(uint32_t id) {
     return std::nullopt;
 }
 
-// An entry of the title's archives (data100 last), stored, with its NRCZ flags.
-using Stored = std::pair<std::vector<uint8_t>, std::array<uint8_t, 8>>;
-std::optional<Stored> title_entry(const std::map<uint32_t, Located>& located, uint32_t key) {
-    const auto it = located.find(key);
-    if (it == located.end()) return std::nullopt;
-    auto stored = read_stored(it->second);
-    if (!stored) return std::nullopt;
-    std::array<uint8_t, 8> flags{};
-    uint8_t raw[8];
-    archive::stored_flags(*stored, key, raw);
-    std::copy(std::begin(raw), std::end(raw), flags.begin());
-    return std::make_pair(std::move(*stored), flags);
-}
-
 bool has_suffix(const std::string& name, const char* suffix) {
     const size_t n = std::strlen(suffix);
     return name.size() >= n && name.compare(name.size() - n, n, suffix) == 0;
@@ -690,32 +781,53 @@ bool has_suffix(const std::string& name, const char* suffix) {
 // with_textures) as entries: stored ones into `entries`, raw ones (a changed
 // sound bank) into `raw` by archive. False if it does not fit.
 bool add_title_copy(const std::map<uint32_t, Located>& located, const std::string& name, uint32_t key,
-                    const std::vector<uint8_t>& contents, std::map<uint32_t, std::vector<uint8_t>>& entries,
-                    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>>& raw) {
+                    const fs::path& path, std::map<uint32_t, vfs::ArchiveEntry>& entries,
+                    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>>& raw) {
+    const auto size = pack_file_size(path);
+    if (!size) return false;
+    const auto original = located.find(key);
     if (has_suffix(name, ".add")) {
-        const auto original = title_entry(located, key);
-        auto unpacked = original ? archive::unpack(original->first, key) : std::nullopt;
-        auto joined = unpacked ? with_textures(std::move(*unpacked), contents) : std::nullopt;
+        // The title's container with the file's textures: joined now, to learn its size, and again when it is read.
+        if (original == located.end()) return false;
+        const std::string from = original->second.archive;
+        const auto described = describe_entry(located, key);
+        auto join = [from, key, path]() -> std::optional<std::vector<uint8_t>> {
+            auto unpacked = read_title_contents(from, key);
+            const auto contents = unpacked ? read_file(path) : std::nullopt;
+            return contents ? with_textures(std::move(*unpacked), *contents) : std::nullopt;
+        };
+        const auto joined = described ? join() : std::nullopt;
         if (!joined) return false;
-        uint8_t flags[8];
-        std::copy(original->second.begin(), original->second.end(), flags);
-        entries[key] = archive::pack(*joined, key, flags);
+        uint8_t raw_flags[8];
+        std::copy(described->flags.begin(), described->flags.end(), raw_flags);
+        if (from == kUpdateArchive) { // (it replaces the entry it is made from: made once, kept)
+            entries[key].stored = archive::pack(*joined, key, raw_flags);
+            return true;
+        }
+        vfs::ArchiveEntry entry;
+        entry.size = archive::stored_size(joined->size());
+        entry.make = [join, key, flags = described->flags]() -> std::optional<std::vector<uint8_t>> {
+            const auto contents = join();
+            if (!contents) return std::nullopt;
+            uint8_t raw_flags[8];
+            std::copy(flags.begin(), flags.end(), raw_flags);
+            return archive::store(*contents, key, raw_flags);
+        };
+        entries[key] = std::move(entry);
         return true;
     }
     // A changed copy of a raw entry (a sound bank) stays raw, in the original's archive.
-    const auto original = located.find(key);
     if (original != located.end() && raw_archive(original->second.archive)) {
-        raw[original->second.archive][key] = contents;
+        raw[original->second.archive][key] = raw_file_entry(path, *size);
         return true;
     }
-    uint8_t flags[8] = {};
-    if (const auto title = title_entry(located, key)) std::copy(title->second.begin(), title->second.end(), flags);
-    entries[key] = archive::pack(contents, key, flags);
+    const auto described = describe_entry(located, key);
+    entries[key] = file_entry(path, *size, key, described ? described->flags : Flags{});
     return true;
 }
 
 // Raw entries into their archives; -> the archives they could not be added to.
-std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>>& raw,
+std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>>& raw,
                                    const fs::path& from) {
     std::vector<std::string> failed;
     for (const auto& [name, map] : raw) {
@@ -749,20 +861,33 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     files.push_back({pack.code + kMotionName, key_of(pack.code + kMotionName), load(kMotionRows + 12 * donor_row)});
     files.push_back({pack.code + kMovesetName, key_of(pack.code + kMovesetName), load(kMotionRows + 12 * donor_row + 4)});
 
-    std::map<uint32_t, std::vector<uint8_t>> entries;
+    std::map<uint32_t, vfs::ArchiveEntry> entries;
     size_t own = 0;
     for (const File& f : files) {
-        const auto donor = title_entry(located, f.donor_key);
+        const auto donor = describe_entry(located, f.donor_key);
         const uint32_t key = f.key;
-        uint8_t flags[8] = {};
-        if (donor) std::copy(donor->second.begin(), donor->second.end(), flags);
-        if (const auto contents = read_file(pack.directory / f.name)) {
-            entries[key] = archive::pack(*contents, key, flags);
+        const Flags flags = donor ? donor->flags : Flags{};
+        if (const auto size = pack_file_size(pack.directory / f.name)) {
+            entries[key] = file_entry(pack.directory / f.name, *size, key, flags);
             ++own;
         } else if (donor) {
-            auto contents = archive::unpack(donor->first, f.donor_key);
-            if (!contents) return false;
-            entries[key] = archive::pack(*contents, key, flags);
+            const std::string from = located.at(f.donor_key).archive;
+            const uint32_t donor_key = f.donor_key;
+            auto make = [from, donor_key, key, flags]() -> std::optional<std::vector<uint8_t>> {
+                const auto contents = read_title_contents(from, donor_key);
+                if (!contents) return std::nullopt;
+                uint8_t raw_flags[8];
+                std::copy(flags.begin(), flags.end(), raw_flags);
+                return archive::store(*contents, key, raw_flags);
+            };
+            if (from == kUpdateArchive) { // (the archive the copy goes to: made once, kept)
+                auto stored = make();
+                if (!stored) return false;
+                entries[key].stored = std::move(*stored);
+            } else {
+                entries[key].size = archive::stored_size(donor->size);
+                entries[key].make = std::move(make);
+            }
         } else if (f.name.size() < 4 ||
                    (f.name.compare(f.name.size() - 4, 4, ".mop") != 0 &&
                     (f.name.size() < 10 || f.name.compare(f.name.size() - 10, 10, ".havok.xml") != 0))) {
@@ -772,7 +897,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         }
     }
     // Its own sound banks: raw entries of a sound archive.
-    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> raw; // archive -> raw entries
+    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>> raw; // archive -> raw entries
     std::vector<std::string> bank_files;
     voice.chr_tones = pack.chr_tones;
     voice.extra = pack.voice_extra;
@@ -780,10 +905,12 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     for (size_t b = 0; b < std::size(kVoiceBanks); ++b) {
         if (b == 1) continue; // win quotes: in se_Chr_ (an older pack's own se_Dwi_ is not played)
         const std::string name = std::string(kVoiceBanks[b]) + pack.code + ".nus3bank";
-        auto contents = read_file(pack.directory / name);
-        if (!contents || contents->size() < 4 || std::memcmp(contents->data(), "NUS3", 4) != 0) continue;
+        const auto size = pack_file_size(pack.directory / name);
+        std::ifstream bank(pack.directory / name, std::ios::binary);
+        char magic[4] = {};
+        if (!size || !bank.read(magic, 4) || std::memcmp(magic, "NUS3", 4) != 0) continue;
         voice.keys[b] = key_of(name);
-        raw[kSoundArchive][voice.keys[b]] = std::move(*contents);
+        raw[kSoundArchive][voice.keys[b]] = raw_file_entry(pack.directory / name, *size);
         bank_files.push_back(name);
         ++own;
     }
@@ -803,31 +930,93 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
                            std::any_of(files.begin(), files.end(), [&](const File& f) { return f.name == name; }) ||
                            std::find(bank_files.begin(), bank_files.end(), name) != bank_files.end();
         if (known || name.compare(0, 5, "keys/") == 0 || name.compare(0, 7, "source/") == 0) continue;
-        auto contents = read_file(item.path());
-        if (!contents) continue;
+        const auto size = pack_file_size(item.path());
+        if (!size) continue;
         ++own;
         const bool own = name.compare(0, 4, "art/") == 0 || name.compare(0, 4, "alo/") == 0;
         const std::string entry = own ? pack.code + "/" + name : name;
         const uint32_t key = part_key(name, pack.code).value_or(key_of(entry));
-        uint8_t flags[8] = {};
-        entries[key] = archive::pack(*contents, key, flags);
+        entries[key] = file_entry(item.path(), *size, key, Flags{});
         if (name.compare(0, 4, "alo/") == 0) {
             for (const auto& outfit : pack.outfits) {
                 const uint32_t alias_key = key_of(outfit + "/" + name);
-                entries[alias_key] = archive::pack(*contents, alias_key, flags);
+                entries[alias_key] = file_entry(item.path(), *size, alias_key, Flags{});
             }
         }
     }
-    if (!vfs::set_archive_entries("content/hdd/data100", entries)) return false;
+    const size_t count = entries.size();
+    if (!vfs::set_archive_entries(kUpdateArchive, std::move(entries))) return false;
     for (const std::string& failed : serve_raw(raw, pack.directory)) {
         if (failed == kSoundArchive) std::fill(std::begin(voice.keys), std::end(voice.keys), 0u);
     }
     if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: %s (donor %s, id %u): %zu entries, %zu from the pack\n",
-                     pack.code.c_str(), pack.donor.c_str(), kFirstAddedId + static_cast<uint32_t>(slot), entries.size(),
-                     own);
+                     pack.code.c_str(), pack.donor.c_str(), kFirstAddedId + static_cast<uint32_t>(slot), count, own);
     }
     return true;
+}
+
+// The added fighters' costume colours. The title's colours are cells of one
+// colour grid (entry 05add6d5: 32 rows x 64 columns x 3 colours, RGB f32; a
+// colour number is s << 11 | (row - 1) << 6 | (column - 1), s = 9 the cell's
+// own colour), and CUSTOMIZE mode's colour picker and the items' default
+// colours use every cell of it. The importer puts each added fighter's
+// player 1 / player 2 colours into cells of a copy of the grid that no palette
+// entry of the title uses (shared/keys/05add6d5.bin) and names those cells in
+// the palettes under the fighter's select id. That copy must not replace the
+// title's grid: with twenty fighters hundreds of the picker's colours would
+// be other colours (a garment turned white or black as its hue was changed,
+// for the title's own fighters as well). So the copy is kept here, the
+// title keeps its grid, and the palettes' rows of the added fighters are
+// marked when they are read (sub_06839C28: the palette manager's four lists of
+// {s16 fighter, u32 register, u32 colour number} at this + 36 + 16 n): a
+// marked number takes its colour from the copy (sub_06321C7C, the colour
+// object's "set number": cell at +112 / +116, s at +120, the cell's first
+// colour at +124 and second at +136; sub_06322428 only splits a number).
+constexpr uint32_t kColourGrid = 0x05ADD6D5;
+constexpr size_t kColourGridSize = 32 * 64 * 3 * 3 * 4;
+constexpr uint32_t kAddedColour = 0x7E000000; // the mark (the title's numbers end at 0x4FFF)
+std::vector<uint8_t> g_added_colours;         // the importer's copy of the grid
+
+bool added_colour(uint32_t number) { return (number & 0xFF000000) == kAddedColour && !g_added_colours.empty(); }
+
+PPC_FUNC(sub_06839C28_orig);
+PPC_FUNC(sub_06839C28) {
+    const uint32_t manager = ctx.r[3];
+    sub_06839C28_orig(ctx, base);
+    if (g_added_colours.empty()) return;
+    for (uint32_t list = 0; list < 4; ++list) {
+        const uint32_t first = load(manager + 36 + 16 * list), end = load(manager + 40 + 16 * list);
+        if (first == 0 || end < first || (end - first) % 12 != 0 || end - first > 12 * 65536) continue;
+        for (uint32_t row = first; row < end; row += 12) {
+            const uint32_t number = load(row + 8);
+            if (static_cast<int16_t>(load16(row)) >= static_cast<int16_t>(kFirstAddedId) && number != 0 &&
+                number < 0x5000) {
+                store(row + 8, kAddedColour | number);
+            }
+        }
+    }
+}
+
+PPC_FUNC(sub_06321C7C_orig);
+PPC_FUNC(sub_06321C7C) {
+    const uint32_t colour = ctx.r[3], number = ctx.r[4];
+    if (!added_colour(number)) {
+        sub_06321C7C_orig(ctx, base);
+        return;
+    }
+    const uint32_t cell = number & 0x7FF;
+    store(colour + 112, (cell & 63) + 1);
+    store(colour + 116, cell >> 6);
+    store(colour + 120, (number >> 11) & 31);
+    std::memcpy(guest_pointer(colour + 124), &g_added_colours[size_t{36} * cell], 12);      // (both big-endian)
+    std::memcpy(guest_pointer(colour + 136), &g_added_colours[size_t{36} * cell + 12], 12);
+}
+
+PPC_FUNC(sub_06322428_orig);
+PPC_FUNC(sub_06322428) {
+    if (added_colour(ctx.r[4])) ctx.r[4] &= 0xFFFF;
+    sub_06322428_orig(ctx, base);
 }
 
 // The title entries the added fighters share (`shared/keys/`, made by the
@@ -838,19 +1027,23 @@ void add_shared(const fs::path& directory) {
     std::error_code ec;
     if (!fs::is_directory(directory / "keys", ec)) return;
     const auto located = locate_entries();
-    std::map<uint32_t, std::vector<uint8_t>> entries;
-    std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> raw;
+    std::map<uint32_t, vfs::ArchiveEntry> entries;
+    std::map<std::string, std::map<uint32_t, vfs::ArchiveEntry>> raw;
     for (const auto& item : fs::directory_iterator(directory / "keys", ec)) {
         const std::string name = "keys/" + item.path().filename().string();
         const auto key = named_key(name);
-        const auto contents = key ? read_file(item.path()) : std::nullopt;
-        if (!contents) continue;
-        if (!add_title_copy(located, name, *key, *contents, entries, raw)) {
+        if (!key || !pack_file_size(item.path())) continue;
+        if (*key == kColourGrid) { // (see kColourGrid: kept here, the title keeps its own)
+            const auto contents = read_file(item.path());
+            if (contents && contents->size() == kColourGridSize) g_added_colours = *contents;
+            continue;
+        }
+        if (!add_title_copy(located, name, *key, item.path(), entries, raw)) {
             std::fprintf(stderr, "ttt2: warning: %s: %s does not fit the title's entry; left out\n",
                          directory.string().c_str(), name.c_str());
         }
     }
-    if (!vfs::set_archive_entries("content/hdd/data100", entries)) {
+    if (!vfs::set_archive_entries(kUpdateArchive, std::move(entries))) {
         std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.string().c_str());
         return;
     }
@@ -1008,15 +1201,15 @@ void patch_title(size_t k) {
 // The added fighters' cells (kCells), joined to the grid's: each row a ring
 // left and right, each column a ring up and down, in column and row order
 // (as the title's own cells are). A slot with no fighter has a random cell
-// nothing moves to.
+// nothing moves to. With the new top row the title's top row is left
+// without a '?' (its own went up): the cell after the last added one stands
+// there, joined like any other, and g_random_twin makes it one with the
+// '?' above it (see sub_033E4704).
 void place_cells() {
-    struct Cell {
-        int32_t column, row;
-        uint32_t cell;
-        bool operator<(const Cell& o) const { return std::tie(column, row) < std::tie(o.column, o.row); }
-    };
-    if (g_grid_rows && load(kGrid + 32 * kRandomCell + kCellId) == 63 &&
-        load(kGrid + 32 * kRandomCell + kCellColumn) == 11) {
+    using select_grid::Cell;
+    const bool rows = g_grid_rows && load(kGrid + 32 * kRandomCell + kCellId) == 63 &&
+                      load(kGrid + 32 * kRandomCell + kCellColumn) == 11;
+    if (rows) {
         store(kGrid + 32 * kRandomCell + kCellRow, static_cast<uint32_t>(-1));
         store(kCursorRowOne, std::bit_cast<uint32_t>(kRowsCursorRow));
     }
@@ -1042,25 +1235,20 @@ void place_cells() {
         cells.push_back({added.column, added.grid_row, cell});
     }
     if (last == 0) return;
-    std::sort(cells.begin(), cells.end());
-    auto ring = [&](auto same, uint32_t back, uint32_t ahead) {
-        std::vector<Cell> sorted = cells;
-        std::stable_sort(sorted.begin(), sorted.end(), [&](const Cell& a, const Cell& b) { return same(a) < same(b); });
-        for (size_t i = 0; i < sorted.size();) {
-            size_t j = i;
-            while (j < sorted.size() && same(sorted[j]) == same(sorted[i])) ++j;
-            for (size_t n = i; n < j; ++n) {
-                const uint32_t next = sorted[n + 1 < j ? n + 1 : i].cell;
-                store(kGrid + 32 * sorted[n].cell + ahead, next);
-                store(kGrid + 32 * next + back, sorted[n].cell);
-            }
-            i = j;
-        }
-    };
-    // rows: column order (cells is sorted by column, then row); columns: row order
-    ring([](const Cell& c) { return static_cast<int64_t>(c.row); }, kCellLeft, kCellRight);
-    std::sort(cells.begin(), cells.end(), [](const Cell& a, const Cell& b) { return std::tie(a.row, a.column) < std::tie(b.row, b.column); });
-    ring([](const Cell& c) { return static_cast<int64_t>(c.column); }, kCellUp, kCellDown);
+    if (rows) {
+        const uint32_t cell = ++last, at = kGrid + 32 * cell;
+        store(at + kCellId, 63);
+        store(at + kCellColumn, 11);
+        store(at + kCellRow, 0);
+        cells.push_back({11, 0, cell});
+        g_random_twin.emplace(kRandomCell, cell);
+    }
+    for (const auto& [cell, links] : select_grid::rings(cells)) {
+        store(kGrid + 32 * cell + kCellUp, links.up);
+        store(kGrid + 32 * cell + kCellDown, links.down);
+        store(kGrid + 32 * cell + kCellLeft, links.left);
+        store(kGrid + 32 * cell + kCellRight, links.right);
+    }
     store(kGrids + 8 * 1 + 4, last + 1);
 }
 
@@ -1253,10 +1441,9 @@ void prepare_art(const Pack& pack, size_t slot, const fs::path& shared) {
 // has one costume. Optional complete outfit bodies repeat the donor's first
 // equipment set, with one preview each; the pick chooses a separate body code.
 // Its pictures are the pack's (`<code>/` + kCostumeFile, else the donor's),
-// its key lent to the table only while the chooser's functions run. The chooser
-// leaves out the customisation slots (customisation is made per fighter in a
-// mode an added fighter is not in; loading a slot's items would read past
-// tables).
+// its key lent to the table only while the chooser's functions run. After the
+// costumes come the slots the fighter's own customization file has filled
+// (sub_033E3460 below; title/customize_store.h).
 constexpr uint32_t kCostumeLists = 0x103B4B84, kCostumePreviews = 0x10161590;
 constexpr const char* kCostumeFile = "art/costumes.nut";
 constexpr uint32_t kCostumeOne = 0;                          // the type of costume 1 in a list
@@ -1503,6 +1690,16 @@ void prepare_roster() {
         }
         added.code_string = guest_string(pack.code);
         added.active = true;
+        if (auto shop = read_file(pack.directory / kShopFile)) {
+            const auto of = customize_grid::shop_fighter(*shop);
+            if (of && *of < 59) {
+                added.shop = std::move(*shop);
+                added.shop_fighter = *of;
+            } else {
+                std::fprintf(stderr, "ttt2: warning: %s: %s is not a shop list; CUSTOMIZE mode stays closed for %s\n",
+                             pack.directory.string().c_str(), kShopFile, pack.code.c_str());
+            }
+        }
         if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory);
         if (pack.camera > 0) fight_camera::configure(static_cast<int>(k), pack.camera);
         if (pack.body > 1) giant_body::configure(static_cast<int>(k), pack.body);
@@ -1815,9 +2012,11 @@ PPC_FUNC(sub_033D5108) {
 constexpr uint32_t kPlayerRecord = 88, kPlayerRow = 80;
 constexpr uint32_t kPlayerLookYawMax = 1060, kPlayerLookYawMin = 1064; // degrees, the neck's and the head's each
 constexpr float kAddedLookYaw = 60.0f;                                  // TTT2's fighters: 30
+win_pose::Handovers g_handovers; // (a team's won match: held_handover, below)
 PPC_FUNC(sub_033D5BBC_orig);
 PPC_FUNC(sub_033D5BBC) {
     const uint32_t player = ctx.r[3];
+    g_handovers.clear(); // (a new fight owes the last one's scene nothing: title/win_pose.h)
     const int k = slot_of_record(load(player + kPlayerRecord));
     if (traces().roster) {
         std::fprintf(stderr, "ttt2: roster: player %08X set up: select id %u, record %08X (slot %d), row %u\n", player,
@@ -1953,13 +2152,55 @@ uint32_t match_side(uint32_t player) {
 // whose byte the setters below may have capped (only ZAKO B, of the Fight
 // Lab, is 62 otherwise).
 uint32_t g_picks[2][2] = {{0, 0}, {0, 0}};
+
+// The player's record with each fighter (rank, wins, losses) is a row of the
+// profile's table: 63 rows of 76 bytes by select id at +9216, saved with the
+// profile (the bytes after the table are its other saved fields). A profile
+// is also a match side: picking a team copies each member's row into its
+// block (sub_04FA571C: the id capped at 62, so ZAKO B's row), the fight's
+// result is counted in the block, and sub_04FA5928 writes the block back to
+// the row of the member's id byte, uncapped: for an added fighter (the byte
+// is put back to its id, below) that was "row 64 + k": the profile's saved
+// fields after the table (the player's totals among them), and nothing read
+// it back: the next pick copied ZAKO B's row again, so the fighter's rank,
+// wins and losses were gone after the main menu. The port keeps an added
+// fighter's row itself, by its pack's code (title/record_store.h): the
+// member's block is filled from it, the block is taken back into it after a
+// fight and never written past the table, and the menus' questions are
+// answered from it (the natives below; the select screen's plates further
+// down, at sub_06F48E08).
+// Only the player's own profile (kind 1) has such rows: a ghost's or a CPU's
+// side is not written back by the title either.
+constexpr uint32_t kProfileKind = 0, kPlayerKind = 1, kProfileRows = 9216, kProfileRest = 14948;
+constexpr uint32_t kPlayerProfile = 0x108514B4; // its holder: the profile (+0) if +4, else the side of player +8
+record_store::Rows g_records;
+uint32_t player_profile() {
+    return load8(kPlayerProfile + 4) ? load(kPlayerProfile) : match_side(load(kPlayerProfile + 8) & 1);
+}
+// Member m of a profile is added fighter k: its block from the fighter's row.
+void fill_member(uint32_t profile, uint32_t m, int k) {
+    if (load8(profile + kProfileKind) != kPlayerKind) return;
+    const record_store::Row& row = g_records.row(vfs::save_root(), g_added[k].code);
+    record_store::to_member(row, guest_pointer(profile + kSideIds + kSideMember * m),
+                            guest_pointer(profile + kProfileRest + record_store::kRestSize * m));
+    if (traces().records) {
+        std::fprintf(stderr, "ttt2: records: %s picked (profile %08X member %u): rank %u, %u wins, %u losses\n",
+                     g_added[k].code.c_str(), profile, m, record_store::rank(row, false),
+                     record_store::wins(row, false), record_store::losses(row, false));
+    }
+}
+// Puts an added fighter's id back in a member's byte the title capped; its block was filled from the capped row.
+void restore_member(uint32_t profile, uint32_t m, uint32_t id) {
+    store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(id));
+    fill_member(profile, m, slot_of_id(id));
+}
 void fix_side_ids() {
     for (uint32_t p = 0; p < 2; ++p) {
         const uint32_t side = match_side(p);
         if (!side) continue;
         for (uint32_t m = 0; m < 2; ++m) {
             const uint32_t at = side + kSideIds + kSideMember * m;
-            if (slot_of_id(g_picks[p][m]) >= 0 && load8(at) == 62) store8(at, static_cast<uint8_t>(g_picks[p][m]));
+            if (slot_of_id(g_picks[p][m]) >= 0 && load8(at) == 62) restore_member(side, m, g_picks[p][m]);
         }
     }
 }
@@ -2054,9 +2295,71 @@ PPC_FUNC(sub_04FA571C) {
         for (uint32_t m = 0; m < 2; ++m) g_picks[p][m] = slot_of_id(ids[m]) >= 0 ? ids[m] : g_picks[p][m];
     }
     for (uint32_t m = 0; m < 2; ++m) {
-        if (slot_of_id(ids[m]) >= 0 && side) store8(side + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+        if (slot_of_id(ids[m]) >= 0 && side) restore_member(side, m, ids[m]);
     }
 }
+// After a fight (profile r3): each member's block back to its row, if the
+// profile is one the title keeps records for (sub_04FC6B28: kinds 1 and 3).
+// An added fighter's block goes to the port's row; the title's own copy is
+// given ZAKO B's row for it (in the table; put back as it was afterwards).
+PPC_FUNC(sub_04FA5928_orig);
+PPC_FUNC(sub_04FA5928) {
+    const uint32_t profile = ctx.r[3];
+    uint32_t ids[2] = {0, 0};
+    bool any = false;
+    for (uint32_t m = 0; m < 2 && g_active && profile; ++m) {
+        ids[m] = load8(profile + kSideIds + kSideMember * m);
+        any = any || slot_of_id(ids[m]) >= 0;
+    }
+    if (!any) {
+        sub_04FA5928_orig(ctx, base);
+        return;
+    }
+    for (uint32_t m = 0; m < 2; ++m) {
+        const int k = slot_of_id(ids[m]);
+        if (k < 0 || (m == 1 && ids[1] == ids[0]) || load8(profile + kProfileKind) != kPlayerKind) continue;
+        record_store::Row row = g_records.row(vfs::save_root(), g_added[k].code);
+        record_store::from_member(row, guest_pointer(profile + kSideIds + kSideMember * m),
+                                  guest_pointer(profile + kProfileRest + record_store::kRestSize * m));
+        const bool saved = g_records.save(vfs::save_root(), g_added[k].code, row);
+        if (!saved || traces().records) {
+            std::fprintf(stderr, "ttt2: records: %s after the fight: rank %u, %u wins, %u losses%s\n",
+                         g_added[k].code.c_str(), record_store::rank(row, false), record_store::wins(row, false),
+                         record_store::losses(row, false),
+                         saved ? "" : " (NOT written to the save folder: kept for this session, tried again later)");
+        }
+    }
+    const uint32_t spare = profile + kProfileRows + record_store::kRowSize * kCappedId;
+    record_store::Row kept;
+    std::memcpy(kept.data(), guest_pointer(spare), kept.size());
+    for (uint32_t m = 0; m < 2; ++m) {
+        if (slot_of_id(ids[m]) >= 0) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(kCappedId));
+    }
+    sub_04FA5928_orig(ctx, base);
+    for (uint32_t m = 0; m < 2; ++m) {
+        if (slot_of_id(ids[m]) >= 0) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+    }
+    std::memcpy(guest_pointer(spare), kept.data(), kept.size());
+}
+// The menus' questions about the player's record with a fighter (set r3: 0
+// the first set of numbers, else the second; select id r4): the title's
+// answers read the row of the id, asserting an id below 63.
+#define RECORD_NUMBER(name, number)                                                                              \
+    PPC_FUNC(name##_orig);                                                                                       \
+    PPC_FUNC(name) {                                                                                             \
+        const int k = g_active ? slot_of_id(ctx.r[4]) : -1;                                                      \
+        if (k < 0) {                                                                                             \
+            name##_orig(ctx, base);                                                                              \
+            return;                                                                                              \
+        }                                                                                                        \
+        const uint32_t profile = player_profile();                                                               \
+        const bool player = profile && load8(profile + kProfileKind) == kPlayerKind;                             \
+        ctx.r[3] = player ? record_store::number(g_records.row(vfs::save_root(), g_added[k].code), ctx.r[3] != 0) : 0; \
+    }
+RECORD_NUMBER(sub_085B1D30, rank)   // ProfileGetCharacterRank
+RECORD_NUMBER(sub_085B1DF4, wins)   // ProfileGetCharacterWins
+RECORD_NUMBER(sub_085B1EB8, losses) // ProfileGetCharacterLoses
+#undef RECORD_NUMBER
 // The other functions that write the bytes.
 #define SIDE_IDS(name)                                                                                           \
     PPC_FUNC(name##_orig);                                                                                       \
@@ -2084,7 +2387,7 @@ PPC_FUNC(sub_076D6CB0) {
     if (!g_active) return;
     for (uint32_t m = 0; m < 2; ++m) {
         const bool added = slot_of_id(ids[m]) >= 0;
-        if (added && profile) store8(profile + kSideIds + kSideMember * m, static_cast<uint8_t>(ids[m]));
+        if (added && profile) restore_member(profile, m, ids[m]);
         if (player < 2 && (added || kind == kCpuProfile)) g_picks[player][m] = added ? ids[m] : 0;
     }
     fix_side_ids();
@@ -2843,8 +3146,9 @@ PPC_FUNC(sub_07A5D01C) {
 // The button guide (the one object every menu shows, made at start-up:
 // placed by sub_04DC6A48 from kGuidePlace, r3 the guide, x r4, y r5 from the
 // screen's bottom), with the new top row: in the banner's place under the
-// grid while the grid is shown (sub_06F4D7B8 runs every frame then), where
-// the title put it elsewhere. sub_04DC933C runs for it every frame;
+// grid while the grid is shown (sub_06F4D7B8 runs every frame then; the
+// menus' grids that are scripts: script_grid_shown), where the title put it
+// elsewhere. sub_04DC933C runs for it every frame;
 // sub_04DC35F0 (its class's method 148) places it (r3, x r4, y r5, r6 0).
 constexpr uint32_t kGuidePlace = 0x0581F874;
 constexpr int32_t kRowsGuideDown = 40;
@@ -2874,10 +3178,38 @@ PPC_FUNC(sub_04DC6A48) {
     sub_04DC6A48_orig(ctx, base);
 }
 
+// The menus' grids that are scripts (CUSTOMIZE's character select, the
+// profile's character records, the ending movies: title/customize_grid.h)
+// have no function of their own that runs every frame: they are shown while
+// their frame is the menus' current one. The menu system (kMenuSystem, set up
+// when the word before it is set; the scripts' natives go the same way,
+// sub_085A9AB4): its object's +744 is the frames' holder, whose +4 + 56 is
+// the current frame; a frame starts with its name (a string object: the text
+// at +4 when its room at +28 is under 16 characters, else a pointer to it at
+// +20; its length at +24).
+constexpr uint32_t kMenuSystem = 0x1084FEBC;
+constexpr std::string_view kScriptGridFrames[] = {"FrameCharacterSelect", "FrameCharacterInfo",
+                                                  "FrameEndingMovieSelect"};
+bool script_grid_shown() {
+    const auto object = [](uint32_t at) { return at >= 0x10000000 && at < 0x50000000 && at % 4 == 0; };
+    if (load(kMenuSystem - 4) == 0) return false;
+    const uint32_t system = load(kMenuSystem);
+    const uint32_t holder = object(system) ? load(system + 744) : 0;
+    const uint32_t frame = object(holder) ? load(holder + 60) : 0;
+    if (!object(frame)) return false;
+    const uint32_t length = load(frame + 24), room = load(frame + 28);
+    if (length < 16 || length > 32 || room < length) return false; // (the three names are 18 to 22 long)
+    const uint32_t text = load(frame + 20);
+    if (!object(text & ~3u) || text >= 0x50000000 - 32) return false;
+    const std::string_view name(reinterpret_cast<const char*>(guest_pointer(text)), length);
+    return std::find(std::begin(kScriptGridFrames), std::end(kScriptGridFrames), name) != std::end(kScriptGridFrames);
+}
+
 PPC_FUNC(sub_04DC35F0);
 PPC_FUNC(sub_04DC933C_orig);
 PPC_FUNC(sub_04DC933C) {
     if (g_grid_rows && g_guide.object && ctx.r[3] == g_guide.object) {
+        if (script_grid_shown()) note_select_frame();
         ++g_guide.frames;
         const bool shown = g_guide.grid_seen && g_guide.frames - g_guide.grid_frame <= kGuideFramesShown;
         if (shown != g_guide.moved) {
@@ -3018,6 +3350,56 @@ PPC_FUNC(sub_06EFA17C) {
         }
     }
     sub_06EFA17C_orig(ctx, base);
+}
+
+// The select screen's record plates (sub_06F48E08: for each player, the rank,
+// wins and losses with the fighter under the cursor, per team member) find
+// the fighter's id from its UI position (record of the position, id of the
+// record: the calls returning to 0x06F49030 for the first member and to
+// 0x06F49B00 for the second; r23 the player, r26 the player's profile) and
+// read the profile's row of that id. An added fighter's position is Paul's,
+// so its plate showed the player's record with Paul. At those two calls the
+// answer for an added fighter is a row the screen shows for nobody else
+// (ZAKO B's for the first member, ZAKO A's for the second: neither can be
+// picked there), which holds the added fighter's row (title/record_store.h)
+// until the plates are done and is then as it was.
+constexpr uint32_t kPlateIds[2] = {0x06F49030, 0x06F49B00};
+constexpr uint32_t kPlateRows[2] = {62, 61};
+struct PlateLoan {
+    uint32_t at;
+    record_store::Row kept;
+};
+bool g_plates = false;
+std::vector<PlateLoan> g_plate_loans;
+PPC_FUNC(sub_06F48E08_orig);
+PPC_FUNC(sub_06F48E08) {
+    g_plates = g_active;
+    sub_06F48E08_orig(ctx, base);
+    g_plates = false;
+    for (auto loan = g_plate_loans.rbegin(); loan != g_plate_loans.rend(); ++loan) {
+        std::memcpy(guest_pointer(loan->at), loan->kept.data(), loan->kept.size());
+    }
+    g_plate_loans.clear();
+}
+PPC_FUNC(sub_06ECF9D8_orig);
+PPC_FUNC(sub_06ECF9D8) { // a record's fighter (a jump to sub_033D50A8)
+    const uint32_t lr = ctx.lr;
+    sub_06ECF9D8_orig(ctx, base);
+    if (!g_plates) return;
+    for (uint32_t m = 0; m < 2; ++m) {
+        const uint32_t player = ctx.r[23], profile = ctx.r[26];
+        if (lr != kPlateIds[m] || player > 1 || !profile || ctx.r[3] != 0) continue;
+        const int k = g_select_slot[player][m];
+        if (k < 0) continue;
+        PlateLoan& loan = g_plate_loans.emplace_back();
+        loan.at = profile + kProfileRows + record_store::kRowSize * kPlateRows[m];
+        std::memcpy(loan.kept.data(), guest_pointer(loan.at), loan.kept.size());
+        static const record_store::Row none{};
+        const record_store::Row& row = load8(profile + kProfileKind) == kPlayerKind
+                                           ? g_records.row(vfs::save_root(), g_added[k].code) : none;
+        std::memcpy(guest_pointer(loan.at), row.data(), row.size());
+        ctx.r[3] = kPlateRows[m];
+    }
 }
 
 // The functions that ask for UI positions leave Paul's rows as they found
@@ -3169,9 +3551,14 @@ PPC_FUNC(sub_06F046D4) {
 
 // A fighter's list of costumes: an added fighter's (see kCostumeLists), in
 // the place of Paul's row while the function reads it.
+constexpr uint32_t kPanelNatives = 0x085B416C, kPanelNativesEnd = 0x085B4E00;
 PPC_FUNC(sub_0580D690_orig);
 PPC_FUNC(sub_0580D690) {
     const int k = slot_of_id(ctx.r[4]);
+    // CUSTOMIZE mode's costume panel (its natives sub_085B416C..sub_085B4DEC, through a thunk) lists a fighter's
+    // costumes, then its customization slots: an added fighter has the slots only there (its costumes are whole
+    // bodies of their own, not records; and the natives keep at most ten rows on their stack).
+    if (k >= 0 && ctx.lr >= kPanelNatives && ctx.lr < kPanelNativesEnd) return; // (the caller's list is empty)
     if (k < 0 || g_costumes[k].entries == 0) {
         sub_0580D690_orig(ctx, base);
         return;
@@ -3206,6 +3593,18 @@ void lend_costume_keys(bool on) {
     }
 }
 
+// The costume previews' key of a fighter (select id r3), read straight from kCostumePreviews by the CUSTOMIZE
+// character select's costume panel (sub_085B4B14, its set-up): an added fighter's own key, or Paul's when its
+// pack has no pictures (the table has 59 rows).
+PPC_FUNC(sub_033EAFB8_orig);
+PPC_FUNC(sub_033EAFB8) {
+    if (const int k = slot_of_id(ctx.r[3]); k >= 0) {
+        ctx.r[3] = g_costumes[k].key != 0 ? g_costumes[k].key : load(kCostumePreviews);
+        return;
+    }
+    sub_033EAFB8_orig(ctx, base);
+}
+
 #define COSTUME_SCOPE(name)                                                                                      \
     PPC_FUNC(name##_orig);                                                                                       \
     PPC_FUNC(name) {                                                                                             \
@@ -3226,7 +3625,9 @@ PPC_FUNC(sub_033E265C) {
     g_outfit_choice = k >= 0 && ctx.r[8] > 0 && ctx.r[8] <= g_added[k].outfits.size() ? ctx.r[8] - 1 : 0;
     // Opening and confirming use this same function. Only confirmation may
     // substitute the native equipment style; opening must keep its input.
-    ctx.r[8] = outfit_menu::native_style(k >= 0 ? g_added[k].outfits.size() : 0, ctx.lr, ctx.r[8]);
+    // (an added fighter has one equipment style, whatever row was confirmed: an outfit or a saved slot)
+    ctx.r[8] = outfit_menu::native_style(k >= 0 ? std::max<size_t>(1, g_added[k].outfits.size()) : 0, ctx.lr,
+                                         ctx.r[8]);
     if (k >= 0 && !g_added[k].outfits.empty() && outfit_menu::confirming(ctx.lr) && traces().roster)
         std::fprintf(stderr, "ttt2: outfit: confirmed menu entry %u for %s\n",
                      g_outfit_choice + 1, g_added[k].code.c_str());
@@ -3245,6 +3646,40 @@ PPC_FUNC(sub_033E265C) {
         set_mask_bit(cursor, static_cast<uint32_t>(k), g_lent_bit);
         g_lent = -1;
     }
+}
+
+// Moves a cursor (r3; its cell at +56, its select at +0x8210) to the cell its
+// cell names for the direction pressed, if any, and then sets the cursor up
+// for that cell (sub_033E1340, cursor r3). The select's grid is at +76. With the new top row the '?' of
+// two rows is one cell (g_random_twin): a cursor at the lower place moves
+// from the cell that stands there, and one that moves onto that cell rests
+// on the '?' itself, before the title looks at where it is.
+constexpr uint32_t kCursorCell = 56, kCursorSelect = 0x8210, kGridOfSelect = 76;
+uint32_t g_moving_cursor = 0;           // the cursor sub_033E4704 is moving
+std::optional<uint32_t> g_moved_to;     // and the cell it was moved to, if it was
+PPC_FUNC(sub_033E1340_orig);
+PPC_FUNC(sub_033E1340) {
+    if (g_random_twin) {
+        const uint32_t cursor = ctx.r[3], cell = load(cursor + kCursorCell);
+        if (cursor == g_moving_cursor) g_moved_to = cell;
+        store(cursor + kCursorCell, g_random_twin->stay(cell));
+    }
+    sub_033E1340_orig(ctx, base);
+}
+PPC_FUNC(sub_033E4704_orig);
+PPC_FUNC(sub_033E4704) {
+    const uint32_t cursor = ctx.r[3], select = g_random_twin ? load(cursor + kCursorSelect) : 0;
+    if (select == 0 || load(select + kGridOfSelect) != 1) {
+        sub_033E4704_orig(ctx, base);
+        return;
+    }
+    store(cursor + kCursorCell, g_random_twin->leave(cursor, load(cursor + kCursorCell)));
+    g_moving_cursor = cursor;
+    g_moved_to.reset();
+    sub_033E4704_orig(ctx, base);
+    g_moving_cursor = 0;
+    const uint32_t cell = load(cursor + kCursorCell);
+    store(cursor + kCursorCell, g_moved_to ? g_random_twin->arrive(cursor, *g_moved_to) : g_random_twin->stay(cell));
 }
 
 // The '?' cell (cell 11, 34 or 54 of a grid) picks its cursor's roulette id,
@@ -3291,21 +3726,191 @@ PPC_FUNC(sub_033E1A54) {
     }
 }
 
-// Notes the fighter a player's cursor is on for the chooser (object r3,
-// player r4, select id r5), asserting that the id is below 63: an added
-// fighter's donor's.
+// ------------------------------------------------------------------ an added fighter's saved customizations
+
+// The title keeps a fighter's ten customization records and the slots' pictures in one file of its save per select
+// id (save type 8: 63 files, the save's directory is full, an id of 63 or more asserts), and works on them in two
+// buffers, one per player side (the save object at manager + 28, manager = *kCustomizeManager; buffer = object +
+// kSaveBuffer * player): +0 state (0 idle, 1 saving, 2 loading), +4 the select id whose file it holds (63: none),
+// +16 the file's bytes (title/customize_store.h), then a byte "a file was read". Three functions reach the file:
+// the load request sub_02669380 (object r3, player r4, id r5: empties the buffer, notes the id, asks the save for
+// the file, state 2), the update sub_02669BAC (object r3, each frame: a finished load is copied into the buffer if
+// the save has that file, state 0; a finished save, state 0), and the save sub_02669264 (object r3, player r4, id
+// r5: writes the buffer as the file of id r5, state 1). An added fighter's file is the port's own, by its code
+// (customize_store.h): its load request never reaches the save, the update fills the buffer from the port's file
+// (or leaves it empty, as the title leaves it for a file its save does not have), and a save of a buffer that
+// holds an added fighter (or for an added id) writes the port's file and nothing else. The donor's file and the
+// title's save are not read or written for an added fighter.
+constexpr uint32_t kCustomizeManager = 0x107A71EC, kManagerSave = 28;
+constexpr uint32_t kSaveBuffer = 0x3E9B0, kSaveState = 0, kSaveId = 4, kSaveBytes = 16;
+constexpr uint32_t kSaveRead = kSaveBytes + customize_store::kSize;
+constexpr uint32_t kSaveIdle = 0, kSaveSaving = 1, kSaveLoading = 2;
+PPC_FUNC(sub_0266D5F8); // empties a buffer's bytes (r3)
+PPC_FUNC(sub_024306B4); // the title's save call (manager r3, player r4, select id r5) -> sub_02669264
+
+customize_store::Unsaved g_unsaved; // saves the disk refused: kept, read back by a load, tried again
+
 PPC_FUNC(sub_02669380_orig);
 PPC_FUNC(sub_02669380) {
-    if (const int k = slot_of_id(ctx.r[5]); k >= 0) ctx.r[5] = g_added[k].donor;
-    sub_02669380_orig(ctx, base);
+    const uint32_t object = ctx.r[3], player = ctx.r[4], id = ctx.r[5];
+    if (slot_of_id(id) < 0 || player > 1) {
+        sub_02669380_orig(ctx, base);
+        return;
+    }
+    const uint32_t buffer = object + kSaveBuffer * player;
+    // The title empties the ten records only; what else the buffer held stays (the pictures of the fighter
+    // before, bytes between fields). Here all of it goes but the first word, so that an added fighter's file never
+    // carries another fighter's pictures and is the same bytes whoever wrote it.
+    std::memset(guest_pointer(buffer + kSaveBytes + 4), 0, customize_store::kSize - 4);
+    guest_call(ctx, base, sub_0266D5F8, {buffer + kSaveBytes});
+    store(buffer + kSaveId, id);
+    store8(buffer + kSaveRead, 0);
+    store(buffer + kSaveState, kSaveLoading);
 }
 
-// Builds the chooser's entries (cursor r3, select id r4) once the pictures
-// are there: for an added fighter without the customisation slots.
+PPC_FUNC(sub_02669264_orig);
+PPC_FUNC(sub_02669264) {
+    const uint32_t object = ctx.r[3], player = ctx.r[4], id = ctx.r[5];
+    if (player > 1) {
+        sub_02669264_orig(ctx, base);
+        return;
+    }
+    const uint32_t buffer = object + kSaveBuffer * player;
+    int k = slot_of_id(load(buffer + kSaveId)); // whose records the buffer holds decides, then the id asked for
+    if (k < 0) k = slot_of_id(id);
+    if (k < 0) {
+        sub_02669264_orig(ctx, base);
+        return;
+    }
+    // The title's save call hands nothing back, so a write the disk refuses is kept and tried again (g_unsaved).
+    const bool named = customize_store::valid_code(g_added[k].code);
+    const bool written = named && g_unsaved.save(vfs::save_root(), g_added[k].code,
+                                                 guest_pointer(buffer + kSaveBytes));
+    if (!written)
+        std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s could not be saved to %s%s\n",
+                     g_added[k].code.c_str(),
+                     named ? customize_store::file_of(vfs::save_root(), g_added[k].code).string().c_str()
+                           : "a file (the pack's code is no file name)",
+                     named ? ": they stay for this session and the save is tried again every few seconds" : "");
+    // (the title's save call has no failure of its own to show: the port's message, on the screen)
+    if (!written)
+        framedata::notice({"The customization could not be saved to the disk.",
+                           named ? "It is kept while the game runs and the save is tried again."
+                                 : "It is kept only while the game runs."},
+                          10.0);
+    else if (traces().roster)
+        std::fprintf(stderr, "ttt2: customize: %s: saved to its own file (player %u)\n", g_added[k].code.c_str(),
+                     player);
+    store(buffer + kSaveState, kSaveSaving); // the update makes it idle, as after the title's own save
+}
+
+// Tries the saves the disk refused again, every two seconds while there are any (from the buffers' update).
+void retry_unsaved() {
+    if (!g_unsaved.any()) return;
+    static std::chrono::steady_clock::time_point last;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::seconds(2)) return;
+    last = now;
+    for (const std::string& code : g_unsaved.retry(vfs::save_root()))
+    {
+        std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s are saved now\n", code.c_str());
+        framedata::notice({"The customization is saved now."}, 5.0);
+    }
+}
+
+// Developer switch TTT2_TEST_SAVE_SLOT (off unless set): `<slot>=<who>:<entries>` (who and entries as
+// TTT2_TEST_CUSTOMIZE, title/test_record.h; slot 0..4). Once, when a buffer holds that fighter's loaded records,
+// the record is put into the slot and the title's own save call is made for that buffer and fighter: for testing
+// the saving of an added fighter's file (and for making a slot of one of the title's fighters in a test save)
+// before CUSTOMIZE mode can do it.
+struct SaveSwitch {
+    uint32_t slot = 0;
+    test_record::Spec spec;
+};
+const std::optional<SaveSwitch>& save_switch() {
+    static const std::optional<SaveSwitch> read = []() -> std::optional<SaveSwitch> {
+        const char* text = std::getenv("TTT2_TEST_SAVE_SLOT");
+        if (!text || !*text) return std::nullopt;
+        const std::string_view all = text;
+        std::optional<test_record::Spec> spec;
+        if (all.size() > 2 && all[0] >= '0' && all[0] < '0' + static_cast<char>(customize_store::kSlots) &&
+            all[1] == '=')
+            spec = test_record::parse(all.substr(2));
+        if (!spec) {
+            std::fprintf(stderr, "ttt2: TTT2_TEST_SAVE_SLOT: cannot read '%s'\n", text);
+            return std::nullopt;
+        }
+        return SaveSwitch{static_cast<uint32_t>(all[0] - '0'), *spec};
+    }();
+    return read;
+}
+
+PPC_FUNC(sub_02669BAC_orig);
+PPC_FUNC(sub_02669BAC) {
+    const uint32_t object = ctx.r[3];
+    for (uint32_t player = 0; player < 2; ++player) {
+        const uint32_t buffer = object + kSaveBuffer * player;
+        if (load(buffer + kSaveState) != kSaveLoading) continue;
+        const int k = slot_of_id(load(buffer + kSaveId));
+        if (k < 0) continue;
+        const auto bytes = customize_store::valid_code(g_added[k].code)
+                               ? g_unsaved.load(vfs::save_root(), g_added[k].code) : std::nullopt;
+        if (bytes) {
+            std::memcpy(guest_pointer(buffer + kSaveBytes), bytes->data(), customize_store::kSize);
+            store8(buffer + kSaveRead, 1);
+        }
+        store(buffer + kSaveState, kSaveIdle);
+        if (traces().roster) {
+            std::string slots;
+            for (uint32_t n = 0; bytes && n < customize_store::kRecords; ++n) {
+                if (customize_store::filled(bytes->data(), n)) slots += " " + std::to_string(n);
+            }
+            std::fprintf(stderr, "ttt2: customize: %s (id %u, player %u): %s%s\n", g_added[k].code.c_str(),
+                         load(buffer + kSaveId), player,
+                         !bytes ? "no file of its own, nothing saved"
+                         : g_unsaved.waiting(g_added[k].code) ? "its save not yet on the disk, records"
+                                                              : "its own file, records",
+                         bytes && slots.empty() ? " none" : slots.c_str());
+        }
+    }
+    sub_02669BAC_orig(ctx, base);
+    retry_unsaved();
+    static bool saved = false;
+    const auto& test = save_switch();
+    for (uint32_t player = 0; test && !saved && player < 2; ++player) {
+        const uint32_t buffer = object + kSaveBuffer * player, id = load(buffer + kSaveId);
+        if (load(buffer + kSaveState) != kSaveIdle || id == 63) continue;
+        const int k = slot_of_id(id);
+        if (test->spec.who != (k >= 0 ? g_added[k].code : "#" + std::to_string(id))) continue;
+        const uint32_t record = buffer + kSaveBytes + customize_store::kFirstRecord +
+                                customize_store::kRecordSize * test->slot;
+        test_record::apply(test->spec, guest_pointer(record));
+        store(record + 3276, test->slot); // (as the title's own store of a record into a slot, sub_0266DA48)
+        saved = true;
+        guest_call(ctx, base, sub_024306B4, {load(kCustomizeManager), player, id});
+        std::fprintf(stderr, "ttt2: TTT2_TEST_SAVE_SLOT: slot %u of fighter %u saved by the title's save call "
+                             "(player %u)\n", test->slot, id, player);
+    }
+}
+
+// Builds the chooser's entries (cursor r3, select id r4) once the pictures are there: the costumes, then (while
+// there are fewer than 14 entries) one row per customization slot 0..4, filled or not. For an added fighter the
+// slot rows are made again here: only the slots its own file has filled (up to 14 preset outfits share the 14 entries: with 9 outfits all five slots fit, with
+// 10 to 13 the first 4 to 1 filled ones, with 14 none). A row is {kind, slot byte, picture, "has a paint"}; a
+// filled slot's picture is the texture the title makes from the slot's picture in the buffer
+// (0x56200000 | player << 8 | slot, sub_0266DBBC). A slot whose picture is blank (written by a tool: CUSTOMIZE
+// mode takes the picture) shows the fighter's first costume picture instead. "Has a paint" is what the title's
+// own rows ask (sub_033E3460 @033E3824): tk::CustomizePaintManager's answer for (select id, slot); it puts the
+// chooser's "painted" mark on the row. The paints are kept by the real select id, added fighters' too.
+constexpr uint32_t kChooserMax = outfit_menu::kMaxPresets, kChooserCursorRow = 84, kChooserPlayer = 340;
+constexpr uint32_t kSlotPicture = 0x56200000;
+constexpr uint32_t kPaintManager = 0x10827D80, kPaintManagerMade = 0x108516A8; // the global and its "constructed"
+PPC_FUNC(sub_02430624); // whether a slot is EMPTY (manager r3, player r4, slot r5)
+PPC_FUNC(sub_02452360); // whether a paint is kept for a slot (paint manager r3, select id r4, slot r5)
 PPC_FUNC(sub_033E3460_orig);
 PPC_FUNC(sub_033E3460) {
-    const uint32_t cursor = ctx.r[3];
-    const int k = slot_of_id(ctx.r[4]);
+    const uint32_t cursor = ctx.r[3], id = ctx.r[4];
+    const int k = slot_of_id(id);
     const bool added = k >= 0 && g_costumes[k].key != 0;
     const bool pending = load8(cursor + kChooserPending) != 0;
     lend_costume_keys(true);
@@ -3315,11 +3920,232 @@ PPC_FUNC(sub_033E3460) {
     const uint32_t count = load8(cursor + kChooserCount);
     uint32_t kept = 0;
     while (kept < count && load(cursor + kChooserEntries + kChooserEntrySize * kept) != kChooserSlot) ++kept;
-    store8(cursor + kChooserCount, static_cast<uint8_t>(kept));
-    if (!g_added[k].outfits.empty() && traces().roster)
-        std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
-                     kept, g_added[k].code.c_str());
+    uint32_t rows = kept;
+    const uint32_t manager = load(kCustomizeManager), player = load(cursor + kChooserPlayer);
+    const uint32_t object = manager ? load(manager + kManagerSave) : 0;
+    const uint32_t buffer = object + kSaveBuffer * player;
+    // (only the fighter's own loaded records: a buffer still loading, or another fighter's, gives no rows)
+    if (object && player < 2 && kept > 0 && load(buffer + kSaveState) == kSaveIdle && load(buffer + kSaveId) == id) {
+        const uint32_t first_picture = load(cursor + kChooserEntries + 8);
+        for (uint32_t slot = 0; slot < customize_store::kSlots && rows < kChooserMax; ++slot) {
+            if (guest_call(ctx, base, sub_02430624, {manager, player, slot}) != 0) continue; // empty
+            const uint32_t entry = cursor + kChooserEntries + kChooserEntrySize * rows++;
+            const bool blank = customize_store::picture_blank(guest_pointer(buffer + kSaveBytes), slot);
+            store(entry, kChooserSlot);
+            store(entry + 4, slot << 24);
+            store(entry + 8, blank ? first_picture : kSlotPicture | player << 8 | slot);
+            const bool painted = load(kPaintManagerMade) != 0 &&
+                                 guest_call(ctx, base, sub_02452360, {kPaintManager, id, slot}) != 0;
+            store(entry + 12, painted ? 1 : 0);
+        }
+    }
+    store8(cursor + kChooserCount, static_cast<uint8_t>(rows));
+    // (the row the chooser opens on is remembered per fighter and mode: never past the rows there are now)
+    if (rows > 0 && load(cursor + kChooserCursorRow) >= rows) store(cursor + kChooserCursorRow, rows - 1);
+    if (traces().roster && (rows > kept || !g_added[k].outfits.empty()))
+        std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s (%u saved slots)\n",
+                     rows, g_added[k].code.c_str(), rows - kept);
 }
+
+// PAINT's first view of a new paint: sub_0255B718 gives the paint its camera (eye, target, up) from the title's
+// table of one camera per fighter (24 bytes per select id at 0x107AF448: eye xyz, target xyz; ids 0..58) through
+// sub_0244F8A8 (paint r3, eye r4, target r5, up r6; the paint's {select id, slot} at *(r3 + 48)). An added
+// fighter's id lies past the table, where other data reads as a camera at the origin: PAINT then opened on the
+// calves from behind (the fights seldom show that side, so the paint seemed missing there). It gets the camera
+// of the fighter its customization comes from (the shop list's fighter, else its donor). Saved paints keep theirs.
+constexpr uint32_t kPaintCameras = 0x107AF448, kPaintCameraSize = 24, kPaintCameraCall = 0x0255BA9C;
+PPC_FUNC(sub_0244F8A8_orig);
+PPC_FUNC(sub_0244F8A8) {
+    if (ctx.lr == kPaintCameraCall) {
+        const uint32_t key = load(ctx.r[3] + 48);
+        const int k = key ? slot_of_id(load(key)) : -1;
+        if (k >= 0) {
+            const auto source = customize_grid::paint_camera_fighter(
+                !g_added[k].shop.empty() ? std::optional<uint32_t>(g_added[k].shop_fighter) : std::nullopt,
+                g_added[k].donor);
+            if (source) {
+                ctx.r[4] = kPaintCameras + kPaintCameraSize * *source;
+                ctx.r[5] = kPaintCameras + kPaintCameraSize * *source + 12;
+                if (traces().roster)
+                    std::fprintf(stderr, "ttt2: paint: %s's first paint view from fighter %u's camera\n",
+                                 g_added[k].code.c_str(), *source);
+            }
+        }
+    }
+    sub_0244F8A8_orig(ctx, base);
+}
+
+// Developer switch TTT2_TEST_CUSTOMIZE (title/test_record.h; off unless set): a customization record for one
+// fighter, without Customize mode or a save. The title fills a player's working record (manager r3 = *0x107A71EC,
+// player r4, costume number r5, select id r6: manager + 96 + 4096 * player) when a costume is confirmed on the
+// select screen, and copies it from there into the match set-up, which the fight's loader hands to the character
+// manager. The switch's items and colours are put into the working record right after the title filled it.
+PPC_FUNC(sub_0242F438_orig);
+PPC_FUNC(sub_0242F438) {
+    const uint32_t manager = ctx.r[3], player = ctx.r[4], number = ctx.r[5], id = ctx.r[6];
+    sub_0242F438_orig(ctx, base);
+    static const std::optional<test_record::Spec> spec = [] {
+        const char* text = std::getenv("TTT2_TEST_CUSTOMIZE");
+        std::optional<test_record::Spec> parsed;
+        if (text && *text && !(parsed = test_record::parse(text)))
+            std::fprintf(stderr, "ttt2: TTT2_TEST_CUSTOMIZE: cannot read '%s'\n", text);
+        return parsed;
+    }();
+    if (spec && traces().roster)
+        std::fprintf(stderr, "ttt2: roster: working record of player %u filled: fighter %u, costume %u, buffers %08X\n",
+                     player, id, number, load(manager + 28));
+    if (!spec || player > 1 || !load(manager + 28)) return; // (no save buffers: the title left the record alone)
+    const int k = slot_of_id(id);
+    if (spec->who != (k >= 0 ? g_added[k].code : "#" + std::to_string(id))) return;
+    test_record::apply(*spec, guest_pointer(manager + 96 + test_record::kSize * player));
+    std::fprintf(stderr, "ttt2: TTT2_TEST_CUSTOMIZE: player %u, fighter %u, costume %u wears the test record\n",
+                 player, id, number);
+}
+
+// ------------------------------------------------------------------ CUSTOMIZE mode with an added fighter
+
+// The mode (the object at *kCustomizeManager + 0) takes a fighter by select id and code: its character select's
+// script calls loadCharacter(id, costume number) (sub_02302C50), which finds the id's code in the chara master
+// and calls sub_02A86B80(mode, code, id): the mode notes the code (its viewer loads the model by it: `loadPlayer
+// PLAYER1 ... <code>`) and the id (mode + 0x6A790, and its per-fighter list object: sub_0241FA08 reads a table of
+// 63 file keys, 0x10046018, by it with no bound), then sub_02A8F5DC(mode, id): the shop list (sub_0263540C: the
+// title's one file of every fighter's rows is read and its parser sub_026466F0 keeps the `<Fighter>` whose id is
+// the one asked for; then the item names' file from a table of 63 keys, 0x1006B08C, by that id, no bound) and the
+// list object again. For an added fighter:
+// * both functions get the id of the title's fighter its shop list is of (shop_fighter: the fighter the importer
+//   fitted its wardrobe from), so every table by id inside the mode is read in bounds and the item ids, names,
+//   prices, owned and unlocked items are that fighter's;
+// * the mode gets the added fighter's own code (its first preset outfit's body when it has presets: the body a
+//   saved slot is worn on in a fight), so the viewer shows the added fighter;
+// * the parser gets the pack's own shop list (shop.bxml: the rows whose items the pack's item database has; a
+//   listed item that cannot be loaded would never finish loading) in place of the title's file;
+// * the select id in the script, the costume panel and the save stays the added fighter's own: the panel's
+//   set-up loads its own file into save buffer 0 (sub_02669380 above), and the mode's save (saveItemCustomize ->
+//   sub_024306B4(manager, 0, the mode's id) -> sub_02669264) writes that buffer to the added fighter's file,
+//   because the buffer holds an added fighter.
+// g_custom_subject: the added fighter the mode holds (-1: one of the title's).
+int g_custom_subject = -1;
+uint32_t g_shop_copy = 0, g_shop_room = 0; // the subject's shop list in guest memory
+
+// An added fighter's colours under a customization record. The loader applies a record's colours to a model
+// with sub_065D2B0C(loader manager r3, slot r4, record r5): colour register 26 + 5 g + e takes the record's colour
+// of group g, entry e (at record + (g == 0 ? 636 : 576 + 60 * (g == 1 ? 0 : g)) + 12 e + 4); a colour of 0 or
+// 255 is "the default": the palette row of the model's select id for that register (sub_0683A59C(the palette
+// manager, id, register); an added fighter's rows hold its own colours, kColourGrid). CUSTOMIZE fills a fresh
+// record with explicit colours, those of the fighter it has the lists of (shop_fighter, the wardrobe's source:
+// Lars, Jun), and a slot saved there keeps them. The importer numbers an added fighter's own registers from 51,
+// as the title numbers its garments', so the source's default for such a register painted the fighter's own
+// outfit (Noctis red, Reina's purple jacket black). While a record is applied to an added fighter's model, a
+// colour equal to the source's default for a register the fighter has a colour of its own for counts as the
+// default: the fighter's own row. Colours the player chose (any other number) stay. (The title copies the record
+// as applied for slots 0..3, 0x107D00C8: that copy keeps the defaults as 0.)
+constexpr uint32_t kPaletteManager = 0x10872798, kLoaderSlotBytes = 3264, kLoaderSlotId = 56;
+PPC_FUNC(sub_0683A59C); // palette row (manager r3, select id r4, register r5) -> colour number, 0: none
+PPC_FUNC(sub_065D2B0C_orig);
+PPC_FUNC(sub_065D2B0C) {
+    const uint32_t slot = ctx.r[4], record = ctx.r[5];
+    const int k = record != 0 && slot < 6 ? slot_of_id(load(ctx.r[3] + kLoaderSlotBytes * slot + kLoaderSlotId)) : -1;
+    if (k < 0 || g_added[k].shop.empty()) {
+        sub_065D2B0C_orig(ctx, base);
+        return;
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> put_back; // (address, colour) of the record's colours taken out
+    for (uint32_t g = 0; g < 14; ++g) { // (the title's 14 groups)
+        const uint32_t group = record + (g == 0 ? 636 : 576 + 60 * (g == 1 ? 0 : g));
+        for (uint32_t e = 0; e < 5; ++e) {
+            const uint32_t at = group + 12 * e + 4, colour = load(at), reg = 26 + 5 * g + e;
+            if (colour == 0 || colour == 255) continue;
+            const PPCContext saved = ctx;
+            const uint32_t source = guest_call(ctx, base, sub_0683A59C, {kPaletteManager, g_added[k].shop_fighter, reg});
+            const uint32_t own = guest_call(ctx, base, sub_0683A59C, {kPaletteManager, g_added[k].id, reg});
+            ctx = saved;
+            if (own != 0 && colour == source) put_back.emplace_back(at, colour);
+        }
+    }
+    for (const auto& [at, colour] : put_back) store(at, 0);
+    if (traces().roster && !put_back.empty())
+        std::fprintf(stderr, "ttt2: colours: %s wears its own colours for %zu registers its record left at %u's\n",
+                     g_added[k].code.c_str(), put_back.size(), g_added[k].shop_fighter);
+    sub_065D2B0C_orig(ctx, base);
+    for (const auto& [at, colour] : put_back) store(at, colour);
+}
+
+PPC_FUNC(sub_02A86B80_orig);
+PPC_FUNC(sub_02A86B80) {
+    const int k = slot_of_id(ctx.r[5]);
+    g_custom_subject = k >= 0 && !g_added[k].shop.empty() ? k : -1;
+    if (k >= 0) {
+        const Added& added = g_added[k];
+        if (!added.outfits.empty()) {
+            ctx.r[4] = added.outfits[0].code_string;
+            g_outfit_bodies.remember(0, added.id, added.outfits[0].id); // (the viewer's player is loader slot 0)
+        } else {
+            g_outfit_bodies.remember(0, added.id, 0);
+        }
+        // (a fighter without a list is never let in by the grid; if it comes all the same, its donor's lists)
+        ctx.r[5] = g_custom_subject >= 0 ? added.shop_fighter : added.donor;
+        if (traces().roster)
+            std::fprintf(stderr, "ttt2: customize: the mode takes %s (id %u) as %s, lists of fighter %u\n",
+                         added.code.c_str(), added.id,
+                         reinterpret_cast<const char*>(guest_pointer(ctx.r[4])), ctx.r[5]);
+    }
+    sub_02A86B80_orig(ctx, base);
+}
+
+PPC_FUNC(sub_02A8F5DC_orig);
+PPC_FUNC(sub_02A8F5DC) {
+    if (const int k = slot_of_id(ctx.r[4]); k >= 0) {
+        ctx.r[4] = !g_added[k].shop.empty() ? g_added[k].shop_fighter : g_added[k].donor;
+    }
+    sub_02A8F5DC_orig(ctx, base);
+}
+
+PPC_FUNC(sub_026466F0_orig);
+PPC_FUNC(sub_026466F0) {
+    if (g_custom_subject >= 0) {
+        const std::vector<uint8_t>& shop = g_added[g_custom_subject].shop;
+        if (g_shop_room < shop.size()) {
+            g_shop_room = static_cast<uint32_t>(shop.size() + 0x4000);
+            g_shop_copy = system_alloc(g_shop_room);
+        }
+        std::memcpy(guest_pointer(g_shop_copy), shop.data(), shop.size());
+        ctx.r[4] = g_shop_copy;
+        ctx.r[5] = static_cast<uint32_t>(shop.size());
+        if (traces().roster)
+            std::fprintf(stderr, "ttt2: customize: the shop list of %s (%zu bytes) in place of the title's\n",
+                         g_added[g_custom_subject].code.c_str(), shop.size());
+    }
+    sub_026466F0_orig(ctx, base);
+}
+
+// REGISTER TAG and TOUCH SELECT (CUSTOMIZE mode's two other screens with a character grid) are the title's own
+// code, not scripts: their grid is the fights' one, where the cursor stands on an added fighter's cell as on any
+// other. Both keep what is picked in the title's save by select id, and read tables of the title's 63 fighters
+// by it (the tag screen's costume panel never finished loading for an added fighter and took no input any more).
+// So a confirm on an added fighter's cell is not passed on, as the title itself passes none on for a fighter
+// already in the team: REGISTER TAG's two grid states (the team's first and second member: sub_0267499C,
+// sub_02675C18; the cursor's cell at this + 136) and TOUCH SELECT's (sub_0239C4B8; this + 112) read the
+// screen's events (a word of bits set by the menu's handlers, 8: confirm) each frame.
+constexpr uint32_t kTagScreenEvents = 0x10851834 + 8, kTouchScreenEvents = 0x108516E4 + 8, kEventConfirm = 8;
+PPC_FUNC(sub_033E10C4); // a cell of a select grid (grid r3: 1 the fights' one, cell r4): 32 bytes, +0 the select id
+void refuse_added_pick(PPCContext& ctx, uint8_t* base, uint32_t events, uint32_t cell) {
+    if (!g_active || (load(events) & kEventConfirm) == 0) return;
+    const uint32_t entry = guest_call(ctx, base, sub_033E10C4, {1, cell});
+    if (entry == 0 || slot_of_id(load(entry)) < 0) return;
+    store(events, load(events) & ~kEventConfirm);
+    if (traces().roster) std::fprintf(stderr, "ttt2: customize: no pick of added fighter %u on this screen\n", load(entry));
+    framedata::notice({"Added fighters cannot be set on this screen."}, 2.5);
+}
+#define NO_ADDED_PICK(name, events, cell)                                                                        \
+    PPC_FUNC(name##_orig);                                                                                       \
+    PPC_FUNC(name) {                                                                                             \
+        refuse_added_pick(ctx, base, events, load(ctx.r[3] + cell));                                             \
+        name##_orig(ctx, base);                                                                                  \
+    }
+NO_ADDED_PICK(sub_0267499C, kTagScreenEvents, 136)
+NO_ADDED_PICK(sub_02675C18, kTagScreenEvents, 136)
+NO_ADDED_PICK(sub_0239C4B8, kTouchScreenEvents, 112)
+#undef NO_ADDED_PICK
 
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)
 
@@ -4382,12 +5208,42 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
         store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
 }
 
+// A team's won match (title/win_pose.h): the hand-over of an added fighter's part (its move property 0x80A2, which
+// the title would write into the partner's signal word at once) ends that part there, as it ended the donor's, and
+// is held until the fighter has left the move. -> whether it was held (the title's own write is then left out).
+constexpr uint32_t kPlayerPartner = 172; // the other member of its tag team (0: a solo fighter)
+constexpr uint32_t kPlayerOutOfPlay = 132; // (nonzero: the title's own hand-over does nothing)
+constexpr uint32_t kPlayerAlone = 1012;    // nonzero: no team (requirement 485 tests it; +172 is set all the same)
+constexpr uint32_t kSignalRequirement = 313; // "my signal word is <param>"
+
+bool held_handover(uint32_t player, uint32_t value) {
+    if (!player || added_slot(player) < 0 || load(player + kPlayerOutOfPlay) != 0) return false;
+    // (a fighter alone plays the winner's first part too and leaves it by a cancel of its own at the same frame)
+    if (load(player + kPlayerAlone) != 0) return false;
+    const uint32_t partner = load(player + kPlayerPartner), move = load(player + kPlayerMove);
+    const uint32_t name = move ? load(move) : 0;
+    if (!partner || !name || !win_pose::is_part(reinterpret_cast<const char*>(guest_pointer(name)))) return false;
+    g_handovers.hold(player, move, partner, value);
+    set_frame(player, win_pose::kPastTheEnd); // (its part ends here, as the donor's pose did)
+    return true;
+}
+
+// The held hand-overs whose part is over, given: before a waiting move tests its signal.
+void give_handovers() {
+    if (g_handovers.empty()) return;
+    g_handovers.deliver([](uint32_t sender) { return load(sender + kPlayerMove); }, [](uint32_t receiver, uint32_t value) {
+        store(receiver + win_pose::kSignal, value);
+        if (traces().roster) std::fprintf(stderr, "ttt2: roster: team win: player %08X is handed %u\n", receiver, value);
+    });
+}
+
 void record_warp_start(PPCContext& ctx, uint8_t* base, uint32_t player); // (level effects, below)
 uint32_t g_property_player = 0; // the player whose move property runs (level effects, below: an effect's owner)
 
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
+    if (id == win_pose::kHandoverProperty && held_handover(player, load(ctx.r[4] + 4))) return;
     // (each property comes twice, pass 1 then 0: acted on once)
     if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd ||
          id == gauge::kStop) &&
@@ -4436,6 +5292,7 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
+    if (kind == kSignalRequirement) give_handovers();
     if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow || kind == gauge::kMaxOn) &&
                      gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {
         ctx.r[3] = result;
@@ -4540,13 +5397,22 @@ std::map<uint32_t, uint32_t> g_special_assist_returns;
 // player+7820: this fighter's bound started the current Tag Assault (see
 // eliza_assist::holds_sessions).
 constexpr uint32_t kPlayerAssaultStarter = 0x1e8c;
+// The fighter's move is a move of the moveset it uses now (eliza_assist::move_of_moveset).
+bool live_move(uint32_t player) {
+    const uint32_t moveset = load(player + kPlayerMovesetInUse), move = load(player + kPlayerMove);
+    return moveset && move && eliza_assist::move_of_moveset(load(moveset + 4),
+        load(moveset + eliza_assist::kMovesetMoves), load(moveset + eliza_assist::kMovesetMoves + 4), move);
+}
 bool special_assist_sequence(uint32_t player) {
     static std::map<uint32_t, eliza_assist::Session> sequences;
     if (!player) return false;
     const int slot = slot_of_id(load(player + kPlayerSelectId));
     const bool supported = slot >= 0 && eliza_assist::holds_sessions(
         eliza_assist::supported(g_added[slot].code), load(player + kPlayerAssaultStarter) != 0);
-    if (!supported) {
+    // No session without a Tag Assault, a human and a partner (update_window
+    // says the same), and none on a move that is not of the moveset in use.
+    if (!supported || load(player + 0x408) != 0 || load(player + 0x1e88) != 1 ||
+        !load(player + 0xac) || !live_move(player)) {
         sequences.erase(player);
         return false;
     }
@@ -5465,4 +6331,58 @@ PPC_FUNC(sub_08977AE8) {
     store(config + 8, kSkinningRoom * total);
     sub_08977AE8_orig(ctx, base);
     store(config + 8, total);
+}
+
+// ------------------------------------------------------------------ CUSTOMIZE mode's character grid
+
+// The added fighters' cells in CUSTOMIZE mode's character select (title/customize_grid.h): the interfaces' file
+// gets the cursor's class with their cells (a fighter whose pack has a shop list can be entered, the others'
+// faces are there and the cursor passes them), and the menus' file the frame's four direction handlers as source
+// text. The menus' file is the one prepare_solo_ghost_battle (called before this) changes too, so its change is
+// made again here first: the entry set last is the one the title reads.
+namespace {
+constexpr uint32_t kInterfaces = 0xB43EB78F, kMenus = 0x4615C394;
+constexpr const char* kMenuArchives[] = {"content/hdd/data100", "content/hdd/data000"}; // the update's copy first
+} // namespace
+
+void cafe::title::prepare_customize_select() {
+    if (!g_active) return;
+    std::vector<customize_grid::Cell> cells;
+    for (const Added& added : g_added) {
+        if (added.active && added.cell != 0)
+            cells.push_back({added.column, added.grid_row, added.id, !added.shop.empty()});
+    }
+    bool script = false, handlers = false;
+    for (const char* archive : kMenuArchives) {
+        uint8_t flags[8] = {};
+        const auto file = game_file(archive, kInterfaces, &flags);
+        if (!file) continue;
+        const auto changed = menudata::with_cursor_script(*file, [&](std::string_view text) {
+            return customize_grid::with_cells(text, cells, g_grid_rows);
+        });
+        script = changed && vfs::set_archive_entries(archive, {{kInterfaces, archive::pack(*changed, kInterfaces, flags)}});
+        break;
+    }
+    for (const char* archive : kMenuArchives) {
+        uint8_t flags[8] = {};
+        auto file = script ? game_file(archive, kMenus, &flags) : std::nullopt;
+        if (!file) continue;
+        if (auto solo = menudata::add_solo_ghost_row(*file)) file = std::move(solo);
+        const auto changed = menudata::with_select_handlers(
+            *file, {customize_grid::handler(-1, 0, "KeyLeft", "KeyLSLeft"),
+                    customize_grid::handler(1, 0, "KeyRight", "KeyLSRight"),
+                    customize_grid::handler(0, -1, "KeyUp", "KeyLSUp"),
+                    customize_grid::handler(0, 1, "KeyDown", "KeyLSDown")});
+        handlers = changed && vfs::set_archive_entries(archive, {{kMenus, archive::pack(*changed, kMenus, flags)}});
+        break;
+    }
+    if (!script)
+        std::fprintf(stderr, "ttt2: warning: CUSTOMIZE mode's character select is not as expected: the added "
+                             "fighters cannot be picked there\n");
+    else if (!handlers)
+        std::fprintf(stderr, "ttt2: warning: CUSTOMIZE mode's character select: its cursor keeps the title's "
+                             "steps (an added fighter beside or above the title's rows cannot be reached)\n");
+    else if (traces().roster)
+        std::fprintf(stderr, "ttt2: customize: the character select has %zu added cells%s\n", cells.size(),
+                     g_grid_rows ? ", the new top row" : "");
 }

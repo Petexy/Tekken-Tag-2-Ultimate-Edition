@@ -259,6 +259,9 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         self_update.update_files(settings.root, branch, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
+    elif action == 'shaders':
+        # (Settings' "Prepare shaders before playing": the game program makes the shaders it has used on this PC.)
+        run_command([settings.game_command()[0], '--precompile'], settings)
     elif action in ('import', 'remove'):
         from setup_game import ensure_importer
         ensure_importer(settings, run_command)

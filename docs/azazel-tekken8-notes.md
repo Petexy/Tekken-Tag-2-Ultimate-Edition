@@ -12,7 +12,19 @@ record what his port needed, for later fighters.
   move cameras) are anchored at his head (a man's head at 1.62 m mapped on his highest sphere, scaled by the body
   size) and turned to his head when they look more than 11.5 degrees away; a launched man is kept under the health
   bars (85% of the picture's height); the KO slow motion (replay camera sub_060B44E4) and the throw camera's view step
-  (sub_06130C84, where its 10 m limit is applied) are contained the same way. Matches without a giant are identical
+  (sub_06130C84, where its 10 m limit is applied) are contained the same way; the round call ("ROUND 1", "READY",
+  "FIGHT": the win camera in its states 0x11 to 0x13, sub_061A9D34) comes round the fighters at the fight camera's
+  distance but looks at its own point at a man's height, so its shot goes up by what the fight camera went up
+  (`title/round_call.h`; a call that opens from above keeps the title's own way down and rises only at its end: a
+  metre higher it went through a hall's gallery; it comes down level with its point, so it comes down to the fight
+  camera's tilt instead, slowing all the way (`from_above()`: the picture tilted 1.7 degrees in one frame when the
+  round began, and a straight ramp of the lift halved the eye's speed in one frame). The call's
+  state is the win camera's counter +440 mod 3 (sub_061AAA8C: 1 round the side 0x11, 2 = 0x13, 0 from above 0x12);
+  0x11 and 0x13 end on the fight camera's tilt by themselves; the 2-character camera's lead for a rising fighter counts
+  a rise from its second frame (his spheres take the round's stance a frame after the round places him, 0.33 m up:
+  read as a rise it sent the call's second frame 2.5 m out), and on the frame the title puts him in a new place (a
+  round's start) the camera takes his place for his body's middle (his spheres still where he was knocked out took
+  the call's first frame of round 2 out to the 15 m limit). Matches without a giant are identical
   frame for frame (camera, bodies, pushes, hits) to the runtime without the hook.
 * `character.ini body = S` (definition `BODY`) drives `runtime/src/title/giant_body.cpp`: player+1652 is the Mushroom
   Battle size (it scales the model too, so never write it for an added giant). The hurt-sphere code (sub_03D6B9F4) and
@@ -33,6 +45,11 @@ record what his port needed, for later fighters.
   owner's projectile-hit flag (+1152 0x200000, requirement 46) a frame after Tekken 8 sees it.
 * Requirement 51 (whiff) is decided by the melee hit test at the last active frame, before a projectile hits.
 * Requirements 35/36 measure the same floor distance between the fighters' origins in both games (1:1).
+* A move's state word (vuln: 0x10 guards highs and mids standing, 0x8 lows crouching; the same bits in both games,
+  player +452 holds them in game) decides what is guarded while it plays. Tekken 8 walks, dashes and back-steps him in
+  a boss state, 0xe81a in its low bits, both guards on: moving forward he blocked everything without even a guard
+  reaction. The converter gives those moves an ordinary fighter's state (convert/moveset.py vuln8: forward 0x842,
+  back 0x1052).
 * A fighter without a Tekken 8 command list gets one from its converted moveset (convert/movelist_rows.py) with
   names the definition writes (`COMMANDS`).
 * Beams: Tekken 8 0x8262/0x8263/0x8264 have no TTT2 counterpart; a TTT2 laser (0x8145/0x8146/0x8147) needs its .alo
@@ -58,3 +75,7 @@ record what his port needed, for later fighters.
   on requirement 46 and gives the guard a normal block reaction.
 * His 4 rows went to the All Direction Attack (a boss charge) before the mid kick his Tekken 6 4 is; dropping the
   charge's rows makes 4 that kick from Tekken 8 data alone.
+* Tekken 8 gives the boss no crouch (his stance's alias 2 is the stance itself; holding down does nothing, down + a
+  button are his attacks), so lows from neutral could not be guarded. move_overrides `stance_crouch` gives his stance,
+  walks and dashes the donor stance's crouch group with the donor's crouch starts swapped for his own Tekken 8 ones,
+  and the crouch those lead to his stance's down + button rows first.

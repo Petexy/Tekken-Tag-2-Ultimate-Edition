@@ -31,6 +31,15 @@ bool wait_timestamp(uint64_t timestamp, uint64_t timeout_ns);
 // before the next submission executes. Any thread.
 void cpu_wrote(uint32_t address, uint32_t size);
 
+// Render targets the title reads with the CPU, beyond those the backend
+// copies to guest memory by itself (small ones at the title's size, as the
+// stage's exposure): while `bytes` is above 0, colour targets at the
+// title's size of up to that many bytes are copied to guest memory after
+// the GPU writes them too (title/paint.cpp, while CUSTOMIZE > PAINT is
+// open). Any thread.
+void set_cpu_read_targets(uint32_t bytes);
+uint32_t cpu_read_targets();
+
 // The clock the command processor samples for GPU timestamps, in CPU timer
 // ticks (so GX2GPUTimeToCPUTime is the identity).
 uint64_t clock();

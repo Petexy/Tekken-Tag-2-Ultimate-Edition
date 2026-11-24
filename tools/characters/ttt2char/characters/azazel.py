@@ -17,6 +17,10 @@ TEKKEN8_ID = 32               # his FighterId in Tekken 8 (BaseCharacterItem BCI
 TEKKEN8_CODE = 'got'          # his code in Tekken 8's files (Character/Item/model/unique/got/)
 CODE = 'aza'                  # his three-letter code in the pack (not a code TTT2 or another added fighter has)
 SEX = 'male'
+REVISION = 1                  # d/f+3+4's hit leaves him 15 frames ahead, not 120 (1); his intros say his Tekken 8
+                              # roars, not Lars's line or subtitle; no Lars voice in his banks (1); walking and
+                              # dashing he guards as any fighter, not everything (1); he crouches as any fighter:
+                              # holding down, lows guarded (1)
 
 # The donor: a TTT2 fighter with a similar body. Its skeleton is the base of his, its moveset gives the generic and
 # tag moves, its voice list, sound banks, item database and effects are used for him.
@@ -162,6 +166,13 @@ MOVESET = {
     'hit_grabs': {'key:34fcd66e': {'grab': 'key:657bbe2c', 'guard_as': 'key:6ecebd8e'}},
     'active_frames': {'key:34fcd66e': (13, 17)},
     'damage': {'key:34fcd66e': 0},
+    # d/f+3+4, the crystal prison (unblockable, hits at frame 80 of its 140): Tekken 8 holds the opponent it hits for
+    # 170 frames (its boss's stun: key:bbbf54b2, a clip of 180), 120 frames after he can act again, time for the same
+    # move again without end. Here its hit leaves him 15 frames ahead (the user's choice, 2026-11-22: a standing or
+    # crouching opponent, counter hit or not, acts 15 frames after he can; convert/move_overrides.py hit_advantage):
+    # the hold ends at its frame 65 and the opponent stands 10 frames later; an opponent hit in the air, lying or at
+    # a wall reacts as before
+    'hit_advantage': {'key:477c5f91': {'reaction': 'key:bbbf54b2', 'frames': 15}},
     # his tail's attacks hit along his tail as it is drawn (its spring chain swings its own way, not as Tekken 8's
     # tail): from his hips to its middle and from there to its tip (WEAPONS' points 0xF0 and 25), not from Tekken 8's
     # boxes (d/b+3, d/b+3,3: a line off his hips in the Hip joint's frame, 2 m under the floor 3 m out; 3: the tail
@@ -178,6 +189,17 @@ MOVESET = {
     # the donor's round-start list keeps its targets except its own moves: Lars's stance -> his (his alias 1), Lars's
     # intros -> his three (his round-start list's), Lars's win poses -> the one of his intros that stays in place (his
     # moveset has no win pose: Tekken 8's is a scene of its own; the others walk him 1.3 and 0.5 m forward)
+    # Tekken 8 gives the boss no crouch: holding down does nothing in his stance, down + a button are his attacks,
+    # and only a guard leaves him crouching. He crouches as any fighter (convert/move_overrides.py stance_crouch):
+    # holding d, d/f or d/b in his stance, walks, dashes and back steps starts his own crouch (Tekken 8's: d his
+    # crouch, d/f and d/b its forward and back starts), which guards lows; his down + button attacks come out of it
+    # as from standing
+    'stance_crouch': {'d': 'key:30e1dedb', 'd/f': 'key:37a56b4f', 'd/b': 'key:d0ff3111',
+                      'from': ('key:642bbb5e',                                  # his stance
+                               'key:1413e0a6', 'key:e5f9cfb1',                  # walking forward
+                               'key:999c1d1a', 'key:8602889f',                  # f,f
+                               'key:baccee0b', 'key:0611959e', 'key:5177dee6',  # walking back, back steps and dashes
+                               'key:5263e694', 'key:ade5acf7', 'key:cd1923f1')},
     'direct': [(r'^La_sKAM00_$', 'move', ['key:642bbb5e']),
                (r'^(la|mk)_s', 'anim', ['key:a54cf917', 'key:df94551b', 'key:af8628ce']),
                (r'^la_w', 'anim', ['key:af8628ce'])],

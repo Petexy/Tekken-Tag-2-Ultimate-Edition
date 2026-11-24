@@ -19,6 +19,8 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -139,21 +141,42 @@ void test_archive() {
 
     // The middle entry replaced by a longer one, and one added.
     std::vector<uint8_t> longer(300, 'x'), added = bytes("an entry the archive did not hold");
-    const auto rebuilt = archive::rebuild(a.ofs, std::vector<uint8_t>(a.bin.begin(), a.bin.begin() + archive::kPayload),
-                                          {{0xBBBB, archive::pack(longer, 0xBBBB, flags)},
-                                           {0xDDDD, archive::pack(added, 0xDDDD, flags)}});
+    // (the added one made when it is read, stored uncompressed)
+    auto made = std::make_shared<archive::Source>();
+    made->size = archive::stored_size(added.size());
+    made->make = [&]() -> std::optional<std::vector<uint8_t>> { return archive::store(added, 0xDDDD, flags); };
+    const auto rebuilt = archive::rebuild(
+        a.ofs, std::vector<uint8_t>(a.bin.begin(), a.bin.begin() + archive::kPayload),
+        {{0xBBBB, std::make_shared<const archive::Source>(archive::held(archive::pack(longer, 0xBBBB, flags)))},
+         {0xDDDD, made}});
     check(rebuilt.has_value(), "rebuild: an archive with a replaced and an added entry");
     if (!rebuilt) return;
     Archive b;
     b.ofs = rebuilt->ofs;
     b.bin.resize(rebuilt->bin_size);
     for (const archive::Piece& p : rebuilt->bin) {
-        if (p.data) std::memcpy(&b.bin[p.at], p.data->data(), p.size);
-        else std::memcpy(&b.bin[p.at], &a.bin[p.source], p.size);
+        if (!p.entry) {
+            std::memcpy(&b.bin[p.at], &a.bin[p.source], p.size);
+            continue;
+        }
+        const auto data = p.entry->data ? *p.entry->data : p.entry->make().value_or(std::vector<uint8_t>{});
+        check(data.size() == p.entry->size && p.size - data.size() < 16, "rebuild: an entry is as long as it says");
+        std::memcpy(&b.bin[p.at], data.data(), std::min<size_t>(data.size(), p.size)); // (the padding stays zero)
     }
     check(contents_of(b, 0xAAAA) == big && contents_of(b, 0xBBBB) == longer && contents_of(b, 0xCCCC) == small &&
               contents_of(b, 0xDDDD) == added,
           "rebuild: every entry read back");
+    // An entry stored uncompressed: as long as its contents' size says, read back like a compressed one.
+    for (const size_t n : {size_t{0}, size_t{1}, size_t{65535}, size_t{65536}, size_t{200000}}) {
+        std::vector<uint8_t> contents(n);
+        for (size_t i = 0; i < n; ++i) contents[i] = static_cast<uint8_t>(i * 13 % 239);
+        const std::vector<uint8_t> stored = archive::store(contents, 0x1234, flags);
+        uint8_t stored_flags[8];
+        archive::stored_flags(stored, 0x1234, stored_flags);
+        check(stored.size() == archive::stored_size(n), "store: an uncompressed entry is as long as foretold");
+        check(std::memcmp(stored_flags, flags, 8) == 0, "store: an uncompressed entry's NRCZ flags");
+        if (n != 0) check(archive::unpack(stored, 0x1234) == contents, "store: an uncompressed entry read back");
+    }
     const auto rebuilt_index = archive::parse_index(b.ofs);
     check(rebuilt_index && rebuilt_index->entries.size() == 4 && rebuilt_index->entries.back().hash == 0xDDDD,
           "rebuild: the added entry is the last");

@@ -197,6 +197,8 @@ void Context::init(const std::vector<const char*>& instance_extensions) {
     e13.synchronization2 = VK_TRUE;
     e13.shaderDemoteToHelperInvocation = VK_TRUE;
     e13.maintenance4 = f13.maintenance4;
+    e13.pipelineCreationCacheControl = f13.pipelineCreationCacheControl;
+    pipeline_cache_control = f13.pipelineCreationCacheControl;
     VkPhysicalDeviceVulkan12Features e12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     e12.bufferDeviceAddress = VK_TRUE;
     e12.samplerMirrorClampToEdge = f12.samplerMirrorClampToEdge;
@@ -448,6 +450,7 @@ void GuestMemory::init(Context& c) {
                      r.base, r.base + size - 1, mai.memoryTypeIndex, props.memoryTypeBits & req.memoryTypeBits,
                      type.propertyFlags, type.heapIndex, heap.flags, static_cast<unsigned long long>(heap.size >> 20));
         regions_.push_back(region);
+        keep_guest_memory_fast(r.base, size);
     }
 }
 
