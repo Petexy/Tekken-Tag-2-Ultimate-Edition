@@ -114,6 +114,7 @@ model::Facts windows_start_facts(const WindowsFiles& files, const fs::path& chos
     f.importer = files.root / "tools" / "characters";
     f.windows.root = files.root;
     f.windows.build = files.build;
+    f.program_in_exe = files.release;
     f.chosen_game = chosen_game;
     f.custom_releases = std::getenv("TTT2_LAUNCHER_RELEASES") != nullptr;
     f.custom_github = std::getenv("TTT2_LAUNCHER_GITHUB") != nullptr;
@@ -256,12 +257,20 @@ void WindowsReady::tick(double now) {
         return;
     }
     if (error.code == "protocol") {
+        // (The .exe's own files put back once: the update's are lost, not the launcher, REVIEW2_compat #3.)
+        std::string why;
+        if (restore_files && restored_.empty()) {
+            restored_ = error.text.empty() ? "?" : error.text;
+            why = restore_files();
+            if (why.empty()) return run_state(now);
+        }
         return fail({"These files are another version's",
                      "The launcher's files in " + u8(files_.root) +
                          " are not the ones this launcher came with. Close every Ultimate Launcher, then start it "
                          "again; if this stays, get the newest one from the releases page.",
                      "Their answers' protocol is " + error.text + ", this launcher's " +
-                         std::to_string(backend::kQueryProtocol) + ".",
+                         std::to_string(backend::kQueryProtocol) + "." +
+                         (why.empty() ? std::string() : " Its own files could not be put back: " + why),
                      {}, false});
     }
     const std::string said = last_lines(err_.empty() ? out_ : err_, 6);

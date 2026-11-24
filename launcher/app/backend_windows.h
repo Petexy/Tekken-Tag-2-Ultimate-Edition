@@ -11,6 +11,7 @@
 #include "steps.h"
 #include "windows_backend.h"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -76,6 +77,11 @@ public:
     };
 
     WindowsReady(WindowsFiles files, model::Starter& starter) : files_(std::move(files)), starter_(starter) {}
+    // The release .exe's own files written again ("" done, else why not): set for a release .exe's files. When the
+    // state's protocol is another one (a test build's Update got files of a newer program, REVIEW2_compat #3), they
+    // are put back once and the state asked again; restored() then says the other files' protocol.
+    std::function<std::string()> restore_files;
+    const std::string& restored() const { return restored_; }
     void start(double now);
     void tick(double now);
     void retry(double now) { start(now); }
@@ -102,6 +108,7 @@ private:
     BootstrapProgress progress_;
     std::optional<backend::WindowsStateAnswer> answer_;
     Failure failure_;
+    std::string restored_;
 };
 
 } // namespace launcher::app

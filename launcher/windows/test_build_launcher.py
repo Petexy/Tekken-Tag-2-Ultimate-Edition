@@ -81,7 +81,8 @@ class Project(unittest.TestCase):
                      'launcher/ui/fonts/Barlow/Barlow-Bold.ttf', 'launcher/app/icons/a.svg',
                      'launcher/windows/launcher.rc.in', 'launcher/windows/build_launcher.py',
                      'launcher/windows/backend.py', 'launcher/windows/__pycache__/backend.cpython-313.pyc',
-                     'launcher/builder/kit.cpp', 'tools/characters/import_character.py', 'runtime/src/a.cpp'):
+                     'launcher/builder/kit.cpp', 'tools/characters/import_character.py', 'runtime/src/a.cpp',
+                     'runtime/src/host/display_settings.cpp'):
             write(self.root / name)
         write(self.root / 'launcher/builder/CMakeLists.txt', 'set(TTT2_LAUNCHER_VERSION 0.9.0)\n')
         write(self.root / 'tools/windows-bootstrap.lock.json', '{"compiler": {}}')
@@ -99,7 +100,7 @@ class Inputs(Project):
             'CMakeLists.txt', 'cmake/LauncherSDL.cmake', 'launcher/CMakeLists.txt', 'launcher/app/icons/a.svg',
             'launcher/builder/CMakeLists.txt', 'launcher/ui/fonts/Barlow/Barlow-Bold.ttf', 'launcher/ui/src/ui.cpp',
             'launcher/windows/build_launcher.py', 'launcher/windows/launcher.rc.in',
-            'tools/windows-bootstrap.lock.json'])
+            'runtime/src/host/display_settings.cpp', 'tools/windows-bootstrap.lock.json'])
 
     def test_digest_follows_sources_version_fonts_and_pins_only(self):
         before = bl.inputs_digest(self.root)
@@ -119,7 +120,8 @@ class Inputs(Project):
     def test_the_real_tree_has_the_launcher_inputs(self):
         names = bl.inputs(REPO)
         for name in ('CMakeLists.txt', 'launcher/builder/CMakeLists.txt', 'launcher/CMakeLists.txt',
-                     'launcher/ui/CMakeLists.txt', 'tools/windows-bootstrap.lock.json'):
+                     'launcher/ui/CMakeLists.txt', 'tools/windows-bootstrap.lock.json',
+                     'runtime/src/host/display_settings.cpp', 'runtime/src/host/display_settings.h'):
             self.assertIn(name, names)
         self.assertFalse([n for n in names if n.endswith('.pyc') or n.startswith('launcher/builder/kit')])
 

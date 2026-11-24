@@ -261,6 +261,21 @@ int App::run() {
     const double t0 = now();
     model_->start(t0);
     handle(model_->take_effects());
+#ifdef _WIN32
+    if (!ready_->restored().empty()) {
+        // (A test build's Update got files of a newer program: they were put back, REVIEW2_compat #3.)
+        const std::string& branch = model_->facts().windows.branch;
+        model_->tell("Update needs a new test build",
+                     "The files Update got" + (branch.empty() ? std::string() : " from " + branch) +
+                         " are for a newer launcher program than this .exe's (their protocol " + ready_->restored() +
+                         ", this one's " + std::to_string(backend::kQueryProtocol) +
+                         "), so it put its own files back. " +
+                         (branch.empty() ? std::string("Get the newest launcher from the releases page.")
+                                         : "Ask for a new test build of " + branch + " to get those changes."),
+                     t0);
+        std::fprintf(stderr, "@ready restored its own files (their protocol %s)\n", ready_->restored().c_str());
+    }
+#endif
     stage_->set_target(share(), tall(), 0);
     stage_->snap();
     last_ = t0;

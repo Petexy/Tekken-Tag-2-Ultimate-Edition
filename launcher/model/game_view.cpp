@@ -456,7 +456,8 @@ NoticeView notice_view(const Facts& facts) {
         const std::string newest = news.changes.empty() ? "" : ", the newest: “" + news.changes[0] + "”";
         n.detail = std::to_string(news.ahead) + " change" + (news.ahead == 1 ? "" : "s") + " since this test build (" +
                    facts.launcher_version + ", " + facts.windows.commit.substr(0, 7) + ")" + newest +
-                   ". Update gets them without a new .exe.";
+                   ". Update gets them" +
+                   (facts.program_in_exe ? "; changes to the launcher program itself need a new test build." : ".");
         page(news.page, news.page.starts_with("https://") || facts.custom_github);
     }
     return n;

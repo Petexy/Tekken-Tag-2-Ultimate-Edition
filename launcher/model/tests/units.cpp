@@ -4,6 +4,7 @@
 
 #include "units.h"
 
+#include "builders.h"
 #include "check.h"
 #include "fakes.h"
 #include "replay.h"
@@ -437,6 +438,24 @@ void self_update() {
         CHECK_EQ(rig.runner.last().title, std::string("Update cancelled"));
         CHECK(rig.opened.empty());
     }
+    {
+        // A test build's newer changes: Update gets its files, never its .exe's program (compat review #3).
+        Facts f;
+        f.caps = Caps::windows_caps();
+        f.self_update = true;
+        f.launcher_version = "0.9.0";
+        f.windows.branch = "dev-test";
+        f.windows.commit = std::string(40, 'a');
+        f.main_news = MainNews{};
+        f.main_news->ahead = 2;
+        f.main_news->changes = {"Faster"};
+        NoticeView n = notice_view(f);
+        CHECK(n.shown && n.title == "Newer changes are on dev-test");
+        CHECK(n.detail.ends_with(". Update gets them.") && n.detail.find("without a new .exe") == std::string::npos);
+        f.program_in_exe = true;
+        n = notice_view(f);
+        CHECK(n.detail.ends_with("Update gets them; changes to the launcher program itself need a new test build."));
+    }
 }
 
 // ---------------------------------------------------------------- preflight (before an install, Linux)
@@ -721,6 +740,13 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK(w.worker(f, TaskKind::kLauncherUpdate)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kLauncherFiles)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kSetup)->mode == Command::Mode::kTask);
+        // (A test build's files update: told when the program is the .exe's, which only opens newer files, compat
+        // review #3: self_update.py then refuses changes to the program.)
+        CHECK(!w.worker(f, TaskKind::kLauncherFiles)->env.count("TTT2_LAUNCHER_PROGRAM_IN_EXE"));
+        f.program_in_exe = true;
+        CHECK_EQ(w.worker(f, TaskKind::kLauncherFiles)->env.at("TTT2_LAUNCHER_PROGRAM_IN_EXE"), std::string("1"));
+        CHECK(!w.worker(f, TaskKind::kLauncherUpdate)->env.count("TTT2_LAUNCHER_PROGRAM_IN_EXE"));
+        f.program_in_exe = false;
         Facts linux_facts;
         linux_facts.install.folder = "/games/ttt2";
         LinuxCommands l;

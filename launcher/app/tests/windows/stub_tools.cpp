@@ -82,7 +82,21 @@ int python(const std::vector<std::string>& a) {
                 std::printf("{\"error\": \"the stub has no answer for %s\", \"protocol\": 1}\n", name.c_str());
                 return 0;
             }
-            std::fputs(read(file).c_str(), stdout);
+            std::string answer = read(file);
+            // (TTT2_STUB_PROTOCOL_FROM_FILES: the protocol is the files' own, query.py's PROTOCOL beside main.py.)
+            const size_t at = answer.rfind("\"protocol\": ");
+            if (!env("TTT2_STUB_PROTOCOL_FROM_FILES").empty() && at != std::string::npos) {
+                std::string protocol = "0";
+                for (const std::string& arg : a) {
+                    if (arg.size() < 7 || arg.compare(arg.size() - 7, 7, "main.py") != 0) continue;
+                    const std::string query = read(path_of(arg).parent_path() / "query.py");
+                    if (const size_t p = query.find("PROTOCOL = "); p != std::string::npos)
+                        protocol = query.substr(p + 11, query.find_first_not_of("0123456789", p + 11) - p - 11);
+                }
+                const size_t from = at + 12, to = answer.find_first_not_of("0123456789", from);
+                answer.replace(from, to - from, protocol);
+            }
+            std::fputs(answer.c_str(), stdout);
             return 0;
         }
         if (a[i] == "--worker" && i + 1 < a.size()) {

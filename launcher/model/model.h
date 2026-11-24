@@ -207,6 +207,8 @@ public:
     void set_launcher_settings(LauncherSettings s) { launcher_ = s; }
     // Windows: what --query state answered (after each task too).
     void set_windows_state(WindowsState state);
+    // Something the player is told as a refusal is (no task runs then): the app's own news, e.g. files put back.
+    void tell(const std::string& title, const std::string& text, double now) { refuse(title, text, now); }
 
     // What the model needs done that came from a program's end (Steam's answer kept, quit after a task, ...):
     // the app takes them each frame.

@@ -68,7 +68,8 @@ class Stopped(Exception):
 
 def inputs(root=ROOT):
     """The project's files the launcher's build reads (relative, '/', sorted): its sources, CMake files, fonts, icons,
-    resources, the version line (launcher/builder/CMakeLists.txt), the build's commit and branch, the pins."""
+    resources, the version line (launcher/builder/CMakeLists.txt), the build's commit and branch, the pins, the game's
+    display.ini code it compiles."""
     def wanted(name):
         parts = name.split('/')
         if '__pycache__' in parts or name.endswith('.pyc'): return False
@@ -77,7 +78,10 @@ def inputs(root=ROOT):
             return name in ('launcher/windows/build_launcher.py', 'launcher/windows/make_icon.py',
                             'launcher/windows/make_launcher_exe.py')
         return True
-    names = [name for name in ('CMakeLists.txt', 'tools/windows-bootstrap.lock.json') if (root / name).is_file()]
+    # (and the game's display.ini code, which the launcher compiles too: self_update.PROGRAM_FILES)
+    names = [name for name in ('CMakeLists.txt', 'tools/windows-bootstrap.lock.json',
+                               *(n for n in self_update.PROGRAM_FILES if n.startswith('runtime/')))
+             if (root / name).is_file()]
     for top in ('cmake', 'launcher'):
         for folder, folders, files in os.walk(root / top):
             folders[:] = sorted(f for f in folders if f != '__pycache__')

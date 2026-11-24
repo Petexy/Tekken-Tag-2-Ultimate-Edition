@@ -57,6 +57,54 @@ BUILD_BRANCH = 'launcher/windows/build-branch'
 # What entry.cpp unpacked last: their SHA-256, then their paths.
 STAMP = 'local/launcher-files.txt'
 REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
+# The new launcher's worker environment: "1" when the launcher's program is built into the .exe these files came
+# from (a release or test build's own files, not a program the source ZIP's bridge builds from them). Its files'
+# update then leaves out changes to that program: they need a new .exe (program_file).
+PROGRAM_IN_EXE_VARIABLE = 'TTT2_LAUNCHER_PROGRAM_IN_EXE'
+# What the launcher's program is compiled from outside launcher/ and cmake/: its display.ini code (the game's) and
+# the SDL it has built in.
+PROGRAM_FILES = ('runtime/src/host/display_settings.cpp', 'runtime/src/host/display_settings.h',
+                 'runtime/src/host/file_io.h', 'dependencies.launcher.lock.json')
+# The Python run from the files (no part of the program) and the build scripts of launcher/windows.
+BUILD_SCRIPTS = ('launcher/windows/build_launcher.py', 'launcher/windows/make_icon.py',
+                 'launcher/windows/make_launcher_exe.py')
+
+
+def program_file(name):
+    """Whether the project file `name` (relative, '/') is one the launcher's program is compiled from: launcher/ and
+    cmake/ but for the Python the workers run (launcher/windows/*.py), Linux's own parts (the kit's builder, its
+    version line aside; the AppImage), tests, demos, notes and the build's commit and branch; the PROGRAM_FILES. A
+    release or test build's .exe has them built in."""
+    parts = name.split('/')
+    if '__pycache__' in parts or name.endswith(('.pyc', '.md')) or name in (BUILD_COMMIT, BUILD_BRANCH): return False
+    if name in PROGRAM_FILES: return True
+    if parts[0] not in ('cmake', 'launcher') or len(parts) < 2: return False
+    if name.startswith('launcher/builder/'): return name == 'launcher/builder/CMakeLists.txt'
+    if 'tests' in parts[:-1] or name.startswith(('launcher/appimage/', 'launcher/ui/demo/', 'launcher/ui/smoke/')):
+        return False
+    if name.startswith('launcher/windows/') and name.endswith('.py'): return name in BUILD_SCRIPTS
+    return True
+
+
+def protocol_of(data):
+    """query.py's PROTOCOL (launcher/windows/query.py's bytes), None when it names none."""
+    match = re.search(rb'^PROTOCOL = (\d+)[ \t]*\r?$', data or b'', re.M)
+    return int(match.group(1)) if match else None
+
+
+def program_changes(root, files, listed):
+    """The program's files (program_file) that `files` change in `root`, whose files are the stamp's `listed` paths:
+    another content (line ends aside), new, or gone."""
+    changed = []
+    for path in sorted(p for p in set(files) | set(listed) if program_file(p)):
+        old = None
+        if path in listed:
+            with contextlib.suppress(OSError): old = (Path(root) / path).read_bytes()
+        new = files.get(path)
+        if (old is None) != (new is None) or \
+                (old is not None and old.replace(b'\r\n', b'\n') != new.replace(b'\r\n', b'\n')):
+            changed.append(path)
+    return changed
 
 
 class UpdateError(Exception):
@@ -515,10 +563,12 @@ def install_files(root, files):
     write_file(stamp, (digest + '\n' + ''.join(path + '\n' for path in sorted(files))).encode())
 
 
-def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(line, flush=True)):
+def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(line, flush=True), program_in_exe=False):
     """Updates a test build's files (unpacked from its .exe into `root`) to the newest commit of its branch on
     GitHub. That commit, or None when these are the newest. UpdateError says why it cannot; Cancelled when
-    cancelled (before anything is replaced)."""
+    cancelled (before anything is replaced). `program_in_exe`: the launcher's program is built into the .exe
+    (PROGRAM_IN_EXE_VARIABLE), which only opens these files again: changes to that program (program_changes) or to
+    the answers' protocol (query.py's PROTOCOL) are refused, as they need a new test build."""
     root = Path(root)
     current = build_commit(root)
     if not current or not (root / STAMP).is_file():
@@ -551,6 +601,19 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     finally:
         with contextlib.suppress(OSError): file.unlink()
     files = archive_files(data, head)
+    if program_in_exe:
+        listed = [line for line in (root / STAMP).read_text(encoding='utf-8').splitlines()[1:] if line]
+        changed = program_changes(root, files, listed)
+        query, mine = 'launcher/windows/query.py', None
+        with contextlib.suppress(OSError): mine = protocol_of((root / query).read_bytes())
+        theirs = protocol_of(files.get(query))
+        if changed or theirs != mine:
+            what = ('the launcher program itself (%s%s)' % (changed[0], ' and %d more' % (len(changed) - 1)
+                                                            if len(changed) > 1 else '')
+                    if changed else 'the launcher\'s answers (their protocol %s, this .exe\'s %s)' % (theirs, mine))
+            raise UpdateError('The newest changes of %s (%s) change %s, which is built into this test build\'s .exe: '
+                              'Update only replaces its files, so it needs a new test build of %s. Nothing was '
+                              'changed.' % (branch, head[:7], what, branch))
     files[BUILD_COMMIT] = (head + '\n').encode()
     files[BUILD_BRANCH] = (branch + '\n').encode()
     if cancelled(): raise Cancelled()

@@ -96,6 +96,18 @@ class LauncherBackend(unittest.TestCase):
             worker(self.settings, 'launcher', [])
         with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'test build'):
             worker(self.settings, 'files', [])
+    def test_files_worker_says_when_the_program_is_the_exes(self):
+        # (compat review #3: the new launcher's env says its program is built into the .exe; update_files refuses
+        # changes to it then.)
+        from backend import worker
+        import self_update
+        for value, expected in (('1', True), ('', False)):
+            with mock.patch.dict(os.environ, {self_update.PROGRAM_IN_EXE_VARIABLE: value}), \
+                    mock.patch.object(self_update, 'running_exe', return_value='C:/x.exe'), \
+                    mock.patch.object(self_update, 'test_branch', return_value='dev-test'), \
+                    mock.patch.object(self_update, 'update_files') as update:
+                worker(self.settings, 'files', [])
+            self.assertEqual(update.call_args.kwargs, {'program_in_exe': expected})
     def test_failure_says_what_failed(self):
         from backend import failure
         ctest = ['94% tests passed, 1 tests failed out of 17', '', 'The following tests FAILED:',

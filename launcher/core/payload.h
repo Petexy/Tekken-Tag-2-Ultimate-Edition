@@ -57,8 +57,9 @@ std::vector<Entry> entries(const Payload& payload);
 // The files into `root` when they are not the ones unpacked there last (local/launcher-files.txt: their digest,
 // then their paths, and launcher/windows/main.py there). Files only the last ones had are deleted; nothing else
 // there (local/, the build, the generated code) is touched. Each file is written beside itself and renamed over
-// it. Throws "Cannot write <path>." Returns whether it unpacked.
-bool unpack(const Payload& payload, const fs::path& root);
+// it. Throws "Cannot write <path>." Returns whether it unpacked. `again`: whatever the stamp says (they were
+// another version's: unpack_own_again).
+bool unpack(const Payload& payload, const fs::path& root, bool again = false);
 
 // The digest named by the stamp in `root` ("" when none).
 std::string unpacked_digest(const fs::path& root);
@@ -71,6 +72,10 @@ std::optional<Payload> own(const fs::path& exe, bool check = true);
 // ASCII (a user name such as José: the game is built there, and the batch files CMake writes in UTF-8 lose such
 // letters), then %PUBLIC%'s, else the system drive's. Throws "LOCALAPPDATA is not set."
 fs::path files_folder();
+// This program's own files written into `root` again, whatever its stamp says, under kFilesMutex: a test build's
+// Update got files of a newer program (their answers' protocol is another, C6), and the .exe goes on with its own.
+// Throws as own() and unpack() do, and "This launcher holds no files." for a build without them.
+void unpack_own_again(const fs::path& exe, const fs::path& root);
 // The mutex around unpacking (two starts at once: one unpacks, the other then finds the files there).
 inline constexpr const wchar_t* kFilesMutex = L"Local\\TTT2UltimateLauncherFiles";
 #endif

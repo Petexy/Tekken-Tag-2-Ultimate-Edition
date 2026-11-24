@@ -259,6 +259,16 @@ void test_payload() {
     check_eq(read_file(root / "sub/dir/b.txt"), std::string("two"), "payload: a file in a folder");
     check_eq(payload::unpacked_digest(root), p->digest(), "payload: the stamp names them");
     check(!payload::unpack(*p, root), "payload: the same files are not unpacked again");
+    // (A test build's Update: other files under the .exe's digest, REVIEW2_compat #3. Again: its own files back.)
+    write_file(root / "a.txt", "updated");
+    write_file(root / "update-only.txt", "new");
+    write_file(root / "local/launcher-files.txt",
+               p->digest() + "\na.txt\nlauncher/windows/main.py\nsub/dir/b.txt\nupdate-only.txt\n");
+    check(!payload::unpack(*p, root), "payload: an update's files under the .exe's digest are kept");
+    check(payload::unpack(*p, root, true), "payload: again, whatever the stamp says");
+    check_eq(read_file(root / "a.txt"), std::string("one"), "payload: again: its own files back");
+    check(!fs::exists(root / "update-only.txt"), "payload: again: the update's own files gone");
+    check_eq(payload::unpacked_digest(root), p->digest(), "payload: again: the stamp names its own");
     write_file(root / "local/windows-tools/kept", "x");
     write_file(root / "build-windows-tools/kept", "x");
     const auto newer = payload::read(make_payload({{"a.txt", "ONE"}, {"c.txt", "three"}, {"launcher/windows/main.py", ""}}));
@@ -389,6 +399,24 @@ void test_release() {
           "release: another version says to close the running one " + different->all());
     check_eq(read_file(unpacked / "a.txt"), std::string("one"), "release: and unpacks nothing");
     check(wait_until([&] { return first->code != -1; }, 30), "release: ended");
+
+    // Its own files again (a test build's Update got another program's files, REVIEW2_compat #3), into a folder
+    // with a letter beyond ASCII.
+    const fs::path again = g_root / launcher::utf8_path("Jos\xc3\xa9 again");
+    write_file(again / "a.txt", "updated");
+    write_file(again / "local/launcher-files.txt", payload::read(files1)->digest() + "\na.txt\nnew.txt\n");
+    write_file(again / "new.txt", "new");
+    payload::unpack_own_again(exe, again);
+    check(read_file(again / "a.txt") == "one" && !fs::exists(again / "new.txt") &&
+              payload::unpacked_digest(again) == payload::read(files1)->digest(),
+          "release: its own files unpacked again");
+    std::string said;
+    try {
+        payload::unpack_own_again(g_self, again);
+    } catch (const std::exception& e) {
+        said = e.what();
+    }
+    check_eq(said, std::string("This launcher holds no files."), "release: again, without files");
 }
 #endif
 

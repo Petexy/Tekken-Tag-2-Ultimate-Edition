@@ -103,6 +103,8 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
     c.cwd = w.root;
     // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
     if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
+    // (A test build's files: the .exe's program stays as it is, so changes to it are refused, self_update.py.)
+    if (action == "files" && facts.program_in_exe) c.env["TTT2_LAUNCHER_PROGRAM_IN_EXE"] = "1";
     return c;
 }
 

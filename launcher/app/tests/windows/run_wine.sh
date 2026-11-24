@@ -10,7 +10,8 @@
 # bootstrap-fail (no download: the failure and Try Again), protocol (another version's files: refused, Releases
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
 # More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard), josé
-# (a José in every folder: the later queries reach Python, compat review #1).
+# (a José in every folder: the later queries reach Python, compat review #1), restore (a test build whose Update got
+# a newer program's files: the .exe puts its own back and says a new test build is needed, compat review #3).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -152,6 +153,43 @@ fi
 # A José in every folder (compat review #1: a libc++ build, as a player's Set Up Game makes, turned the model's
 # paths into the ANSI code page): the first state, then the status and owned questions through the model's
 # own commands reach the stub Python, and Home shows the installed game.
+# A test build's .exe (files appended) whose files an Update replaced with a newer program's: query.py's PROTOCOL 2
+# under the .exe's digest. The .exe puts its own files back, asks again and says a new test build is needed.
+if want_case restore; then
+    make_root restore installed yes
+    "${PYTHON:-python3}" - "$SRC" "$EXE" "$WORK/restore" <<'PY'
+import hashlib, sys
+from pathlib import Path
+src, exe, case = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+sys.path.insert(0, str(src / 'launcher/windows'))
+from make_launcher_exe import payload
+import self_update
+root = case / 'root'
+own = {'launcher/windows/main.py': (root / 'launcher/windows/main.py').read_bytes(),
+       'launcher/windows/query.py': b'PROTOCOL = 1\n',
+       'Start Ultimate Launcher.cmd': (root / 'Start Ultimate Launcher.cmd').read_bytes(),
+       self_update.BUILD_BRANCH: b'dev-test\n', self_update.BUILD_COMMIT: b'a' * 40 + b'\n'}
+files = payload(own)
+(case / 'test-build.exe').write_bytes(exe.read_bytes() + files)
+digest = hashlib.sha256(files[:-self_update.TRAILER.size]).hexdigest()
+updated = dict(own, **{'launcher/windows/query.py': b'PROTOCOL = 2\n', 'launcher/app/newer.cpp': b'newer',
+                       self_update.BUILD_COMMIT: b'b' * 40 + b'\n'})
+for name, data in updated.items():
+    (root / name).parent.mkdir(parents=True, exist_ok=True); (root / name).write_bytes(data)
+(root / self_update.STAMP).write_text(digest + '\n' + ''.join(n + '\n' for n in sorted(updated)), encoding='utf-8')
+PY
+    EXE_SAVED=$EXE
+    EXE=$WORK/restore/test-build.exe
+    cp "$B/launcher/SDL3.dll" "$WORK/restore/"
+    run restore 0 "wait:1.0" TTT2_STUB_PROTOCOL_FROM_FILES=1
+    EXE=$EXE_SAVED
+    expect restore "@ready restored its own files (their protocol 2)"
+    [ "$(cat "$WORK/restore/root/launcher/windows/query.py" 2>/dev/null)" = "PROTOCOL = 1" ] || fail restore "query.py not put back"
+    [ ! -e "$WORK/restore/root/launcher/app/newer.cpp" ] || fail restore "the update's own file left"
+    grep -qx 'a\{40\}' "$WORK/restore/root/launcher/windows/build-commit" || fail restore "build-commit not put back"
+    [ "$(grep -cx state "$WORK/restore/answers/queries.log" 2>/dev/null)" = 2 ] || fail restore "the state not asked twice"
+fi
+
 if want_case josé; then
     make_root josé installed yes
     run josé 0 "wait:1.5;focus:more;press:Return;wait:0.6"
