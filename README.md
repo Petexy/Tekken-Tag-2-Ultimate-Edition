@@ -123,14 +123,25 @@ refuse a game whose executable is not the one they were built from.
 - To build: Git, CMake 3.20+, Ninja, Clang (or GCC 15+), Python 3, and the
   development files of SDL 3.2 or newer, shaderc, the Vulkan loader, Vulkan
   headers recent enough to define `VK_KHR_present_wait2` (mid-2025 or
-  newer), OpenSSL 3, zstd and zlib; for the launcher also GTK 4.10 or newer
-  (without it the launcher is left out) and MinGW (optional: the Tekken 7
-  and Tekken 8 helpers are then built in).
+  newer), OpenSSL 3, zstd and zlib; for the launcher MinGW too (optional: the
+  Tekken 7 and Tekken 8 helpers are then built in). The launcher draws its own
+  window with SDL 3, without GTK.
+<!-- switch: true once launcher/app's ttt2-launcher is the SDL program; until then the Linux launcher is the GTK one
+     (GTK 4.10 or newer, without which it is left out) and gtk4 belongs in the pacman line below -->
+- For the launcher's release programs (the AppImage, the Windows `.exe`):
+  SDL 3's own source at its pinned revision, built into them
+  (`python3 tools/setup_deps.py --launcher`), with the development files of
+  what SDL can use on a player's PC (X11, Wayland, libdecor, PipeWire,
+  PulseAudio, ALSA, udev, D-Bus: opened when the launcher starts, never
+  linked), LLD and `mksquashfs` for the AppImage, and MinGW-w64 for the
+  `.exe`.
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel git cmake ninja clang python zstd zlib openssl vulkan-headers vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+sudo pacman -S --needed base-devel git cmake ninja clang python zstd zlib openssl vulkan-headers vulkan-icd-loader sdl3 shaderc mingw-w64-gcc
+# and for the launcher's release programs (openssl-3: the OpenSSL the players' systems have, for the AppImage's kit)
+sudo pacman -S --needed lld squashfs-tools openssl-3 libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst libxkbcommon wayland wayland-protocols libdecor libpulse pipewire alsa-lib systemd-libs dbus mesa
 ```
 
 Other distributions package the same libraries under similar names; older
@@ -142,6 +153,7 @@ are too old.
 ```bash
 git clone https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition.git && cd Tekken-Tag-2-Ultimate-Edition
 python3 tools/setup_deps.py                      # ZArchive and AMD's addrlib, at pinned revisions
+# (python3 tools/setup_deps.py --launcher: SDL 3's source too, for the launcher's release programs only)
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
@@ -207,12 +219,21 @@ the build's first error; **Open Log** there opens the whole log.
 
 1. Download this branch as a ZIP and **Extract All** into a writable folder
    whose path has only plain letters and is short, such as `C:\TTT2`: not in
-   OneDrive (30 GB would be synced). Set Up Game refuses a path with letters
-   such as à: CMake runs some build steps through batch files it writes in
-   UTF-8, which `cmd.exe` reads in the console's code page, so such a letter
-   turns into others and the step finds no folder.
+   OneDrive (30 GB would be synced). The first start and Set Up Game refuse
+   a path with letters such as à: CMake runs some build steps through batch
+   files it writes in UTF-8, which `cmd.exe` reads in the console's code
+   page, so such a letter turns into others and the step finds no folder.
 2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
-   downloads and verifies a private Python/Tk runtime. No Python installation,
+   downloads and verifies a private Python runtime, then builds the launcher
+   from the folder's files, once (a few minutes; a small window shows how far
+   it is): with the C compiler, CMake, Ninja and SDL 3 that Set Up Game uses
+   (SHA-256 or version pinned, downloaded where missing into `local\` and
+   `third_party\windows\` as Set Up Game does, and shared with it), in
+   `%LOCALAPPDATA%\TTT2Ultimate\launcher-build`. Later
+   starts open the launcher at once; it is built again only when its files
+   change. When it cannot be built, that window says why, with **Open log**
+   (`local\launcher-build.log`) and **Try again**; the release's
+   `Ultimate_Launcher-x86_64.exe` needs no build. No Python installation,
    Git installation, terminal commands or second project download are needed.
 3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
    update v16, and choose an installation folder.
@@ -230,11 +251,15 @@ project files are reused; the game and its assets are never downloaded.
 Setup logs remain under the selected data folder. The game archive is kept.
 
 
-The Windows build also produces `build-windows-tools/ttt2-launcher.exe`.
-This opens a separate Windows interface; the GTK launcher and Linux build/import
-paths are unchanged. The ZIP startup path obtains private Python/Tk automatically; developer launches
-can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
-to a Python executable to override automatic discovery.
+<!-- switch: the next sentence is true once launcher/app's ttt2-launcher is the SDL program (ARCHITECTURE C1); until
+     then build-windows-tools/ttt2-launcher.exe is the Python launcher's starter (entry.cpp) -->
+Set Up Game also builds the launcher there: `build-windows-tools/ttt2-launcher.exe`
+(SDL3.dll beside it), the same program as the release `.exe` and the ZIP's first
+start make. The ZIP startup path obtains a private Python automatically (its Tk
+draws only the first start's progress window); developer launches can also use an
+installed Python 3 (`python launcher/windows/main.py` builds and starts the
+launcher as the ZIP's first start does). Setup obtains numpy and Pillow. Set
+`TTT2_PYTHON` to a Python executable to override automatic discovery.
 
 The Windows interface looks and behaves as the Linux launcher: one page with the
 game (Play, Settings, Update when the launcher's version is newer than the game's)
@@ -317,15 +342,19 @@ To make an AppImage of the launcher (the launcher, its kit and the character
 importer; nothing of the game):
 
 ```bash
+python3 tools/setup_deps.py --launcher           # SDL 3's source, built into the launcher
 launcher/appimage/make_appimage.sh Ultimate_Launcher-x86_64.AppImage build-appimage
 ```
+<!-- switch: until launcher/app's ttt2-launcher is the SDL program, make_appimage.sh needs `--ui sdl` for this (its
+     default is still the GTK launcher, which uses the system's GTK 4.10 or newer) -->
 
 It builds in a folder of its own (here `build-appimage`; Git ignores it and
 the AppImage), needs LLD and `mksquashfs`,
 and downloads the AppImage runtime once (`--runtime-cache DIR` says where).
-The AppImage uses the system's GTK 4 (4.10 or newer) and needs glibc 2.38
-and GCC 13's libstdc++ or newer (Ubuntu 24.04, Debian 13, Fedora 39 and
-newer releases, and rolling distributions), on any x86-64 processor. The
+The launcher in it has SDL 3 built in and needs nothing of the system but
+glibc 2.39 and GCC 14's libstdc++ or newer (Ubuntu 24.04, Debian 13, Fedora
+40 and newer releases, and rolling distributions), on any x86-64 processor;
+it opens the display's and sound's libraries when it starts. The
 game program it builds needs SDL 3.2 or newer from the system, which
 Ubuntu 24.04 does not have yet.
 
@@ -354,11 +383,16 @@ The Windows launcher of a release is made on Linux too, from a commit:
 python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
 ```
 
-It is `launcher/windows/entry.cpp` compiled with MinGW-w64
-(`x86_64-w64-mingw32-g++` and its `windres`; `--cxx` names another), with the
+It is the launcher's own program cross-built for Windows by CMake with
+MinGW-w64 (`cmake/toolchain-mingw64.cmake`; it needs CMake, Ninja and SDL 3's
+source: `python3 tools/setup_deps.py --launcher`), SDL 3 built in, with the
 project's tracked files (nothing of the game) as a resource of the program, and
-its icon and version details (the icon needs `rsvg-convert`). `--stub` takes a
-launcher CMake built for Windows instead and appends the files to it (tests).
+its icon and version details (the icon needs `rsvg-convert`); the same commit
+makes the same bytes. `--cxx COMPILER` makes the Python launcher's `.exe` of
+0.4.0 to 0.8.0 instead (`launcher/windows/entry.cpp`), and `--stub` appends the
+files to a launcher CMake built for Windows already (tests).
+<!-- switch: the program is the stand-in (launcher/standin, make_launcher_exe.py's DEFAULT_CMAKE_TARGET) until
+     launcher/app's ttt2-launcher is the SDL program -->
 Made on a branch other than `main`, it is a test build, which updates its files
 from that branch (above); a release is made on `main`.
 The files are a resource rather than data after the program because virus
