@@ -207,7 +207,7 @@ constexpr float kReadoutIn = .26f, kReadoutOut = .2f, kReadoutDx = 22, kReadoutD
 // A drill-in lock (FEEDBACK F4): the locked half's content fades to this much and moves this far away from the
 // seam, at this rate per second (eased); its plate darkens by kLockVeil.
 constexpr float kLockOpacity = .42f, kLockPush = 10, kLockRate = 12, kLockVeil = .42f;
-constexpr float kWipe = .4f, kWipeReduced = .14f;
+constexpr float kWipe = .4f;  // (Reduce motion: a cut)
 constexpr float kBand = .32f, kScrimFade = .2f;
 constexpr float kEntry = .42f, kEntryStagger = .04f;
 constexpr float kGhost = .22f, kBump = 260;

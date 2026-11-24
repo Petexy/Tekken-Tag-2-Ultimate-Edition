@@ -95,7 +95,7 @@ private:
 
 // The diagonal wipe between screens: every frame is drawn into a render target; a switch keeps the last frame
 // and, for theme::motion::kWipe seconds, draws it (textured geometry) over the part of the content area the new
-// screen has not reached yet, behind a red-white-blue band parallel to the seam. Reduce motion: a short cross-fade.
+// screen has not reached yet, behind a red-white-blue band parallel to the seam. Reduce motion: a cut (never two screens at once).
 class Wipe {
 public:
     explicit Wipe(TextureRegistry& textures) : textures_(textures) {}

@@ -355,13 +355,20 @@ void Wipe::begin_frame(Canvas& canvas, Vec2 size) {
 }
 
 void Wipe::start(double now, int dir, bool reduced) {
+    // Reduce motion: a cut. (A cross-fade showed both screens at once, the seam of each where it was: user
+    // 2026-11-24.)
+    if (reduced) {
+        start_ = -1;
+        reduced_ = true;
+        return;
+    }
     if (!drawn_) return;
     current_ ^= 1;  // the last frame stays in the other target
     have_old_ = true;
     start_ = now;
     dir_ = dir >= 0 ? 1 : -1;
-    reduced_ = reduced;
-    duration_ = reduced ? theme::motion::kWipeReduced : theme::motion::kWipe;
+    reduced_ = false;
+    duration_ = theme::motion::kWipe;
 }
 
 float Wipe::progress(double now) const {
@@ -385,12 +392,6 @@ void Wipe::end_frame(Canvas& canvas, double now) {
     const float e = ease::in_out_cubic(progress(now));
     const float y0 = top_, y1 = bottom_;
     auto uv = [&](Vec2 p) { return Vec2{p.x / size_.x, p.y / size_.y}; };
-    if (reduced_) {
-        const Vec2 pts[4] = {{0, y0}, {W, y0}, {W, y1}, {0, y1}};
-        const Vec2 uvs[4] = {uv(pts[0]), uv(pts[1]), uv(pts[2]), uv(pts[3])};
-        canvas.textured(old, pts, uvs, rgba(255, 255, 255, 1 - e));
-        return;
-    }
     // The reveal line: parallel to the seam, crossing the window (stage x of its top at y = 0: bx).
     const float bx = dir_ > 0 ? (W + 210) + (-W - 560) * e : -160 + (W + 560) * e;
     auto line_x = [&](float y) { return bx + 75 - y * theme::kSeamTan; };
