@@ -148,7 +148,7 @@ for i in $(seq 1 31); do
 done
 actions+=";resolution:1280x720;tab:home;resolution:3840x2160;tab:home;resolution:auto;tab:home"
 h=$(home f6-combinations installed)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$actions;quit" -- --size 1920x1080 --scale 1.25
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$actions;quit" -- --size 1280x800 --scale 1.25
 clean "$h"
 steps=$(grep -c '@test .* ok' "$h/out.txt")
 [ "$steps" -ge 70 ] || fail "f6-combinations: $steps steps"

@@ -91,6 +91,7 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frames.sh $<TARGET_FILE:ttt2-launcher>
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/frames ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_frames)
-    set_tests_properties(launcher_app_frames PROPERTIES TIMEOUT 600)
+    # (About 3.5 minutes on 4 cores: large windows drawn by the software renderer.)
+    set_tests_properties(launcher_app_frames PROPERTIES TIMEOUT 900)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)
