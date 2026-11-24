@@ -201,5 +201,35 @@ class DependencyCheckout(unittest.TestCase):
                               env=dict(os.environ,GIT_TEST_ASSUME_DIFFERENT_OWNER='1'))
         self.assertEqual(result.returncode,0,result.stderr)
         for name in ('Library','Empty'):self.assertEqual((project/'third_party'/name/'file').read_text(),'pinned')
+    # the launcher's own (SDL's source, built into its release programs) only with --launcher: a player's game setup
+    # (setup_deps.py --windows) never downloads it
+    def test_launcher_dependencies_only_when_asked(self):
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup);root=Path(temp.name)
+        def git(folder,*args):
+            return subprocess.run(['git','-c','user.name=test','-c','user.email=test@example.com','-c','commit.gpgsign=false',
+                                   '-C',str(folder),*args],check=True,capture_output=True,text=True).stdout.strip()
+        source=root/'source';source.mkdir();git(source,'init','-q');(source/'file').write_text('pinned')
+        git(source,'add','file');git(source,'commit','-q','-m','pinned')
+        project=root/'project';(project/'tools').mkdir(parents=True)
+        shutil.copy2(Path(__file__).resolve().parents[2]/'tools/setup_deps.py',project/'tools')
+        pinned=dict(url=str(source),revision=git(source,'rev-parse','HEAD'))
+        (project/'dependencies.lock.json').write_text(json.dumps({'Game':pinned}))
+        (project/'dependencies.windows.lock.json').write_text(json.dumps({'WindowsGame':pinned}))
+        (project/'dependencies.launcher.lock.json').write_text(json.dumps({'SDL':pinned}))
+        def setup(*args):
+            result=subprocess.run([sys.executable,str(project/'tools/setup_deps.py'),*args],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            return sorted(path.name for path in (project/'third_party').iterdir())
+        self.assertEqual(setup('--windows'),['Game','WindowsGame'])
+        self.assertEqual(setup('--launcher'),['Game','SDL','WindowsGame'])
+        self.assertEqual((project/'third_party/SDL/file').read_text(),'pinned')
+    def test_repository_pins_sdl_for_the_launcher(self):
+        root=Path(__file__).resolve().parents[2]
+        pins=json.loads((root/'dependencies.launcher.lock.json').read_text())
+        # (the same SDL as the Windows game's, tools/setup_windows_runtime.ps1: release-3.4.18)
+        self.assertEqual(pins['SDL'],{'url':'https://github.com/libsdl-org/SDL.git',
+                                      'revision':'829a65d769d935c4852f8159e964312c0957260a'})
+        self.assertNotIn('SDL',json.loads((root/'dependencies.lock.json').read_text()))
+        self.assertNotIn('SDL',json.loads((root/'dependencies.windows.lock.json').read_text()))
 
 if __name__=='__main__':unittest.main()

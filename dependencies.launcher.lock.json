@@ -1,0 +1,6 @@
+{
+  "SDL": {
+    "url": "https://github.com/libsdl-org/SDL.git",
+    "revision": "829a65d769d935c4852f8159e964312c0957260a"
+  }
+}
