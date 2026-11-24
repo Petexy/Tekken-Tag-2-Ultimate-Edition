@@ -123,8 +123,24 @@ jobs:
             git mingw-w64-clang-x86_64-toolchain
             mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja
             mingw-w64-clang-x86_64-python mingw-w64-clang-x86_64-python-numpy
-            mingw-w64-clang-x86_64-python-pillow mingw-w64-clang-x86_64-sdl3
+            mingw-w64-clang-x86_64-python-pillow
       - run: python tools/setup_deps.py
+      # (The pinned downloads of tools/windows-bootstrap.lock.json, checked against their SHA-256 when used: SDL 3 and
+      # the bridge's compiler, about 200 MB, kept between runs.)
+      - uses: actions/cache@v6
+        with:
+          path: |
+            local/windows-downloads
+            third_party/windows/SDL3.zip
+          key: windows-downloads-${{ hashFiles('tools/windows-bootstrap.lock.json') }}
+      - name: The players' SDL 3 (the pinned mingw build Set Up Game uses, not msys2's)
+        # (The launcher's pictures are held to references drawn with that SDL 3; CMakeLists.txt takes it from
+        # third_party/windows as tools/setup_windows_runtime.ps1 puts it there.)
+        run: >-
+          python -c "import json, sys; from pathlib import Path; sys.path.insert(0, 'launcher/windows');
+          import setup_game; lock = json.loads(Path('tools/windows-bootstrap.lock.json').read_text());
+          native = Path('third_party/windows');
+          setup_game.unzip(setup_game.download(lock['sdl'], native / 'SDL3.zip'), native)"
       - name: Configure native Windows tools without game files
         run: cmake -S . -B build-windows-ci -G Ninja -DTTT2_TOOLS_ONLY=ON -DTTT2_WINDOWS_RUNTIME=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
       - run: cmake --build build-windows-ci --parallel 2

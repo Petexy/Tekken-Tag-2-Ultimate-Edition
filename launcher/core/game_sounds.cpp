@@ -1,5 +1,6 @@
 // The game's own menu sounds, read from the player's install (game_sounds.h has the formats).
 #include "game_sounds.h"
+#include "utf8_path.h"
 
 #include <algorithm>
 #include <cmath>
@@ -203,22 +204,22 @@ bool Archives::list(std::string* error) {
     std::error_code ec;
     std::vector<std::string> names;
     for (fs::directory_iterator it(hdd_, ec), end; !ec && it != end; it.increment(ec)) {
-        std::string n = it->path().filename().string();
+        std::string n = path_utf8(it->path().filename());
         if (n.size() == 11 && n.compare(0, 4, "data") == 0 && n.compare(7, 4, ".ofs") == 0 &&
             std::all_of(n.begin() + 4, n.begin() + 7, [](char c) { return c >= '0' && c <= '9'; }))
             names.push_back(n.substr(0, 7));
     }
     if (ec) {
-        set(error, "cannot list " + hdd_.string() + ": " + ec.message());
+        set(error, "cannot list " + path_utf8(hdd_) + ": " + ec.message());
         return false;
     }
     std::sort(names.rbegin(), names.rend()); // data100 (the update) first: the last loaded wins
     for (const auto& n : names) {
         Index index;
-        index.bin = hdd_ / (n + ".bin");
+        index.bin = hdd_ / utf8_path(n + ".bin");
         indices_.push_back(std::move(index));
     }
-    if (indices_.empty()) set(error, "no archives in " + hdd_.string());
+    if (indices_.empty()) set(error, "no archives in " + path_utf8(hdd_));
     return !indices_.empty();
 }
 
@@ -736,7 +737,7 @@ Loaded load_cues(const fs::path& root) {
     try {
         auto hdd = find_archives(root);
         if (!hdd) {
-            loaded.log.push_back("no game archives under " + root.string());
+            loaded.log.push_back("no game archives under " + path_utf8(root));
             return loaded;
         }
         loaded.archives = *hdd;

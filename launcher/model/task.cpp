@@ -1,4 +1,5 @@
 #include "task.h"
+#include "utf8_path.h"
 
 #include "rules.h"
 
@@ -386,7 +387,7 @@ TaskView TaskRunner::view() const {
         open.icon = Icon::kLog;
         open.flat = true;
         open.describe.title = "Open Log";
-        open.describe.path = spec_.command.log_file.string();
+        open.describe.path = path_utf8(spec_.command.log_file);
         v.open_log = open;
     }
     return v;

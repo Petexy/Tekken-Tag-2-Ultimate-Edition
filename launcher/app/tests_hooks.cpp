@@ -6,6 +6,7 @@
 // the window once the actions are done and everything has settled, then quits.
 
 #include "app.h"
+#include "utf8_path.h"
 
 #include "display.h"
 #include "keymap.h"
@@ -107,7 +108,7 @@ void App::shot(const std::string& name) {
     if (o_.shots.empty()) return;
     std::string error;
     const fs::path file = o_.shots / (name + ".png");
-    if (!window_.screenshot(file.string(), &error)) std::fprintf(stderr, "@test shot failed %s\n", error.c_str());
+    if (!window_.screenshot(path_utf8(file), &error)) std::fprintf(stderr, "@test shot failed %s\n", error.c_str());
 }
 
 void App::test_said(bool ok, const std::string& message) {
@@ -193,7 +194,7 @@ void App::test_audit(double t) {
 void App::test_capture(double t) {
     const auto check = [&](const std::string& name) {
         std::string error;
-        if (!window_.screenshot((o_.frames / (name + ".png")).string(), &error))
+        if (!window_.screenshot(path_utf8(o_.frames / (name + ".png")), &error))
             std::fprintf(stderr, "@frames %s failed %s\n", name.c_str(), error.c_str());
         std::vector<std::string> problems = ui_->audit();
         // (As painted: events move the focus after the frame.)

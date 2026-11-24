@@ -182,6 +182,8 @@ class ReleaseExe(unittest.TestCase):
         self.assertTrue(frame['frame'] and not frame['error'], frame)
         self.assertEqual((frame['after'], frame['after_ended'], frame['after_left']), ('999999', True, ''))
         self.assertEqual(frame['digest'], files_digest(RELEASE))
+        # (Its manifest's activeCodePage: UTF-8 is the ANSI code page of the whole program.)
+        self.assertEqual(frame.get('code_page'), 65001, frame)
         self.assertFalse((apps / 'Ultimate_Launcher-x86_64.old.exe').exists())
         self.assertEqual((root / self_update.STAMP).read_text(encoding='utf-8').splitlines()[0],
                          files_digest(RELEASE))

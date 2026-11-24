@@ -9,6 +9,9 @@
 
 #include "paths.h"
 #include "startup.h"
+#ifdef _WIN32
+#include "win32.h"
+#endif
 
 #include <SDL3/SDL.h>
 #ifdef _WIN32
@@ -85,9 +88,8 @@ std::string utf8(const std::filesystem::path& p) {
 // A variable of this process as it is now (Windows: begin() changes the process's own; the C runtime keeps a copy).
 std::string environment(const char* name) {
 #ifdef _WIN32
-    char value[4096];
-    const DWORD n = GetEnvironmentVariableA(name, value, sizeof value);
-    return n > 0 && n < sizeof value ? std::string(value, n) : "";
+    // (Wide, as UTF-8: the A function would give the ANSI code page's letters.)
+    return launcher::win32::narrow(launcher::win32::environment(launcher::win32::wide(name).c_str()));
 #else
     const char* value = std::getenv(name);
     return value ? value : "";
@@ -195,6 +197,10 @@ static int launcher_main(int argc, char** argv) {
         facts += ", \"exe\": " + json_string(environment("TTT2_LAUNCHER_EXE"));
         facts += std::string(", \"unique\": ") + (o.instance ? "true" : "false");
         facts += ", \"note\": " + json_string(start.note);
+#ifdef _WIN32
+        // (65001 = UTF-8, the manifest's activeCodePage: narrow paths and texts in UTF-8 on Windows 10 1903 and later.)
+        facts += ", \"code_page\": " + std::to_string(GetACP());
+#endif
         o.smoke_start = facts;
     }
     for (size_t i = 0; i < start.args.size(); ++i) {
@@ -210,7 +216,7 @@ static int launcher_main(int argc, char** argv) {
         } else if (a == "--scale" && more) {
             o.scale = static_cast<float>(std::atof(start.args[++i].c_str()));
         } else if (a == "--frames" && more) {
-            o.frames = start.args[++i];
+            o.frames = arg_path(start.args[++i]);
         } else if (a == "--files" && more) {
             o.windows.files = launcher::normal(arg_path(start.args[++i]));
         } else if (a == "--build-dir" && more) {
@@ -262,8 +268,8 @@ static int launcher_main(int argc, char** argv) {
     // TTT2_LAUNCHER_TEST_VIDEO=offscreen: drawn offscreen, for Wine without a display.)
     if (const std::string s = environment("TTT2_LAUNCHER_TEST_SMOKE"); o.smoke.empty() && !s.empty()) o.smoke = arg_path(s);
     o.offscreen = environment("TTT2_LAUNCHER_TEST_VIDEO") == "offscreen";
-    if (const char* shots = std::getenv("TTT2_LAUNCHER_TEST_SHOTS"); shots && *shots) {
-        o.shots = shots;
+    if (const std::string shots = environment("TTT2_LAUNCHER_TEST_SHOTS"); !shots.empty()) {
+        o.shots = arg_path(shots);
         std::error_code ec;
         std::filesystem::create_directories(o.shots, ec);
     }

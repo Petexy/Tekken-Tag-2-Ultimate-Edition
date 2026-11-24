@@ -13,6 +13,7 @@
 #include "single_instance.h"
 #include "startup.h"
 #include "subprocess.h"
+#include "utf8_path.h"
 
 #ifdef _WIN32
 #include "win32.h"
@@ -474,12 +475,15 @@ int main(int argc, char** argv) {
     g_self = fs::read_symlink("/proc/self/exe");
 #endif
     if (args.size() >= 3 && args[0] == "--child" && args[2] == "--") {
-        g_root = args[1];
+        g_root = launcher::utf8_path(args[1]);
         return child(std::vector<std::string>(args.begin() + 3, args.end()));
     }
     const bool dbus = !args.empty() && args[0] == "--dbus";
     const std::vector<std::string> rest(args.begin() + (dbus ? 1 : 0), args.end());
-    const fs::path base = fs::absolute(!rest.empty() ? fs::path(rest[0]) : fs::temp_directory_path());
+    // (In the OS's own form: libc++ keeps an absolute C:/x as it is where libstdc++ makes it C:\x, and the children
+    // say GetModuleFileNameW's backslashes. UTF-8 to a path never through the ANSI code page: compat review #2.)
+    const fs::path base =
+        fs::absolute(!rest.empty() ? launcher::utf8_path(rest[0]) : fs::temp_directory_path()).make_preferred();
     g_root = base / ("startup_test." + std::to_string(own_pid()));
     g_instance = "ttt2-startup-test." + std::to_string(own_pid());
     std::error_code ec;

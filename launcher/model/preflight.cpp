@@ -1,4 +1,5 @@
 #include "preflight.h"
+#include "utf8_path.h"
 
 #include "protocol.h"
 
@@ -10,9 +11,9 @@ namespace launcher::model {
 std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, const fs::path& work, Probe& probe) {
     std::vector<Check> checks;
     if (probe.exists(game))
-        checks.push_back({true, "Game", game.filename().string(), {}});
+        checks.push_back({true, "Game", path_utf8(game.filename()), {}});
     else
-        checks.push_back({false, "Game", game.string() + " does not exist", {}});
+        checks.push_back({false, "Game", path_utf8(game) + " does not exist", {}});
 
     const auto missing = probe.missing_cpu_features();
     if (missing.empty()) {
@@ -29,7 +30,7 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
 
     std::string why;
     if (const auto compiler = probe.find_compiler(&why)) {
-        checks.push_back({true, "C++ compiler", compiler->name + " (" + compiler->path.string() + ")", {}});
+        checks.push_back({true, "C++ compiler", compiler->name + " (" + path_utf8(compiler->path) + ")", {}});
     } else {
         const Distro distro = probe.distro();
         const std::string command = install_command(distro, {Package::kCompiler});
@@ -51,7 +52,7 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
     if (together) needed += kBuildBytes;
     const auto space = [&](const fs::path& where, uint64_t bytes, const char* title, const std::string& what) {
         const auto free = probe.free_space(where);
-        if (!free) return Check{true, title, "Unknown for " + where.string(), {}};
+        if (!free) return Check{true, title, "Unknown for " + path_utf8(where), {}};
         return Check{*free >= bytes,
                      title,
                      gigabytes(*free) + " free, about " + gigabytes(bytes) + " needed " + what +
@@ -60,7 +61,7 @@ std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, cons
     };
     checks.push_back(
         space(folder, needed, "Free space", together ? "(the game, and building its program)" : "(the game)"));
-    if (!together) checks.push_back(space(work, kBuildBytes, "Free space for building", "in " + work.string()));
+    if (!together) checks.push_back(space(work, kBuildBytes, "Free space for building", "in " + path_utf8(work)));
     return checks;
 }
 
@@ -76,7 +77,7 @@ std::string stopped_text(int code, const std::string& log_end, const fs::path& l
     const std::vector<std::string> said = last_words(log_end, 3);
     if (!said.empty()) text += " Its last lines:";
     for (const std::string& line : said) text += "\n" + line;
-    if (log_there) text += "\nAll it wrote is in " + log.string() + ".";
+    if (log_there) text += "\nAll it wrote is in " + path_utf8(log) + ".";
     return text;
 }
 

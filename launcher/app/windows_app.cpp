@@ -51,7 +51,7 @@ bool App::windows_ready() {
     starter_ = std::make_unique<backend::ProcessStarter>(*host_);
     // (Tests: a files folder as the release .exe's, TTT2_LAUNCHER_TEST_FILES: its first start gets Python.)
     fs::path files = o_.files;
-    if (const char* f = std::getenv("TTT2_LAUNCHER_TEST_FILES"); o_.testing && f && *f) files = f;
+    if (const std::wstring f = win32::environment(L"TTT2_LAUNCHER_TEST_FILES"); o_.testing && !f.empty()) files = f;
     win_files_ = windows_files(files, o_.windows);
     ready_ = std::make_unique<WindowsReady>(*win_files_, *starter_);
     stage_->set_target(.5f, false, 0);

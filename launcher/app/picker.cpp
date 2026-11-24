@@ -3,6 +3,7 @@
 // entries; blue: the focused entry, what the launcher thinks of it, and Choose.
 
 #include "app.h"
+#include "utf8_path.h"
 
 #include "system.h"
 
@@ -37,8 +38,8 @@ Focus blue_focus() {
 }
 
 std::string folder_name(const fs::path& p) {
-    const std::string n = p.filename().string();
-    return n.empty() ? p.string() : n;
+    const std::string n = path_utf8(p.filename());
+    return n.empty() ? path_utf8(p) : n;
 }
 
 // Settings > Folders' names, as the picker's title says them.
@@ -263,7 +264,7 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
     auto g = ui.open("pk/blue", blue);
     const std::string& fo = ui.focused();
     if (fo.starts_with("pe:") || fo.starts_with("pp:") || fo == "pk/here") picker_key_ = fo;
-    const std::string key = p.dir.string() + "|" + picker_key_;
+    const std::string key = path_utf8(p.dir) + "|" + picker_key_;
     readout_.show(key, last_dy_, ui.now());
     readout_.build(ui, "pk/ro", Box{}, [&](const std::string&) {
         const std::string k = picker_key_;

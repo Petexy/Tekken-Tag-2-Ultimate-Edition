@@ -1,4 +1,5 @@
 #include "self_update.h"
+#include "utf8_path.h"
 
 #include "json.h"
 #include "system.h"
@@ -41,7 +42,7 @@ std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
     }
     if (runner_.running()) return Refusal{"Another task is running", "Wait for it to end, then update the launcher."};
     if (const std::string why = files_.cannot_replace(*config_.appimage); !why.empty()) {
-        return Refusal{"Cannot update the launcher", "Its folder, " + config_.appimage->parent_path().string() +
+        return Refusal{"Cannot update the launcher", "Its folder, " + path_utf8(config_.appimage->parent_path()) +
                                                          ", cannot be written to (" + why +
                                                          "): move the AppImage to a folder of yours, then update it."};
     }
@@ -154,7 +155,7 @@ void SelfUpdate::downloaded(int code, const std::string& err) {
     state_ = State::kChecking;
     timed_out_ = false;
     deadline_ = now_ + kVersionSeconds;
-    run({{file_.string(), "--version"}, {}, {}, {}, {}}, true,
+    run({{path_utf8(file_), "--version"}, {}, {}, {}, {}}, true,
         [this](int code, const std::string& out, const std::string&) { started(code, out); });
 }
 
@@ -173,12 +174,12 @@ void SelfUpdate::started(int code, const std::string& out) {
         return failed("Update failed", "The AppImage released as version " + version + " is version " + said + ".");
     }
     if (const std::string why = files_.replace(file_, *config_.appimage); !why.empty()) {
-        return failed("Update failed", "It cannot replace " + config_.appimage->string() + " (" + why + ").");
+        return failed("Update failed", "It cannot replace " + path_utf8(*config_.appimage) + " (" + why + ").");
     }
     state_ = State::kIdle;
-    runner_.add_log("Version " + version + " is in " + config_.appimage->string() + ".");
+    runner_.add_log("Version " + version + " is in " + path_utf8(*config_.appimage) + ".");
     std::string error;
-    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {},
+    Command open{{path_utf8(*config_.appimage)}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {},
                  Command::Mode::kDetached}; // (it outlives this one)
     auto job = starter_.start(open, {}, &error);
     if (!job) {

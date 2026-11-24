@@ -1,4 +1,5 @@
 #include "app.h"
+#include "utf8_path.h"
 
 #include "preflight.h"
 #include "rules.h"
@@ -75,10 +76,6 @@ Cue sound_of(ttt2::app::Cue c) {
     return Cue::Move;
 }
 
-#ifdef _WIN32
-// A UTF-8 folder from the state (Settings > Folders) as a wide path, so that a José in it is kept.
-fs::path utf8_path(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
-#endif
 
 } // namespace
 
@@ -169,7 +166,7 @@ void App::make_model() {
                        : utf8_path(data->second) / "launcher" / "dlc-owned.json";
     exe_ = answer.exe;
     banner_ = std::string("ttt2-launcher ") + TTT2_LAUNCHER_VERSION + " (Windows): files " +
-              win_files_->root.string() + ", python " + facts.python.string();
+              path_utf8(win_files_->root) + ", python " + path_utf8(facts.python);
     folders_from_state(facts.windows);
 #else
     env_ = std::make_unique<LinuxEnvironment>(places_);
@@ -842,8 +839,8 @@ void App::dialog_band() {
             const auto it = folders.find(key);
             return it == folders.end() ? std::string() : it->second;
         };
-        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(folder("source")), true}}});
-        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(folder("install")), true}}});
+        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(utf8_path(folder("source"))), true}}});
+        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(utf8_path(folder("install"))), true}}});
         what.push_back({"Needs",
                         WhatTone::Neutral,
                         {{"Internet for its tools (downloaded once), at least 30 GB free, and a while."}}});

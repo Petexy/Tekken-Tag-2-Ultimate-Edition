@@ -9,7 +9,8 @@
 # Cases: bootstrap (the first start: the .cmd hidden, its steps read from the log, then Home's Set Up),
 # bootstrap-fail (no download: the failure and Try Again), protocol (another version's files: refused, Releases
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
-# More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard).
+# More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard), josé
+# (a José in every folder: the later queries reach Python, compat review #1).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -146,6 +147,18 @@ fi
 if want_case folders; then
     make_root folders installed yes
     run folders 0 "tab:settings;focus:sec:folders;press:Return;wait:0.6;focus:fold:data;wait:0.6"
+fi
+
+# A José in every folder (compat review #1: a libc++ build, as a player's Set Up Game makes, turned the model's
+# paths into the ANSI code page): the first state, then the status and owned questions through the model's
+# own commands reach the stub Python, and Home shows the installed game.
+if want_case josé; then
+    make_root josé installed yes
+    run josé 0 "wait:1.5;focus:more;press:Return;wait:0.6"
+    for q in state status owned; do
+        grep -qx "$q" "$WORK/josé/answers/queries.log" 2>/dev/null || fail josé "no --query $q reached Python ($WORK/josé/answers/queries.log)"
+    done
+    [ "$(grep -c . "$WORK/josé/answers/queries.log" 2>/dev/null)" -ge 3 ] || fail josé "too few queries"
 fi
 
 # Sounds (FEEDBACK F7): Sound on (launcher.ini beside display.ini), SDL's disk audio driver into a file: moving, a

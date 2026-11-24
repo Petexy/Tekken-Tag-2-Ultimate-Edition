@@ -1,6 +1,7 @@
 // What the launcher asks of the OS through SDL, the same on Linux and Windows (backend.h).
 
 #include "backend.h"
+#include "utf8_path.h"
 
 #include "keymap.h"
 #include "settings.h"
@@ -88,7 +89,7 @@ struct Pick {
 
 void SDLCALL picked(void* data, const char* const* files, int) {
     std::unique_ptr<Pick> pick(static_cast<Pick*>(data));
-    const fs::path chosen = files && files[0] ? fs::path(files[0]) : fs::path();
+    const fs::path chosen = files && files[0] ? utf8_path(files[0]) : fs::path();
     auto done = std::move(pick->done);
     pick->post([done, chosen] { done(chosen); });
 }
@@ -102,7 +103,7 @@ void show(SDL_FileDialogType type, SDL_Window* window, const fs::path& start, co
         SDL_SetPointerProperty(props, SDL_PROP_FILE_DIALOG_FILTERS_POINTER, const_cast<SDL_DialogFileFilter*>(kFilters));
         SDL_SetNumberProperty(props, SDL_PROP_FILE_DIALOG_NFILTERS_NUMBER, 2);
     }
-    const std::string location = start.string();
+    const std::string location = path_utf8(start);
     if (!location.empty()) SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_LOCATION_STRING, location.c_str());
     SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_TITLE_STRING, title);
     if (accept) SDL_SetStringProperty(props, SDL_PROP_FILE_DIALOG_ACCEPT_STRING, accept);

@@ -16,6 +16,7 @@
 // nor while the game runs from that folder.
 
 #include "paths.h"
+#include "utf8_path.h"
 
 #include <string>
 #include <vector>
@@ -32,7 +33,7 @@ struct UninstallOptions {
 struct UninstallProblem {
     fs::path path;
     std::string why;
-    std::string text() const { return path.string() + ": " + why; }
+    std::string text() const { return path_utf8(path) + ": " + why; }
 };
 
 struct UninstallReport {

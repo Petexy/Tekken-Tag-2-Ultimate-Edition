@@ -4,6 +4,7 @@
 // game, and what the focused item does or why it cannot.
 
 #include "app.h"
+#include "utf8_path.h"
 
 #include "builders.h"
 #include "rules.h"
@@ -157,7 +158,7 @@ void App::home_readout(const std::string& key) {
             title = "Game file";
             body = f.chosen_game.empty()
                        ? "Choose your .wua with the file browser: it works with a controller too."
-                       : f.chosen_game.filename().string() + ", in " + m::shown_path(f.chosen_game.parent_path()) +
+                       : path_utf8(f.chosen_game.filename()) + ", in " + m::shown_path(f.chosen_game.parent_path()) +
                              ". Choose another one with the file browser.";
         } else if (k == "slot:folder") {
             title = "Install folder";
@@ -348,10 +349,10 @@ void App::home_setup(const Box& crimson, const Box& blue) {
                   fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
     const Fact list[] = {
         {"Your copy", {{"TEKKEN TAG TOURNAMENT 2 WII U EDITION: European, update 16, as a .wua archive", kValue}}, false},
-        {"Archive", {{source.empty() ? "Chosen when you set up" : m::shown_path(source), source.empty() ? c::kBlueDim
+        {"Archive", {{source.empty() ? "Chosen when you set up" : m::shown_path(utf8_path(source)), source.empty() ? c::kBlueDim
                                                                                                       : kValue}},
          !source.empty()},
-        {"Folder", {{install.empty() ? "Chosen when you set up" : m::shown_path(install), install.empty() ? c::kBlueDim
+        {"Folder", {{install.empty() ? "Chosen when you set up" : m::shown_path(utf8_path(install)), install.empty() ? c::kBlueDim
                                                                                                         : kValue}},
          !install.empty()},
         {"Space", {{"About 30 GB and internet: the tools are downloaded once", kValue}}, false}};
@@ -430,7 +431,7 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
         MenuRowSpec one;
         one.number = 1;
         one.caption = "Game file";
-        one.title = f.chosen_game.empty() ? "Choose your .wua" : f.chosen_game.filename().string();
+        one.title = f.chosen_game.empty() ? "Choose your .wua" : path_utf8(f.chosen_game.filename());
         one.ok = !f.chosen_game.empty();
         one.mono_title = !f.chosen_game.empty();
         menu_row(ui, "slot:game", one, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
@@ -451,7 +452,7 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
     const Fact list[] = {
         {"Your copy", {{"TEKKEN TAG TOURNAMENT 2 WII U EDITION: European, update 16, as a .wua archive", kValue}}, false},
         {"Game file",
-         {{f.chosen_game.empty() ? "Not chosen yet" : f.chosen_game.filename().string(),
+         {{f.chosen_game.empty() ? "Not chosen yet" : path_utf8(f.chosen_game.filename()),
            f.chosen_game.empty() ? c::kWarn : kValue}},
          !f.chosen_game.empty()},
         {"Space", {{"About 16 GB, plus 3 GB while building", kValue}}, false},

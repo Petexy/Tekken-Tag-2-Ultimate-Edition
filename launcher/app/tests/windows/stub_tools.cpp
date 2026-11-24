@@ -26,9 +26,23 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// (UTF-8 text <-> wide: never the ANSI code page, so that a José in a folder is kept, run_wine.sh's jose case.)
+std::string utf8(const std::wstring& w) {
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? n - 1 : 0, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+fs::path path_of(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
+
 std::string env(const char* name) {
-    const char* v = std::getenv(name);
-    return v ? v : "";
+    const std::wstring wide_name(name, name + std::char_traits<char>::length(name));
+    const DWORD n = GetEnvironmentVariableW(wide_name.c_str(), nullptr, 0);
+    if (!n) return "";
+    std::wstring v(n, L'\0');
+    v.resize(GetEnvironmentVariableW(wide_name.c_str(), v.data(), n));
+    return utf8(v);
 }
 
 std::string lower(std::string s) {
@@ -56,8 +70,9 @@ int python(const std::vector<std::string>& a) {
             return 0;
         }
         if (a[i] == "--query" && i + 1 < a.size()) {
-            const fs::path answers = env("TTT2_STUB_ANSWERS");
+            const fs::path answers = path_of(env("TTT2_STUB_ANSWERS"));
             const std::string name = a[i + 1];
+            std::ofstream(answers / "queries.log", std::ios::app | std::ios::binary) << name << "\n"; // (what was asked, in order)
             if (name == "save-settings") {
                 std::string input{std::istreambuf_iterator<char>(std::cin), {}};
                 std::ofstream(answers / "save-settings.in", std::ios::binary) << input;
@@ -96,7 +111,7 @@ int python(const std::vector<std::string>& a) {
 int curl(const std::vector<std::string>& a) {
     fs::path out;
     for (size_t i = 0; i + 1 < a.size(); ++i)
-        if (a[i] == "-o") out = a[i + 1];
+        if (a[i] == "-o") out = path_of(a[i + 1]);
     if (env("TTT2_STUB_CURL_FAIL") == "1") {
         std::fprintf(stderr, "curl: (6) Could not resolve host: github.com\n");
         return 6;
@@ -125,7 +140,7 @@ int findstr(const std::vector<std::string>& a) {
     for (const std::string& w : a)
         if (!w.empty() && w[0] != '/') words.push_back(w);
     if (words.size() < 2) return 2;
-    std::ifstream in(fs::path(words[1]), std::ios::binary);
+    std::ifstream in(path_of(words[1]), std::ios::binary);
     for (std::string line; std::getline(in, line);) {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
         if (lower(line) == lower(words[0])) return 0;
@@ -136,7 +151,7 @@ int findstr(const std::vector<std::string>& a) {
 int tar(const std::vector<std::string>& a) {
     fs::path dir;
     for (size_t i = 0; i + 1 < a.size(); ++i)
-        if (a[i] == "-C") dir = a[i + 1];
+        if (a[i] == "-C") dir = path_of(a[i + 1]);
     pause(0.4);
     std::error_code ec;
     fs::create_directories(dir / "python", ec);
@@ -152,12 +167,7 @@ int main() {
     int count = 0;
     wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
     std::vector<std::string> a;
-    for (int i = 1; i < count; ++i) {
-        const int n = WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, nullptr, 0, nullptr, nullptr);
-        std::string s(n > 0 ? n - 1 : 0, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wide[i], -1, s.data(), n, nullptr, nullptr);
-        a.push_back(s);
-    }
+    for (int i = 1; i < count; ++i) a.push_back(utf8(wide[i]));
     const std::string name = lower(self().stem().string());
     if (name == "python" || name == "pythonw") return python(a);
     if (name == "curl") return curl(a);
