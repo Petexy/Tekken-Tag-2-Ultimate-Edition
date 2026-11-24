@@ -1,0 +1,4 @@
+@test show-uninstall started
+@test show-uninstall ok
+@test quit started
+@test quit ok

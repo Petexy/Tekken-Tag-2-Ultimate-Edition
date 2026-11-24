@@ -1,0 +1,4 @@
+@test uninstall:keep started
+@test uninstall:keep ok Uninstalled
+@test quit started
+@test quit ok

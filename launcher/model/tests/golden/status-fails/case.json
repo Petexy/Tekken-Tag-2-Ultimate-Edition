@@ -1,0 +1,20 @@
+{
+ "name": "status-fails",
+ "about": "launcher.py status fails",
+ "install": "installed",
+ "built": "0.8.0-1cab8c68f39b",
+ "kit_version": "0.8.0-1cab8c68f39b",
+ "status": null,
+ "owned": {
+  "owned": {
+   "geese": true,
+   "noctis": true,
+   "fahkumram": false
+  }
+ },
+ "owned_cache": null,
+ "main": null,
+ "steps": "expand-dlc",
+ "import_script": {},
+ "status_fail": "RuntimeError: the importer broke"
+}

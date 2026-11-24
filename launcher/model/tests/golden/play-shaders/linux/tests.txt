@@ -1,0 +1,4 @@
+@test play started
+@test play ok
+@test quit started
+@test quit ok
