@@ -426,5 +426,61 @@ class Routing(unittest.TestCase):
             self.assertEqual(main.main(), 0)
 
 
+@unittest.skipUnless(os.name == 'nt', 'the Tk window is tried on Windows only (no window on a developer\'s desktop)')
+class TkWindow(unittest.TestCase):
+    """The bootstrap window itself (Windows, and Wine without a display, can make one)."""
+
+    def setUp(self):
+        self.window = bl.Window.open()
+        if not self.window: self.skipTest('Tk cannot make a window here')
+
+    def run_window(self, job, press, exe=None):
+        """Runs the window; once the failure's buttons show, records them and presses `press`."""
+        window, seen = self.window, []
+
+        def watch():
+            buttons = {b['text']: b for b in window.buttons.winfo_children()}
+            if buttons and not window.busy:
+                seen.append((sorted(buttons), window.heading['text'], window.text['text']))
+                buttons[press].invoke()     # (and no more watching: the window may be gone)
+            else:
+                window.top.after(50, watch)
+        window.top.after(50, watch)
+        environment = {'TTT2_LAUNCHER_EXE': str(exe)} if exe else {}
+        with mock.patch.dict(os.environ, environment), mock.patch('self_update.running_exe',
+                                                                 return_value=exe):
+            return window.run(job, Path('launcher-build.log')), seen
+
+    def test_failure_shows_why_and_try_again_builds_clean(self):
+        calls = []
+
+        def job(report, clean):
+            calls.append(clean)
+            if not clean: raise bl.BuildError('No compiler.')
+            report.step('Building the launcher')
+            report.fraction(0.5)
+        code, seen = self.run_window(job, 'Try again')
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [False, True])
+        self.assertEqual(seen, [(['Close', 'Open log', 'Releases page', 'Try again'],
+                                 'The new launcher could not be prepared.', 'No compiler.')])
+
+    def test_an_exe_is_offered_the_newest_launcher(self):
+        def job(report, clean):
+            raise bl.BuildError('No compiler.')
+        exe = Path(__file__)
+        with mock.patch('build_launcher.newest_launcher', return_value=True) as newest:
+            code, seen = self.run_window(job, 'Get the newest launcher', exe)
+        self.assertEqual(code, 0)
+        self.assertEqual(seen[0][0], ['Close', 'Get the newest launcher', 'Open log', 'Try again'])
+        self.assertEqual(newest.call_args.args[0], exe)
+
+    def test_close_after_a_failure_ends_with_an_error(self):
+        def job(report, clean):
+            raise bl.BuildError('No compiler.')
+        code, seen = self.run_window(job, 'Close')
+        self.assertEqual(code, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

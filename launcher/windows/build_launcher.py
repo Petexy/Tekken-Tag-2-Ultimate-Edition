@@ -519,7 +519,7 @@ class Window:
     def run(self, job, log_path):
         self.job, self.log_path = job, log_path
         self.begin(lambda: self.job(self, False))
-        self.top.after(100, self.poll)
+        self.polling = self.top.after(100, self.poll)
         self.top.mainloop()
         return self.code
 
@@ -560,11 +560,11 @@ class Window:
                 self.failed('This launcher is the newest release already.')
             elif kind in ('done', 'closed'):
                 self.code = 0 if kind == 'done' else 1
-                self.top.destroy()
+                self.finish()
                 return
             elif kind == 'failed':
                 self.failed(value)
-        self.top.after(100, self.poll)
+        self.polling = self.top.after(100, self.poll)
 
     def failed(self, reason):
         self.busy, self.code = False, 1
@@ -600,4 +600,11 @@ class Window:
         if self.busy:
             self.code = 1
             if self.runner: self.runner.stop()
+        self.finish()
+
+    def finish(self):
+        # (Nothing of this window may run after it: Tcl's timers outlive it, in the thread's next window too.)
+        with contextlib.suppress(Exception):
+            self.bar.stop()
+            self.top.after_cancel(self.polling)
         self.top.destroy()
