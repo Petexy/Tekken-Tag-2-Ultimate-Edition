@@ -88,6 +88,7 @@ bool App::open_window() {
     wipe_ = std::make_unique<Wipe>(*textures_);
     if (const char* glyphs = std::getenv("TTT2_CONTROLLER")) {
         const std::string g = glyphs;
+        forced_glyphs_ = g == "ps" || g == "playstation" || g == "xbox" || g == "nintendo" || g == "keyboard";
         if (g == "ps" || g == "playstation") router_.force_glyphs(true, Glyphs::PlayStation);
         else if (g == "xbox") router_.force_glyphs(true, Glyphs::Xbox);
         else if (g == "nintendo") router_.force_glyphs(true, Glyphs::Nintendo);
@@ -122,6 +123,13 @@ void App::make_model() {
     parts.update.pid = static_cast<int>(getpid());
     model_ = std::make_unique<m::LauncherModel>(std::move(facts), parts);
     model_->set_monitors(sdl_monitors());
+    // The launcher's own settings (launcher.ini beside display.ini).
+    launcher_ini_ = parts.display_file.parent_path() / "launcher.ini";
+    applied_ = read_launcher_ini(launcher_ini_);
+    model_->set_launcher_settings(applied_);
+    sounds_ = applied_.sounds;
+    if (applied_.prompts > 0 && !forced_glyphs_) apply_prompts(applied_.prompts);
+    if (applied_.text_size != 100) window_.set_user_text_scale(applied_.text_size / 100.f);
     // Where the install goes until another folder is chosen: ~/Games when there is one.
     const fs::path home = home_folder();
     std::error_code ec;
@@ -143,7 +151,7 @@ int App::run() {
     while (!quit_) {
         const double t = now();
         const bool busy = ui_->animating() || stage_->animating() || wipe_->active(t) || router_.holding() || first_ ||
-                          readout_.animating(t);
+                          readouts_animating(t);
         pump_input(t, !busy && !o_.testing);
         frame(now());
         if (o_.testing) test_tick(now());
@@ -228,6 +236,7 @@ void App::frame(double t) {
     model_->tick(t);
     handle(model_->take_effects());
     router_.tick(t);
+    key_capture_tick(t);
     // The install, an update, the uninstall and the launcher's update fill Home while they run, and their end stays
     // there until it is closed.
     const m::TaskRunner& runner = model_->task();
@@ -374,7 +383,7 @@ void App::declare() {
     if (picker_) picker_screen(crimson, blue);
     else if (screen_ == Screen::kHome) home(crimson, blue);
     else if (screen_ == Screen::kFighters) fighters(crimson, blue);
-    else placeholder(crimson, blue);
+    else settings(crimson, blue);
     task_strip();
     if (view_.dialog) dialog_band();
     bottom_band();
@@ -482,6 +491,31 @@ std::vector<Hint> App::hints() const {
     if (drilled()) {
         if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? "Copy" : focused_label());
         h.push_back({Prompt::Back, "Back"});
+        h.push_back({Prompt::Tabs, "Tabs"});
+        return h;
+    }
+    if (screen_ == Screen::kSettings && !drilled()) {
+        if (model_->keys().picking() >= 0) {
+            h.clear();
+            h.push_back({Prompt::AnyKey, "Press a key"});
+            h.push_back({Prompt::Back, "Keep"});
+            return h;
+        }
+        const m::Action* a = action(f);
+        if (a && (a->kind == m::ActionKind::kSwitch || a->kind == m::ActionKind::kChoice)) {
+            if (a->enabled) {
+                h.push_back({Prompt::Change, "Change"});
+                accept(a->kind == m::ActionKind::kSwitch ? "Switch" : "Next");
+            }
+        } else if (f.starts_with("key:")) {
+            accept("Change Key");
+        } else if (f.starts_with("fold:")) {
+            accept("Options");
+        } else if (a && a->enabled) {
+            accept(a->label);
+        }
+        if (settings_sections().size() > 1) h.push_back({Prompt::Sections, "Section"});
+        h.push_back({Prompt::Back, "Home"});
         h.push_back({Prompt::Tabs, "Tabs"});
         return h;
     }
@@ -656,6 +690,15 @@ void App::dialog_band() {
                                     : title + " is not finished."}}});
         what.push_back({"Stop", WhatTone::Removed, {{"Stop and Quit stops it, then the launcher closes."}}});
         what.push_back({"Keep", WhatTone::Kept, {{"Keep Running goes back: the task goes on."}}});
+    } else if (d.id == "remove-all") {
+        // (Remove All exists only while that game is gone: its characters cannot be made again until it is back.)
+        std::vector<std::string> shown;
+        const std::string game = d.title.find("Tekken 8") != std::string::npos ? kTekken8 : kTekken7;
+        for (const std::string& n : m::to_remove_all(model_->facts(), game))
+            shown.push_back(m::display_name(model_->facts(), n));
+        what.push_back({"Removed", WhatTone::Removed, {{m::joined_most(shown, 8) + ": their packs, from the game."}}});
+        what.push_back({"Stays", WhatTone::Kept, {{"The game's own fighters and the other game's characters."}}});
+        what.push_back({"Later", WhatTone::Neutral, {{d.text}}});
     } else {
         what.push_back({"", WhatTone::Neutral, {{d.text}}});
         for (const m::Line& l : d.lines)
@@ -672,6 +715,8 @@ void App::go(Screen to) {
     // (A drill-in ends with its screen; the screen keeps the opener as its focus.)
     saved_focus_[static_cast<int>(screen_)] = drilled() ? drill_->opener : ui_->focused();
     drill_.reset();
+    if (model_->keys().picking() >= 0) model_->cancel_key();
+    router_.end_capture();
     const int dir = static_cast<int>(to) > static_cast<int>(screen_) ? 1 : -1;
     // The model's page follows (Settings reads display.ini and the keys when opened).
     if (to == Screen::kSettings && model_->page() != m::Page::kSettings) handle(model_->activate("settings", now()));
@@ -681,6 +726,23 @@ void App::go(Screen to) {
     stage_->note_input(now());
     const auto it = saved_focus_.find(static_cast<int>(to));
     ui_->focus(it != saved_focus_.end() ? it->second : std::string(), true);
+}
+
+void App::apply_prompts(int prompts) {
+    static const Glyphs kGlyphs[] = {Glyphs::Keyboard, Glyphs::Keyboard, Glyphs::Xbox, Glyphs::PlayStation,
+                                     Glyphs::Nintendo};
+    router_.force_glyphs(prompts > 0, kGlyphs[std::clamp(prompts, 0, 4)]);
+}
+
+void App::apply_launcher_settings() {
+    const m::LauncherSettings s = model_->launcher_settings();
+    sounds_ = s.sounds;
+    if (s == applied_) return;
+    if (s.prompts != applied_.prompts && !forced_glyphs_) apply_prompts(s.prompts);
+    if (s.text_size != applied_.text_size) window_.set_user_text_scale(s.text_size / 100.f);
+    applied_ = s;
+    std::string error;
+    if (!write_launcher_ini(launcher_ini_, s, &error)) toast("Not saved", error);
 }
 
 void App::cue(ttt2::app::Cue c) {
@@ -787,7 +849,15 @@ void App::on_events(const std::vector<Event>& events) {
             break;
         case EventKind::Fullscreen: window_.toggle_fullscreen(); break;
         case EventKind::FocusMoved: cue(ttt2::app::Cue::Move); break;
-        case EventKind::Change: cue(ttt2::app::Cue::Toggle); break;
+        case EventKind::Change:
+            if (screen_ == Screen::kSettings && !view_.dialog && !picker_) settings_change(e.id, e.delta);
+            else cue(ttt2::app::Cue::Toggle);
+            break;
+        case EventKind::SectionPrev:
+        case EventKind::SectionNext:
+            if (screen_ == Screen::kSettings && !view_.dialog && !picker_ && !drilled())
+                settings_switch(e.kind == EventKind::SectionNext ? 1 : -1);
+            break;
         case EventKind::Refused:
             cue(ttt2::app::Cue::Refuse);
             refused(e.id);
@@ -799,9 +869,14 @@ void App::on_events(const std::vector<Event>& events) {
             if (e.id == "play" || e.id == "task/play") cue(Cue::Play);
             else if (e.id == "sound" || (a && a->kind == m::ActionKind::kCheck)) {
                 // (Sound: its cue after the switch, so turning it on is heard.)
-            } else if (!tab && !(e.id.starts_with("check:") && check_has_copy(e.id))) cue(Cue::Accept);
-            activate(e.id);
-            if (e.id == "sound" || (a && a->kind == m::ActionKind::kCheck)) cue(Cue::Toggle);
+            } else if (!tab && !(e.id.starts_with("check:") && check_has_copy(e.id)) &&
+                       !(a && (a->kind == m::ActionKind::kSwitch || a->kind == m::ActionKind::kChoice)) &&
+                       !e.id.starts_with("sec:") && !e.id.starts_with("tile:") && !e.id.starts_with("fold:"))
+                cue(Cue::Accept);
+            activate(e.id, e.device);
+            if (e.id == "sound" || (a && (a->kind == m::ActionKind::kCheck || a->kind == m::ActionKind::kSwitch ||
+                                          a->kind == m::ActionKind::kChoice)))
+                cue(Cue::Toggle);
             break;
         }
         default: break;
@@ -817,19 +892,20 @@ void App::refused(const std::string& id) {
     if (id == "pk/choose") toast("Not a .wua", "Choose the game's .wua archive.");
 }
 
-void App::activate(const std::string& id) {
+void App::activate(const std::string& id, ttt2::ui::Device device) {
     const double t = now();
     stage_->note_input(t);
     if (picker_ && picker_activate(id)) return;
+    if (screen_ == Screen::kSettings && !view_.dialog && settings_activate(id, device)) return;
     if (id == "tab:home" || id == "ph/home") return go(Screen::kHome);
     if (id == "tab:fighters" || id == "fighters") return go(Screen::kFighters);
     if (id == "tab:settings") return go(Screen::kSettings);
     if (id == "settings" && !view_.dialog) return go(Screen::kSettings);
     if (id == "sound") {
-        sounds_ = !sounds_;
         m::LauncherSettings s = model_->launcher_settings();
-        s.sounds = sounds_;
+        s.sounds = !s.sounds;
         model_->set_launcher_settings(s);
+        apply_launcher_settings();
         return;
     }
     if (id == "quit" || id == "frame/close") return handle(model_->request_close(t));

@@ -763,6 +763,8 @@ std::vector<Effect> LauncherModel::choose(const std::string& id, int index, doub
         if (!display_.set(id, index)) said_ = display_.error();
     } else if (id == "text-size" && index >= 0 && static_cast<size_t>(index) < std::size(kTextSizes)) {
         launcher_.text_size = kTextSizes[index];
+    } else if (id == "prompts" && index >= 0 && static_cast<size_t>(index) < std::size(kPrompts)) {
+        launcher_.prompts = index;
     }
     return {};
 }
@@ -998,6 +1000,8 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         launcher_.sounds = !launcher_.sounds;
     else if (id == "reduce-motion")
         launcher_.reduce_motion = !launcher_.reduce_motion;
+    else if (id == "prompts")
+        return choose(id, (launcher_.prompts + 1) % static_cast<int>(std::size(kPrompts)), now);
     else if (id == "text-size") {
         const auto at = std::find(std::begin(kTextSizes), std::end(kTextSizes), launcher_.text_size);
         return choose(id, static_cast<int>((at - std::begin(kTextSizes) + 1) % std::size(kTextSizes)), now);

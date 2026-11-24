@@ -161,10 +161,12 @@ struct LauncherSettings {
     bool sounds = false;        // U17: off by default
     bool reduce_motion = false; // U9 (the app sets it from the OS where readable, until chosen)
     int text_size = 100;        // U6: percent (kTextSizes)
+    int prompts = 0;            // the button prompts shown: an index into kPrompts (0: from the last device used)
     bool operator==(const LauncherSettings&) const = default;
 };
 
 inline constexpr int kTextSizes[] = {100, 125, 150};
+inline constexpr const char* kPrompts[] = {"Automatic", "Keyboard", "Xbox", "PlayStation", "Nintendo"};
 
 struct Facts {
     Caps caps = Caps::linux_caps();

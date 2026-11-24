@@ -270,7 +270,7 @@ bool App::test_input(const std::string& name, const std::vector<std::string>& ar
 
 void App::test_tick(double t) {
     const bool busy = model_->busy() || working_ > 0 || stage_->animating() || wipe_->active(t) ||
-                      readout_.animating(t) || !test_raw_.empty();
+                      readouts_animating(t) || !test_raw_.empty();
     if (busy) {
         idle_since_ = t;
         frames_idle_ = 0;

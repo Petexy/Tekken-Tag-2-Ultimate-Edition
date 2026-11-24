@@ -8,6 +8,7 @@
 
 #include "backend_linux.h"
 #include "browser.h"
+#include "launcher_ini.h"
 #include "sound_cues.h"
 #include "model.h"
 #include "single_instance.h"
@@ -94,7 +95,7 @@ private:
     void frame(double now);
     void declare();
     void on_events(const std::vector<ui::Event>& events);
-    void activate(const std::string& id);
+    void activate(const std::string& id, ttt2::ui::Device device = ttt2::ui::Device::None);
     void refused(const std::string& id);
     void handle(std::vector<m::Effect> effects);
     void go(Screen to);
@@ -113,6 +114,9 @@ private:
     std::string focused_label() const;
     const m::Action* action(const std::string& id) const;
     double now() const;
+    bool readouts_animating(double t) const {
+        return readout_.animating(t) || fighters_ro_.animating(t) || settings_ro_.animating(t);
+    }
 
     // ---- bands (app.cpp)
     void top_band();
@@ -171,6 +175,25 @@ private:
     void outfits_view();
     void needs_view();
     bool fighters_activate(const std::string& id);
+
+    // ---- Settings (settings_screen.cpp)
+    static constexpr double kCaptureSeconds = 10; // choosing a key stops after this long without one
+    std::vector<std::string> settings_sections() const;
+    void settings_switch(int delta, const std::string& to = {});
+    void settings(const ui::Box& crimson, const ui::Box& blue);
+    void settings_keys_crimson(const m::SettingsView& view, const std::string& up);
+    void settings_blue(const ui::Box& blue, const m::SettingsView& view);
+    void setting_view(const m::SettingsView& view, const std::string& id);
+    void key_view(const m::SettingsView& view, const std::string& id);
+    void folder_view(const m::SettingsView& view, const std::string& key);
+    void settings_change(const std::string& id, int delta);
+    bool settings_activate(const std::string& id, ttt2::ui::Device device);
+    void key_capture_tick(double now);
+    std::string folder_default(const std::string& key) const;
+    void set_folder(const std::string& key, const std::string& value);
+    // The launcher's own settings changed (Sounds, Reduce motion, Button prompts, Text size): applied and saved.
+    void apply_launcher_settings();
+    void apply_prompts(int prompts);
 
     // ---- the in-app browser (picker.cpp)
     void open_picker(bool folder, const std::string& purpose);
@@ -256,8 +279,18 @@ private:
 
     // Fighters
     std::string fighters_key_;                       // what the blue side shows ("f:<name>", "g:<group>:<id>", ...)
-    ui::Readout fighters_ro_;
+    ui::Readout fighters_ro_, settings_ro_;
     std::map<std::string, std::string> group_of_button_;  // a group action's id -> its group's key
+    // Settings
+    std::string settings_section_ = "display"; // display / keyboard / launcher / folders
+    std::string settings_key_;                 // the row the blue side shows
+    int settings_slide_ = 1;                   // the side the last value change came from
+    double capture_since_ = 0;                 // choosing a key since
+    m::LauncherSettings applied_{};            // the launcher's settings as applied
+    fs::path launcher_ini_;                    // where they are kept (beside display.ini)
+    bool forced_glyphs_ = false;               // TTT2_CONTROLLER chose the prompts
+    std::map<std::string, std::string> folder_defaults_; // Windows: Settings > Folders' defaults
+    bool folders_changed_ = false;
     // Every action the screen declared this frame (Fighters, Settings): their whys, labels and kinds.
     std::map<std::string, m::Action> screen_actions_;
 

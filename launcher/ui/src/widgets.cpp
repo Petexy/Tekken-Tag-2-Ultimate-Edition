@@ -1213,7 +1213,8 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
         &focus);
 }
 
-void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box) {
+void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box,
+                  int focus_group) {
     Box b = box;
     b.layout = Layout::Row;
     b.align = Align::Center;
@@ -1228,6 +1229,7 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
         const bool on = static_cast<int>(i) == active;
         Focus f;
         f.disabled = s.disabled;
+        f.group = focus_group;
         ui.leaf(
             s.id, Box{.h = Size::fixed(m::kSectionHeight)},
             [&te, s](float) { return Vec2{40 + te.width(tx::kSection, s.label), m::kSectionHeight}; },

@@ -28,7 +28,7 @@ if(NOT TTT2_KIT_DIR)
 endif()
 
 # The parts without SDL (tested on their own): the file browser's folders, the install's steps from its log.
-add_library(ttt2_launcher_app_parts STATIC browser.cpp steps.cpp)
+add_library(ttt2_launcher_app_parts STATIC browser.cpp steps.cpp launcher_ini.cpp)
 target_include_directories(ttt2_launcher_app_parts PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ttt2_launcher_app_parts PUBLIC launcher_model)
 target_compile_features(ttt2_launcher_app_parts PUBLIC cxx_std_20)
@@ -39,6 +39,7 @@ add_executable(ttt2-launcher
     app.cpp
     home.cpp
     fighters.cpp
+    settings_screen.cpp
     picker.cpp
     tests_hooks.cpp
     backend_linux.cpp)

@@ -170,7 +170,9 @@ struct Section {
     std::string id{}, label{};
     bool disabled = false;
 };
-void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box = {});
+// `focus_group`: the sections' Focus::group (the list's below them: -1, so Up from its first item reaches them).
+void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box = {},
+                  int focus_group = 0);
 // A key binding row.
 struct KeyRowSpec {
     std::string icon{}, name{}, key{};
