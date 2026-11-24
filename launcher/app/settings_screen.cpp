@@ -5,6 +5,7 @@
 // inputs in three columns, a gamepad with the focused input lit, choosing a key (U4) with its 10 s countdown.
 
 #include "app.h"
+#include "utf8_path.h"
 
 #include "builders.h"
 #include "rules.h"
@@ -243,7 +244,7 @@ void App::settings(const Box& crimson, const Box& blue) {
             for (const m::FolderRow& r : sv.folders) {
                 SettingRowSpec s;
                 s.title = r.name;
-                s.detail = r.value.empty() ? std::string("Not set") : m::shown_path(r.value);
+                s.detail = r.value.empty() ? std::string("Not set") : m::shown_path(utf8_path(r.value));
                 s.chevron = true;
                 Focus f = crimson_focus(first);
                 if (first) f.up = up;

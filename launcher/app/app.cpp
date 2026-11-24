@@ -1,4 +1,5 @@
 #include "app.h"
+#include "utf8_path.h"
 
 #include "preflight.h"
 #include "rules.h"
@@ -75,10 +76,6 @@ Cue sound_of(ttt2::app::Cue c) {
     return Cue::Move;
 }
 
-#ifdef _WIN32
-// A UTF-8 folder from the state (Settings > Folders) as a wide path, so that a José in it is kept.
-fs::path utf8_path(const std::string& text) { return fs::path(std::u8string(text.begin(), text.end())); }
-#endif
 
 } // namespace
 
@@ -118,6 +115,9 @@ bool App::open_window() {
     wo.offscreen = (o_.testing && !o_.real_window) || o_.offscreen;
     wo.quiet = !o_.smoke.empty();
     wo.forced_scale = o_.scale;
+#ifndef _WIN32
+    wo.no_window = appimage_no_window; // (C2: back to the version before an update)
+#endif
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
     window_.update_scale();
@@ -169,7 +169,7 @@ void App::make_model() {
                        : utf8_path(data->second) / "launcher" / "dlc-owned.json";
     exe_ = answer.exe;
     banner_ = std::string("ttt2-launcher ") + TTT2_LAUNCHER_VERSION + " (Windows): files " +
-              win_files_->root.string() + ", python " + facts.python.string();
+              path_utf8(win_files_->root) + ", python " + path_utf8(facts.python);
     folders_from_state(facts.windows);
 #else
     env_ = std::make_unique<LinuxEnvironment>(places_);
@@ -264,6 +264,31 @@ int App::run() {
     const double t0 = now();
     model_->start(t0);
     handle(model_->take_effects());
+#ifdef _WIN32
+    if (!ready_->restored().empty()) {
+        // (A test build's Update got files of a newer program: they were put back, REVIEW2_compat #3.)
+        const std::string& branch = model_->facts().windows.branch;
+        model_->tell("Update needs a new test build",
+                     "The files Update got" + (branch.empty() ? std::string() : " from " + branch) +
+                         " are for a newer launcher program than this .exe's (their protocol " + ready_->restored() +
+                         ", this one's " + std::to_string(backend::kQueryProtocol) +
+                         "), so it put its own files back. " +
+                         (branch.empty() ? std::string("Get the newest launcher from the releases page.")
+                                         : "Ask for a new test build of " + branch + " to get those changes."),
+                     t0);
+        std::fprintf(stderr, "@ready restored its own files (their protocol %s)\n", ready_->restored().c_str());
+    }
+#endif
+    if (!o_.rolled_back.empty()) {
+        // (C2: the version an update opened ended before its first frame, and this one was put back.)
+        model_->tell("Version " + o_.rolled_back + " did not start",
+                     "Version " + o_.rolled_back + " of the launcher ended before it could open its window on this " +
+                         "PC, so the launcher went back to this version (" + TTT2_LAUNCHER_VERSION +
+                         "). Update offers it again; if it fails again, please tell us on the releases page.",
+                     t0);
+        std::fprintf(stderr, "ttt2-launcher: Version %s did not start: this version (%s) was put back\n",
+                     o_.rolled_back.c_str(), TTT2_LAUNCHER_VERSION);
+    }
     stage_->set_target(share(), tall(), 0);
     stage_->snap();
     last_ = t0;
@@ -346,6 +371,7 @@ void App::pump_input(double t, bool wait) {
     for (auto& w : work) w();
     if (o_.instance) {
         for (const Forwarded& f : o_.instance->take()) {
+            std::fprintf(stderr, "ttt2-launcher: a later start came here (%zu argument(s))\n", f.args.size());
             for (const std::string& a : f.args) {
                 if (!a.empty() && a[0] != '-')
                     model_->mutable_facts().chosen_game = normal(fs::path(std::u8string(a.begin(), a.end())));
@@ -448,6 +474,9 @@ void App::frame(double t) {
         SDL_RenderPresent(window_.renderer());
         if (first_) window_.show();
     }
+#ifndef _WIN32
+    if (first_) appimage_first_frame(); // (C2: the version before an update is not needed any more)
+#endif
     first_ = false;
     on_events(events);
 }
@@ -842,8 +871,8 @@ void App::dialog_band() {
             const auto it = folders.find(key);
             return it == folders.end() ? std::string() : it->second;
         };
-        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(folder("source")), true}}});
-        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(folder("install")), true}}});
+        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(utf8_path(folder("source"))), true}}});
+        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(utf8_path(folder("install"))), true}}});
         what.push_back({"Needs",
                         WhatTone::Neutral,
                         {{"Internet for its tools (downloaded once), at least 30 GB free, and a while."}}});

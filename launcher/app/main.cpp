@@ -8,7 +8,11 @@
 #include "app.h"
 
 #include "paths.h"
+#include "release.h"
 #include "startup.h"
+#ifdef _WIN32
+#include "win32.h"
+#endif
 
 #include <SDL3/SDL.h>
 #ifdef _WIN32
@@ -19,6 +23,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <share.h>
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -85,9 +91,8 @@ std::string utf8(const std::filesystem::path& p) {
 // A variable of this process as it is now (Windows: begin() changes the process's own; the C runtime keeps a copy).
 std::string environment(const char* name) {
 #ifdef _WIN32
-    char value[4096];
-    const DWORD n = GetEnvironmentVariableA(name, value, sizeof value);
-    return n > 0 && n < sizeof value ? std::string(value, n) : "";
+    // (Wide, as UTF-8: the A function would give the ANSI code page's letters.)
+    return launcher::win32::narrow(launcher::win32::environment(launcher::win32::wide(name).c_str()));
 #else
     const char* value = std::getenv(name);
     return value ? value : "";
@@ -135,7 +140,18 @@ void log_to_file(const std::filesystem::path& file) {
     if (const auto size = fs::file_size(file, ec); !ec && size > (1u << 20))
         fs::rename(file, file.parent_path() / "launcher.old.log", ec);
 #ifdef _WIN32
-    if (!_wfreopen(file.c_str(), L"a", stderr)) return;
+    // (An old test build's starter, 0.4 to 0.8.0, holds launcher.log for its Python, the bridge, sharing it only for
+    // reading: then launcher-ui.log beside it, compat review #7. Only a file that opens is reopened as standard error:
+    // _wfreopen closes it first and would leave none when the file cannot be opened.)
+    fs::path chosen;
+    for (const fs::path& f : {file, file.parent_path() / L"launcher-ui.log"}) {
+        if (FILE* probe = _wfsopen(f.c_str(), L"a", _SH_DENYNO)) {
+            std::fclose(probe);
+            chosen = f;
+            break;
+        }
+    }
+    if (chosen.empty() || !_wfreopen(chosen.c_str(), L"a", stderr)) return;
 #else
     if (!std::freopen(file.c_str(), "a", stderr)) return;
 #endif
@@ -167,13 +183,28 @@ static int launcher_main(int argc, char** argv) {
     program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}, {"--frames", 1}, {"--at", 1},
                        {"--files", 1},      {"--build-dir", 1}, {"--config", 1}, {"--ui-smoke-test", 1}};
     program.unique = !screenshot && !smoke_arg && !(actions && *actions);
+    // (Tests that start it as a player would: a name of their own, so that they never reach a launcher in use.)
+    program.instance_name = environment("TTT2_LAUNCHER_TEST_INSTANCE");
     program.wake = wake;
+#ifndef _WIN32
+    // (Before any window: the player is told in a message box too, as C2's failures are, not only on standard error,
+    // which a start from the desktop's menu shows nowhere; compat review #8. Tests' starts only write it.)
+    program.tell = [quiet = !environment("TTT2_LAUNCHER_TEST_SMOKE").empty()](const std::string& text) {
+        std::fprintf(stderr, "ttt2-launcher: %s\n", text.c_str());
+        if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Ultimate Launcher", text.c_str(), nullptr);
+    };
+#endif
     st::Start start = st::begin(args, program);
     if (start.exit >= 0) return start.exit;
 
     launcher::app::Options o;
     o.instance = std::move(start.instance);
     o.files = start.files;
+#ifndef _WIN32
+    // (C2: set when an update's new version never drew and this one was put back; not for the programs it starts.)
+    o.rolled_back = environment(launcher::kRolledBackVariable);
+    unsetenv(launcher::kRolledBackVariable);
+#endif
     // (For --ui-smoke-test / TTT2_LAUNCHER_TEST_SMOKE's answer: what this start found, as the release tests read it.)
     {
         std::string facts = "\"pid\": " + std::to_string(
@@ -188,6 +219,7 @@ static int launcher_main(int argc, char** argv) {
             facts += std::string(", \"after_ended\": ") +
                      (st::wait_for_exit(std::strtoll(after.c_str(), nullptr, 10), 0) ? "true" : "false");
         facts += ", \"after_left\": " + json_string(environment("TTT2_LAUNCHER_AFTER"));
+        facts += ", \"rolled_back\": " + json_string(o.rolled_back);
         facts += ", \"args\": [";
         for (size_t i = 0; i < start.args.size(); ++i) facts += (i ? ", " : "") + json_string(start.args[i]);
         facts += "], \"files\": " + json_string(utf8(start.files));
@@ -195,6 +227,10 @@ static int launcher_main(int argc, char** argv) {
         facts += ", \"exe\": " + json_string(environment("TTT2_LAUNCHER_EXE"));
         facts += std::string(", \"unique\": ") + (o.instance ? "true" : "false");
         facts += ", \"note\": " + json_string(start.note);
+#ifdef _WIN32
+        // (65001 = UTF-8, the manifest's activeCodePage: narrow paths and texts in UTF-8 on Windows 10 1903 and later.)
+        facts += ", \"code_page\": " + std::to_string(GetACP());
+#endif
         o.smoke_start = facts;
     }
     for (size_t i = 0; i < start.args.size(); ++i) {
@@ -210,7 +246,7 @@ static int launcher_main(int argc, char** argv) {
         } else if (a == "--scale" && more) {
             o.scale = static_cast<float>(std::atof(start.args[++i].c_str()));
         } else if (a == "--frames" && more) {
-            o.frames = start.args[++i];
+            o.frames = arg_path(start.args[++i]);
         } else if (a == "--files" && more) {
             o.windows.files = launcher::normal(arg_path(start.args[++i]));
         } else if (a == "--build-dir" && more) {
@@ -262,8 +298,8 @@ static int launcher_main(int argc, char** argv) {
     // TTT2_LAUNCHER_TEST_VIDEO=offscreen: drawn offscreen, for Wine without a display.)
     if (const std::string s = environment("TTT2_LAUNCHER_TEST_SMOKE"); o.smoke.empty() && !s.empty()) o.smoke = arg_path(s);
     o.offscreen = environment("TTT2_LAUNCHER_TEST_VIDEO") == "offscreen";
-    if (const char* shots = std::getenv("TTT2_LAUNCHER_TEST_SHOTS"); shots && *shots) {
-        o.shots = shots;
+    if (const std::string shots = environment("TTT2_LAUNCHER_TEST_SHOTS"); !shots.empty()) {
+        o.shots = arg_path(shots);
         std::error_code ec;
         std::filesystem::create_directories(o.shots, ec);
     }

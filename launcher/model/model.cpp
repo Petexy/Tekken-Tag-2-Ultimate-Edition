@@ -1,4 +1,5 @@
 #include "model.h"
+#include "utf8_path.h"
 
 #include <set>
 
@@ -15,11 +16,11 @@ std::map<std::string, std::string> importer_environment(const fs::path& kit,
                                                         const std::function<bool(const fs::path&)>& exists) {
     // (The importer may be read-only, as in the AppImage: no bytecode files next to it.)
     std::map<std::string, std::string> env = {{"PYTHONUNBUFFERED", "1"}, {"PYTHONDONTWRITEBYTECODE", "1"}};
-    if (exists(kit / "t7helper.exe")) env["TTT2_T7HELPER"] = (kit / "t7helper.exe").string();
-    if (exists(kit / "t8helper.exe")) env["TTT2_T8HELPER"] = (kit / "t8helper.exe").string();
+    if (exists(kit / "t7helper.exe")) env["TTT2_T7HELPER"] = path_utf8(kit / "t7helper.exe");
+    if (exists(kit / "t8helper.exe")) env["TTT2_T8HELPER"] = path_utf8(kit / "t8helper.exe");
     // (The importer's C parts, so that no C compiler is needed: ttt2char/native.py.)
-    if (exists(kit / "native/decimate.so")) env["TTT2_NATIVE_DECIMATE"] = (kit / "native/decimate.so").string();
-    if (exists(kit / "native/oodle.so")) env["TTT2_NATIVE_OODLE"] = (kit / "native/oodle.so").string();
+    if (exists(kit / "native/decimate.so")) env["TTT2_NATIVE_DECIMATE"] = path_utf8(kit / "native/decimate.so");
+    if (exists(kit / "native/oodle.so")) env["TTT2_NATIVE_OODLE"] = path_utf8(kit / "native/oodle.so");
     return env;
 }
 
@@ -38,7 +39,7 @@ std::string answer_of(const std::string& out) {
 
 
 Command script(const Facts& facts, const std::map<std::string, std::string>& env, const char* name) {
-    return Command{{facts.python.string(), (facts.importer / name).string()}, env, {}, {}, {}};
+    return Command{{path_utf8(facts.python), path_utf8(facts.importer / name)}, env, {}, {}, {}};
 }
 
 } // namespace
@@ -64,13 +65,13 @@ const char* worker_action(TaskKind kind) {
 Command WindowsCommands::query(const Facts& facts, const std::string& name) const {
     const WindowsState& w = facts.windows;
     Command c;
-    c.argv = {facts.python.string(),
+    c.argv = {path_utf8(facts.python),
               "-u",
-              (w.root / "launcher/windows/main.py").string(),
+              path_utf8(w.root / "launcher/windows/main.py"),
               "--build-dir",
-              w.build.string(),
+              path_utf8(w.build),
               "--config",
-              w.config.string(),
+              path_utf8(w.config),
               "--query",
               name};
     c.cwd = w.root;
@@ -85,23 +86,25 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
     Command c;
     c.log_file = w.logs / (action + "-" + stamp_text + ".log");
     c.cancel_file = w.logs / (action + "-" + stamp_text + ".cancel");
-    c.argv = {facts.python.string(),
+    c.argv = {path_utf8(facts.python),
               "-u",
-              (w.root / "launcher/windows/main.py").string(),
+              path_utf8(w.root / "launcher/windows/main.py"),
               "--build-dir",
-              w.build.string(),
+              path_utf8(w.build),
               "--config",
-              w.config.string(),
+              path_utf8(w.config),
               "--worker",
               action,
               "--cancel-file",
-              c.cancel_file.string(),
+              path_utf8(c.cancel_file),
               "--outfits",
               outfits.empty() ? "none" : outfits};
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.cwd = w.root;
     // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
     if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
+    // (A test build's files: the .exe's program stays as it is, so changes to it are refused, self_update.py.)
+    if (action == "files" && facts.program_in_exe) c.env["TTT2_LAUNCHER_PROGRAM_IN_EXE"] = "1";
     return c;
 }
 
@@ -181,7 +184,7 @@ std::optional<Command> LinuxCommands::status(const Facts& facts) {
     Command c = script(facts, importer_env, "launcher.py");
     c.argv.push_back("status");
     if (facts.install.state == InstallState::kInstalled)
-        c.argv.insert(c.argv.end(), {"--game", facts.install.folder.string()});
+        c.argv.insert(c.argv.end(), {"--game", path_utf8(facts.install.folder)});
     return c;
 }
 
@@ -203,7 +206,7 @@ Command LinuxCommands::import(const Facts& facts, const std::vector<std::string>
     Command c = script(facts, importer_env, "import_character.py");
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.argv.insert(c.argv.end(), {"--outfits", outfits.empty() ? "none" : outfits, "--game",
-                                 facts.install.folder.string(), "--progress"});
+                                 path_utf8(facts.install.folder), "--progress"});
     return c;
 }
 
@@ -211,7 +214,7 @@ Command LinuxCommands::remove(const Facts& facts, const std::vector<std::string>
     Command c = script(facts, importer_env, "import_character.py");
     c.argv.push_back("--remove");
     c.argv.insert(c.argv.end(), names.begin(), names.end());
-    c.argv.insert(c.argv.end(), {"--game", facts.install.folder.string(), "--progress"});
+    c.argv.insert(c.argv.end(), {"--game", path_utf8(facts.install.folder), "--progress"});
     return c;
 }
 
@@ -223,19 +226,19 @@ Command LinuxCommands::packages(const Facts& facts) {
 
 Command LinuxCommands::install(const Facts& facts, const fs::path& game, const fs::path& folder) {
     return Command{
-        {(facts.kit / "bin/ttt2-build").string(), "install", game.string(), folder.string()}, {}, {}, {}, {}};
+        {path_utf8(facts.kit / "bin/ttt2-build"), "install", path_utf8(game), path_utf8(folder)}, {}, {}, {}, {}};
 }
 
 Command LinuxCommands::update(const Facts& facts) {
-    return Command{{(facts.kit / "bin/ttt2-build").string(), "update", facts.install.folder.string()}, {}, {}, {}, {}};
+    return Command{{path_utf8(facts.kit / "bin/ttt2-build"), "update", path_utf8(facts.install.folder)}, {}, {}, {}, {}};
 }
 
 Command LinuxCommands::shaders(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string(), "--precompile"}, {}, {}, {}, {}};
+    return Command{{path_utf8(facts.install.folder / kProgramName), "--precompile"}, {}, {}, {}, {}};
 }
 
 std::optional<Command> LinuxCommands::play(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}, Command::Mode::kDetached};
+    return Command{{path_utf8(facts.install.folder / kProgramName)}, {}, {}, game_log, {}, Command::Mode::kDetached};
 }
 
 // ---------------------------------------------------------------- the model
@@ -730,7 +733,7 @@ std::vector<Effect> LauncherModel::uninstall_confirmed(double now) {
     spec.kind = TaskKind::kUninstall;
     spec.title = "Uninstalling Tekken Tag Tournament 2";
     runner_.begin(spec, now);
-    runner_.add_log("Uninstalling from " + facts_.install.folder.string());
+    runner_.add_log("Uninstalling from " + path_utf8(facts_.install.folder));
     sync();
     Effect e{Effect::Kind::kUninstall, {}, facts_.install.folder, {}, {uninstall_.saves, uninstall_.characters}};
     return {e};
@@ -750,7 +753,7 @@ void LauncherModel::uninstall_done(const UninstallReport& r, double now) {
     std::string detail;
     if (!r.folder_removed && !left.empty()) {
         detail =
-            "Left in " + facts_.install.folder.string() + ", as they are not the game's: " + joined_most(left, 6) + ".";
+            "Left in " + path_utf8(facts_.install.folder) + ", as they are not the game's: " + joined_most(left, 6) + ".";
     }
     if (!problems.empty())
         detail += (detail.empty() ? "" : " ") + std::string("Not deleted: ") + joined_most(problems, 3) + ".";
@@ -786,8 +789,8 @@ std::vector<Effect> LauncherModel::chosen_game(const fs::path& game, double now)
 
 std::vector<Effect> LauncherModel::chosen_folder(const fs::path& chosen, double now) {
     if (facts_.caps.setup_game) {
-        facts_.windows.folders["source"] = setup_source_.string();
-        facts_.windows.folders["install"] = chosen.string();
+        facts_.windows.folders["source"] = path_utf8(setup_source_);
+        facts_.windows.folders["install"] = path_utf8(chosen);
         dialog_ = setup_confirm_view();
         return {};
     }
@@ -803,7 +806,7 @@ std::vector<Effect> LauncherModel::chosen_folder(const fs::path& chosen, double 
     const auto folder = parts_.environment.install_target(chosen, &error);
     if (!folder) {
         refuse("Cannot install into this folder",
-               chosen.lexically_normal().string() + " " + error + ": choose another folder.", now);
+               path_utf8(chosen.lexically_normal()) + " " + error + ": choose another folder.", now);
         return {};
     }
     facts_.game_error.clear();
@@ -1112,7 +1115,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     else if (id == "more:latest-log") {
         if (facts_.windows.latest_log.empty()) {
             dialog_ =
-                message_view("No log yet", "No task has written a log in " + facts_.windows.logs.string() + " yet.");
+                message_view("No log yet", "No task has written a log in " + path_utf8(facts_.windows.logs) + " yet.");
         } else {
             effects.push_back({Effect::Kind::kOpenPath, {}, facts_.windows.latest_log, {}, {}});
         }

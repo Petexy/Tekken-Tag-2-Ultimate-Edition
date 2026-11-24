@@ -1,4 +1,5 @@
 #include "browser.h"
+#include "utf8_path.h"
 
 #include <algorithm>
 #include <cctype>
@@ -26,7 +27,7 @@ int count_items(const fs::path& folder) {
     int n = 0;
     for (const fs::directory_iterator end; it != end; it.increment(ec)) {
         if (ec) break;
-        if (it->path().filename().string().starts_with('.')) continue;
+        if (path_utf8(it->path().filename()).starts_with('.')) continue;
         if (++n >= 9999) break;
     }
     return n;
@@ -61,7 +62,7 @@ std::vector<Place> places(const fs::path& home, const std::string& user) {
             }
             std::sort(drives.begin(), drives.end());
             for (const fs::path& d : drives)
-                out.push_back({"drive:" + d.filename().string(), d.filename().string(), d, "stroke:drive"});
+                out.push_back({"drive:" + path_utf8(d.filename()), path_utf8(d.filename()), d, "stroke:drive"});
         }
     }
     out.push_back({"root", "Computer", "/", "stroke:drive"});
@@ -76,7 +77,7 @@ std::vector<Entry> list_folder(const fs::path& folder, bool folders_only, std::s
         Entry up;
         up.kind = Entry::Kind::kUp;
         up.path = parent;
-        const std::string pname = parent == parent.root_path() ? parent.string() : parent.filename().string();
+        const std::string pname = parent == parent.root_path() ? path_utf8(parent) : path_utf8(parent.filename());
         up.name = ".. (up to " + pname + ")";
         out.push_back(up);
     }
@@ -89,7 +90,7 @@ std::vector<Entry> list_folder(const fs::path& folder, bool folders_only, std::s
     for (const fs::directory_iterator end; it != end; it.increment(ec)) {
         if (ec) break;
         const fs::path p = it->path();
-        const std::string name = p.filename().string();
+        const std::string name = path_utf8(p.filename());
         if (name.starts_with('.')) continue;
         std::error_code e2;
         if (fs::is_directory(p, e2)) {
@@ -106,7 +107,7 @@ std::vector<Entry> list_folder(const fs::path& folder, bool folders_only, std::s
             f.path = p;
             f.size = fs::file_size(p, e2);
             if (e2) f.size = 0;
-            f.wua = lower(p.extension().string()) == ".wua";
+            f.wua = lower(path_utf8(p.extension())) == ".wua";
             files.push_back(f);
         }
     }

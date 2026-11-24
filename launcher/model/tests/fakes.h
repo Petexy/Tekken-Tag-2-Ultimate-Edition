@@ -135,9 +135,18 @@ struct FakeFiles final : UpdateFiles {
     std::string sha256(const fs::path&) override { return sum; }
     bool is_appimage(const fs::path&) override { return appimage; }
     std::string make_executable(const fs::path&, const fs::path&) override { return exec_error; }
-    std::string replace(const fs::path&, const fs::path&) override { return replace_error; }
+    std::string replace(const fs::path&, const fs::path&) override {
+        steps.push_back("replace");
+        return replace_error;
+    }
     void remove(const fs::path& file) override { removed.push_back(file); }
     Distro distro() override { return Distro{"arch", "Arch Linux", "", {"arch"}, false}; }
+    std::string keep_error;
+    std::vector<std::string> steps; // keep / replace, in order
+    std::string keep_previous(const fs::path&) override {
+        steps.push_back("keep");
+        return keep_error;
+    }
 };
 
 struct MemoryKeys final : KeyStore {

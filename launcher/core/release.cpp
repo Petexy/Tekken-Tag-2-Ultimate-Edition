@@ -1,6 +1,7 @@
 // The launcher's own updates (see release.h).
 
 #include "release.h"
+#include "utf8_path.h"
 
 #include "json.h"
 
@@ -126,20 +127,20 @@ std::vector<std::string> download_command(const Downloader& d, const std::string
                                           const std::string& user_agent) {
     static const char* const kAccept = "Accept: application/vnd.github+json";
     static const char* const kApiVersion = "X-GitHub-Api-Version: 2022-11-28";
-    std::vector<std::string> argv = {d.program.string()};
+    std::vector<std::string> argv = {path_utf8(d.program)};
     if (d.curl) {
         // (Without -f for the API: its error answers say why. A download
         // that stalls for a minute stops.)
         argv.insert(argv.end(), {"-sS", "-L", "--connect-timeout", "20", "-A", user_agent});
         if (api) argv.insert(argv.end(), {"--max-time", "60", "-H", kAccept, "-H", kApiVersion});
-        else argv.insert(argv.end(), {"-f", "--speed-limit", "1", "--speed-time", "60", "-o", file.string()});
+        else argv.insert(argv.end(), {"-f", "--speed-limit", "1", "--speed-time", "60", "-o", path_utf8(file)});
     } else {
         argv.insert(argv.end(), {"-nv", "--timeout=60", "-U", user_agent});
         if (api) {
             argv.insert(argv.end(), {"--tries=2", "--content-on-error", std::string("--header=") + kAccept,
                                      std::string("--header=") + kApiVersion, "-O", "-"});
         } else {
-            argv.insert(argv.end(), {"--tries=3", "-O", file.string()});
+            argv.insert(argv.end(), {"--tries=3", "-O", path_utf8(file)});
         }
     }
     argv.push_back(url);
@@ -147,7 +148,24 @@ std::vector<std::string> download_command(const Downloader& d, const std::string
 }
 
 fs::path update_file(const fs::path& appimage) {
-    return appimage.parent_path() / ("." + appimage.filename().string() + ".update");
+    return appimage.parent_path() / utf8_path("." + path_utf8(appimage.filename()) + ".update");
+}
+
+fs::path previous_file(const fs::path& appimage) {
+    return appimage.parent_path() / utf8_path("." + path_utf8(appimage.filename()) + ".previous");
+}
+
+std::vector<std::string> open_with_rollback(const fs::path& appimage, const std::string& version) {
+    // ($1 the AppImage, $2 its previous one, $3 the version opened. 128 + N: ended by signal N.)
+    static const char* const script =
+        "\"$1\"; c=$?\n"
+        "if [ \"$c\" -gt 128 ] && [ -e \"$2\" ] && mv -f \"$2\" \"$1\"; then\n"
+        "  echo \"ttt2-launcher: version $3 ended (code $c) before its first frame: the version before is back\" >&2\n"
+        "  TTT2_LAUNCHER_ROLLED_BACK=\"$3\" exec \"$1\"\n"
+        "fi\n"
+        "exit \"$c\"\n";
+    return {"/bin/sh", "-c", script, "ttt2-launcher-update", path_utf8(appimage), path_utf8(previous_file(appimage)),
+            version};
 }
 
 bool is_appimage(const fs::path& file) {

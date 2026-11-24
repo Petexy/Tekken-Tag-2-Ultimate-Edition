@@ -81,7 +81,8 @@ class Project(unittest.TestCase):
                      'launcher/ui/fonts/Barlow/Barlow-Bold.ttf', 'launcher/app/icons/a.svg',
                      'launcher/windows/launcher.rc.in', 'launcher/windows/build_launcher.py',
                      'launcher/windows/backend.py', 'launcher/windows/__pycache__/backend.cpython-313.pyc',
-                     'launcher/builder/kit.cpp', 'tools/characters/import_character.py', 'runtime/src/a.cpp'):
+                     'launcher/builder/kit.cpp', 'tools/characters/import_character.py', 'runtime/src/a.cpp',
+                     'runtime/src/host/display_settings.cpp'):
             write(self.root / name)
         write(self.root / 'launcher/builder/CMakeLists.txt', 'set(TTT2_LAUNCHER_VERSION 0.9.0)\n')
         write(self.root / 'tools/windows-bootstrap.lock.json', '{"compiler": {}}')
@@ -99,7 +100,7 @@ class Inputs(Project):
             'CMakeLists.txt', 'cmake/LauncherSDL.cmake', 'launcher/CMakeLists.txt', 'launcher/app/icons/a.svg',
             'launcher/builder/CMakeLists.txt', 'launcher/ui/fonts/Barlow/Barlow-Bold.ttf', 'launcher/ui/src/ui.cpp',
             'launcher/windows/build_launcher.py', 'launcher/windows/launcher.rc.in',
-            'tools/windows-bootstrap.lock.json'])
+            'runtime/src/host/display_settings.cpp', 'tools/windows-bootstrap.lock.json'])
 
     def test_digest_follows_sources_version_fonts_and_pins_only(self):
         before = bl.inputs_digest(self.root)
@@ -119,9 +120,25 @@ class Inputs(Project):
     def test_the_real_tree_has_the_launcher_inputs(self):
         names = bl.inputs(REPO)
         for name in ('CMakeLists.txt', 'launcher/builder/CMakeLists.txt', 'launcher/CMakeLists.txt',
-                     'launcher/ui/CMakeLists.txt', 'tools/windows-bootstrap.lock.json'):
+                     'launcher/ui/CMakeLists.txt', 'tools/windows-bootstrap.lock.json',
+                     'runtime/src/host/display_settings.cpp', 'runtime/src/host/display_settings.h'):
             self.assertIn(name, names)
         self.assertFalse([n for n in names if n.endswith('.pyc') or n.startswith('launcher/builder/kit')])
+
+
+class ProgramsPlace(unittest.TestCase):
+    def test_set_up_game_and_the_texts_name_the_programs_place(self):
+        # (compat review #6: CMake puts the program in <build>/launcher; the one of 0.8.0 at the top is removed.)
+        self.assertIn('RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher"',
+                      (REPO / 'launcher/ui/CMakeLists.txt').read_text(encoding='utf-8'))
+        self.assertIn('`build-windows-tools/launcher/ttt2-launcher.exe`', (REPO / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('build-windows-*/launcher/ttt2-launcher.exe',
+                      (REPO / 'launcher/windows/make_launcher_exe.py').read_text(encoding='utf-8'))
+        script = (REPO / 'tools/build_windows_tools.ps1').read_text(encoding='utf-8')
+        built = script.index('--target cafe-recomp')
+        removed = script.index('Remove-Item -LiteralPath "$root/build-windows-tools/ttt2-launcher.exe"')
+        self.assertGreater(removed, built)
+        self.assertIn(' ttt2-launcher ', script[built:script.index('\n', built)])
 
 
 class Folders(Project):

@@ -35,6 +35,12 @@ private:
     Places places_;
 };
 
+// C2 (an AppImage after its update): this start drew its first frame, so the version before is not needed any more.
+void appimage_first_frame();
+// This start cannot open its window: the version before an update put back when it is kept. What the player is
+// told then (empty: nothing was kept).
+std::string appimage_no_window();
+
 struct LinuxUpdateFiles final : model::RealUpdateFiles {
     std::string sha256(const fs::path& file) override;
 };

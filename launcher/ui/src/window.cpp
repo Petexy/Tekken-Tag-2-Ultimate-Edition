@@ -36,7 +36,9 @@ Window::~Window() {
 }
 
 bool Window::try_open(const WindowOptions& o, const char* video, const char* render, std::string& why) {
-    if (video) SDL_SetHint(SDL_HINT_VIDEO_DRIVER, video);
+    // (A driver of its own overrides the player's SDL_VIDEO_DRIVER / SDL_VIDEODRIVER, which a hint of normal priority
+    // does not: C2's other driver is tried also when they named one that fails. None: as they asked.)
+    if (video) SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, video, SDL_HINT_OVERRIDE);
     else SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         why = SDL_GetError();
@@ -93,21 +95,31 @@ bool Window::open(const WindowOptions& o) {
         ok = try_open(o, "offscreen", "software", why);
         first = why;
     } else {
-        // C2: the default driver and renderer; the other video driver; the software renderer.
+        // C2: the default driver (or the one the player named) and renderer; the other video driver; the software
+        // renderer with each.
         ok = try_open(o, nullptr, nullptr, why);
         first = why;
 #ifndef _WIN32
+        const char* other = nullptr;
         if (!ok) {
-            const char* now = std::getenv("WAYLAND_DISPLAY") ? "wayland" : "x11";
-            ok = try_open(o, std::strcmp(now, "wayland") == 0 ? "x11" : "wayland", nullptr, why);
+            const char* named = std::getenv("SDL_VIDEO_DRIVER");
+            if (!named || !*named) named = std::getenv("SDL_VIDEODRIVER"); // (SDL 2's name, which SDL 3 reads too)
+            const bool wayland = named && *named ? std::strncmp(named, "wayland", 7) == 0
+                                                 : std::getenv("WAYLAND_DISPLAY") != nullptr;
+            other = wayland ? "x11" : "wayland";
+            ok = try_open(o, other, nullptr, why);
         }
 #endif
         if (!ok) ok = try_open(o, nullptr, "software", why);
+#ifndef _WIN32
+        if (!ok && other) ok = try_open(o, other, "software", why);
+#endif
     }
     if (!ok) {
         error_ = first.empty() ? why : first;
         const std::string text = "Ultimate Launcher cannot open its window (" + error_ +
-                                 ").\n\nThe newest launcher is at " + o.releases_url;
+                                 ").\n\nThe newest launcher is at " + o.releases_url +
+                                 (o.no_window ? o.no_window() : std::string());
         std::fprintf(stderr, "%s\n", text.c_str());
         if (!o.offscreen && !o.quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, o.title.c_str(), text.c_str(), nullptr);
         return false;

@@ -9,7 +9,10 @@
 # Cases: bootstrap (the first start: the .cmd hidden, its steps read from the log, then Home's Set Up),
 # bootstrap-fail (no download: the failure and Try Again), protocol (another version's files: refused, Releases
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
-# More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard).
+# More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard), josé
+# (a José in every folder: the later queries reach Python, compat review #1), restore (a test build whose Update got
+# a newer program's files: the .exe puts its own back and says a new test build is needed, compat review #3),
+# log-held (launcher.log held as an old test build's starter holds it: the log goes to launcher-ui.log, review #7).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -146,6 +149,77 @@ fi
 if want_case folders; then
     make_root folders installed yes
     run folders 0 "tab:settings;focus:sec:folders;press:Return;wait:0.6;focus:fold:data;wait:0.6"
+fi
+
+# A José in every folder (compat review #1: a libc++ build, as a player's Set Up Game makes, turned the model's
+# paths into the ANSI code page): the first state, then the status and owned questions through the model's
+# own commands reach the stub Python, and Home shows the installed game.
+# A test build's .exe (files appended) whose files an Update replaced with a newer program's: query.py's PROTOCOL 2
+# under the .exe's digest. The .exe puts its own files back, asks again and says a new test build is needed.
+if want_case restore; then
+    make_root restore installed yes
+    "${PYTHON:-python3}" - "$SRC" "$EXE" "$WORK/restore" <<'PY'
+import hashlib, sys
+from pathlib import Path
+src, exe, case = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+sys.path.insert(0, str(src / 'launcher/windows'))
+from make_launcher_exe import payload
+import self_update
+root = case / 'root'
+own = {'launcher/windows/main.py': (root / 'launcher/windows/main.py').read_bytes(),
+       'launcher/windows/query.py': b'PROTOCOL = 1\n',
+       'Start Ultimate Launcher.cmd': (root / 'Start Ultimate Launcher.cmd').read_bytes(),
+       self_update.BUILD_BRANCH: b'dev-test\n', self_update.BUILD_COMMIT: b'a' * 40 + b'\n'}
+files = payload(own)
+(case / 'test-build.exe').write_bytes(exe.read_bytes() + files)
+digest = hashlib.sha256(files[:-self_update.TRAILER.size]).hexdigest()
+updated = dict(own, **{'launcher/windows/query.py': b'PROTOCOL = 2\n', 'launcher/app/newer.cpp': b'newer',
+                       self_update.BUILD_COMMIT: b'b' * 40 + b'\n'})
+for name, data in updated.items():
+    (root / name).parent.mkdir(parents=True, exist_ok=True); (root / name).write_bytes(data)
+(root / self_update.STAMP).write_text(digest + '\n' + ''.join(n + '\n' for n in sorted(updated)), encoding='utf-8')
+PY
+    EXE_SAVED=$EXE
+    EXE=$WORK/restore/test-build.exe
+    cp "$B/launcher/SDL3.dll" "$WORK/restore/"
+    run restore 0 "wait:1.0" TTT2_STUB_PROTOCOL_FROM_FILES=1
+    EXE=$EXE_SAVED
+    expect restore "@ready restored its own files (their protocol 2)"
+    [ "$(cat "$WORK/restore/root/launcher/windows/query.py" 2>/dev/null)" = "PROTOCOL = 1" ] || fail restore "query.py not put back"
+    [ ! -e "$WORK/restore/root/launcher/app/newer.cpp" ] || fail restore "the update's own file left"
+    grep -qx 'a\{40\}' "$WORK/restore/root/launcher/windows/build-commit" || fail restore "build-commit not put back"
+    [ "$(grep -cx state "$WORK/restore/answers/queries.log" 2>/dev/null)" = 2 ] || fail restore "the state not asked twice"
+fi
+
+# An old test build's starter holds local/launcher.log (shared for reading only) while the bridge starts this launcher
+# with its standard error nowhere: its log goes to local/launcher-ui.log, and nothing is lost.
+if want_case log-held; then
+    make_root log-held installed yes
+    dir=$WORK/log-held
+    cp "$STUB" "$dir/holder.exe"
+    "$WINE" "$dir/holder.exe" "$(winpath "$dir/root/local/launcher.log")" 15 > "$dir/holder.out" 2>&1 &
+    holder=$!
+    for _ in $(seq 100); do grep -q held "$dir/holder.out" 2>/dev/null && break; sleep 0.2; done
+    grep -q held "$dir/holder.out" || fail log-held "the holder did not start"
+    code=0
+    TTT2_LAUNCHER_TEST_SMOKE="$(winpath "$dir/smoke.json")" TTT2_LAUNCHER_TEST_VIDEO=offscreen \
+        timeout 120 "$WINE" "$EXE" --files "$(winpath "$dir/root")" > /dev/null 2>&1 < /dev/null || code=$?
+    [ "$code" = 0 ] || fail log-held "exit $code"
+    grep -q "ttt2-launcher: smoke test:" "$dir/root/local/launcher-ui.log" 2>/dev/null ||
+        fail log-held "its log is not in launcher-ui.log"
+    grep -q "== .* ttt2-launcher" "$dir/root/local/launcher-ui.log" 2>/dev/null || fail log-held "no start line"
+    wait "$holder" 2>/dev/null || true # (it lets go after 15 s)
+    [ "$(cat "$dir/root/local/launcher.log")" = "$(printf "the bridge's log\r")" ] ||
+        fail log-held "the bridge's log was changed"
+fi
+
+if want_case josé; then
+    make_root josé installed yes
+    run josé 0 "wait:1.5;focus:more;press:Return;wait:0.6"
+    for q in state status owned; do
+        grep -qx "$q" "$WORK/josé/answers/queries.log" 2>/dev/null || fail josé "no --query $q reached Python ($WORK/josé/answers/queries.log)"
+    done
+    [ "$(grep -c . "$WORK/josé/answers/queries.log" 2>/dev/null)" -ge 3 ] || fail josé "too few queries"
 fi
 
 # Sounds (FEEDBACK F7): Sound on (launcher.ini beside display.ini), SDL's disk audio driver into a file: moving, a

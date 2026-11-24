@@ -178,5 +178,21 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/sounds ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_sounds)
     set_tests_properties(launcher_app_sounds PROPERTIES TIMEOUT 300)
+    # C2's way back (compat review #4): an update to a version that breaks before its first frame (tests/way_back).
+    find_program(TTT2_CURL curl)
+    if(TTT2_CURL)
+        add_executable(launcher_way_back_broken tests/way_back/broken.cpp)
+        add_test(NAME launcher_app_way_back
+            COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/way_back/way_back.sh $<TARGET_FILE:ttt2-launcher>
+                    $<TARGET_FILE:launcher_way_back_broken> ${CMAKE_CURRENT_BINARY_DIR}/way-back ${Python3_EXECUTABLE})
+        list(APPEND _app_tests launcher_app_way_back)
+        set_tests_properties(launcher_app_way_back PROPERTIES TIMEOUT 300)
+    endif()
+    # C2's other video driver when the one the player named fails (compat review #5): a headless cage, else skipped.
+    add_test(NAME launcher_app_video_fallback
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/video_fallback.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_BINARY_DIR}/video-fallback)
+    list(APPEND _app_tests launcher_app_video_fallback)
+    set_tests_properties(launcher_app_video_fallback PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

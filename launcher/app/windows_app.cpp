@@ -5,6 +5,7 @@
 #ifdef _WIN32
 
 #include "app.h"
+#include "payload.h"
 
 #include "rules.h"
 #include "win32.h"
@@ -51,9 +52,21 @@ bool App::windows_ready() {
     starter_ = std::make_unique<backend::ProcessStarter>(*host_);
     // (Tests: a files folder as the release .exe's, TTT2_LAUNCHER_TEST_FILES: its first start gets Python.)
     fs::path files = o_.files;
-    if (const char* f = std::getenv("TTT2_LAUNCHER_TEST_FILES"); o_.testing && f && *f) files = f;
+    if (const std::wstring f = win32::environment(L"TTT2_LAUNCHER_TEST_FILES"); o_.testing && !f.empty()) files = f;
     win_files_ = windows_files(files, o_.windows);
     ready_ = std::make_unique<WindowsReady>(*win_files_, *starter_);
+    if (win_files_->release) {
+        // (Its own files again when the state's protocol is another one: a test build's Update got a newer
+        // program's files, REVIEW2_compat #3.)
+        ready_->restore_files = [root = win_files_->root] {
+            try {
+                payload::unpack_own_again(program_file(), root);
+                return std::string();
+            } catch (const std::exception& error) {
+                return std::string(error.what());
+            }
+        };
+    }
     stage_->set_target(.5f, false, 0);
     stage_->snap();
     last_ = now();

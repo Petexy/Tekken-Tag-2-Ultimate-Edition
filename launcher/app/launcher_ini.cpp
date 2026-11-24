@@ -1,4 +1,5 @@
 #include "launcher_ini.h"
+#include "utf8_path.h"
 
 #include <algorithm>
 #include <fstream>
@@ -53,18 +54,19 @@ bool write_launcher_ini(const std::filesystem::path& file, const model::Launcher
       << "text_size=" << s.text_size << "\n";
     std::error_code ec;
     if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path(), ec);
-    const std::filesystem::path tmp = file.string() + ".new";
+    std::filesystem::path tmp = file;
+    tmp += ".new";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         out << o.str();
         if (!out) {
-            if (error) *error = "cannot write " + tmp.string();
+            if (error) *error = "cannot write " + path_utf8(tmp);
             return false;
         }
     }
     std::filesystem::rename(tmp, file, ec);
     if (ec) {
-        if (error) *error = "cannot write " + file.string() + ": " + ec.message();
+        if (error) *error = "cannot write " + path_utf8(file) + ": " + ec.message();
         return false;
     }
     return true;

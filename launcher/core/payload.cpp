@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -168,7 +169,7 @@ std::string unpacked_digest(const fs::path& root) {
     return text.substr(0, std::min(text.find('\n'), text.size()));
 }
 
-bool unpack(const Payload& p, const fs::path& root) {
+bool unpack(const Payload& p, const fs::path& root, bool again) {
     const fs::path stamp = root / "local" / "launcher-files.txt";
     const std::string digest = p.digest();
     std::vector<std::string> last;
@@ -179,7 +180,8 @@ bool unpack(const Payload& p, const fs::path& root) {
         start = end + 1;
     }
     std::error_code ec;
-    if (!last.empty() && last[0] == digest && fs::is_regular_file(root / "launcher" / "windows" / "main.py", ec))
+    if (!again && !last.empty() && last[0] == digest &&
+        fs::is_regular_file(root / "launcher" / "windows" / "main.py", ec))
         return false;
     std::set<std::string> now;
     std::string list = digest + "\n";
@@ -221,6 +223,24 @@ fs::path files_folder() {
             return fs::path(base) / L"TTT2Ultimate\\launcher";
     }
     return fs::path(data) / L"TTT2Ultimate\\launcher";
+}
+
+void unpack_own_again(const fs::path& exe, const fs::path& root) {
+    const auto files = own(exe);
+    if (!files) throw std::runtime_error("This launcher holds no files.");
+    HANDLE lock = CreateMutexW(nullptr, FALSE, kFilesMutex);
+    if (lock) WaitForSingleObject(lock, INFINITE);
+    std::exception_ptr failed;
+    try {
+        unpack(*files, root, true);
+    } catch (...) {
+        failed = std::current_exception();
+    }
+    if (lock) {
+        ReleaseMutex(lock);
+        CloseHandle(lock);
+    }
+    if (failed) std::rethrow_exception(failed);
 }
 #endif
 

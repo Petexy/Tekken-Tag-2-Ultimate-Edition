@@ -24,7 +24,7 @@ its launcher updates its files from that branch's newer commits instead.
                 files as its resource 100, stripped, without a time stamp (the
                 same commit makes the same bytes); in --build-dir DIR (else a
                 temporary folder)
---stub EXE      else a program built already (build-windows-*/ttt2-launcher.exe), the files appended
+--stub EXE      else a program built already (build-windows-*/launcher/ttt2-launcher.exe), the files appended
 --cxx COMPILER  else the Python launcher's .exe (entry.cpp, 0.4.0 to 0.8.0)
                 compiled here with COMPILER (x86_64-w64-mingw32-g++) and its
                 windres, which puts the files in it (with its icon and version

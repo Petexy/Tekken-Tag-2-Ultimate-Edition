@@ -3,6 +3,7 @@
 // the banner, the launcher update notice and the dialogs.
 
 #include "builders.h"
+#include "utf8_path.h"
 #include "rules.h"
 
 #include <cstdlib>
@@ -63,7 +64,7 @@ void installed(const Facts& facts, GameView& v) {
     const bool playing = facts.game_running;
     const bool task = facts.task.has_value();
     v.state = GameState::kInstalled;
-    v.folder = facts.install.folder.string();
+    v.folder = path_utf8(facts.install.folder);
     v.pill.text = playing                                            ? "Running"
                   : task && facts.task->kind == TaskKind::kUpdate    ? "Updating"
                   : task && facts.task->kind == TaskKind::kUninstall ? "Uninstalling"
@@ -141,14 +142,14 @@ void installed(const Facts& facts, GameView& v) {
     Action open = button("open-folder", "", true, {}, "Open the install folder");
     open.icon = Icon::kFolder;
     open.describe.title = "Open the install folder";
-    open.describe.path = facts.install.folder.string();
+    open.describe.path = path_utf8(facts.install.folder);
     v.actions.push_back(open);
     if (facts.caps.uninstall) {
         Action u = button("uninstall", "Uninstall…", !playing && !task,
                           playing ? refusal_sentence("The game is running", "Quit it, then uninstall.")
                                   : task_why("uninstall"));
         u.destructive = true;
-        u.describe.path = facts.install.folder.string();
+        u.describe.path = path_utf8(facts.install.folder);
         v.actions.push_back(u);
     }
 }
@@ -156,7 +157,7 @@ void installed(const Facts& facts, GameView& v) {
 void unfinished(const Facts& facts, GameView& v) {
     const bool task = facts.task.has_value();
     v.state = GameState::kNotFinished;
-    v.folder = facts.install.folder.string();
+    v.folder = path_utf8(facts.install.folder);
     v.pill = {"Not finished", PillKind::kWarn, {}};
     v.body.push_back(
         text_line("The install stopped before it was complete. Resume it to finish: the files copied so far are kept.",
@@ -164,13 +165,13 @@ void unfinished(const Facts& facts, GameView& v) {
     if (!facts.game_error.empty()) v.body.push_back(text_line(facts.game_error, Tone::kError));
     Action resume = button("resume", "Resume", !task && facts.builder, task ? task_why("install") : kBuilderMissing);
     resume.primary = true;
-    resume.describe.path = facts.install.folder.string();
+    resume.describe.path = path_utf8(facts.install.folder);
     v.actions.push_back(resume);
     v.spacer = v.actions.size();
     if (facts.caps.uninstall) {
         Action u = button("uninstall", "Uninstall…", !task, task_why("uninstall"));
         u.destructive = true;
-        u.describe.path = facts.install.folder.string();
+        u.describe.path = path_utf8(facts.install.folder);
         v.actions.push_back(u);
     }
 }
@@ -199,13 +200,13 @@ void not_installed(const Facts& facts, GameView& v) {
         file.kind = Line::Kind::kFile;
         file.icon = Icon::kDocument;
         file.icon_tone = Tone::kDim;
-        file.title = facts.chosen_game.filename().string();
-        file.text = facts.chosen_game.parent_path().string();
+        file.title = path_utf8(facts.chosen_game.filename());
+        file.text = path_utf8(facts.chosen_game.parent_path());
         v.body.push_back(file);
     }
     if (!facts.builder) {
         v.body.push_back(text_line("The game builder is missing from this launcher" +
-                                       (facts.kit.empty() ? std::string() : " (" + facts.kit.string() + ")") +
+                                       (facts.kit.empty() ? std::string() : " (" + path_utf8(facts.kit) + ")") +
                                        ": the game cannot be installed.",
                                    Tone::kError));
     }
@@ -213,13 +214,13 @@ void not_installed(const Facts& facts, GameView& v) {
     Action install = button("install", "Install…", facts.builder && !task,
                             !facts.builder ? std::string(kBuilderMissing) : task_why("install"));
     install.primary = true;
-    if (!facts.chosen_game.empty()) install.describe.path = facts.chosen_game.string();
+    if (!facts.chosen_game.empty()) install.describe.path = path_utf8(facts.chosen_game);
     v.actions.push_back(install);
 }
 
 void installing(const Facts& facts, GameView& v) {
     v.state = GameState::kInstalling;
-    v.folder = facts.installing.string();
+    v.folder = path_utf8(facts.installing);
     v.pill = {"Installing", PillKind::kNeutral, {}};
     v.body.push_back(text_line("The game program is built for this PC from your game, then the game is copied into "
                                "this folder. Stopping keeps what is copied: the install resumes from there.",
@@ -229,7 +230,7 @@ void installing(const Facts& facts, GameView& v) {
 void preflight(const Facts& facts, GameView& v) {
     const Preflight& p = *facts.preflight;
     v.state = p.running ? GameState::kChecking : GameState::kCannotInstall;
-    v.folder = p.folder.string();
+    v.folder = path_utf8(p.folder);
     v.pill = {p.running ? "Checking" : "Cannot install yet", p.running ? PillKind::kNeutral : PillKind::kBad, {}};
     if (p.running) {
         Line l;
@@ -321,7 +322,7 @@ void explain(const Facts& facts, GameView& v) {
         } else if (a.id == "install") {
             x = facts.chosen_game.empty()
                     ? "Asks for your .wua first, then checks this PC and installs."
-                    : "Checks this PC, then builds the game program from " + facts.chosen_game.filename().string() +
+                    : "Checks this PC, then builds the game program from " + path_utf8(facts.chosen_game.filename()) +
                           " and copies the game into the folder chosen.";
         } else if (a.id == "check-again") {
             x = "Checks this PC again: the install starts once everything is ready.";
@@ -335,7 +336,7 @@ void explain(const Facts& facts, GameView& v) {
 
 // A path as the window shows it: the home folder as ~.
 std::string shown_path(const fs::path& path) {
-    const std::string p = path.string();
+    const std::string p = path_utf8(path);
     const char* home = std::getenv("HOME");
     if (home && *home) {
         const std::string h = std::string(home);
@@ -455,7 +456,8 @@ NoticeView notice_view(const Facts& facts) {
         const std::string newest = news.changes.empty() ? "" : ", the newest: “" + news.changes[0] + "”";
         n.detail = std::to_string(news.ahead) + " change" + (news.ahead == 1 ? "" : "s") + " since this test build (" +
                    facts.launcher_version + ", " + facts.windows.commit.substr(0, 7) + ")" + newest +
-                   ". Update gets them without a new .exe.";
+                   ". Update gets them" +
+                   (facts.program_in_exe ? "; changes to the launcher program itself need a new test build." : ".");
         page(news.page, news.page.starts_with("https://") || facts.custom_github);
     }
     return n;
@@ -468,7 +470,7 @@ Dialog uninstall_view(const Facts& facts, const fs::path& saves, bool saves_cust
     d.id = "uninstall";
     d.title = "Uninstall Tekken Tag Tournament 2?";
     d.text = "This deletes the game, its program and its menu entry from this folder; anything else in it stays:";
-    d.lines.push_back(text_line(facts.install.folder.string(), Tone::kPath));
+    d.lines.push_back(text_line(path_utf8(facts.install.folder), Tone::kPath));
     const auto check = [&](std::string id, std::string label, bool on) {
         Action a = button(std::move(id), std::move(label));
         a.kind = ActionKind::kCheck;
@@ -479,11 +481,11 @@ Dialog uninstall_view(const Facts& facts, const fs::path& saves, bool saves_cust
         return l;
     };
     Line s = check("uninstall-saves", "Also delete saves", choice.saves);
-    s.actions[0].describe.path = saves.string();
+    s.actions[0].describe.path = path_utf8(saves);
     if (saves_custom)
         s.actions[0].describe.more.push_back("Only the game's saves in it are deleted; anything else there stays.");
     d.lines.push_back(s);
-    d.lines.push_back(text_line(saves.string(), Tone::kPath));
+    d.lines.push_back(text_line(path_utf8(saves), Tone::kPath));
     if (saves_custom) {
         d.lines.push_back(
             text_line("Only the game's saves in it are deleted; anything else there stays.", Tone::kDim, true));

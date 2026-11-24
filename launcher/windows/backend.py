@@ -257,7 +257,8 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         branch = self_update.test_branch(settings.root)
         if not self_update.running_exe() or not branch:
             raise ValueError('Only a test build\'s .exe updates its files from its branch, and this launcher is not one.')
-        self_update.update_files(settings.root, branch, cancelled)
+        self_update.update_files(settings.root, branch, cancelled,
+                                 program_in_exe=os.environ.get(self_update.PROGRAM_IN_EXE_VARIABLE) == '1')
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action == 'shaders':

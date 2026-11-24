@@ -205,6 +205,9 @@ struct Facts {
     std::optional<MainNews> main_news; // what main (or a test build's branch) has beyond this build
     std::optional<Release> newer;      // a newer release GitHub named
     bool self_update = false;          // AppImage (Linux) / release .exe (Windows): the launcher updates itself
+    // Windows: this program is built into the .exe its files came from (a release or test build's own files, not a
+    // program the source ZIP's bridge built from them): an update of the files alone leaves the program as it is.
+    bool program_in_exe = false;
     bool custom_releases = false;      // TTT2_LAUNCHER_RELEASES set (tests): What's New for any page
     bool custom_github = false;        // TTT2_LAUNCHER_GITHUB set (tests)
 

@@ -1,6 +1,7 @@
 // The launcher's own updates, what only the AppImage (Linux) needs of them
 // (see release.h): the AppImage it runs from, its folder, curl or wget, the
-// new file made executable and renamed over it, and /proc.
+// new file made executable and renamed over it (the old one kept until the new
+// one drew its first frame), and /proc.
 
 #include "release.h"
 
@@ -44,6 +45,28 @@ std::string replace_appimage(const fs::path& update, const fs::path& appimage) {
     if (::rename(update.c_str(), appimage.c_str()) != 0) return std::strerror(errno);
     return {};
 }
+
+std::string keep_previous(const fs::path& appimage) {
+    const fs::path previous = previous_file(appimage);
+    ::unlink(previous.c_str());
+    if (::link(appimage.c_str(), previous.c_str()) == 0) return {};
+    // (A file system without hard links: a copy, as executable as the AppImage.)
+    std::error_code ec;
+    if (fs::copy_file(appimage, previous, fs::copy_options::overwrite_existing, ec)) {
+        fs::permissions(previous, fs::status(appimage, ec).permissions(), ec);
+        if (!ec) return {};
+    }
+    const std::string why = ec ? ec.message() : std::string("it cannot be copied");
+    ::unlink(previous.c_str());
+    return why;
+}
+
+std::string restore_previous(const fs::path& appimage) {
+    if (::rename(previous_file(appimage).c_str(), appimage.c_str()) != 0) return std::strerror(errno);
+    return {};
+}
+
+void forget_previous(const fs::path& appimage) { ::unlink(previous_file(appimage).c_str()); }
 
 bool process_alive(int pid) {
     if (pid <= 0) return false;

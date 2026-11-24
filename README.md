@@ -249,9 +249,12 @@ project files are reused; the game and its assets are never downloaded.
 Setup logs remain under the selected data folder. The game archive is kept.
 
 
-Set Up Game also builds the launcher there: `build-windows-tools/ttt2-launcher.exe`
-(SDL3.dll beside it), the same program as the release `.exe` and the ZIP's first
-start make. The ZIP startup path obtains a private Python automatically (its Tk
+Set Up Game also builds the launcher there: `build-windows-tools/launcher/ttt2-launcher.exe`
+(SDL3.dll beside it), from the same sources as the release `.exe` and the program
+the ZIP's first start makes (those are built with other compilers and C++ libraries:
+the release `.exe` with MinGW-w64's GCC, Set Up Game and the ZIP with LLVM-MinGW).
+The launcher of releases up to 0.8.0 that an older Set Up Game left at
+`build-windows-tools/ttt2-launcher.exe` is removed by the next Set Up Game. The ZIP startup path obtains a private Python automatically (its Tk
 draws only the first start's progress window); developer launches can also use an
 installed Python 3 (`python launcher/windows/main.py` builds and starts the
 launcher as the ZIP's first start does). Setup obtains numpy and Pillow. Set

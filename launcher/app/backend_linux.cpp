@@ -77,6 +77,23 @@ model::Facts start_facts(const Places& places, const fs::path& here, const fs::p
     return f;
 }
 
+void appimage_first_frame() {
+    if (const auto image = running_appimage(program_file(), std::getenv("APPIMAGE"), std::getenv("APPDIR")))
+        forget_previous(*image);
+}
+
+std::string appimage_no_window() {
+    const auto image = running_appimage(program_file(), std::getenv("APPIMAGE"), std::getenv("APPDIR"));
+    std::error_code ec;
+    if (!image || !fs::exists(previous_file(*image), ec)) return {};
+    if (const std::string why = restore_previous(*image); !why.empty()) {
+        return "\n\nThe version before this update is kept as " + previous_file(*image).string() + ": rename it to " +
+               image->filename().string() + " to go back to it (" + why + ").";
+    }
+    std::fprintf(stderr, "ttt2-launcher: the version before this update is back in %s\n", image->c_str());
+    return "\n\nThe launcher went back to the version it was before this update: start it again.";
+}
+
 void LinuxEnvironment::look(model::Facts& facts) {
     facts.install = find_install(places_);
     const bool installed = facts.install.state == InstallState::kInstalled;

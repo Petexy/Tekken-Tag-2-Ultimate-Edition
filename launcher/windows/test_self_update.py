@@ -280,6 +280,52 @@ class Files(unittest.TestCase):
         stamp = (self.root / self_update.STAMP).read_text().splitlines()
         self.assertEqual(stamp[0], 'updating')
         self.assertIn('tools/added.py', stamp)
+    def program_files(self, query_protocol=1, app=b'void app() {}\n'):
+        # (The test build's files with its program's sources: the .exe has these built in.)
+        extra = {'launcher/app/app.cpp': b'void app() {}\n',
+                 'launcher/windows/query.py': b'PROTOCOL = 1\n'}
+        for path, data in extra.items(): (self.root / path).parent.mkdir(parents=True, exist_ok=True); (self.root / path).write_bytes(data)
+        self.old.update(extra)
+        self.stamp = 'f' * 64 + '\n' + ''.join(path + '\n' for path in sorted(self.old))
+        (self.root / self_update.STAMP).write_text(self.stamp)
+        return dict(PROJECT, **{'launcher/app/app.cpp': app,
+                                'launcher/windows/query.py': b'PROTOCOL = %d\n' % query_protocol})
+    def test_program_in_exe_takes_python_changes(self):
+        # (A test build's .exe: changes to the files it runs, not to its program, are put in place.)
+        self.github(data=archive(dict(self.program_files(), **{'launcher/app/app.cpp': b'void app() {}\r\n'})))
+        self.assertEqual(self_update.update_files(self.root, 'dev-0-4-0', say=self.lines.append, program_in_exe=True),
+                         HEAD)
+        self.assertEqual((self.root / 'launcher/windows/main.py').read_bytes(), b'new main')
+    def test_program_in_exe_refuses_its_programs_changes(self):
+        # (REVIEW2_compat #3: the .exe's program stays the old one, so these need a new test build; nothing changes.)
+        for project, why in [(self.program_files(app=b'void app() { new(); }\n'),
+                              r'change the launcher program itself \(launcher/app/app\.cpp\), which is built into '
+                              r'this test build.s \.exe: Update only replaces its files, so it needs a new test build '
+                              r'of dev-0-4-0'),
+                             (self.program_files(query_protocol=2),
+                              r'the launcher.s answers \(their protocol 2, this \.exe.s 1\).*new test build'),
+                             (dict(self.program_files(), **{'launcher/ui/fonts/new.ttf': b'font',
+                                                            'cmake/LauncherSDL.cmake': b'new'}),
+                              r'cmake/LauncherSDL\.cmake and 1 more')]:
+            with self.subTest(why):
+                self.github(data=archive(project))
+                with self.assertRaisesRegex(UpdateError, why):
+                    self_update.update_files(self.root, 'dev-0-4-0', say=self.lines.append, program_in_exe=True)
+                self.assertUnchanged()
+        # (A launcher the source ZIP's bridge builds from these files is built again from them: it takes them.)
+        self.github(data=archive(self.program_files(app=b'void app() { new(); }\n')))
+        self.assertEqual(self.update(), HEAD)
+        self.assertEqual((self.root / 'launcher/app/app.cpp').read_bytes(), b'void app() { new(); }\n')
+    def test_program_files(self):
+        for name, program in [('launcher/app/app.cpp', True), ('launcher/ui/fonts/Barlow/Barlow-Bold.ttf', True),
+                              ('cmake/LauncherSDL.cmake', True), ('launcher/windows/launcher.manifest', True),
+                              ('launcher/builder/CMakeLists.txt', True), ('runtime/src/host/display_settings.cpp', True),
+                              ('dependencies.launcher.lock.json', True), ('launcher/windows/query.py', False),
+                              ('launcher/windows/main.py', False), (self_update.BUILD_COMMIT, False),
+                              ('launcher/builder/kit.cpp', False), ('launcher/app/tests/e2e.sh', False),
+                              ('launcher/appimage/make_appimage.sh', False), ('runtime/src/memory.cpp', False),
+                              ('tools/characters/launcher.py', False), ('CMakeLists.txt', False), ('README.md', False)]:
+            self.assertEqual(self_update.program_file(name), program, name)
     def test_its_release_is_newer(self):
         with mock.patch.object(self_update, 'version', return_value='0.4.0'):
             self.assertTrue(self_update.newer_release('0.4.0', self.root))

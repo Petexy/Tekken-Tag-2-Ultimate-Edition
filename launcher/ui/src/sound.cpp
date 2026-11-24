@@ -1,5 +1,6 @@
 // The launcher's sounds (sound.h): the game's own or the launcher's, mixed into one lazily opened SDL audio stream.
 #include "ttt2ui/sound.h"
+#include "utf8_path.h"
 
 #include <SDL3/SDL.h>
 
@@ -121,7 +122,7 @@ struct Sounds::Impl {
         loaded_root = game_root;
         load = spawn(game_root);
         source = load ? Source::Loading : Source::Own;
-        status = load ? "reading the game's sounds from " + game_root.string()
+        status = load ? "reading the game's sounds from " + launcher::path_utf8(game_root)
                       : "the launcher's own sounds (the game's could not be read)";
     }
 
@@ -166,7 +167,7 @@ struct Sounds::Impl {
         }
         source = found ? Source::Game : Source::Own;
         if (found == kCueCount)
-            status = "the game's sounds (" + r.archives.string() + ")";
+            status = "the game's sounds (" + launcher::path_utf8(r.archives) + ")";
         else if (found)
             status = "the game's sounds, " + std::to_string(kCueCount - found) + " of the launcher's own (" +
                      (r.log.empty() ? std::string("?") : r.log.front()) + ")";
@@ -390,7 +391,7 @@ int write_sound_wavs(const std::filesystem::path& dir, const std::filesystem::pa
         if (f)
             ++written;
         else
-            std::fprintf(stderr, "sounds: cannot write %s\n", (dir / name).string().c_str());
+            std::fprintf(stderr, "sounds: cannot write %s\n", launcher::path_utf8(dir / name).c_str());
     };
     for (int c = 0; c < kCueCount; ++c) {
         char prefix[8];
