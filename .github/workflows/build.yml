@@ -21,8 +21,12 @@ jobs:
           pacman -Syu --noconfirm --needed git cmake ninja clang gcc python
           python-numpy python-pillow zstd zlib openssl vulkan-headers
           vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+          libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
+          libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
+          alsa-lib systemd-libs dbus mesa
       - uses: actions/checkout@v6
-      - run: python tools/setup_deps.py
+      # (--launcher: SDL's source too, built into the new launcher's release programs)
+      - run: python tools/setup_deps.py --launcher
       - name: Configure Linux build
         shell: bash
         run: |
@@ -34,11 +38,24 @@ jobs:
       - run: python launcher/windows/test_setup.py
       - run: python launcher/windows/test_self_update.py
       - run: python launcher/windows/test_keys.py
+      - name: Launcher with SDL built in (as its release programs)
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == clang ]]; then cc=clang; cxx=clang++; else cc=gcc; cxx=g++; fi
+          cmake -S . -B build-launcher -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" \
+            -DTTT2_LAUNCHER_ONLY=ON -DTTT2_LAUNCHER_SDL=static
+          cmake --build build-launcher --parallel 2
+          ctest --test-dir build-launcher -L launcher --output-on-failure --timeout 180
       - name: Windows release launcher
         # (Git refuses a repository another user owns: the checkout's, here in a container run as root.)
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
+      - name: Windows launcher program of the new interface (cross-built, SDL built in)
+        if: matrix.compiler == 'gcc'
+        run: >-
+          python launcher/windows/make_launcher_exe.py --cmake-target launcher_smoke
+          --build-dir build-launcher-windows build-linux/launcher_smoke-release.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
