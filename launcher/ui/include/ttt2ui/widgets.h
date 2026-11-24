@@ -141,6 +141,10 @@ struct TileSpec {
     TileTone tone = TileTone::Red;
     TileState state = TileState::Added;
     bool busy = false;
+    // The fighter's picture in place of its code (an added fighter's, from its pack): `portrait_uv` is the part of
+    // the texture the tile's upright rectangle shows (its slanted sides show a little more, at the same scale).
+    TextureId portrait = 0;
+    Rect portrait_uv{};
 };
 void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus focus = {});
 // A group heading with counts and action buttons (Activate with each button's id).

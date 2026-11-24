@@ -161,7 +161,7 @@ def status(game=None, movesets=None, movesets8=None):
     for name in CHARACTERS:
         d = definition(name)
         tekken8_fighter = game_of(d) == 'tekken8'
-        fighter = {'name': name, 'display': d.NAME.split(' (')[0],
+        fighter = {'name': name, 'display': d.NAME.split(' (')[0], 'code': d.CODE,
                    'dlc': dump8.DLC.get(d.TEKKEN8_ID) if tekken8_fighter else autodump.DLC.get(d.TEKKEN7_ID),
                    'installed': d.CODE in packs, 'outdated': packs.get(d.CODE) == 'outdated',
                    'newer': packs.get(d.CODE) == 'newer',

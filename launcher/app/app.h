@@ -202,6 +202,10 @@ private:
     void fighters_early(const ui::Box& crimson, const ui::Box& blue);
     void fighters_blue(const ui::Box& blue, const std::vector<FighterGroup>& groups);
     void fighter_view(const std::string& name);
+    // The added fighters' portraits (their packs' art/portrait_1p.nut, game_art.h): read on a thread when the
+    // importer's status or a finished task may have changed the packs; textures by display name.
+    void update_portraits();
+    ui::TextureId portrait_of(const std::string& display) const;
     void group_view(const std::string& group, const std::string& action_id, const std::vector<FighterGroup>& groups);
     void outfits_view();
     void needs_view();
@@ -341,6 +345,16 @@ private:
 
     // Fighters
     std::string fighters_key_;                       // what the blue side shows ("f:<name>", "g:<group>:<id>", ...)
+    struct PortraitArt {
+        fs::path file;
+        fs::file_time_type mtime{};
+        std::uintmax_t size = 0;
+        ui::TextureId texture = 0;
+    };
+    std::map<std::string, PortraitArt> portraits_;   // by display name
+    std::string portraits_key_;                      // what they were read for
+    int portraits_generation_ = 0;                   // + 1 at each task's end (packs made or removed)
+    bool portraits_loading_ = false;
     ui::Readout fighters_ro_, settings_ro_;
     std::map<std::string, std::string> group_of_button_;  // a group action's id -> its group's key
     // Settings

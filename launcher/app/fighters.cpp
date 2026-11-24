@@ -8,6 +8,7 @@
 #include "app.h"
 
 #include "builders.h"
+#include "game_art.h"
 #include "rules.h"
 
 #include <algorithm>
@@ -86,6 +87,48 @@ std::pair<std::string, std::string> split_name(const std::string& display) {
 }
 
 const char* kGroupTitles[] = {"Tekken 7", "Tekken 7 DLC", "Tekken 8"};
+
+namespace art = launcher::game_art;
+
+// The part of a portrait (its texture's 0..1) a w x h box shows: `tall` pixels of the picture from a little above
+// the head, the eyes at `eyes` of the height and centred across.
+Rect portrait_uv(float w, float h, float tall, float eyes) {
+    const float wide = tall * w / h;
+    return {(art::kFaceX - wide / 2) / art::kPortraitW, (art::kFaceY - eyes * tall) / art::kPortraitH,
+            wide / art::kPortraitW, tall / art::kPortraitH};
+}
+
+// The fighter's portrait on the blue side: a card slanted like the seam (its left edge parallel to it), the picture
+// fading into its dark ground towards the bottom and at the sides it does not reach.
+void portrait_card(Ui& ui, const std::string& id, TextureId texture, float w, float h) {
+    ui.leaf(id, fit(Box{.w = Size::fixed(w), .h = Size::fixed(h)}, SeamFit::BlueSkewed), {},
+            [texture](PaintContext& ctx) {
+                Canvas& cv = ctx.canvas;
+                const Rect r = ctx.rect;
+                const Quad q = skewed(r, theme::kSeamTan);
+                cv.fill(q, Gradient::css(r, 180, {{0, rgba(20, 34, 70, .9f)}, {1, rgba(4, 8, 22, .95f)}}));
+                // From the top of the frame's inside down to the hips (the card's height), centred on the face.
+                const float tall = std::min(art::kInner.h, 470.f);
+                const float s = r.h / tall;
+                const float wide = art::kInner.w * s;
+                const float face = art::kFaceX - art::kInner.x;   // (in the inside's pixels)
+                Rect dst{r.center().x - face * s, r.y, wide, r.h};
+                // (Kept inside the frame: the card's middle is all picture.)
+                dst.x = std::clamp(dst.x, r.right() - wide, r.x);
+                const Rect uv{art::kInner.x / art::kPortraitW, art::kInner.y / art::kPortraitH,
+                              art::kInner.w / art::kPortraitW, tall / art::kPortraitH};
+                cv.picture(texture, dst, uv, std::span<const Vec2>(q.p, 4), [dst](Vec2 p) {
+                    const float u = (p.x - dst.x) / dst.w, v = (p.y - dst.y) / dst.h;
+                    const float sides = std::clamp(std::min(u, 1 - u) / .07f, 0.f, 1.f);
+                    const float bottom = std::clamp((1 - v) / .22f, 0.f, 1.f);
+                    return sides * bottom * bottom;
+                }, rgba(255, 255, 255, 1), 10);
+                // The blue side's marks: a light top edge, a thin frame.
+                cv.fill(shaped_part(r, {r.x, r.y, r.w, 3}, Shape::Skewed, theme::kSeamTan),
+                        Gradient::linear({r.x, 0}, {r.right(), 0}, c::kBlue, rgba(45, 128, 255, .2f)));
+                cv.stroke(q, 1, rgba(130, 180, 255, .3f));
+            });
+}
 
 } // namespace
 
@@ -311,6 +354,11 @@ void App::fighters(const Box& crimson, const Box& blue) {
                     ((f->added() && f->outfits_added) || m::wants_outfits(model_->facts(), *f)))
                     t.tag = "Outfits";
                 t.busy = fighter_task(r->name).in;
+                // An added fighter: their portrait in place of the letters.
+                if (f && f->installed && t.state != TileState::NotOwned) {
+                    t.portrait = portrait_of(f->display);
+                    t.portrait_uv = portrait_uv(theme::metric::kTileWidth, theme::metric::kTileHeight, 210, .36f);
+                }
                 fighter_tile(ui, "tile:" + r->name, t, crimson_focus(first_tile));
                 first_tile = false;
             }
@@ -495,6 +543,18 @@ void App::fighter_view(const std::string& name) {
                     (usable ? " found" : present ? " cannot be used" : " not installed");
         }
         text(ui, "fv/found", TextSpec{found, tx::kKick, c::kBlueDim}, Box{.shrink_order = 1});
+    }
+    // An added fighter: their portrait on a card at the seam, the rest of what is said of them right-aligned beside it.
+    std::optional<Ui::Guard> card, info;
+    if (const TextureId pic = f->installed ? portrait_of(f->display) : 0) {
+        const Rect bl = stage_->blue_area(stage_->share_now());
+        const float w = std::clamp(std::round(bl.w * .34f), 112.f, 230.f);
+        const float h = std::min(std::round(w * 1.9f), std::max(160.f, bl.h - 120));
+        // (The row fitted at its middle, like the card: the card's slanted edge keeps the seam's distance.)
+        card.emplace(ui.open("fv/card", fit(Box{.layout = Layout::Row, .gap = 22, .align = Align::Start},
+                                            SeamFit::BlueSkewed)));
+        portrait_card(ui, "fv/portrait", pic, w, h);
+        info.emplace(ui.open("fv/info", Box{.w = Size::grow()}));
     }
     const auto [first, last] = split_name(r->display);
     text(ui, "fv/first", TextSpec{.text = first, .style = tx::kFighterName, .chroma = 4, .autofit_min = 34},

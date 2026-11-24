@@ -978,8 +978,20 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             const TileState st = spec.state;
             const bool none = st == TileState::None, notowned = st == TileState::NotOwned,
                        checking = st == TileState::Checking;
+            const bool pic = spec.portrait != 0 && !none && !notowned;
             // Body.
-            if (none) cv.fill(q, rgba(20, 8, 12, .72f));
+            if (pic) {
+                // The fighter, over a dark ground, its lower part darkened for the name; lit up when focused.
+                cv.fill(q, rgba(10, 6, 10, .92f));
+                // (The slanted sides show the picture beyond the rectangle, at its scale.)
+                const Rect u = spec.portrait_uv;
+                const float d = r.h / 2 * kSeamTan, du = u.w * d / r.w;
+                cv.picture(spec.portrait, {r.x - d, r.y, r.w + 2 * d, r.h}, {u.x - du, u.y, u.w + 2 * du, u.h},
+                           std::span<const Vec2>(q.p, 4), [](Vec2) { return 1.f; },
+                           rgba(255, 255, 255, .86f + .14f * f), 2);
+                cv.fill(q, Gradient::css(r, 180, {{0, rgba(0, 0, 0, 0)}, {.5f, rgba(0, 0, 0, 0)},
+                                                  {.78f, rgba(8, 2, 6, .55f)}, {1, rgba(8, 2, 6, .9f)}}));
+            } else if (none) cv.fill(q, rgba(20, 8, 12, .72f));
             else if (notowned) cv.fill(q, rgba(14, 8, 10, .82f));
             else if (checking) cv.fill(q, rgba(20, 10, 14, .72f));
             else {
@@ -1042,11 +1054,13 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
                                    : checking ? rgb(0xa8949a)
                                    : none     ? rgb(0xecd5db)
                                               : rgb(0xffffff);
-            TextStyle code = tx::kTileCode;
-            code.size *= 1 + .14f * f;
-            const float cw = ctx.text.width(code, spec.code);
-            ctx.text.draw(cv, code, spec.code, {r.center().x - cw / 2, r.y + 19 - (code.size - tx::kTileCode.size) / 2},
-                          code_col);
+            if (!pic) {
+                TextStyle code = tx::kTileCode;
+                code.size *= 1 + .14f * f;
+                const float cw = ctx.text.width(code, spec.code);
+                ctx.text.draw(cv, code, spec.code,
+                              {r.center().x - cw / 2, r.y + 19 - (code.size - tx::kTileCode.size) / 2}, code_col);
+            }
             const std::string name = ctx.text.ellipsize(tx::kTileName, spec.name, r.w + 12);
             const float nw = ctx.text.width(tx::kTileName, name);
             ctx.text.draw(cv, tx::kTileName, name,

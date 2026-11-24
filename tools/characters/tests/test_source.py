@@ -611,7 +611,7 @@ class Launcher(unittest.TestCase):
             s = launcher.status(None, os.path.join(d, 'movesets'), os.path.join(d, 'movesets8'))
             json.dumps(s)
         fighters = {f['name']: f for f in s['fighters']}
-        self.assertEqual(fighters['reina'], {'name': 'reina', 'display': 'Reina', 'dlc': None, 'installed': False,
+        self.assertEqual(fighters['reina'], {'name': 'reina', 'display': 'Reina', 'code': 'rei', 'dlc': None, 'installed': False,
                                              'outdated': False, 'newer': False, 'update': False,
                                              'moveset_saved': False, 'outfits': 0, 'outfits_added': False,
                                              'needs_game': False, 'stand_in': False, 'game': 'tekken8'})

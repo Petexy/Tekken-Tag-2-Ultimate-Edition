@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 #include <initializer_list>
 #include <span>
@@ -101,6 +102,11 @@ public:
     // A texture through a convex polygon with texture coordinates per point (the wipe).
     void textured(TextureId texture, std::span<const Vec2> points, std::span<const Vec2> uvs,
                   Color tint = {1, 1, 1, 1});
+    // A picture: the texture's `uv` part laid over `dst`, cut to the convex polygon `shape` (either winding), its
+    // opacity at each point alpha(p) (exact at the corners of a grid of `cells` x `cells` over `dst`, linear
+    // between): soft edges and fades (the added fighters' portraits).
+    void picture(TextureId texture, const Rect& dst, const Rect& uv, std::span<const Vec2> shape,
+                 const std::function<float(Vec2)>& alpha, Color tint = {1, 1, 1, 1}, int cells = 8);
     // One glyph quad in PHYSICAL pixels (text engine), with x shifted by `shear` * (baseline - y) for slanted text.
     void glyph_quad(TextureId texture, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                     Color color, float shear = 0, float baseline = 0);

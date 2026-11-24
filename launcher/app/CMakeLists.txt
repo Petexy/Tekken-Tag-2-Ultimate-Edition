@@ -62,6 +62,7 @@ else()
     target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_app_parts ttt2_launcher_ui launcher_backend
         launcher_model ttt2_launcher_core_linux Threads::Threads)
 endif()
+target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_game_art)  # (the added fighters' portraits)
 ttt2_launcher_program(ttt2-launcher NAME ttt2-launcher FILENAME ttt2-launcher.exe DESCRIPTION "Ultimate Launcher")
 if(NOT WIN32)
     if(NOT TTT2_KIT_DIR)
