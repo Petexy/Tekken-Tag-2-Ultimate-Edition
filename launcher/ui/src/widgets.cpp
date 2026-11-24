@@ -1,5 +1,7 @@
 #include "ttt2ui/widgets.h"
 
+#include <SDL3/SDL_clipboard.h>
+
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -544,8 +546,7 @@ void watermark(Canvas& canvas, TextEngine& text, const std::string& word, Vec2 b
               TextPaint{rgba(255, 255, 255, .035f), 2});
 }
 
-// ---- top band
-// ---------------------------------------------------------------------------------------------------------
+// ---- top band -------------------------------------------------------------------------------------------------------
 
 void brand(Ui& ui, const std::string& id, const std::string& line1, const std::string& line2, const Box& box) {
     Box b = with_height(box, 34);
@@ -726,8 +727,7 @@ void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const 
     }
 }
 
-// ---- crimson lists
-// ----------------------------------------------------------------------------------------------------
+// ---- crimson lists --------------------------------------------------------------------------------------------------
 
 void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, const Box& box) {
     Box b = with_height(box, m::kSlabHeight);
@@ -1339,8 +1339,7 @@ void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focu
         &focus);
 }
 
-// ---- blue readout
-// -----------------------------------------------------------------------------------------------------
+// ---- blue readout ---------------------------------------------------------------------------------------------------
 
 void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, const Box& box) {
     Box b = with_height(box, m::kProgressHeight);
@@ -1591,14 +1590,13 @@ void Readout::build(Ui& ui, const std::string& id, const Box& box,
     content(key_);
 }
 
-// ---- dialog band
-// ------------------------------------------------------------------------------------------------------
+// ---- dialog band ----------------------------------------------------------------------------------------------------
 
 BandLayout band_layout(Vec2 size, float top, float height, float share) {
     BandLayout l;
     l.band = {0, top, size.x, height};
     const Seam seam{share * size.x, (theme::kTopBand + size.y - theme::kBottomBand) / 2, kSeamTan};
-    const float y0 = top + 8 + 22, y1 = top + height - 8;
+    const float y0 = top + 8 + 12, y1 = top + height - 8;  // (content: 20 points into the band, as the mock)
     const float left = theme::kPlateSide + theme::kPlatePad;
     l.crimson.seam = seam;
     l.crimson.margin = {left, y0, 0, 0};
@@ -1660,8 +1658,7 @@ Ui::Guard dialog_band(Ui& ui, const std::string& id, const BandLayout& layout) {
     return ui.modal(id, b, paint);
 }
 
-// ---- log view
-// -----------------------------------------------------------------------------------------------------------
+// ---- log view -------------------------------------------------------------------------------------------------------
 
 void LogView::append(std::string text, LogKind kind) {
     lines_.push_back({std::move(text), kind});
@@ -1731,9 +1728,11 @@ void log_view(Ui& ui, const std::string& id, LogView& log, const Box& box) {
     Box b = box;
     b.scroll = true;
     b.pad = {19, 9, 16, 9};
-    // Follow the end: when it was scrolled to the end, it stays there as lines come.
-    if (NodeState* s = ui.state(id))
-        if (s->scroll.target >= s->content_h - s->view_h - 2) s->scroll.target = 1e9f;
+    // Follow the end: shown first at its end, and when it was scrolled to the end, it stays there as lines come.
+    const std::string full = ui.prefix() + id;
+    const NodeState* s = ui.state(full);
+    if (!s || !s->user_set) ui.scroll_to_end(full, true);
+    else if (s->scroll.target >= s->content_h - s->view_h - 2) ui.scroll_to_end(full);
     Focus f;
     f.skewed = false;
     f.pad = 4;
@@ -1747,6 +1746,7 @@ void log_view(Ui& ui, const std::string& id, LogView& log, const Box& box) {
         ctx.canvas.fill_rect({ctx.rect.x, ctx.rect.y, 3, ctx.rect.h}, c::kBlue);
     };
     auto g = ui.open(id, b, bg, &f);
+    if (NodeState* st = ui.state(full)) st->user_set = true;
     TextEngine& te = ui.text();
     LogView* lv = &log;
     ui.leaf(id + "/lines", Box{}, [&te, lv](float max_w) { return Vec2{max_w, lv->height(te, max_w)}; },
@@ -1755,5 +1755,173 @@ void log_view(Ui& ui, const std::string& id, LogView& log, const Box& box) {
                 lv->paint(ctx, ctx.rect, clip.y, clip.bottom());
             });
 }
+
+// ---- dialog parts --------------------------------------------------------------------------------------------------
+
+void option_row(Ui& ui, const std::string& id, const OptionRowSpec& spec, Focus focus, const Box& box) {
+    // .opt: min 44 high, padding 8 18 8 20, check box 20, gap 14, text 600 14.5/1.25.
+    static constexpr TextStyle kText{theme::Font::BodySemiBold, 14.5f, 0, false, 1.25f};
+    static constexpr float kLeft = 20 + 20 + 14, kRight = 18;
+    TextEngine& te = ui.text();
+    focus.disabled = focus.disabled || spec.disabled;
+    Box b = box;
+    if (zero(b.margin)) b.margin = {0, 0, 0, 8};
+    ui.leaf(
+        id, b,
+        [&te, spec](float max_w) {
+            const float room = std::max(1.f, max_w - kLeft - kRight);
+            return Vec2{std::min(max_w, kLeft + te.width(kText, spec.text) + kRight),
+                        std::max(44.f, te.wrapped_height(kText, spec.text, room) + 16)};
+        },
+        [spec](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const float f = ctx.focus_t;
+            if (spec.disabled) cv.push_layer({}, .42f);
+            row_surface(cv, r, f, rgba(255, 255, 255, .04f), rgba(255, 120, 150, .22f), rgba(255, 42, 85, .5f),
+                        rgba(150, 10, 40, .36f), rgba(255, 200, 212, .95f));
+            const Rect cb{r.x + 20, r.y + r.h / 2 - 10, 20, 20};
+            const Quad cq = skewed(cb, kSeamTan);
+            if (spec.on) {
+                cv.fill(cq, c::kRed);
+                icon(cv, ctx.icons, "stroke:check:3.4", cb.outset(-3.5f), rgb(0xffffff));
+            } else {
+                cv.stroke(cq, 2, rgba(255, 255, 255, .75f));
+            }
+            const float x = r.x + kLeft, room = std::max(1.f, r.right() - kRight - x);
+            const float h = ctx.text.wrapped_height(kText, spec.text, room);
+            ctx.text.draw_wrapped(cv, kText, spec.text, {x, r.y + (r.h - h) / 2, room, h}, TextPaint{c::kText});
+            if (spec.disabled) cv.pop_layer();
+        },
+        &focus);
+}
+
+namespace {
+// Words of "what happens" parts, each with its font, laid out in lines of `width`.
+struct WhatWord {
+    std::string text;
+    bool mono;
+    bool space_before;
+    float width;
+};
+constexpr TextStyle kWhatText{theme::Font::Body, 14, 0, false, 1.4f};
+constexpr TextStyle kWhatMono{theme::Font::Mono, 13, 0, false, 1.4f};
+constexpr TextStyle kWhatKey{theme::Font::DisplayExtraBoldItalic, 13, .14f, true, 1};
+constexpr float kWhatKeyWidth = 62, kWhatGap = 12, kWhatLineGap = 9;
+
+std::vector<WhatWord> what_words(TextEngine& te, const WhatLine& line) {
+    std::vector<WhatWord> out;
+    bool space = false;
+    for (const WhatPart& p : line.parts) {
+        std::size_t i = 0;
+        if (!p.text.empty() && p.text.front() == ' ') space = true;
+        while (i < p.text.size()) {
+            const std::size_t j = p.text.find(' ', i);
+            const std::string w = p.text.substr(i, j == std::string::npos ? std::string::npos : j - i);
+            if (!w.empty()) {
+                out.push_back({w, p.mono, space && !out.empty(), te.width(p.mono ? kWhatMono : kWhatText, w)});
+                space = false;
+            }
+            if (j == std::string::npos) break;
+            space = true;
+            i = j + 1;
+        }
+    }
+    return out;
+}
+// Positions (x, line) of each word; a word wider than the line is cut where it no longer fits (paths).
+struct Placed {
+    std::string text;
+    bool mono;
+    float x;
+    int line;
+};
+std::vector<Placed> what_layout(TextEngine& te, const std::vector<WhatWord>& words, float width, int& lines) {
+    std::vector<Placed> out;
+    float x = 0;
+    int line = 0;
+    const float space = te.width(kWhatText, " ");
+    for (const WhatWord& w : words) {
+        const float gap = w.space_before && x > 0 ? space : 0;
+        if (x > 0 && x + gap + w.width > width + .5f) {
+            ++line;
+            x = 0;
+        }
+        const TextStyle& st = w.mono ? kWhatMono : kWhatText;
+        if (w.width <= width + .5f) {
+            out.push_back({w.text, w.mono, x + (x > 0 ? gap : 0), line});
+            x += (x > 0 ? gap : 0) + w.width;
+            continue;
+        }
+        // (Too long for any line: break it by characters.)
+        std::vector<char32_t> cps;
+        decode_utf8(w.text, cps);
+        std::string piece;
+        for (char32_t cp : cps) {
+            const std::string next = piece + encode_utf8(cp);
+            if (!piece.empty() && x + te.width(st, next) > width + .5f) {
+                out.push_back({piece, w.mono, x, line});
+                ++line;
+                x = 0;
+                piece = encode_utf8(cp);
+            } else {
+                piece = next;
+            }
+        }
+        if (!piece.empty()) {
+            out.push_back({piece, w.mono, x, line});
+            x += te.width(st, piece);
+        }
+    }
+    lines = line + 1;
+    return out;
+}
+}  // namespace
+
+void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, const Box& box) {
+    TextEngine& te = ui.text();
+    std::vector<WhatLine> copy(lines.begin(), lines.end());
+    ui.leaf(
+        id, box,
+        [&te, copy](float max_w) {
+            const float room = std::max(40.f, max_w - kWhatKeyWidth - kWhatGap);
+            const float lh = te.line_height(kWhatText);
+            float h = 0, w = 0;
+            for (std::size_t i = 0; i < copy.size(); ++i) {
+                int n = 1;
+                const auto words = what_words(te, copy[i]);
+                float natural = 0;
+                for (const WhatWord& word : words) natural += word.width + (word.space_before ? 4 : 0);
+                what_layout(te, words, room, n);
+                h += n * lh + (i ? kWhatLineGap : 0);
+                w = std::max(w, kWhatKeyWidth + kWhatGap + natural);
+            }
+            return Vec2{std::min(max_w, w), h};
+        },
+        [copy](PaintContext& ctx) {
+            const Rect r = ctx.rect;
+            const float room = std::max(40.f, r.w - kWhatKeyWidth - kWhatGap);
+            const float lh = ctx.text.line_height(kWhatText);
+            float y = r.y;
+            for (const WhatLine& l : copy) {
+                const Color kc = l.tone == WhatTone::Removed ? rgb(0xff9aa8)
+                                 : l.tone == WhatTone::Kept  ? c::kOk
+                                                             : c::kBlueFaint;
+                ctx.text.draw(ctx.canvas, kWhatKey, l.key, {r.x, y + (19 - ctx.text.line_height(kWhatKey)) / 2}, kc);
+                int n = 1;
+                const auto placed = what_layout(ctx.text, what_words(ctx.text, l), room, n);
+                for (const Placed& p : placed) {
+                    const TextStyle& st = p.mono ? kWhatMono : kWhatText;
+                    // (Mono words sit on the same baseline as the text around them.)
+                    const float dy = p.mono ? ctx.text.ascent(kWhatText) - ctx.text.ascent(kWhatMono) : 0;
+                    ctx.text.draw(ctx.canvas, st, p.text, {r.x + kWhatKeyWidth + kWhatGap + p.x, y + p.line * lh + dy},
+                                  p.mono ? rgb(0xffffff) : rgb(0xd6e2f5));
+                }
+                y += n * lh + kWhatLineGap;
+            }
+        });
+}
+
+bool copy_text(const std::string& text) { return SDL_SetClipboardText(text.c_str()); }
 
 }  // namespace ttt2::ui

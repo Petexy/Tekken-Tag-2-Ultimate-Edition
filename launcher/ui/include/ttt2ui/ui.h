@@ -228,8 +228,10 @@ public:
     }
     const std::string& prefix() const { return prefix_; }
 
-    // Scrolling a container by hand.
+    // Scrolling a container by hand (ids as declared, with any prefix). scroll_to_end may come before the container
+    // is declared in the frame (a log following its end); `snap`: no animation.
     void scroll_by(const std::string& container, float dy);
+    void scroll_to_end(const std::string& container, bool snap = false);
 
 private:
     struct Node {

@@ -119,7 +119,10 @@ foreach(_shot
         "settings_1080|--screen;settings;--size;1920x1080"
         "fighters_scale15|--screen;fighters;--size;1920x1200;--scale;1.5"
         "pad_glyphs|--screen;settings;--glyphs;ps"
-        "script_wipe|--screen;home;--frames;40;--script;${CMAKE_CURRENT_SOURCE_DIR}/tests/wipe.script")
+        "script_wipe|--screen;home;--frames;40;--script;${CMAKE_CURRENT_SOURCE_DIR}/tests/wipe.script"
+        "widgets|--screen;widgets"
+        "dialog|--screen;home;--dialog"
+        "script_dialog|--screen;home;--frames;100;--script;${CMAKE_CURRENT_SOURCE_DIR}/tests/dialog.script")
     string(REPLACE "|" ";" _parts "${_shot}")
     list(GET _parts 0 _name)
     list(REMOVE_AT _parts 0)

@@ -960,6 +960,12 @@ void Ui::scroll_by(const std::string& container, float dy) {
     st.scroll.target = std::clamp(st.scroll.target + dy, 0.f, scroll_max(i));
 }
 
+void Ui::scroll_to_end(const std::string& container, bool snap) {
+    NodeState& st = states_[container];
+    st.scroll.target = 1e9f;  // (clamped to the end when laid out)
+    if (snap) st.scroll.snap();
+}
+
 // ---- painting ----------------------------------------------------------------------------------------------------
 
 void Ui::paint_node(Canvas& canvas, int index) {

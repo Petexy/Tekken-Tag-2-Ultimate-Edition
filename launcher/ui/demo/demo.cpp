@@ -1,8 +1,9 @@
 // launcher_ui_demo: the toolkit's Tag Split screens (Home, Fighters, Settings) built from FAKE data, to show and test
 // the toolkit without the launcher's model. Nothing here is the launcher: no files, no game, no settings saved.
 //
-//   launcher_ui_demo [--screen home|fighters|settings] [--size WxH] [--scale S] [--glyphs kb|xbox|ps|nintendo|generic]
-//                    [--reduced] [--script FILE] [--frames N] [--screenshot FILE [--compare REF.png [--tolerance T]]]
+//   launcher_ui_demo [--screen home|fighters|settings|widgets] [--dialog] [--size WxH] [--scale S]
+//                    [--glyphs kb|xbox|ps|nintendo|generic] [--reduced] [--script FILE] [--frames N]
+//                    [--screenshot FILE [--compare REF.png [--tolerance T] [--max-changed N]]] [--write-reference F]
 //   launcher_ui_demo --version
 //
 // --screenshot: SDL's offscreen driver and the software renderer, a fixed clock (60 frames a second, N frames),
@@ -52,8 +53,7 @@ void say(std::string_view text, bool error = false) {
 #endif
 }
 
-// ---- fake data
-// --------------------------------------------------------------------------------------------------------
+// ---- fake data ------------------------------------------------------------------------------------------------------
 
 struct Fighter {
     std::string first, last, code, short_name;
@@ -116,17 +116,31 @@ const DisplayRow kDisplayRows[] = {
     {"pre", "Prepare shaders before playing",
      "Play first makes ready the shaders the game has used on this PC so far."}};
 
-// ---- the demo
-// -----------------------------------------------------------------------------------------------------------
+// ---- the demo -------------------------------------------------------------------------------------------------------
 
 class Demo {
 public:
-    Demo() : fighters_(fake_fighters()) {}
+    Demo() : fighters_(fake_fighters()) {
+        // (A task's log for the widget gallery.)
+        log_.append("ttt2 --install ~/Games/Tekken Tag Tournament 2", LogKind::Command);
+        log_.append("Checking the game", LogKind::Status);
+        for (int i = 0; i < 40; ++i)
+            log_.append("checked content/" + std::string(i % 3 ? "chara/" : "stage/") + std::to_string(4096 + i * 37) +
+                        ".bin (" + std::to_string(100 + i * 13) + " KB)");
+        log_.append("Compiling the game program", LogKind::Status);
+        log_.append("clang++: error: unable to execute command: Killed (a long line that wraps where the log view is "
+                    "narrower than it)",
+                    LogKind::Error);
+    }
 
-    int screen = 0;  // 0 Home, 1 Fighters, 2 Settings
+    int screen = 0;  // 0 Home, 1 Fighters, 2 Settings, 3 the other widgets (--screen widgets)
     bool quit = false;
+    bool dialog = false;  // the Uninstall dialog band over the screen
     float share() const {
-        return screen == 1 ? theme::split::kFighters : screen == 2 ? theme::split::kSettings : theme::split::kHome;
+        return screen == 1   ? theme::split::kFighters
+               : screen == 2 ? theme::split::kSettings
+               : screen == 3 ? theme::split::kSetup
+                             : theme::split::kHome;
     }
 
     void declare(Ui& ui, SplitStage& stage, const Window& window) {
@@ -146,7 +160,7 @@ public:
             const Tab tabs[] = {{"tab:home", "Home", ""},
                                 {"tab:fighters", "Fighters", ups ? std::to_string(ups) : ""},
                                 {"tab:settings", "Settings", ""}};
-            tab_bar(ui, "tabs", tabs, screen);
+            tab_bar(ui, "tabs", tabs, screen < 3 ? screen : -1);
             ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
             TextSpec version{"Launcher 0.8.0", tx::kVersion, c::kFaint};
             version.drop = true;  // (the first thing to go in a narrow window)
@@ -177,7 +191,9 @@ public:
         blue.pad = {16, 0, 16, 8};
         if (screen == 0) home(ui, crimson, blue);
         else if (screen == 1) fighters(ui, crimson, blue);
-        else settings(ui, crimson, blue);
+        else if (screen == 2) settings(ui, crimson, blue);
+        else gallery(ui, crimson, blue);
+        if (dialog) uninstall_dialog(ui);
         // Bottom band.
         {
             Box bottom;
@@ -190,6 +206,11 @@ public:
             auto g = ui.open("bottom", bottom);
             std::vector<Hint> hints;
             hints.push_back({Prompt::Move, "Move"});
+            if (dialog) {
+                hints.push_back({Prompt::Accept, ui.focused() == "dlg-ok" ? "Uninstall" : ui.focused() == "dlg-cancel" ? "Cancel" : "Tick"});
+                hint_bar(ui, "hints", hints);
+                return;
+            }
             if (screen == 2) hints.push_back({Prompt::Change, "Change"});
             hints.push_back({Prompt::Accept, screen == 0 ? "Play" : screen == 1 ? "Options" : "Switch"});
             if (screen == 1) hints.push_back({Prompt::Context1, "Outfits"});
@@ -213,9 +234,13 @@ public:
                 ui.focus(saved_focus_.count(to) ? saved_focus_[to] : def[to], true);
             };
             switch (e.kind) {
-            case EventKind::TabNext: go((screen + 1) % 3); break;
-            case EventKind::TabPrev: go((screen + 2) % 3); break;
-            case EventKind::Back: if (screen != 0) go(0); break;
+            case EventKind::TabNext: if (!dialog) go((screen + 1) % 3); break;
+            case EventKind::TabPrev: if (!dialog) go((screen + 2) % 3); break;
+            case EventKind::Back:
+                if (dialog) dialog = false;
+                else if (screen != 0) go(0);
+                break;
+            case EventKind::ClickOutside: dialog = false; break;
             case EventKind::SectionNext: if (screen == 2) section_ = (section_ + 1) % 3; break;
             case EventKind::SectionPrev: if (screen == 2) section_ = (section_ + 2) % 3; break;
             case EventKind::Fullscreen: window.toggle_fullscreen(); break;
@@ -234,6 +259,11 @@ public:
                 else if (e.id.rfind("set:", 0) == 0) change_setting(e.id.substr(4), 1);
                 else if (e.id.rfind("sec:", 0) == 0) section_ = std::stoi(e.id.substr(4));
                 else if (e.id == "oall") outfits_all_ = !outfits_all_;
+                else if (e.id == "uninstall") dialog = true;
+                else if (e.id == "dlg-cancel" || e.id == "dlg-ok") dialog = false;
+                else if (e.id == "opt:saves") del_saves_ = !del_saves_;
+                else if (e.id == "opt:chars") del_chars_ = !del_chars_;
+                else if (e.id == "copy-log") copy_text(log_.text());
                 break;
             default: break;
             }
@@ -579,6 +609,123 @@ private:
         });
     }
 
+    // ---- the other widgets (no screen of the mock shows them all)
+    void gallery(Ui& ui, const Box& crimson, const Box& blue) {
+        {
+            auto g = ui.open("kit/crimson", crimson);
+            section_label(ui, "kit/keys-label", "Keys", Half::Crimson, {}, fit({}, SeamFit::CrimsonRect));
+            {
+                auto k = ui.open("kit/keys", Box{.margin = {0, 0, 0, 14}, .gap = 6});
+                const KeyRowSpec keys[] = {{"icons/ttt2-input-dpad_up.svg", "Up", "W"},
+                                           {"icons/ttt2-input-face_left.svg", "Punch (Left)", "J", true},
+                                           {"icons/ttt2-input-face_bottom.svg", "Kick (Right)", "L", false, true, 1e9}};
+                for (int i = 0; i < 3; ++i) {
+                    Focus f;
+                    f.group = -1;
+                    f.is_default = i == 0;
+                    key_row(ui, "key:" + std::to_string(i), keys[i], f, fit({}, SeamFit::CrimsonSkewed));
+                }
+            }
+            section_label(ui, "kit/steps-label", "Steps", Half::Crimson, {}, fit({}, SeamFit::CrimsonRect));
+            {
+                auto s = ui.open("kit/steps", Box{.margin = {0, 0, 0, 14}, .gap = 6});
+                const StepRowSpec steps[] = {{"Checking", "16.2 GB", 1, StepState::Done, 1},
+                                             {"Copying", "7.9 / 16.2 GB", .49f, StepState::Current, 2},
+                                             {"Compiling", "", 0, StepState::Pending, 3},
+                                             {"Finishing", "", 0, StepState::Failed, 4}};
+                for (int i = 0; i < 4; ++i)
+                    step_row(ui, "step:" + std::to_string(i), steps[i], fit({}, SeamFit::CrimsonSkewed));
+            }
+            section_label(ui, "kit/files-label", "Files", Half::Crimson, {}, fit({}, SeamFit::CrimsonRect));
+            const FileRowSpec files[] = {{"stroke:up", ".. (up to Games)", "", Tone::Neutral},
+                                         {"stroke:disc", "Tekken Tag Tournament 2 [EUR] (update 16).wua", "6.9 GB", Tone::Ok},
+                                         {"stroke:file", "notes.txt", "2 KB", Tone::Dim}};
+            for (int i = 0; i < 3; ++i) {
+                Focus f;
+                f.group = -1;
+                file_row(ui, "file:" + std::to_string(i), files[i], f,
+                         fit(Box{.margin = {0, 0, 0, 6}}, SeamFit::CrimsonSkewed));
+            }
+        }
+        auto g = ui.open("kit/blue", blue);
+        section_label(ui, "kit/task-label", "Installing", Half::Blue, "49%", fit({}, SeamFit::BlueRect));
+        progress_bar(ui, "kit/progress", .49f, Tone::Blue, fit({}, SeamFit::BlueRect));
+        {
+            auto r = ui.open("kit/pills", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 12}, .gap = 10, .wrap = true}, SeamFit::BlueRect));
+            pill(ui, "kit/p-ok", "Ready", Tone::Ok, true);
+            pill(ui, "kit/p-warn", "Update", Tone::Warn);
+            pill(ui, "kit/p-bad", "Failed", Tone::Bad);
+            pill(ui, "kit/p-blue", "Running", Tone::Blue, true);
+            pill(ui, "kit/p-n", "Not added");
+        }
+        log_view(ui, "kit/log", log_, fit(Box{.h = Size::fixed(176), .margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
+        note(ui, "kit/note", Tone::Warn, "The game is from an older Ultimate Launcher: update it to play.",
+             fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect), "stroke:warn");
+        auto b = ui.open("kit/buttons", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
+        Focus bf;
+        bf.group = 1;
+        ButtonSpec copy;
+        copy.label = "Copy the log";
+        copy.kind = ButtonKind::Blue;
+        copy.size = ButtonSize::Small;
+        button(ui, "copy-log", copy, bf);
+        ButtonSpec stop;
+        stop.label = "Stop";
+        stop.kind = ButtonKind::Danger;
+        stop.size = ButtonSize::Small;
+        stop.prompt = Prompt::Back;
+        button(ui, "stop", stop, bf);
+        ButtonSpec off;
+        off.label = "Not now";
+        off.size = ButtonSize::Small;
+        off.disabled = true;
+        button(ui, "later", off, bf);
+    }
+
+    // ---- the Uninstall dialog (the mock's uninstall.png)
+    void uninstall_dialog(Ui& ui) {
+        const Vec2 size = ui.frame().size;
+        const float yc = (theme::kTopBand + size.y - theme::kBottomBand) / 2, height = 334;
+        const BandLayout L = band_layout(size, std::round(yc - height / 2), height);
+        auto g = dialog_band(ui, "dlg", L);
+        {
+            Box c = L.crimson;
+            c.pad = {0, 0, 0, 0};
+            auto cg = ui.open("dlg/crimson", c);
+            section_label(ui, "dlg/label", "Uninstall", Half::Crimson, {}, fit({}, SeamFit::CrimsonRect));
+            text(ui, "dlg/title",
+                 TextSpec{.text = "Uninstall Tekken Tag Tournament 2?", .style = tx::kDialogTitle, .wrap = true},
+                 fit(Box{.margin = {0, 0, 0, 14}}, SeamFit::CrimsonRect));
+            Focus f;
+            option_row(ui, "opt:saves", {"Also delete saves", del_saves_}, f, fit({}, SeamFit::CrimsonSkewed));
+            option_row(ui, "opt:chars", {"Also delete added characters and what was saved from Tekken 7 and Tekken 8", del_chars_},
+                       f, fit({}, SeamFit::CrimsonSkewed));
+            auto bg = ui.open("dlg/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14 - 8, 0, 0}, .gap = 12}, SeamFit::CrimsonRect));
+            ButtonSpec cancel;
+            cancel.label = "Cancel";
+            cancel.prompt = Prompt::Back;
+            cancel.half = Half::Crimson;
+            Focus cf;
+            cf.is_default = true;
+            button(ui, "dlg-cancel", cancel, cf);
+            ButtonSpec ok;
+            ok.label = "Uninstall";
+            ok.kind = ButtonKind::Danger;
+            button(ui, "dlg-ok", ok);
+        }
+        auto bg = ui.open("dlg/blue", L.blue);
+        section_label(ui, "dlg/what-label", "What happens", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+        const WhatLine what[] = {
+            {"Deleted", WhatTone::Removed, {{"The game, its program and its menu entry, from"}, {" ~/Games/Tekken Tag Tournament 2", true}}},
+            {"Stays", WhatTone::Kept, {{"Anything else in that folder."}}},
+            {"Saves", del_saves_ ? WhatTone::Removed : WhatTone::Kept,
+             {{del_saves_ ? "Deleted too:" : "Kept:"}, {" ~/.local/share/ttt2/save", true}}},
+            {"Fighters", del_chars_ ? WhatTone::Removed : WhatTone::Kept,
+             {{del_chars_ ? "The added characters and what was saved from Tekken 7 and Tekken 8 are deleted too."
+                          : "The added characters are kept, for when it is installed again."}}}};
+        what_list(ui, "dlg/what", what, fit({}, SeamFit::BlueRect));
+    }
+
     static void diagram(Ui& ui, const std::string& id, bool full, const Box& box) {
         Box b = box;
         b.h = Size::fixed(86);
@@ -604,13 +751,13 @@ private:
     int last_dy_ = 0;
     int section_ = 0, res_ = 0, slide_ = 1;
     bool display_[6] = {false, false, true, false, false, false};
-    bool sound_ = false, outfits_all_ = false;
+    bool sound_ = false, outfits_all_ = false, del_saves_ = false, del_chars_ = false;
+    LogView log_;
 };
 
-const char* kWatermarks[] = {"Tag", "Roster", "Setup"};
+const char* kWatermarks[] = {"Tag", "Roster", "Setup", "Kit"};
 
-// ---- scripted input
-// --------------------------------------------------------------------------------------------------------
+// ---- scripted input -------------------------------------------------------------------------------------------------
 
 struct Scripted {
     double time;
@@ -695,8 +842,7 @@ bool load_script(const std::string& path, std::vector<Scripted>& out, std::strin
     return true;
 }
 
-// ---- comparing with a reference
-// ---------------------------------------------------------------------------------------
+// ---- comparing with a reference -------------------------------------------------------------------------------------
 
 int compare(const std::vector<std::uint8_t>& rgba, int w, int h, const std::string& ref_path, float tolerance,
             int max_changed) {
@@ -763,8 +909,8 @@ bool write_small(const std::vector<std::uint8_t>& rgba, int w, int h, const std:
 }
 
 int usage(bool error) {
-    say("usage: launcher_ui_demo [--screen home|fighters|settings] [--size WxH] [--scale S] [--glyphs "
-        "kb|xbox|ps|nintendo|generic]\n"
+    say("usage: launcher_ui_demo [--screen home|fighters|settings|widgets] [--dialog] [--size WxH] [--scale S]\n"
+        "                        [--glyphs kb|xbox|ps|nintendo|generic]\n"
         "                        [--reduced] [--script FILE] [--frames N] [--screenshot FILE] [--compare REF.png]\n"
         "                        [--tolerance T] [--max-changed N] [--write-reference FILE] | --version\n",
         error);
@@ -779,7 +925,7 @@ int run(const std::vector<std::string>& args) {
     std::string screenshot, script_path, compare_path, reference_out;
     int width = 1280, height = 800, frames = 90, screen = 0, max_changed = 200;
     float scale = 0, tolerance = 4;
-    bool reduced = false;
+    bool reduced = false, dialog = false;
     std::optional<Glyphs> glyphs;
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -794,12 +940,13 @@ int run(const std::vector<std::string>& args) {
         else if (a == "--frames" && more) frames = std::max(1, std::stoi(args[++i]));
         else if (a == "--scale" && more) scale = std::stof(args[++i]);
         else if (a == "--reduced") reduced = true;
+        else if (a == "--dialog") dialog = true;
         else if (a == "--size" && more) {
             if (std::sscanf(args[++i].c_str(), "%dx%d", &width, &height) != 2 || width < 320 || height < 240)
                 return usage(true);
         } else if (a == "--screen" && more) {
             const std::string s = args[++i];
-            screen = s == "fighters" ? 1 : s == "settings" ? 2 : s == "home" ? 0 : -1;
+            screen = s == "fighters" ? 1 : s == "settings" ? 2 : s == "widgets" ? 3 : s == "home" ? 0 : -1;
             if (screen < 0) return usage(true);
         } else if (a == "--glyphs" && more) {
             const std::string g = args[++i];
@@ -849,6 +996,7 @@ int run(const std::vector<std::string>& args) {
     if (glyphs) router.force_glyphs(true, *glyphs);
     Demo demo;
     demo.screen = screen;
+    demo.dialog = dialog;
     stage.set_target(demo.share(), false, 0);
     stage.snap();
 

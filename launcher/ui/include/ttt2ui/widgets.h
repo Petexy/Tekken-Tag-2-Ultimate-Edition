@@ -233,6 +233,30 @@ private:
     int dy_ = 0;
 };
 
+// ---- dialog parts --------------------------------------------------------------------------------------------------
+// A ticked option of a dialog (.opt): check box and its text (wrapped), Accept toggles it.
+struct OptionRowSpec {
+    std::string text{};
+    bool on = false;
+    bool disabled = false;
+};
+void option_row(Ui& ui, const std::string& id, const OptionRowSpec& spec, Focus focus = {}, const Box& box = {});
+// "What happens" lines (.wh): a key in small capitals (red: removed, green: kept) and words wrapped after it, some
+// of them in the mono font (paths).
+enum class WhatTone : std::uint8_t { Neutral, Removed, Kept };
+struct WhatPart {
+    std::string text{};
+    bool mono = false;
+};
+struct WhatLine {
+    std::string key{};
+    WhatTone tone = WhatTone::Neutral;
+    std::vector<WhatPart> parts{};
+};
+void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, const Box& box = {});
+// Puts text on the clipboard (a log, a command to run); false when the system refused.
+bool copy_text(const std::string& text);
+
 // ---- dialog band ---------------------------------------------------------------------------------------------------
 // A split band across the dimmed screen (a modal): the crimson half (options) and the blue half (what happens),
 // split by the dialog's seam. Returns the guard of the modal; declare the halves inside with the boxes given.
@@ -243,8 +267,7 @@ struct BandLayout {
 BandLayout band_layout(Vec2 size, float top, float height, float share = theme::split::kDialog);
 [[nodiscard]] Ui::Guard dialog_band(Ui& ui, const std::string& id, const BandLayout& layout);
 
-// ---- log view
-// --------------------------------------------------------------------------------------------------------
+// ---- log view -------------------------------------------------------------------------------------------------------
 enum class LogKind : std::uint8_t { Normal, Command, Error, Status };
 struct LogLine {
     std::string text{};
