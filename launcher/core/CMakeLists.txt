@@ -21,16 +21,22 @@ add_library(ttt2_launcher_core STATIC
     json.cpp
     keymap.cpp
     paths_common.cpp
-    subprocess.cpp
+    payload.cpp
     protocol.cpp
     release.cpp
+    sha256.cpp
+    single_instance.cpp
+    startup.cpp
     status.cpp
+    subprocess.cpp
     test_actions.cpp
     ${runtime_src}/host/display_settings.cpp)
 if(WIN32)
-    target_sources(ttt2_launcher_core PRIVATE subprocess_windows.cpp win32.cpp)
+    target_sources(ttt2_launcher_core PRIVATE single_instance_windows.cpp subprocess_windows.cpp win32.cpp)
+    target_link_libraries(ttt2_launcher_core PUBLIC shell32 user32)
 else()
-    target_sources(ttt2_launcher_core PRIVATE subprocess_linux.cpp)
+    target_sources(ttt2_launcher_core PRIVATE single_instance_linux.cpp subprocess_linux.cpp)
+    target_link_libraries(ttt2_launcher_core PUBLIC ${CMAKE_DL_LIBS})
 endif()
 target_include_directories(ttt2_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${runtime_src})
 target_compile_features(ttt2_launcher_core PUBLIC cxx_std_20)
@@ -66,27 +72,37 @@ foreach(header IN LISTS sdl_scancode_headers)
     endif()
 endforeach()
 
-# The platform layer with real programs (subprocess, single instance), on Linux and on Windows; a Windows build made
-# on Linux runs it through Wine when there is one (never on this PC's screen, never adding to the desktop's menus:
-# no display, winemenubuilder off).
-add_executable(launcher_platform_test platform_test.cpp)
-target_link_libraries(launcher_platform_test PRIVATE ttt2_launcher_core)
-target_compile_options(launcher_platform_test PRIVATE -Wall -Wextra)
-if(WIN32)
-    target_link_libraries(launcher_platform_test PRIVATE shell32)
-    target_link_options(launcher_platform_test PRIVATE -static)
-endif()
-add_test(NAME launcher_platform_test COMMAND launcher_platform_test ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(launcher_platform_test PROPERTIES LABELS launcher TIMEOUT 300)
-if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
-    find_program(TTT2_WINE wine)
-    if(TTT2_WINE AND WIN32)
-        set_property(TARGET launcher_platform_test PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
-        set_tests_properties(launcher_platform_test PROPERTIES ENVIRONMENT_MODIFICATION
-            "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
-    else()
-        set_tests_properties(launcher_platform_test PROPERTIES DISABLED ON)
+# The platform layer with real programs (subprocess; startup, single instance and the release .exe's files), on Linux
+# and on Windows; a Windows build made on Linux runs them through Wine when there is one (never on this PC's screen,
+# never adding to the desktop's menus: no display, winemenubuilder off).
+function(ttt2_launcher_platform_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE ttt2_launcher_core)
+    target_compile_options(${name} PRIVATE -Wall -Wextra)
+    if(WIN32)
+        target_link_options(${name} PRIVATE -static)
     endif()
+    add_test(NAME ${name} COMMAND ${name} ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(${name} PROPERTIES LABELS launcher TIMEOUT 300)
+    if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+        find_program(TTT2_WINE wine)
+        if(TTT2_WINE AND WIN32)
+            set_property(TARGET ${name} PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
+            set_tests_properties(${name} PROPERTIES ENVIRONMENT_MODIFICATION
+                "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
+        else()
+            set_tests_properties(${name} PROPERTIES DISABLED ON)
+        endif()
+    endif()
+endfunction()
+ttt2_launcher_platform_test(launcher_platform_test platform_test.cpp)
+ttt2_launcher_platform_test(launcher_startup_test startup_test.cpp)
+# An old GTK launcher on the session bus: a private one (dbus-run-session), skipped without Python's gi.
+find_program(TTT2_DBUS_RUN_SESSION dbus-run-session)
+if(NOT WIN32 AND TTT2_DBUS_RUN_SESSION)
+    add_test(NAME launcher_old_launcher_test COMMAND ${TTT2_DBUS_RUN_SESSION} -- $<TARGET_FILE:launcher_startup_test>
+        --dbus ${CMAKE_CURRENT_BINARY_DIR})
+    set_tests_properties(launcher_old_launcher_test PROPERTIES LABELS launcher TIMEOUT 120 SKIP_RETURN_CODE 77)
 endif()
 
 if(WIN32)

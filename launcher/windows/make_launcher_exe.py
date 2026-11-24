@@ -179,10 +179,12 @@ def compile_launcher(cxx, windres, number, work, files):
     """entry.cpp compiled with the files in it."""
     if not shutil.which(cxx): die(cxx + ' is not installed (MinGW-w64, or pass --cxx or --stub)')
     out = work / 'launcher.exe'
+    core = HERE.parent / 'core'  # (its files as launcher/core reads them: payload.h)
     subprocess.run([cxx, '-std=c++20', '-O2', '-municode', '-mwindows', '-static', '-s',
-                    '-DTTT2_LAUNCHER_VERSION="%s"' % number, str(HERE / 'entry.cpp'),
+                    '-DTTT2_LAUNCHER_VERSION="%s"' % number, '-I', str(core), str(HERE / 'entry.cpp'),
+                    *(str(core / name) for name in ('payload.cpp', 'sha256.cpp', 'win32.cpp')),
                     str(resource(cxx, windres, number, work, files)),
-                    '-o', str(out), '-ladvapi32', '-lbcrypt', '-lshell32'], check=True)
+                    '-o', str(out), '-ladvapi32', '-lshell32'], check=True)
     return out.read_bytes()
 
 
