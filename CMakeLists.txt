@@ -3,6 +3,15 @@ project(ttt2_recomp_tools LANGUAGES C CXX)
 
 option(TTT2_WINDOWS_RUNTIME "Build experimental native Windows game runtime" OFF)
 option(TTT2_TOOLS_ONLY "Build portable RPX/recompiler tools without the game runtime" OFF)
+# Only the launcher's interface (launcher/ui), on Linux or Windows, nothing of
+# the game or its tools: the Windows release .exe cross-built on Linux
+# (launcher/windows/make_launcher_exe.py, cmake/toolchain-mingw64.cmake).
+option(TTT2_LAUNCHER_ONLY "Build only the launcher's interface programs" OFF)
+if(TTT2_LAUNCHER_ONLY)
+    enable_testing()
+    add_subdirectory(launcher)
+    return()
+endif()
 if(TTT2_TOOLS_ONLY)
     if(POLICY CMP0135)
         cmake_policy(SET CMP0135 NEW)
@@ -64,6 +73,8 @@ if(TTT2_TOOLS_ONLY)
         target_link_libraries(windows_installer_driver PRIVATE windows_zarchive SDL3::SDL3 bcrypt ole32 shell32 uuid)
         add_custom_command(TARGET windows_installer_driver POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:windows_installer_driver>)
+        # The launcher's new interface on this SDL3 (its DLL beside the programs).
+        add_subdirectory(launcher/ui)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME windows_installer_test COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tests/windows_installer_test.py $<TARGET_FILE:windows_installer_driver>)

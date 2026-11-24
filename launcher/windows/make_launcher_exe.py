@@ -96,6 +96,17 @@ def ico(pngs):
     return head + entries + data
 
 
+def make_icon(out, rsvg):
+    """The launcher's icon (ICON drawn at each of ICON_SIZES by rsvg-convert) as the .ico `out`."""
+    with tempfile.TemporaryDirectory(prefix='ttt2-launcher-icon-') as temporary:
+        pngs = {}
+        for size in ICON_SIZES:
+            png = Path(temporary) / ('icon-%d.png' % size)
+            subprocess.run([rsvg, '-w', str(size), '-h', str(size), '-o', str(png), str(ICON)], check=True)
+            pngs[size] = png.read_bytes()
+    Path(out).write_bytes(ico(pngs))
+
+
 # The resource that holds the files (entry.cpp's kFilesResource): an ordinary
 # part of a program, which virus scanners' guesses take less for a dropper's
 # payload than data appended after it.
@@ -111,12 +122,7 @@ def resource(cxx, windres, number, work, files):
     (work / 'files.bin').write_bytes(files)
     icon = ''
     if rsvg:
-        pngs = {}
-        for size in ICON_SIZES:
-            png = work / ('icon-%d.png' % size)
-            subprocess.run([rsvg, '-w', str(size), '-h', str(size), '-o', str(png), str(ICON)], check=True)
-            pngs[size] = png.read_bytes()
-        (work / 'launcher.ico').write_bytes(ico(pngs))
+        make_icon(work / 'launcher.ico', rsvg)
         icon = '1 ICON "launcher.ico"\n'
     else:
         print('make_launcher_exe.py: no icon: needs rsvg-convert', file=sys.stderr)
