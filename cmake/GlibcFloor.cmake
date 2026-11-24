@@ -71,7 +71,21 @@ function(ttt2_glibc_floor_header output floor)
    Binds the functions this glibc gave a default version newer than GLIBC_@floor@ to their newest version up to it,
    so that the programs compiled with this header start on glibc @floor@. */
 #if defined(__linux__) && !defined(__ASSEMBLER__)
-@pins@#endif
+@pins@
+/* libstdc++ 16 has std::string's C++20 members (starts_with, ends_with) in libstdc++.so too, at GLIBCXX_3.4.35, and
+   declares them extern there: a call the compiler does not inline then needs that libstdc++, which the oldest
+   systems the programs are for lack (release_checks.sh: GLIBCXX_3.4.33). As libstdc++ does for its assertions, its
+   explicit instantiation declarations of std::string are left out: the program has its own copy of what it uses. */
+#if defined(__cplusplus) && defined(__has_include)
+#if __has_include(<bits/c++config.h>)
+#include <bits/c++config.h>
+#if _GLIBCXX_EXTERN_TEMPLATE > 0
+#undef _GLIBCXX_EXTERN_TEMPLATE
+#define _GLIBCXX_EXTERN_TEMPLATE -1
+#endif
+#endif
+#endif
+#endif
 ")
     set(TTT2_GLIBC_FLOOR_PINS ${count} PARENT_SCOPE)
 endfunction()
