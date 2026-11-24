@@ -540,6 +540,10 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
     replay(installed, Caps::linux_caps(), scratch / "a", {0, [](Harness& h) {
                                                               CHECK_EQ(count_started(h.starter, "owned"), 1);
                                                               CHECK(h.model.facts().owned.state == OwnedState::kKnown);
+        // Kept for when Steam is closed next time (cache/ttt2/dlc-owned.json, written by the app).
+        const auto saved = std::find_if(h.effects.begin(), h.effects.end(),
+                                        [](const Effect& e) { return e.kind == Effect::Kind::kSaveOwned; });
+        CHECK(saved != h.effects.end() && saved->text.starts_with("{\"owned\": {"));
                                                               // Not again on a refresh once known.
                                                               h.model.activate("refresh", h.now);
                                                               h.settle();
