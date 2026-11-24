@@ -1,8 +1,9 @@
 # Intended differences from the old launchers
 
 What `launcher::model` shows differently from the old GTK app on purpose.
-`model_test` applies I1-I5 to a golden before comparing it (model_test.cpp,
-`intended()`); anything else that differs fails.
+`model_test` applies I1-I5 to a GTK golden before comparing it (model_test.cpp,
+`intended()`) and accepts W0-W8 between the Tk goldens' texts and the model's
+Windows views (`kTkDifferences`); anything else that differs fails.
 
 ## Linux (compared with the GTK goldens)
 
@@ -32,8 +33,13 @@ be used now keeps a reason (`describe.why`, U7) instead of only being
 greyed out, and nothing is said only in a tooltip (the blue side shows the
 focused item's `describe` block).
 
-## Windows (what Tk showed; no Tk goldens)
+## Windows (compared with the Tk goldens' texts)
 
+The rules in `kTkDifferences` (model_test.cpp) name these:
+
+- **W0 Tk's layout, not its words**: the "Game" title above the game card and
+  the shoulder buttons' glyphs (L, R, ZL, ZR) beside their keycaps.
+- **I2** as above: the launcher's own settings.
 - **W1 Display defaults are the game's**: no display.ini means windowed, Auto,
   120 fps on (the runtime's `display::Settings`). Tk assumed fullscreen.
 - **W2 Saving errors use Linux's words**: "The display settings cannot be
@@ -44,6 +50,25 @@ focused item's `describe` block).
   tasks (Set Up Game, Build, Install, Update installed, the launcher's files)
   keep Tk's texts.
 - **W4 Folders are chosen, not typed** (U11): each folder row has Browse
-  (`folder:<key>`), no text entry.
+  (`folder:<key>`) and shows the folder, no text entry.
 - **W5 Every sentence is the model's** (U2): `main.py --query` answers facts
   and codes only; only a worker's `@error` lines carry Python's words.
+- **W6 Linux's words where Tk's had drifted, or Tk said nothing**: the
+  resolution's Automatic note, the notes on a keyboard.ini or display.ini
+  that cannot be used as it is, Steam and DLC ownership ("Your Steam account
+  owns 2 of them: only those can be added.", what is not known and why),
+  Tekken 7 or 8 not installed, Steam needed by both games, the importer that
+  cannot read the game, the outfits warning Tk added.
+- **W7 Linux's rules where Tk's had drifted**: a DLC fighter the account does
+  not own shows Not owned with no Add (Tk: a greyed Add); the DLC list's count
+  and "2 of 3 owned"; the update offer for characters made by an older
+  version also while they cannot be updated now (it says why); Tekken 8's
+  stand-in moves, packs made by another version (Remove, Remove All).
+- **W8 Linux's sentence with Windows' action**: "Set up the game first: the
+  characters are made from it and from your Tekken 7 or Tekken 8." (Tk: "Set
+  up the game first: characters are made from it.").
+
+Where the game is built differs, so Windows keeps Tk's words there: an update
+of the game "builds it again on this PC from your game", its builds shown as
+"0.8.0 (1cab8c6)", and no update offered for a game whose build is not
+recorded (Tk's rule: many games from before the record).

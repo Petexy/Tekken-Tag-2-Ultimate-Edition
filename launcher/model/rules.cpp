@@ -54,8 +54,24 @@ std::string older_game(const Facts& facts) {
 }
 
 bool update_ready(const Facts& facts) {
+    // (Windows: a game whose build is not recorded is not offered an update: the Tk window's rule, as its games
+    // from before the record are many.)
+    if (facts.caps.windows && facts.game_built.empty()) return false;
     return facts.install.state == InstallState::kInstalled && !facts.this_build.empty() &&
            facts.game_built != facts.this_build;
+}
+
+std::string shown_build(const std::string& build) {
+    const size_t dash = build.rfind('-');
+    if (dash == std::string::npos) return build;
+    return build.substr(0, dash) + " (" + build.substr(dash + 1, 7) + ")";
+}
+
+std::string set_up_first(const Facts& facts, bool long_form) {
+    const char* const verb = facts.caps.setup_game ? "Set up" : "Install";
+    return std::string(verb) + (long_form ? " the game first: the characters are made from it and from your Tekken 7 or "
+                                            "Tekken 8."
+                                          : " the game first: characters are made from it.");
 }
 
 MovesBlock moves_block(const Facts& facts) {
@@ -86,7 +102,7 @@ bool can_import(const Facts& facts, std::string* why) {
     };
     if (facts.importer.empty() || facts.python.empty()) return no("The character importer or Python 3 is missing.");
     if (facts.install.state != InstallState::kInstalled) {
-        return no("Install the game first: characters are made from it.");
+        return no(set_up_first(facts, false));
     }
     if (const std::string older = older_game(facts); !older.empty()) return no(older);
     if (!facts.status) return no("The importer cannot tell what this PC has: " + facts.status_error);

@@ -37,6 +37,10 @@ std::string older_game(const Facts& facts);
 // Whether Update is offered beside Play: this launcher's build is known and
 // the installed program's is another (or unknown).
 bool update_ready(const Facts& facts);
+// A build as Windows shows it: "0.8.0-1cab8c68f39b" -> "0.8.0 (1cab8c6)" (self_update.shown_id).
+std::string shown_build(const std::string& build);
+// "Install the game first: ..." (Linux) / "Set up the game first: ..." (Windows); long: the characters card's note.
+std::string set_up_first(const Facts& facts, bool long_form);
 
 // What stops a Tekken 8 character's own moves being saved now (Tekken 8
 // runs hidden for that): nothing, a build its helper does not know, it

@@ -439,10 +439,7 @@ CharactersView characters_view(const Facts& facts) {
     }
     const ImporterStatus& s = *facts.status;
     if (facts.install.state != InstallState::kInstalled) {
-        v.lines.push_back(note_line(Icon::kInfo,
-                                    "Install the game first: the characters are made from it and from your Tekken 7 "
-                                    "or Tekken 8.",
-                                    false));
+        v.lines.push_back(note_line(Icon::kInfo, set_up_first(facts, true), false));
     }
     if (const std::string older = older_game(facts); !older.empty()) {
         v.lines.push_back(note_line(Icon::kWarning, older, true));

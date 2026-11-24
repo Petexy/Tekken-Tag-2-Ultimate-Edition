@@ -75,9 +75,11 @@ void installed(const Facts& facts, GameView& v) {
     }
     const bool update = update_ready(facts);
     const std::string older = older_game(facts);
+    // (Windows builds it from the .wua chosen in Folders: the Tk window's words.)
+    const std::string again = facts.caps.windows ? " Update builds it again on this PC from your game: a few minutes."
+                                                 : " Update builds it again from the game in its folder: a few minutes.";
     if (!older.empty()) {
-        Line l = note_line(Icon::kWarning, older + " Update builds it again from the game in its folder: a few minutes.",
-                           true);
+        Line l = note_line(Icon::kWarning, older + again, true);
         l.tone = Tone::kDim;
         l.small = true;
         v.body.push_back(l);
@@ -86,9 +88,11 @@ void installed(const Facts& facts, GameView& v) {
                            facts.game_built.empty()
                                ? "This game program was not built by the launcher. Update builds it again from the "
                                  "game in its folder."
+                           : facts.caps.windows
+                               ? "An update of the game is ready (Ultimate Launcher " + shown_build(facts.this_build) +
+                                     "; the game is from " + shown_build(facts.game_built) + ")." + again
                                : "An update of the game program is ready (" + facts.this_build + ", installed " +
-                                     facts.game_built + "). Update builds it again from the game in its folder: a few "
-                                     "minutes.",
+                                     facts.game_built + ")." + again,
                            true);
         l.tone = Tone::kDim;
         l.small = true;

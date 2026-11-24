@@ -165,8 +165,16 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         facts.owned.has_answer = true;
     }
     if (caps.windows) {
-        facts.windows.folders = {{"source", ""}, {"title", ""}, {"install", (home / "Games").string()},
-                                 {"data", (home / "TTT2Ultimate").string()}, {"packs", ""}, {"saves", ""}, {"tools", ""}};
+        // (As the Tk window's run had them: tests/golden/README.md.)
+        const std::string state = c["install"].string();
+        facts.windows.folders = {
+            {"source", ""},
+            {"title", ""},
+            {"install", state == "installed" || state == "unfinished" ? (home / "Games/Tekken Tag Tournament 2").string() : ""},
+            {"data", (home / "TTT2Ultimate").string()},
+            {"packs", (home / "TTT2Ultimate/characters").string()},
+            {"saves", (home / "saves").string()},
+            {"tools", (home / "tools").string()}};
         facts.windows.logs = home / "TTT2Ultimate/logs";
     }
 
@@ -184,7 +192,7 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
     FakeFiles files;
     LauncherModel::Parts parts{commands, starter, env, keys, nullptr, {}, {}, us_key_label};
     parts.display_file = display_file;
-    if (c["appimage"].boolean()) {
+    if (c["appimage"].boolean() && !caps.windows) {
         facts.self_update = true;
         facts.custom_releases = true;
         parts.update_files = &files;

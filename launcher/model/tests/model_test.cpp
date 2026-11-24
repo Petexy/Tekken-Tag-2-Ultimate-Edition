@@ -1,13 +1,15 @@
-// model_test GOLDEN_DIR SCRATCH_DIR [--case NAME] [--write DIR]
+// model_test GOLDEN_DIR SCRATCH_DIR [--case NAME] [--write DIR] [--tk-report NAME|all]
 //
-// 1. Goldens: every case of GOLDEN_DIR (dumped from the old GTK app, see
+// 1. GTK goldens: every case of GOLDEN_DIR (dumped from the old GTK app, see
 //    golden/README.md) played through the model and compared, dump by dump,
 //    with the intended differences of golden/INTENDED.md applied. --write
 //    also writes the model's dumps (the same shape) for a look or a diff.
-// 2. The same cases with Windows' caps: views build, every id is unique,
-//    nothing Linux-only shows (no Tk goldens: see golden/README.md).
-// 3. Unit tests of the controllers: tasks, keys, display.ini, the refresh
-//    rules, the AppImage's update, preflight, activate(id).
+// 2. The same cases with Linux's and Windows' caps: every view's ids are
+//    unique, of its OS, and a disabled item says why.
+// 3. Tk goldens: the model's Windows views say what the old Tk window said,
+//    but for INTENDED.md's W rules (--tk-report lists every difference).
+// 4. Unit tests of the controllers: tasks, keys, display.ini, the refresh
+//    rules, the AppImage's update, closing, activate(id) for every id.
 
 #include "check.h"
 #include "fakes.h"
@@ -21,6 +23,7 @@
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <regex>
 #include <set>
 #include <sstream>
 
@@ -225,6 +228,173 @@ void every_view(const fs::path& dir, const fs::path& scratch, const Caps& caps) 
     std::printf("%s: %d views checked\n", caps.platform_name, views);
 }
 
+// ---------------------------------------------------------------- 4. Windows: what the Tk window showed
+
+// The texts a section shows (labels, buttons, pills, check boxes, lists, folder fields), each once per showing.
+// Not tooltips: the new window has none (an item's describe block says it), and not icons.
+std::multiset<std::string> texts_of(const Section& section) {
+    std::multiset<std::string> out;
+    for (const Element& e : section) {
+        const auto it = e.text.find("t");
+        if (e.kind != "icon" && it != e.text.end() && !it->second.empty()) out.insert(it->second);
+    }
+    return out;
+}
+
+std::vector<std::string> minus(const std::multiset<std::string>& a, const std::multiset<std::string>& b) {
+    std::vector<std::string> out;
+    std::multiset<std::string> rest = b;
+    for (const std::string& t : a) {
+        const auto it = rest.find(t);
+        if (it == rest.end()) out.push_back(t);
+        else rest.erase(it);
+    }
+    return out;
+}
+
+// The model's Windows views of the Tk dumps' moments: the start page with the DLC list open, Settings.
+std::map<std::string, Dump> windows_views(const json::Value& c, const fs::path& scratch) {
+    std::map<std::string, Dump> out;
+    replay(c, Caps::windows_caps(), scratch, {0, [&](Harness& h) {
+        if (!h.model.facts().dlc_expanded) h.model.activate("dlc", h.now);
+        h.settle();
+        out["00-start"] = flatten(h.model.view());
+        h.model.activate("settings", h.now);
+        out["01-settings"] = flatten(h.model.view());
+    }});
+    return out;
+}
+
+// What the model's Windows views say differently from the Tk window, on purpose (golden/INTENDED.md): every
+// difference of the texts must match one of these.
+struct TkDifference {
+    bool tk_only;        // a text Tk showed that the model does not (else: the model's, not Tk's)
+    const char* section;
+    const char* pattern; // the whole text
+    const char* rule;    // INTENDED.md
+};
+const TkDifference kTkDifferences[] = {
+    // W0 Tk's layout, not its words: the section title above the game card, the shoulder buttons' glyphs.
+    {true, "game", "Game", "W0"},
+    {true, "settings", "L|R|ZL|ZR", "W0"},
+    // I2 The launcher's own settings.
+    {false, "settings",
+     "Ultimate Launcher|How this launcher looks and sounds\\.|Sounds|Short sounds when moving between and choosing "
+     "items\\.|Reduce motion|No moving backgrounds, and pages change without sliding\\.|Text size|How large this "
+     "launcher's text is\\.|100 %",
+     "I2"},
+    // W6 Linux's words where Tk's had drifted (or Tk had none).
+    {false, "settings", "Automatic: enough to cover the .*", "W6"},
+    {false, "settings", "keyboard\\.ini, changed by hand, gives a key to two inputs, .*", "W6"},
+    {false, "settings", "display\\.ini cannot be read \\(.*", "W6"},
+    {true, "characters", "Your Steam account owns \\d+ of them\\.", "W6"},
+    {false, "characters", "Your Steam account owns \\d+ of them: only those can be added\\.", "W6"},
+    {true, "characters", "Start Steam to add them: it tells which of them you own\\.", "W6"},
+    {false, "characters", "Start Steam to see which DLC you own: only those can be added\\.", "W6"},
+    {false, "characters", "Your Steam account owned \\d+ of them last time Steam was asked\\. Start Steam to add them: it "
+                          "checks again\\.", "W6"},
+    {true, "characters", "Which of them you own is not known yet\\.", "W6"},
+    {false, "characters", "Which DLC you own is not known: .*", "W6"},
+    {true, "characters", "Steam could not tell which you own \\(.*\\): adding one asks it again\\.", "W6"},
+    {false, "characters", "Steam could not be asked again \\(.*\\)\\. It said last time that your account owns \\d+ of "
+                          "them\\.", "W6"},
+    {true, "characters", "Tekken 7 is not installed\\.|Tekken 8 is not installed in any Steam library|Not installed", "W6"},
+    {false, "characters", "Not installed|Not installed: Tekken 7 and Tekken 8 for PC come from Steam", "W6"},
+    {true, "characters", "Start Steam to add characters: Tekken 7 needs it the first time, and it tells which DLC you "
+                         "own\\.", "W6"},
+    {false, "characters", "Start Steam to add characters: Tekken 7 and Tekken 8 need it the first time, and it tells "
+                          "which DLC you own\\.", "W6"},
+    {true, "characters", "The importer cannot read the installed game: .*", "W6"},
+    {false, "characters", "The importer cannot read it: .*|Game", "W6"},
+    {true, "characters", "Importing outfits can drastically prolong adding and updating characters: .*", "W6"},
+    // W7 Linux's rules where Tk's had drifted: a DLC fighter not owned has no Add (Not owned says it); the count of
+    // DLC fighters and the owned ones; the update offer also while the game cannot be used; Tekken 8's stand-ins
+    // and packs from another version.
+    {true, "characters", "Add", "W7"},
+    {false, "characters", "\\d+|\\d+ of \\d+ owned|Owned|Not owned", "W7"},
+    {false, "characters", ".+ was made by an older version: update them to get what this one adds\\.|Update", "W7"},
+    {true, "characters", ".+ was made by an older version: update them to get what this one adds\\.", "W7"},
+    {false, "characters", ".+ fights with Heihachi's moves for now: .*|.+ was made by a newer version of Ultimate "
+                          "Launcher and is not in the game: .*|.+ was made by an older version and is not in the game: "
+                          "add them again\\.|Remove|Remove All", "W7"},
+    {false, "characters", "Their moves cannot be saved from Tekken 8 now: .*|Tekken 8 was updated to a version that "
+                          "Ultimate Launcher cannot save moves from yet: .*", "W7"},
+    // W8 Linux's sentence with Windows' action.
+    {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},
+    {false, "characters", "Set up the game first: the characters are made from it and from your Tekken 7 or Tekken "
+                          "8\\.", "W8"},
+};
+
+const TkDifference* tk_intended(bool tk_only, const std::string& section, const std::string& text) {
+    for (const TkDifference& d : kTkDifferences) {
+        if (d.tk_only == tk_only && section == d.section && std::regex_match(text, std::regex(d.pattern))) return &d;
+    }
+    return nullptr;
+}
+
+// The Tk goldens: the model's Windows views say what the Tk window said, but for kTkDifferences.
+void tk_goldens(const fs::path& dir, const fs::path& scratch) {
+    int cases = 0, dumps = 0, intended = 0;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        if (!fs::exists(entry.path() / "windows/00-start.json")) continue;
+        current = "tk " + name;
+        const auto c = json::parse(read(entry.path() / "case.json"));
+        if (!c) continue;
+        ++cases;
+        const auto made = windows_views(*c, scratch / name);
+        for (const auto& [shot, model] : made) {
+            const auto tk = parse_dump(read(entry.path() / "windows" / (shot + ".json")));
+            if (!tk) {
+                fail(__FILE__, __LINE__, shot + ": not a dump");
+                continue;
+            }
+            ++dumps;
+            for (const char* section : kSections) {
+                const auto a = texts_of(tk->count(section) ? tk->at(section) : Section{});
+                const auto b = texts_of(model.count(section) ? model.at(section) : Section{});
+                for (const bool tk_only : {true, false}) {
+                    for (const std::string& t : tk_only ? minus(a, b) : minus(b, a)) {
+                        if (tk_intended(tk_only, section, t)) {
+                            ++intended;
+                            continue;
+                        }
+                        fail(__FILE__, __LINE__, shot + " " + section + (tk_only ? ": Tk said, the model does not: "
+                                                                                 : ": the model says, Tk did not: ") + t);
+                    }
+                }
+            }
+        }
+    }
+    std::printf("tk goldens: %d cases, %d dumps compared, %d intended differences\n", cases, dumps, intended);
+    CHECK(cases >= 30);
+}
+
+void tk_report(const fs::path& dir, const fs::path& scratch, const std::string& only) {
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        const std::string name = entry.path().filename().string();
+        if (!fs::exists(entry.path() / "windows/00-start.json") || (!only.empty() && name != only)) continue;
+        const auto c = json::parse(read(entry.path() / "case.json"));
+        if (!c) continue;
+        const auto made = windows_views(*c, scratch / name);
+        for (const auto& [shot, model] : made) {
+            const auto tk = parse_dump(read(entry.path() / "windows" / (shot + ".json")));
+            if (!tk) continue;
+            for (const char* section : kSections) {
+                const auto a = texts_of(tk->count(section) ? tk->at(section) : Section{});
+                const auto b = texts_of(model.count(section) ? model.at(section) : Section{});
+                for (const bool tk_only : {true, false}) {
+                    for (const std::string& t : tk_only ? minus(a, b) : minus(b, a)) {
+                        const TkDifference* d = tk_intended(tk_only, section, t);
+                        std::printf("%s\t%s\t%s\t%s\t%s\t%s\n", name.c_str(), shot.c_str(), section,
+                                    tk_only ? "tk-only" : "model-only", d ? d->rule : "-", t.c_str());
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -239,6 +409,10 @@ int main(int argc, char** argv) {
         const std::string flag = argv[i];
         if (flag == "--case") only = argv[i + 1];
         else if (flag == "--write") write = argv[i + 1];
+        else if (flag == "--tk-report") {
+            tk_report(golden, scratch / "tk", argv[i + 1] == std::string("all") ? "" : argv[i + 1]);
+            return 0;
+        }
     }
 #ifdef _WIN32
     // (The goldens are Linux's, with its paths: Windows' views are held to the rules below.)
@@ -249,6 +423,7 @@ int main(int argc, char** argv) {
     if (only.empty()) {
         every_view(golden, scratch / "linux", Caps::linux_caps());
         every_view(golden, scratch / "windows", Caps::windows_caps());
+        tk_goldens(golden, scratch / "tk");
         units(golden, scratch / "units");
     }
     if (failures) std::fprintf(stderr, "%d failed\n", failures);

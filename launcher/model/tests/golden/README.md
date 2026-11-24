@@ -1,9 +1,12 @@
-# Goldens: what the old GTK launcher showed
+# Goldens: what the old launchers showed
 
 Each folder is one case: `case.json` is the fixture (what `launcher.py status`,
 `owned` and `main` answered, the install's state, the kit's version, the
-files, the test steps), and `linux/` is what the old GTK launcher
-(`launcher/app`) showed for it:
+files, the test steps), `linux/` is what the old GTK launcher
+(`launcher/app`) showed for it and `windows/` what the old Tk window
+(`launcher/windows/window.py`) showed for it.
+
+In `linux/`:
 
 - `00-start.json`: once the window had settled after opening;
 - `NN-<step>.json`: after each test step (spec linux 6.3's actions:
@@ -19,10 +22,19 @@ class and whether they could be used, check boxes, switches, lists,
 expanders, spinners and progress bars. The paths are under `/home/player`
 (the case's own folder was put in its place).
 
+In `windows/` (the Tk window has no test steps): `00-start.json`, the main
+page once settled with the DLC list open, and `01-settings.json`, the
+Settings page.
+
 `launcher_model_test` (ctest label `launcher`) plays every case through
 `launcher::model` with the same answers and steps (tests/replay.cpp) and
 compares each dump with `flatten()` of the model's view, after applying the
-intended differences of [INTENDED.md](INTENDED.md). It then plays every case
+intended differences of [INTENDED.md](INTENDED.md). With Windows' caps it
+builds the same two moments and compares their texts (labels, buttons,
+pills, check boxes, lists, folder fields; not tooltips, which the new window
+does not have, nor the order, which is the new window's) with the Tk dumps:
+every text one has and the other has not must be one of INTENDED.md's
+(model_test.cpp, `kTkDifferences`). It then plays every case
 again with Linux's and with Windows' caps and checks what every view keeps
 to (no other OS's items, one id per item, a reason on every disabled item),
 activates every id of every first view, and runs the controllers' unit tests.
@@ -41,10 +53,11 @@ with the tests) turned each run's dumps and log into the files here.
 To make them again after the old app changes: add the hook to a scratch copy
 again, run the cases, and convert each run.
 
-## Windows
+## How the Tk ones were made
 
-There are no Tk goldens: the PC they were made on has no Tk (Python's
-`tkinter` cannot load `libtk8.6.so`). With Windows' caps the cases are
-checked for the rules above, not compared with what `window.py` showed;
-where Tk said something else than GTK, the model shows what Linux decides
-(INTENDED.md, W1-W5).
+The same way: a scratch copy (never committed) of `launcher/windows` with an
+entry that replaced the window's UI smoke test by a dump hook walking its
+widgets, run by Python 3.13 with Tk under `cage` (its Xwayland, headless),
+one fake project folder per case (`launcher.py` answering the fixture,
+`local/windows-launcher.json` with the folders model_test also uses, the
+installed game's build record), converted by the same tool with `windows`.
