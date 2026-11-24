@@ -45,14 +45,6 @@ bool usable(const fs::path& folder) {
     return fs::exists(folder / kMarker, ec) || fs::exists(folder / kStarted, ec) || fs::is_empty(folder, ec);
 }
 
-bool starts_with(const fs::path& path, const fs::path& folder) {
-    auto p = path.begin();
-    for (auto f = folder.begin(); f != folder.end(); ++f, ++p) {
-        if (p == path.end() || *p != *f) return false;
-    }
-    return true;
-}
-
 } // namespace
 
 Places Places::from_environment() {
@@ -71,14 +63,6 @@ Places Places::from_environment() {
     p.tekken7_data = p.home / ".local/share/ttt2/tekken7";
     p.tekken8_data = p.home / ".local/share/ttt2/tekken8";
     return p;
-}
-
-std::string first_line(const fs::path& file) {
-    std::ifstream in(file);
-    std::string line;
-    if (!in || !std::getline(in, line)) return {};
-    if (!line.empty() && line.back() == '\r') line.pop_back();
-    return line;
 }
 
 bool write_started_record(const Places& places, const fs::path& folder, const fs::path& game) {
@@ -115,20 +99,6 @@ Install find_install(const Places& places) {
         if (fs::exists(fs::path(recorded) / kStarted, ec)) return {InstallState::kUnfinished, recorded, {}};
     }
     return {};
-}
-
-fs::path normal(const fs::path& path) {
-    std::error_code ec;
-    fs::path out = fs::absolute(path, ec).lexically_normal();
-    if (!out.has_filename() && out.has_relative_path()) out = out.parent_path(); // a trailing slash
-    return out;
-}
-
-bool inside(const fs::path& path, const fs::path& folder) {
-    if (starts_with(normal(path), normal(folder))) return true;
-    std::error_code ec, ec2;
-    const fs::path real_path = fs::weakly_canonical(path, ec), real_folder = fs::weakly_canonical(folder, ec2);
-    return !ec && !ec2 && starts_with(normal(real_path), normal(real_folder));
 }
 
 bool program_running(const fs::path& folder) {

@@ -73,7 +73,10 @@ if(TTT2_TOOLS_ONLY)
         target_link_libraries(windows_installer_driver PRIVATE windows_zarchive SDL3::SDL3 bcrypt ole32 shell32 uuid)
         add_custom_command(TARGET windows_installer_driver POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:windows_installer_driver>)
-        # The launcher's new interface on this SDL3 (its DLL beside the programs).
+        # The launcher's new interface on this SDL3 (its DLL beside the programs), with its logic (launcher/core's
+        # portable part and launcher/model).
+        add_subdirectory(launcher/core)
+        add_subdirectory(launcher/model)
         add_subdirectory(launcher/ui)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME windows_installer_test COMMAND ${Python3_EXECUTABLE}

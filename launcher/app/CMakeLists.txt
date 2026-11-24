@@ -84,7 +84,7 @@ add_executable(ttt2-launcher
     task.cpp
     widgets.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/icons.c)
-target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_core PkgConfig::GTK4)
+target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_core_linux PkgConfig::GTK4)
 # (Not on the generated icons.c.)
 target_compile_options(ttt2-launcher PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 # The build tree's kit and the source tree's importer and icon are found
