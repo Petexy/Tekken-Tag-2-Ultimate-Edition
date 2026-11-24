@@ -77,9 +77,12 @@ endfunction()
 add_library(ttt2_launcher_ui STATIC
     src/anim.cpp src/canvas.cpp src/focus.cpp src/icons.cpp src/input.cpp src/stage.cpp src/text.cpp
     src/textures.cpp src/ui.cpp src/widgets.cpp src/window.cpp)
+# Sounds (sound.h): the game's own menu sounds read from the player's install (launcher/core/game_sounds), else
+# the launcher's own made in code (src/sound_synth.cpp).
+target_sources(ttt2_launcher_ui PRIVATE src/sound.cpp src/sound_synth.cpp)
 target_include_directories(ttt2_launcher_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(ttt2_launcher_ui PUBLIC ttt2_launcher_sdl ttt2_launcher_vendor ttt2_launcher_fonts
-    ttt2_launcher_icons)
+    ttt2_launcher_icons ttt2_launcher_game_sounds)
 target_compile_features(ttt2_launcher_ui PUBLIC cxx_std_20)
 target_compile_options(ttt2_launcher_ui PRIVATE -Wall -Wextra -Wpedantic)
 if(WIN32)
@@ -101,6 +104,23 @@ if(WIN32)
     target_link_options(launcher_ui_tests PRIVATE -static)
 endif()
 add_test(NAME launcher_ui_unit COMMAND launcher_ui_tests)
+
+# The sounds' tests (no speaker: SDL's dummy audio driver; the game's sounds from made-up archives): the launcher's
+# own sounds, mixing, limits, the device opened on the first sound and closed after the silence, the game's read in
+# the background. And the demo's --sounds-wav (every cue as WAV files to listen to).
+add_executable(launcher_sound_tests tests/sound_tests.cpp)
+target_link_libraries(launcher_sound_tests PRIVATE ttt2_launcher_ui)
+target_compile_options(launcher_sound_tests PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(launcher_sound_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher")
+if(WIN32)
+    target_link_options(launcher_sound_tests PRIVATE -static)
+endif()
+add_test(NAME launcher_sound_tests COMMAND launcher_sound_tests "${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME launcher_ui_demo_sounds_wav
+    COMMAND launcher_ui_demo --sounds-wav "${CMAKE_CURRENT_BINARY_DIR}/sounds-wav")
+set_tests_properties(launcher_sound_tests launcher_ui_demo_sounds_wav PROPERTIES LABELS launcher
+    ENVIRONMENT "SDL_AUDIO_DRIVER=dummy")
+set_tests_properties(launcher_ui_demo_sounds_wav PROPERTIES PASS_REGULAR_EXPRESSION "12 sound files")
 
 # The demo's frames against small references (tests/ref, 320 pixels wide, made with --write-reference): the same
 # frame every run (fixed clock, ambient still, software renderer, offscreen), compared after a box filter.
@@ -134,11 +154,14 @@ set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES LABELS launch
 if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
     find_program(TTT2_WINE wine)
     if(TTT2_WINE AND WIN32)
-        set_property(TARGET launcher_ui_demo launcher_ui_tests PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
-        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES ENVIRONMENT_MODIFICATION
+        set_property(TARGET launcher_ui_demo launcher_ui_tests launcher_sound_tests PROPERTY CROSSCOMPILING_EMULATOR
+            "${TTT2_WINE}")
+        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} launcher_sound_tests launcher_ui_demo_sounds_wav
+            PROPERTIES ENVIRONMENT_MODIFICATION
             "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
     else()
-        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES DISABLED ON)
+        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} launcher_sound_tests launcher_ui_demo_sounds_wav
+            PROPERTIES DISABLED ON)
     endif()
 endif()
 

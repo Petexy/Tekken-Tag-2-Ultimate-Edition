@@ -72,6 +72,13 @@ foreach(header IN LISTS sdl_scancode_headers)
     endif()
 endforeach()
 
+# The game's own menu sounds, read from the player's install at run time (game_sounds.h): a library of its own, so
+# that the interface toolkit's Sounds use it without the rest of the launcher's logic. Portable (MinGW too), no SDL.
+add_library(ttt2_launcher_game_sounds STATIC game_sounds.cpp)
+target_include_directories(ttt2_launcher_game_sounds PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ttt2_launcher_game_sounds PUBLIC cxx_std_20)
+target_compile_options(ttt2_launcher_game_sounds PRIVATE -Wall -Wextra -Wpedantic)
+
 # The platform layer with real programs (subprocess; startup, single instance and the release .exe's files), on Linux
 # and on Windows; a Windows build made on Linux runs them through Wine when there is one (never on this PC's screen,
 # never adding to the desktop's menus: no display, winemenubuilder off).
@@ -96,6 +103,9 @@ function(ttt2_launcher_platform_test name source)
     endif()
 endfunction()
 ttt2_launcher_platform_test(launcher_platform_test platform_test.cpp)
+# (made-up archives, banks and audio only: no game data in the repository)
+ttt2_launcher_platform_test(launcher_game_sounds_test game_sounds_test.cpp)
+target_link_libraries(launcher_game_sounds_test PRIVATE ttt2_launcher_game_sounds)
 ttt2_launcher_platform_test(launcher_startup_test startup_test.cpp)
 # An old GTK launcher on the session bus: a private one (dbus-run-session), skipped without Python's gi.
 find_program(TTT2_DBUS_RUN_SESSION dbus-run-session)
