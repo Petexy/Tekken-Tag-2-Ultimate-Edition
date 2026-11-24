@@ -6,7 +6,6 @@
 if(NOT COMMAND ttt2_launcher_program)
     return() # (no SDL: launcher/ui is left out)
 endif()
-include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/LauncherVersion.cmake")
 add_executable(launcher_standin standin.cpp)
 target_link_libraries(launcher_standin PRIVATE ttt2_launcher_core)
 ttt2_launcher_program(launcher_standin NAME ttt2-launcher FILENAME Ultimate_Launcher-x86_64.exe

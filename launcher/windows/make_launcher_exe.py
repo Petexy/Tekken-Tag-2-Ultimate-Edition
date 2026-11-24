@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
 """Makes the Windows release's launcher, as make_appimage.sh makes the Linux one.
 
-    python3 launcher/windows/make_launcher_exe.py [--stub EXE | --cxx COMPILER | --cmake-target TARGET]
-                                                  [--build-dir DIR] [--allow-dirty] OUTPUT
+    python3 launcher/windows/make_launcher_exe.py [--cmake-target TARGET [--build-dir DIR] | --stub EXE |
+                                                   --cxx COMPILER] [--allow-dirty] OUTPUT
 
 OUTPUT is the .exe to write (Ultimate_Launcher-x86_64.exe for a release). It is
-launcher/windows/entry.cpp compiled for 64-bit Windows, with this project's
-files in it: Git's tracked files as they are in the working tree, batch files
-with Windows line ends, as resource 100 (RCDATA; appended after the program
-for a --stub, which is built already). Nothing of the game is in it: the game is built
-on the player's PC from their own .wua. On the player's PC the .exe keeps the
-files in %LOCALAPPDATA%\\TTT2Ultimate\\launcher, opens the launcher from there,
-and that launcher updates the .exe from this repository's releases
-(self_update.py). One made on a branch other than main is a test build: its
-launcher updates its files from that branch's newer commits instead.
+the launcher's program for 64-bit Windows with this project's files in it:
+Git's tracked files as they are in the working tree, batch files with Windows
+line ends, as resource 100 (RCDATA; appended after the program for a --stub,
+which is built already). Nothing of the game is in it: the game is built on the
+player's PC from their own .wua. On the player's PC the .exe keeps the files in
+%LOCALAPPDATA%\\TTT2Ultimate\\launcher and runs the launcher with them, and
+that launcher updates the .exe from this repository's releases (its Python
+workers: self_update.py). One made on a branch other than main is a test build:
+its launcher updates its files from that branch's newer commits instead.
 
---stub EXE      entry.cpp as CMake built it for Windows (build-windows-*/ttt2-launcher.exe)
---cxx COMPILER  else it is compiled here: with x86_64-w64-mingw32-g++ by default,
-                and its windres, which puts the files in it (with its icon and
-                version details when rsvg-convert is there too)
 --cmake-target TARGET
-                else a program of the new interface (launcher/ui; launcher_smoke
-                to test this), cross-built by CMake with MinGW-w64
-                (cmake/toolchain-mingw64.cmake), SDL 3 built in (from
-                third_party/SDL: python3 tools/setup_deps.py --launcher) and
-                the files as its resource 100; in --build-dir DIR (else a
+                the program (the default: DEFAULT_CMAKE_TARGET below): a program
+                of the new interface (ttt2_launcher_program), cross-built by
+                CMake with MinGW-w64 (cmake/toolchain-mingw64.cmake), the
+                launcher alone (TTT2_LAUNCHER_ONLY), SDL 3 built in (from
+                third_party/SDL: python3 tools/setup_deps.py --launcher), the
+                files as its resource 100, stripped, without a time stamp (the
+                same commit makes the same bytes); in --build-dir DIR (else a
                 temporary folder)
+--stub EXE      else a program built already (build-windows-*/ttt2-launcher.exe), the files appended
+--cxx COMPILER  else the Python launcher's .exe (entry.cpp, 0.4.0 to 0.8.0)
+                compiled here with COMPILER (x86_64-w64-mingw32-g++) and its
+                windres, which puts the files in it (with its icon and version
+                details when rsvg-convert is there too)
 --allow-dirty   pack the working tree as it is, with uncommitted changes and new
                 files Git does not ignore (tests: a release is made from a commit)
 
@@ -48,6 +51,9 @@ sys.path.insert(0, str(HERE))
 from self_update import BUILD_BRANCH, BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
 
 ICON = REPO / 'launcher/app/io.github.petexy.TekkenTag2UltimateEdition.svg'
+# The release's program: launcher_standin (launcher/standin) until launcher/app's ttt2-launcher is the SDL program;
+# then ttt2-launcher.
+DEFAULT_CMAKE_TARGET = 'launcher_standin'
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
@@ -228,13 +234,14 @@ def main():
     parser.add_argument('output', type=Path)
     which = parser.add_mutually_exclusive_group()
     which.add_argument('--stub', type=Path)
-    which.add_argument('--cxx', default='x86_64-w64-mingw32-g++')
+    which.add_argument('--cxx')
     which.add_argument('--cmake-target')
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--windres')
     parser.add_argument('--allow-dirty', action='store_true')
     args = parser.parse_args()
-    if args.build_dir and not args.cmake_target: parser.error('--build-dir is for --cmake-target')
+    if args.build_dir and (args.stub or args.cxx): parser.error('--build-dir is for --cmake-target')
+    if args.windres and not args.cxx: parser.error('--windres is for --cxx')
     number = version(REPO)
     output = args.output.resolve()
     if not output.parent.is_dir(): die('%s is not a folder' % output.parent)
@@ -253,10 +260,11 @@ def main():
             if program[-TRAILER.size:][-len(MAGIC):] == MAGIC:
                 die('%s already holds files: give the launcher as built' % args.stub)
             program += payload(files)
-        elif args.cmake_target:
-            program = cmake_build(args.cmake_target, args.build_dir, Path(temporary), payload(files))
-        else:
+        elif args.cxx:
             program = compile_launcher(args.cxx, args.windres, number, Path(temporary), payload(files))
+        else:
+            program = cmake_build(args.cmake_target or DEFAULT_CMAKE_TARGET, args.build_dir, Path(temporary),
+                                  payload(files))
         part = output.with_name(output.name + '.part')
         part.write_bytes(program)
     if not is_launcher_exe(part):

@@ -4,17 +4,23 @@
 // starts (launcher/core/startup.h: --version, --help, --unpack, TTT2_LAUNCHER_AFTER, one launcher per user, the
 // release .exe's files into the files folder), then opens a window and draws one frame with SDL:
 //
-//   launcher_standin [GAME.wua] [--files DIR] | --version | --help | --unpack DIR (Windows)
+//   launcher_standin [GAME.wua] [--files DIR] [--screenshot FILE] | --version | --help | --unpack DIR (Windows)
 //
 // With TTT2_LAUNCHER_STANDIN_LOG set (tests: what an old launcher's update opened), it adds what it found to that
 // file and ends after the frame: "start" (its version, the launcher it waited for and whether that one had ended,
 // its arguments, the release files' folder and digest, TTT2_LAUNCHER_EXE), then "frame" (SDL's video driver and
-// renderer, the colour read back) or "no-frame" (why). Without it, the window stays until it is closed.
+// renderer, the colour read back) or "no-frame" (why); TTT2_LAUNCHER_STANDIN_VIDEO=offscreen draws it offscreen with the
+// software renderer (Wine does not pass SDL_VIDEO_DRIVER on, and a start by an old launcher's update has no
+// arguments of the test's). --screenshot FILE (as the launcher's: a test run, not the one
+// launcher of the user, drawn offscreen by the software renderer) writes the frame as a PNG and ends too. Otherwise
+// the window stays until it is closed.
 
 #include "startup.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+
+#include "stb_image_write.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,8 +45,15 @@ const char kUsage[] = "usage: ttt2-launcher [GAME.wua] [--files DIR] | --version
                       "(launcher_standin: the new launcher's stand-in in its packaging and tests)\n";
 
 std::string environment(const char* name) {
+#ifdef _WIN32
+    // (The process's own variables, which begin() changes; the C runtime keeps a copy of those it started with.)
+    char value[4096];
+    const DWORD n = GetEnvironmentVariableA(name, value, sizeof value);
+    return n > 0 && n < sizeof value ? std::string(value, n) : "";
+#else
     const char* value = std::getenv(name);
     return value ? value : "";
+#endif
 }
 
 long long own_pid() {
@@ -69,15 +82,28 @@ std::string word(std::string text) {
 
 // The frame: the Tag Split halves (crimson left, blue right) and nothing else; the colour of a pixel on each side read
 // back. Returns "" or why there is no frame.
-std::string draw(bool stay, std::string* said) {
+std::string draw(bool stay, const std::string& screenshot, std::string* said) {
     SDL_SetMainReady();
     SDL_SetAppMetadata("Ultimate Launcher", TTT2_LAUNCHER_VERSION, TTT2_LAUNCHER_APP_ID);
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+    if (!screenshot.empty() || environment("TTT2_LAUNCHER_STANDIN_VIDEO") == "offscreen") {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    }
     if (!SDL_Init(SDL_INIT_VIDEO)) return std::string("SDL cannot start: ") + SDL_GetError();
+    // (As the launcher's window does: SDL's renderer for this PC, else the software one.)
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("Ultimate Launcher", 640, 400, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
-        std::string why = std::string("no window: ") + SDL_GetError();
+    std::string why;
+    for (const char* driver : {static_cast<const char*>(nullptr), "software"}) {
+        window = SDL_CreateWindow("Ultimate Launcher", 640, 400, SDL_WINDOW_RESIZABLE);
+        renderer = window ? SDL_CreateRenderer(window, driver) : nullptr;
+        if (renderer) break;
+        why += std::string(why.empty() ? "" : "; ") + (window ? "no renderer: " : "no window: ") + SDL_GetError();
+        if (window) SDL_DestroyWindow(window);
+        window = nullptr;
+    }
+    if (!renderer) {
         SDL_Quit();
         return why;
     }
@@ -102,6 +128,17 @@ std::string draw(bool stay, std::string* said) {
         std::snprintf(text, sizeof text, "%s%02x%02x%02x", colours.empty() ? "" : ",", r, g, b);
         colours += text;
     }
+    std::string failed;
+    if (!screenshot.empty()) {
+        SDL_Surface* read = SDL_RenderReadPixels(renderer, nullptr);
+        SDL_Surface* image = read ? SDL_ConvertSurface(read, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (!image)
+            failed = std::string("cannot read the frame: ") + SDL_GetError();
+        else if (!stbi_write_png(screenshot.c_str(), image->w, image->h, 4, image->pixels, image->pitch))
+            failed = "cannot write " + screenshot;
+        SDL_DestroySurface(image);
+        SDL_DestroySurface(read);
+    }
     SDL_RenderPresent(renderer);
     const char* video = SDL_GetCurrentVideoDriver();
     const char* name = SDL_GetRendererName(renderer);
@@ -119,7 +156,7 @@ std::string draw(bool stay, std::string* said) {
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return "";
+    return failed;
 }
 
 int run(const std::vector<std::string>& args) {
@@ -128,7 +165,11 @@ int run(const std::vector<std::string>& args) {
     launcher::startup::Program program;
     program.version = TTT2_LAUNCHER_VERSION;
     program.usage = kUsage;
-    program.options = {{"--files", 1}};
+    program.options = {{"--files", 1}, {"--screenshot", 1}};
+    std::string screenshot;
+    for (size_t i = 0; i + 1 < args.size(); ++i)
+        if (args[i] == "--screenshot") screenshot = args[i + 1];
+    program.unique = screenshot.empty();
     launcher::startup::Start start = launcher::startup::begin(args, program);
     if (start.exit >= 0) return start.exit;
 
@@ -149,7 +190,7 @@ int run(const std::vector<std::string>& args) {
     note(log, line);
 
     std::string said;
-    const std::string why = draw(log.empty(), &said);
+    const std::string why = draw(log.empty() && screenshot.empty(), screenshot, &said);
     note(log, why.empty() ? "frame " + said : "no-frame " + word(why));
     if (!why.empty()) {
         std::fprintf(stderr, "ttt2-launcher: %s\n", why.c_str());
