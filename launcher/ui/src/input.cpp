@@ -112,8 +112,11 @@ void InputRouter::feed(const RawEvent& e) {
         last_device_ = Device::Keyboard;
         last_glyphs_ = Glyphs::Keyboard;
         if (capturing_) {
-            if (capture_device_ == Device::Gamepad && e.time - capture_start_ < theme::input::kCaptureKeyboardIgnore)
+            if (capture_device_ == Device::Gamepad && e.time - capture_start_ < theme::input::kCaptureKeyboardIgnore) {
+                // (Ignored: its key-up is not a capture either.)
+                keys_down_before_capture_.push_back(e.code);
                 return;
+            }
             capture_.push_back({CaptureEvent::Key, e.code, e.shift, e.ctrl, e.alt, e.gui, e.time});
             return;
         }

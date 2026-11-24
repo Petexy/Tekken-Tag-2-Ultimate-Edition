@@ -186,6 +186,8 @@ void Canvas::add_vertex(Vec2 px, Color c, Vec2 uv) {
     rgba_.push_back(c.a * alpha_);
     uv_.push_back(uv.x);
     uv_.push_back(uv.y);
+    uv_.push_back(0);  // (padding: see flush)
+    uv_.push_back(0);
 }
 void Canvas::tri(int a, int b, int c) { indices_.insert(indices_.end(), {a, b, c}); }
 
@@ -193,9 +195,11 @@ void Canvas::flush() {
     if (!indices_.empty() && renderer_) {
         SDL_Texture* texture = batch_texture_ ? textures_.get(batch_texture_) : nullptr;
         if (!batch_texture_ || texture) {
+            // (UVs at the colours' stride, 4 floats: SDL 3.4's software path reads UVs at the colour stride when it
+            // looks for rectangles (SDL_SW_RenderGeometryRaw), past the end of a tighter array.)
             SDL_RenderGeometryRaw(renderer_, texture, xy_.data(), 2 * sizeof(float),
                                   reinterpret_cast<const SDL_FColor*>(rgba_.data()), 4 * sizeof(float), uv_.data(),
-                                  2 * sizeof(float), static_cast<int>(xy_.size() / 2), indices_.data(),
+                                  4 * sizeof(float), static_cast<int>(xy_.size() / 2), indices_.data(),
                                   static_cast<int>(indices_.size()), sizeof(int));
             ++draw_calls_;
         }

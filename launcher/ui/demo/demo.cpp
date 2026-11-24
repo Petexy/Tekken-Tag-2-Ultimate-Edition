@@ -8,7 +8,8 @@
 // --screenshot: SDL's offscreen driver and the software renderer, a fixed clock (60 frames a second, N frames),
 // the ambient layer still, a seeded random source: the same picture every time. --script: input events at times
 // ("0.5 key Down", "1 pad South", "1.2 move 300 400", "1.3 click 300 400", "1.5 wheel -1"; '#' comments).
-// --compare: the frame scaled down to the reference's size; exit 3 when the mean difference is over T (default 4).
+// --compare: the frame scaled down to the reference's size; exit 3 when the mean difference is over T (default 4)
+// or more than --max-changed pixels (default 200 of a 320 x 200 reference) differ by more than 48 in a channel.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -128,7 +129,9 @@ public:
             const Tab tabs[] = {{"tab:home", "Home", ""}, {"tab:fighters", "Fighters", ups ? std::to_string(ups) : ""}, {"tab:settings", "Settings", ""}};
             tab_bar(ui, "tabs", tabs, screen);
             ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
-            text(ui, "version", TextSpec{"Launcher 0.8.0", tx::kVersion, c::kFaint}, Box{.margin = {0, 0, 16, 0}});
+            TextSpec version{"Launcher 0.8.0", tx::kVersion, c::kFaint};
+            version.drop = true;  // (the first thing to go in a narrow window)
+            text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
             icon_button(ui, "sound", {sound_ ? "stroke:sound-on" : "stroke:sound-off", sound_ ? "Sound on" : "Sound off", sound_},
                         Box{.margin = {0, 0, 10, 0}});
             icon_button(ui, "quit", {"stroke:power", "Quit"});
@@ -265,8 +268,8 @@ private:
             pill(ui, "home/installed", "Installed", Tone::Ok);
             text(ui, "home/kv", TextSpec{"Game 0.8.0 · built on this PC", tx::kKick, c::kBlueDim});
         }
-        text(ui, "home/t1", TextSpec{.text = "Tekken Tag", .style = tx::kTitleLine, .chroma = 4}, fit({}, SeamFit::BlueRect));
-        text(ui, "home/t2", TextSpec{.text = "Tournament 2", .style = tx::kTitleLine, .chroma = 4}, fit({}, SeamFit::BlueRect));
+        text(ui, "home/t1", TextSpec{.text = "Tekken Tag", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30}, fit({}, SeamFit::BlueRect));
+        text(ui, "home/t2", TextSpec{.text = "Tournament 2", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30}, fit({}, SeamFit::BlueRect));
         edition(ui, "home/edition", fit(Box{.margin = {4, 12, 0, 16}}, SeamFit::BlueSkewed));
         const int added = 15;
         const Fact facts_list[] = {{"Version", {{"0.8.0 (1cab8c6)", rgb(0xdbe3f1)}}},
@@ -323,7 +326,9 @@ private:
                 const std::string gid = gi == 0 ? "t7" : gi == 1 ? "dlc" : "t8";
                 h.buttons = {{"gadd:" + gid, gi == 1 ? "Add All Owned" : "Add All"}, {"gupd:" + gid, "Update All"}, {"grem:" + gid, "Remove All"}};
                 group_header(ui, "grp" + std::to_string(gi) + "/h", h, fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::CrimsonRect));
-                auto tiles = ui.open("grp" + std::to_string(gi) + "/tiles", Box{.layout = Layout::Row, .pad = {12, 0, 0, 0}, .gap = 8});
+                auto tiles = ui.open("grp" + std::to_string(gi) + "/tiles",
+                                     fit(Box{.layout = Layout::Row, .pad = {12, 0, 0, 0}, .gap = 8, .line_gap = 8, .wrap = true},
+                                         SeamFit::CrimsonRect));
                 for (std::size_t i = 0; i < fighters_.size(); ++i) {
                     const Fighter& f = fighters_[i];
                     if (f.group != gi) continue;
@@ -397,33 +402,37 @@ private:
     }
 
     static void pair(Ui& ui, const std::string& id, const Fighter& p1, const Fighter& p2, const Box& box) {
+        // 328 x 118 at most; narrower in a narrow window, everything scaled with it.
         Box b = box;
-        b.w = Size::fixed(328);
-        b.h = Size::fixed(118);
-        ui.leaf(id, b, {}, [p1, p2](PaintContext& ctx) {
+        b.hug = true;
+        ui.leaf(id, b, [](float max_w) { const float w = std::min(328.f, max_w); return Vec2{w, 118 * w / 328}; },
+                [p1, p2](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
+            const float k = ctx.rect.w / 328;
             const Rect r = ctx.rect;
+            auto sz = [k](theme::TextStyle st) { st.size *= k; return st; };
             auto slot = [&](const Rect& s, const Fighter& f, bool blue, const char* label) {
                 const Gradient g = blue ? Gradient::css(s, 165, {{0, rgba(45, 128, 255, .62f)}, {.7f, rgba(8, 26, 80, .9f)}, {1, rgba(8, 26, 80, .9f)}})
                                         : Gradient::css(s, 165, {{0, rgba(255, 42, 85, .5f)}, {.7f, rgba(70, 6, 22, .9f)}, {1, rgba(70, 6, 22, .9f)}});
                 surface(cv, s, g, blue ? rgba(160, 205, 255, .75f) : rgba(255, 255, 255, .22f));
-                constexpr theme::TextStyle kCode{theme::Font::DisplayBlackItalic, 58, -.01f, true, 1};
-                constexpr theme::TextStyle kSmall{theme::Font::DisplayExtraBoldItalic, 12, .22f, false, 1};
-                constexpr theme::TextStyle kName{theme::Font::DisplayBoldItalic, 12, .1f, true, 1};
+                const theme::TextStyle kCode = sz({theme::Font::DisplayBlackItalic, 58, -.01f, true, 1});
+                const theme::TextStyle kSmall = sz({theme::Font::DisplayExtraBoldItalic, 12, .22f, false, 1});
+                const theme::TextStyle kName = sz({theme::Font::DisplayBoldItalic, 12, .1f, true, 1});
                 const float cw = ctx.text.width(kCode, f.code);
-                ctx.text.draw(cv, kCode, f.code, {s.center().x - cw / 2, s.y + 22}, rgba(255, 255, 255, .95f));
-                ctx.text.draw(cv, kSmall, label, {s.x + 16, s.y + 8}, rgba(255, 255, 255, .8f));
+                ctx.text.draw(cv, kCode, f.code, {s.center().x - cw / 2, s.y + 22 * k}, rgba(255, 255, 255, .95f));
+                ctx.text.draw(cv, kSmall, label, {s.x + 16 * k, s.y + 8 * k}, rgba(255, 255, 255, .8f));
                 const float nw = ctx.text.width(kName, f.short_name);
-                ctx.text.draw(cv, kName, f.short_name, {s.center().x - nw / 2, s.bottom() - 10 - 12}, rgb(0xffffff));
+                ctx.text.draw(cv, kName, f.short_name, {s.center().x - nw / 2, s.bottom() - 22 * k}, rgb(0xffffff));
             };
-            slot({r.x, r.y, 142, 118}, p1, false, "P1");
-            slot({r.x + 186, r.y, 142, 118}, p2, true, "P2");
-            const Rect tag{r.x + 141, r.y + 44, 48, 30};
+            slot({r.x, r.y, 142 * k, r.h}, p1, false, "P1");
+            slot({r.x + 186 * k, r.y, 142 * k, r.h}, p2, true, "P2");
+            const Rect tag{r.x + 141 * k, r.y + 44 * k, 48 * k, 30 * k};
             cv.fill(skewed(tag.outset(3), theme::kSeamTan), rgb(0x07080d));
             cv.glow(skewed(tag, theme::kSeamTan), 18, rgba(255, 255, 255, .35f));
             cv.fill(skewed(tag, theme::kSeamTan), rgb(0xffffff));
-            const float tw = ctx.text.width(tx::kTagMark, "TAG");
-            ctx.text.draw(cv, tx::kTagMark, "TAG", {tag.center().x - tw / 2, tag.y + (tag.h - ctx.text.line_height(tx::kTagMark)) / 2}, rgb(0x07080d));
+            const theme::TextStyle mark = sz(tx::kTagMark);
+            const float tw = ctx.text.width(mark, "TAG");
+            ctx.text.draw(cv, mark, "TAG", {tag.center().x - tw / 2, tag.y + (tag.h - ctx.text.line_height(mark)) / 2}, rgb(0x07080d));
         });
     }
 
@@ -593,7 +602,8 @@ bool load_script(const std::string& path, std::vector<Scripted>& out, std::strin
 
 // ---- comparing with a reference ---------------------------------------------------------------------------------------
 
-int compare(const std::vector<std::uint8_t>& rgba, int w, int h, const std::string& ref_path, float tolerance) {
+int compare(const std::vector<std::uint8_t>& rgba, int w, int h, const std::string& ref_path, float tolerance,
+            int max_changed) {
     SDL_Surface* loaded = SDL_LoadPNG(ref_path.c_str());
     SDL_Surface* ref = loaded ? SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32) : nullptr;
     SDL_DestroySurface(loaded);
@@ -623,11 +633,13 @@ int compare(const std::vector<std::uint8_t>& rgba, int w, int h, const std::stri
     }
     SDL_DestroySurface(ref);
     const double mean = total / (rw * rh);
-    char line[200];
-    std::snprintf(line, sizeof line, "compare %s: mean difference %.2f (tolerance %.2f), %d of %d pixels differ by > 48\n",
-                  ref_path.c_str(), mean, tolerance, big, rw * rh);
-    say(line, mean > tolerance);
-    return mean > tolerance ? 3 : 0;
+    const bool bad = mean > tolerance || big > max_changed;
+    char line[300];
+    std::snprintf(line, sizeof line,
+                  "compare %s: mean difference %.2f (tolerance %.2f), %d of %d pixels differ by > 48 (at most %d)\n",
+                  ref_path.c_str(), mean, tolerance, big, rw * rh, max_changed);
+    say(line, bad);
+    return bad ? 3 : 0;
 }
 
 bool write_small(const std::vector<std::uint8_t>& rgba, int w, int h, const std::string& path, int rw) {
@@ -657,7 +669,7 @@ bool write_small(const std::vector<std::uint8_t>& rgba, int w, int h, const std:
 int usage(bool error) {
     say("usage: launcher_ui_demo [--screen home|fighters|settings] [--size WxH] [--scale S] [--glyphs kb|xbox|ps|nintendo|generic]\n"
         "                        [--reduced] [--script FILE] [--frames N] [--screenshot FILE] [--compare REF.png]\n"
-        "                        [--tolerance T] [--write-reference FILE] | --version\n",
+        "                        [--tolerance T] [--max-changed N] [--write-reference FILE] | --version\n",
         error);
     return error ? 2 : 0;
 }
@@ -668,7 +680,7 @@ int run(const std::vector<std::string>& args) {
         return 0;
     }
     std::string screenshot, script_path, compare_path, reference_out;
-    int width = 1280, height = 800, frames = 90, screen = 0;
+    int width = 1280, height = 800, frames = 90, screen = 0, max_changed = 200;
     float scale = 0, tolerance = 4;
     bool reduced = false;
     std::optional<Glyphs> glyphs;
@@ -681,6 +693,7 @@ int run(const std::vector<std::string>& args) {
         else if (a == "--compare" && more) compare_path = args[++i];
         else if (a == "--write-reference" && more) reference_out = args[++i];
         else if (a == "--tolerance" && more) tolerance = std::stof(args[++i]);
+        else if (a == "--max-changed" && more) max_changed = std::stoi(args[++i]);
         else if (a == "--frames" && more) frames = std::max(1, std::stoi(args[++i]));
         else if (a == "--scale" && more) scale = std::stof(args[++i]);
         else if (a == "--reduced") reduced = true;
@@ -852,7 +865,7 @@ int run(const std::vector<std::string>& args) {
         say("launcher_ui_demo: cannot write " + reference_out + "\n", true);
         return 1;
     }
-    if (!compare_path.empty()) return compare(rgba, w, h, compare_path, tolerance);
+    if (!compare_path.empty()) return compare(rgba, w, h, compare_path, tolerance, max_changed);
     return 0;
 }
 

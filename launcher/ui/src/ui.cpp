@@ -1,6 +1,7 @@
 #include "ttt2ui/ui.h"
 
 #include <algorithm>
+#include <functional>
 #include <cassert>
 #include <cmath>
 
@@ -56,7 +57,7 @@ int Ui::add(std::string id, const Box& box) {
     }
     if (index_.count(id)) {
         ++duplicates_;
-        assert(!"ttt2::ui: an id was declared twice in one frame");
+        assert(!strict_ids_ || !"ttt2::ui: an id was declared twice in one frame");
         id += "~" + std::to_string(duplicates_);
     }
     Node n;
@@ -138,27 +139,80 @@ void Ui::assign_widths(int index) {
         return k.pref_w;
     };
     if (b.layout == Layout::Row && !b.wrap) {
-        float sum = 0, weights = 0, shrinkable = 0;
+        float sum = 0, weights = 0;
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const bool grows = k.box.w.mode == Size::Grow && k.fit_w < 0;
             k.w = grows ? 0 : base_of(k);
             sum += k.w + k.box.margin.horizontal();
             if (grows) weights += std::max(.0001f, k.box.w.value);
-            else if (k.box.w.mode == Size::Fit && k.fit_w < 0) shrinkable += std::max(0.f, k.w - k.box.min_w);
         }
         if (!n.children.empty()) sum += b.gap * static_cast<float>(n.children.size() - 1);
-        float free = inner - sum;
+        const float free = inner - sum;
+        auto shrinks = [](const Node& k) { return k.box.w.mode == Size::Fit && k.fit_w < 0; };
+        if (free < 0) {
+            // Too narrow: Fit children give up width toward their minimum, in shrink_order (highest first), each
+            // order's children in proportion to what they can give.
+            float deficit = -free;
+            std::vector<int> orders;
+            for (int c : n.children)
+                if (shrinks(nodes_[static_cast<std::size_t>(c)])) orders.push_back(nodes_[static_cast<std::size_t>(c)].box.shrink_order);
+            std::sort(orders.begin(), orders.end(), std::greater<>());
+            orders.erase(std::unique(orders.begin(), orders.end()), orders.end());
+            for (int order : orders) {
+                if (deficit <= 0) break;
+                float room = 0;
+                for (int c : n.children) {
+                    const Node& k = nodes_[static_cast<std::size_t>(c)];
+                    if (shrinks(k) && k.box.shrink_order == order) room += std::max(0.f, k.w - k.box.min_w);
+                }
+                if (room <= 0) continue;
+                const float take = std::min(deficit, room);
+                for (int c : n.children) {
+                    Node& k = nodes_[static_cast<std::size_t>(c)];
+                    if (shrinks(k) && k.box.shrink_order == order) k.w -= take * std::max(0.f, k.w - k.box.min_w) / room;
+                }
+                deficit -= take;
+            }
+        }
         for (int c : n.children) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const bool grows = k.box.w.mode == Size::Grow && k.fit_w < 0;
             if (grows && free > 0) k.w = free * std::max(.0001f, k.box.w.value) / weights;
             else if (grows) k.w = 0;
-            if (free < 0 && shrinkable > 0 && k.box.w.mode == Size::Fit && k.fit_w < 0) {
-                const float room = std::max(0.f, k.w - k.box.min_w);
-                k.w -= std::min(room, -free * room / shrinkable);
-            }
             k.w = std::clamp(k.w, k.box.min_w, k.box.max_w);
+        }
+    } else if (b.layout == Layout::Row) {
+        // Wrapping: each child as wide as it likes (at most the row), then lines as place() makes them; Grow
+        // children share their own line's free space.
+        for (int c : n.children) {
+            Node& k = nodes_[static_cast<std::size_t>(c)];
+            const float room = std::max(0.f, inner - k.box.margin.horizontal());
+            float w;
+            if (k.box.w.mode == Size::Fixed) w = k.box.w.value;
+            else if (k.box.w.mode == Size::Grow) w = 0;
+            else w = std::min(k.pref_w, room);
+            k.w = std::clamp(w, k.box.min_w, k.box.max_w);
+        }
+        std::size_t i = 0;
+        while (i < n.children.size()) {
+            std::size_t j = i;
+            float line_w = 0, weights = 0;
+            while (j < n.children.size()) {
+                const Node& k = nodes_[static_cast<std::size_t>(n.children[j])];
+                const float cw = k.w + k.box.margin.horizontal();
+                if (j > i && line_w + b.gap + cw > inner + .01f) break;
+                line_w += (j > i ? b.gap : 0) + cw;
+                if (k.box.w.mode == Size::Grow) weights += std::max(.0001f, k.box.w.value);
+                ++j;
+            }
+            const float free = inner - line_w - .02f;  // (a hair less: the same lines when placed)
+            if (weights > 0 && free > 0)
+                for (std::size_t q = i; q < j; ++q) {
+                    Node& k = nodes_[static_cast<std::size_t>(n.children[q])];
+                    if (k.box.w.mode == Size::Grow) k.w = std::min(k.box.max_w, free * std::max(.0001f, k.box.w.value) / weights);
+                }
+            i = j;
         }
     } else {
         for (int c : n.children) {
@@ -168,7 +222,6 @@ void Ui::assign_widths(int index) {
             if (k.fit_w >= 0 && (k.box.fit == SeamFit::CrimsonSkewed || k.box.fit == SeamFit::CrimsonRect))
                 w = k.fit_w;
             else if (k.box.w.mode == Size::Fixed) w = k.box.w.value;
-            else if (b.layout == Layout::Row) w = std::min(k.pref_w, room);  // (wrapping rows)
             else if (k.box.w.mode == Size::Grow || (b.align == Align::Stretch && !k.box.hug)) w = room;
             else w = std::min(k.pref_w, room);
             k.w = std::clamp(w, k.box.min_w, k.box.max_w);
@@ -264,6 +317,7 @@ void Ui::place(int index, float x, float y) {
         s.scroll.target = std::clamp(s.scroll.target, 0.f, max);
         s.scroll.value = std::clamp(s.scroll.value, 0.f, max);
         scroll = std::round(s.scroll.value * frame_.scale) / frame_.scale;
+        n.scroll_used = scroll;
     }
     auto cross = [&](const Node&, float room, float size, Align a) {
         if (a == Align::Center) return (room - size) / 2;
@@ -759,7 +813,9 @@ void Ui::keep_in_view(bool snap) {
     if (n.scroller >= 0) {
         const Node& s = nodes_[static_cast<std::size_t>(n.scroller)];
         NodeState& st = states_[s.id];
-        const float content_y = n.y - s.y + st.scroll.value;
+        // (Its place in the content: as laid out, with the offset it was laid out with, not the moving value: the
+        // pixel rounding would read as content moving.)
+        const float content_y = n.y - s.y + s.scroll_used;
         if (anchor_id_ == focused_ && !user_scrolled_ && std::fabs(content_y - anchor_y_) > .5f) {
             const float delta = content_y - anchor_y_;
             st.scroll.value = std::clamp(st.scroll.value + delta, 0.f, scroll_max(n.scroller));
@@ -772,7 +828,7 @@ void Ui::keep_in_view(bool snap) {
             }
         }
         anchor_id_ = focused_;
-        anchor_y_ = nodes_[static_cast<std::size_t>(fi)].y - s.y + st.scroll.value;
+        anchor_y_ = nodes_[static_cast<std::size_t>(fi)].y - s.y + s.scroll_used;
     } else {
         anchor_id_.clear();
     }

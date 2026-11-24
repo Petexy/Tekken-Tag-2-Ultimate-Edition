@@ -62,6 +62,7 @@ struct TextSpec {
     float outline = 0;   // > 0: outlined letters (.lname)
     float chroma = 0;    // > 0: chromatic split (.tline 4, .big 3)
     float autofit_min = 0;  // > 0: shrink the size (to this) until one line fits
+    bool drop = false;      // narrower than the text: nothing at all (no ellipsis); with Box.shrink_order
 };
 void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box = {});
 // Coloured runs on one line ("15 of 23 added · 3 to update").

@@ -400,6 +400,7 @@ void text(Ui& ui, const std::string& id, const TextSpec& spec, const Box& box) {
                 return;
             }
             TextStyle st = spec.style;
+            if (spec.drop && ctx.text.width(st, spec.text) + spec.chroma * 2 > r.w + .5f) return;
             if (spec.autofit_min > 0)
                 while (st.size > spec.autofit_min && ctx.text.width(st, spec.text) + spec.chroma * 2 > r.w + .5f)
                     st.size = std::max(spec.autofit_min, st.size - 3);
@@ -535,14 +536,17 @@ void watermark(Canvas& canvas, TextEngine& text, const std::string& word, Vec2 b
 
 void brand(Ui& ui, const std::string& id, const std::string& line1, const std::string& line2, const Box& box) {
     Box b = with_height(box, 34);
-    if (b.w.mode == Size::Fit) b.w = Size::fixed(196);
+    // (Its words go when the top band is short of room: shrink_order 1, down to the mark.)
+    if (b.w.mode == Size::Fit && b.min_w == 0) b.min_w = 44;
+    if (b.shrink_order == 0) b.shrink_order = 1;
     static constexpr theme::TextStyle kSecond{theme::Font::DisplayBoldItalic, 14, .24f, true, 1.05f};
-    ui.leaf(id, b, {}, [line1, line2](PaintContext& ctx) {
+    ui.leaf(id, b, [](float) { return Vec2{196, 34}; }, [line1, line2](PaintContext& ctx) {
         Canvas& cv = ctx.canvas;
         const float x = ctx.rect.x, cy = ctx.rect.y + ctx.rect.h / 2;
         const Rect red{x + 2, cy - 15, 20, 30}, blue{x + 19, cy - 15, 20, 30};
         cv.fill(skewed(red, kSeamTan), Gradient::linear({0, red.y}, {0, red.bottom()}, rgb(0xff4d72), rgb(0xc40f39)));
         cv.fill(skewed(blue, kSeamTan), Gradient::linear({0, blue.y}, {0, blue.bottom()}, rgb(0x4b98ff, .92f), rgb(0x1650d6, .92f)));
+        if (ctx.rect.w < 52 + std::max(ctx.text.width(tx::kBrand, line1), ctx.text.width(kSecond, line2))) return;
         const float lh = ctx.text.line_height(tx::kBrand);
         ctx.text.draw(cv, tx::kBrand, line1, {x + 52, cy - lh}, rgb(0xe6e9f2));
         ctx.text.draw(cv, kSecond, line2, {x + 52, cy}, c::kDim);
@@ -623,6 +627,11 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
     Focus f;
     f.nav = spec.nav;
     f.pad = 4;
+    // (Short of room: the label goes, the icon stays: shrink_order 2.)
+    if (!spec.icon.empty() && !spec.label.empty() && b.w.mode == Size::Fit && b.min_w == 0) {
+        b.min_w = 28 + 17;
+        if (b.shrink_order == 0) b.shrink_order = 2;
+    }
     ui.leaf(
         id, b,
         [&te, spec](float) {
@@ -634,12 +643,14 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
             const Color border = spec.on ? rgba(98, 212, 255, .5f) : rgba(255, 255, 255, .16f);
             surface(ctx.canvas, r, mix(rgba(255, 255, 255, .05f), rgba(255, 255, 255, .12f), hv), border);
             const Color col = spec.on ? c::kCyan : mix(c::kTabHover, rgb(0xffffff), hv);
-            float x = r.x + 14;
+            const bool label = !spec.label.empty() &&
+                               (spec.icon.empty() || r.w >= 28 + 17 + 8 + ctx.text.width(tx::kIconButton, spec.label) - .5f);
+            float x = label ? r.x + 14 : r.x + (r.w - 17) / 2;
             if (!spec.icon.empty()) {
                 icon(ctx.canvas, ctx.icons, spec.icon, {x, r.y + (r.h - 17) / 2, 17, 17}, col);
                 x += 17 + 8;
             }
-            if (!spec.label.empty()) ctx.text.draw(ctx.canvas, tx::kIconButton, spec.label, {x, centred_y(ctx.text, tx::kIconButton, r)}, col);
+            if (label) ctx.text.draw(ctx.canvas, tx::kIconButton, spec.label, {x, centred_y(ctx.text, tx::kIconButton, r)}, col);
         },
         &f);
 }
@@ -944,10 +955,15 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
 }
 
 void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, const Box& box) {
-    Box b = with_height(box, 30);
+    // A wrapping row: short of room, the buttons go to a line of their own, on the right.
+    Box b = box;
     b.layout = Layout::Row;
+    b.wrap = true;
     b.align = Align::Center;
+    b.justify = Align::End;
     b.gap = 12;
+    b.line_gap = 6;
+    b.min_h = 30;
     auto g = ui.open(id, b);
     TextSpec title{spec.title, tx::kGroupTitle, c::kText};
     text(ui, id + "/title", title);
@@ -965,7 +981,7 @@ void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, co
             if (!sub.empty())
                 ctx.text.draw(ctx.canvas, tx::kGroupCount, sub, {ctx.rect.x, ctx.rect.y + ctx.text.line_height(tx::kGroupCount) + 3}, sub_col);
         });
-    ui.leaf(id + "/space", Box{.w = Size::grow()}, {}, {});
+    ui.leaf(id + "/space", Box{.w = Size::grow(), .h = Size::fixed(1)}, {}, {});
     {
         auto bg = ui.open(id + "/buttons", Box{.layout = Layout::Row, .gap = 8});
         for (const HeaderButton& hb : spec.buttons) {

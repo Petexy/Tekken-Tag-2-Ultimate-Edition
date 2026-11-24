@@ -57,6 +57,9 @@ struct Box {
     bool scroll = false;          // vertical scroll container (clips, scroll bar, keeps the focus in view)
     bool clip = false;
     bool hug = false;             // Fit width: its content's width even in a stretching column (inline blocks)
+    // A row too narrow for its Fit children shrinks them toward min_w, the highest shrink_order first (all of it),
+    // then the next (a top band: the version text goes, then the buttons' labels, then the brand's words).
+    int shrink_order = 0;
     Insets scroll_insets{};       // parts of the viewport covered by overlays (the focus is kept out of them)
     SeamFit fit = SeamFit::None;
     float fit_gap = theme::kSeamGap;
@@ -203,6 +206,8 @@ public:
     Rect rect(const std::string& id) const;  // screen points; empty when absent
     NodeState* state(const std::string& id);
     std::size_t duplicate_ids() const { return duplicates_; }
+    // Debug builds stop at an id declared twice in a frame (assert); tests that make one on purpose turn it off.
+    void set_strict_ids(bool on) { strict_ids_ = on; }
     std::size_t node_count() const { return nodes_.size(); }
     std::size_t state_count() const { return states_.size(); }
     std::vector<std::string> focusable_ids() const;
@@ -239,6 +244,7 @@ private:
         // layout
         float pref_w = 0, w = 0, h = 0, x = 0, y = 0, content_h = 0;
         float fit_w = -1, fit_dx = 0;
+        float scroll_used = 0;  // scroll containers: the (pixel-rounded) offset their children were placed with
         Rect clip;      // visible part (ancestors' clips and scroll viewports)
         int scroller = -1;  // nearest scroll container above
     };
@@ -306,7 +312,7 @@ private:
     std::string anchor_id_;
     float anchor_y_ = 0;
     bool user_scrolled_ = false;
-    bool animating_ = false, paint_animating_ = false;
+    bool animating_ = false, paint_animating_ = false, strict_ids_ = true;
     std::string prefix_;
     std::vector<std::string> prefixes_;
 };

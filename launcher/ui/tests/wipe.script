@@ -1,0 +1,5 @@
+# Home: down to Settings, accept (a wipe to Settings), then a right arrow on the first row. Times in seconds.
+0.10 key Down
+0.25 key Down
+0.40 key Return
+0.55 key Right

@@ -83,7 +83,12 @@ void TextureRegistry::make(Entry& e) {
     if (e.kind == Entry::Target) {
         e.texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, e.w, e.h);
     } else {
-        e.texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, e.w, e.h);
+        // Alpha pages are updated after they were drawn: streaming. (SDL's software renderer RLE-encodes a static
+        // texture the first time it blits it and frees its pixels; a later SDL_UpdateTexture then writes through a
+        // null pointer. Seen with SDL 3.4.18/3.4.20.)
+        e.texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGBA32,
+                                      e.kind == Entry::Alpha ? SDL_TEXTUREACCESS_STREAMING : SDL_TEXTUREACCESS_STATIC,
+                                      e.w, e.h);
     }
     if (!e.texture) return;
     SDL_SetTextureBlendMode(e.texture, SDL_BLENDMODE_BLEND);

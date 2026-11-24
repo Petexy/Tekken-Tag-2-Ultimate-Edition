@@ -92,6 +92,53 @@ target_link_libraries(launcher_ui_demo PRIVATE ttt2_launcher_ui)
 ttt2_launcher_program(launcher_ui_demo NAME launcher_ui_demo FILENAME launcher_ui_demo.exe
     DESCRIPTION "Ultimate Launcher (interface toolkit demo)")
 
+# Its unit tests (no window): layout, focus, input timings, springs, text, per-id state.
+add_executable(launcher_ui_tests tests/ui_tests.cpp)
+target_link_libraries(launcher_ui_tests PRIVATE ttt2_launcher_ui)
+target_compile_options(launcher_ui_tests PRIVATE -Wall -Wextra -Wpedantic)
+set_target_properties(launcher_ui_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher")
+if(WIN32)
+    target_link_options(launcher_ui_tests PRIVATE -static)
+endif()
+add_test(NAME launcher_ui_unit COMMAND launcher_ui_tests)
+
+# The demo's frames against small references (tests/ref, 320 pixels wide, made with --write-reference): the same
+# frame every run (fixed clock, ambient still, software renderer, offscreen), compared after a box filter.
+set(_ui_ref "${CMAKE_CURRENT_SOURCE_DIR}/tests/ref")
+set(_ui_out "${CMAKE_CURRENT_BINARY_DIR}/ui-shots")
+file(MAKE_DIRECTORY "${_ui_out}")
+add_test(NAME launcher_ui_demo_version COMMAND launcher_ui_demo --version)
+set_tests_properties(launcher_ui_demo_version PROPERTIES
+    PASS_REGULAR_EXPRESSION "^launcher_ui_demo ${TTT2_LAUNCHER_VERSION}\n$")
+set(_ui_shot_tests launcher_ui_demo_version)
+foreach(_shot
+        "home|--screen;home"
+        "fighters|--screen;fighters"
+        "settings|--screen;settings"
+        "home_960|--screen;home;--size;960x640"
+        "settings_1080|--screen;settings;--size;1920x1080"
+        "fighters_scale15|--screen;fighters;--size;1920x1200;--scale;1.5"
+        "pad_glyphs|--screen;settings;--glyphs;ps"
+        "script_wipe|--screen;home;--frames;40;--script;${CMAKE_CURRENT_SOURCE_DIR}/tests/wipe.script")
+    string(REPLACE "|" ";" _parts "${_shot}")
+    list(GET _parts 0 _name)
+    list(REMOVE_AT _parts 0)
+    add_test(NAME launcher_ui_shot_${_name}
+        COMMAND launcher_ui_demo ${_parts} --screenshot "${_ui_out}/${_name}.png" --compare "${_ui_ref}/${_name}.png")
+    list(APPEND _ui_shot_tests launcher_ui_shot_${_name})
+endforeach()
+set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES LABELS launcher)
+if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    find_program(TTT2_WINE wine)
+    if(TTT2_WINE AND WIN32)
+        set_property(TARGET launcher_ui_demo launcher_ui_tests PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
+        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES ENVIRONMENT_MODIFICATION
+            "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
+    else()
+        set_tests_properties(launcher_ui_unit ${_ui_shot_tests} PROPERTIES DISABLED ON)
+    endif()
+endif()
+
 add_executable(launcher_smoke smoke/smoke.cpp)
 ttt2_launcher_program(launcher_smoke NAME launcher_smoke FILENAME launcher_smoke.exe
     DESCRIPTION "Ultimate Launcher (smoke test)")
