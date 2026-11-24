@@ -21,14 +21,22 @@ add_library(ttt2_launcher_core STATIC
     json.cpp
     keymap.cpp
     paths_common.cpp
+    subprocess.cpp
     protocol.cpp
     release.cpp
     status.cpp
     test_actions.cpp
     ${runtime_src}/host/display_settings.cpp)
+if(WIN32)
+    target_sources(ttt2_launcher_core PRIVATE subprocess_windows.cpp win32.cpp)
+else()
+    target_sources(ttt2_launcher_core PRIVATE subprocess_linux.cpp)
+endif()
 target_include_directories(ttt2_launcher_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${runtime_src})
 target_compile_features(ttt2_launcher_core PUBLIC cxx_std_20)
 target_compile_options(ttt2_launcher_core PRIVATE -Wall -Wextra -Wpedantic)
+find_package(Threads REQUIRED)
+target_link_libraries(ttt2_launcher_core PUBLIC Threads::Threads)
 
 # Match SDL's key-name inventory (keyboard.ini names keys as the game's SDL does): read from the SDL 3 headers the
 # game is built with (find_package(SDL3); on Windows the pinned mingw one), else the launcher's own SDL source
@@ -57,6 +65,29 @@ foreach(header IN LISTS sdl_scancode_headers)
         break()
     endif()
 endforeach()
+
+# The platform layer with real programs (subprocess, single instance), on Linux and on Windows; a Windows build made
+# on Linux runs it through Wine when there is one (never on this PC's screen, never adding to the desktop's menus:
+# no display, winemenubuilder off).
+add_executable(launcher_platform_test platform_test.cpp)
+target_link_libraries(launcher_platform_test PRIVATE ttt2_launcher_core)
+target_compile_options(launcher_platform_test PRIVATE -Wall -Wextra)
+if(WIN32)
+    target_link_libraries(launcher_platform_test PRIVATE shell32)
+    target_link_options(launcher_platform_test PRIVATE -static)
+endif()
+add_test(NAME launcher_platform_test COMMAND launcher_platform_test ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(launcher_platform_test PROPERTIES LABELS launcher TIMEOUT 300)
+if(CMAKE_CROSSCOMPILING AND NOT CMAKE_CROSSCOMPILING_EMULATOR)
+    find_program(TTT2_WINE wine)
+    if(TTT2_WINE AND WIN32)
+        set_property(TARGET launcher_platform_test PROPERTY CROSSCOMPILING_EMULATOR "${TTT2_WINE}")
+        set_tests_properties(launcher_platform_test PROPERTIES ENVIRONMENT_MODIFICATION
+            "WINEDEBUG=set:-all;WINEDLLOVERRIDES=set:winemenubuilder.exe=d;DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
+    else()
+        set_tests_properties(launcher_platform_test PROPERTIES DISABLED ON)
+    endif()
+endif()
 
 if(WIN32)
     return()

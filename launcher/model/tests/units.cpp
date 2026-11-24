@@ -371,6 +371,7 @@ void self_update() {
         CHECK_EQ(rig.runner.last().title, std::string("Updated to 0.9.0"));
         CHECK(rig.update.opened());
         CHECK(rig.opened.size() == 1 && rig.opened[0].env.at(kReplacesVariable) == "42");
+        CHECK(rig.opened.size() == 1 && rig.opened[0].mode == Command::Mode::kDetached); // (it outlives this one)
     }
     {
         UpdateRig rig;
@@ -702,6 +703,15 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK(w.worker(f, TaskKind::kUpdateInstalled)->argv[8] == "update");
         CHECK(!w.worker(f, TaskKind::kUninstall));
         CHECK(w.remove(f, {"kazumi"}).argv.back() == "kazumi");
+        // How each runs (core/subprocess.h): the update workers never in a job nor killed (C3), the rest tasks.
+        CHECK(import.mode == Command::Mode::kTask && status->mode == Command::Mode::kTask);
+        CHECK(w.worker(f, TaskKind::kLauncherUpdate)->mode == Command::Mode::kSelfUpdate);
+        CHECK(w.worker(f, TaskKind::kLauncherFiles)->mode == Command::Mode::kSelfUpdate);
+        CHECK(w.worker(f, TaskKind::kSetup)->mode == Command::Mode::kTask);
+        Facts linux_facts;
+        linux_facts.install.folder = "/games/ttt2";
+        LinuxCommands l;
+        CHECK(l.play(linux_facts)->mode == Command::Mode::kDetached); // (the game outlives the launcher)
     }
     replay(fixture(golden, "add-ok"), Caps::windows_caps(), scratch / "i",
            {0, [](Harness& h) {

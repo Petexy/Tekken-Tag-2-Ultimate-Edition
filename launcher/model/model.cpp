@@ -86,6 +86,8 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
               outfits.empty() ? "none" : outfits};
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.cwd = w.root;
+    // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
+    if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
     return c;
 }
 
@@ -183,7 +185,7 @@ Command LinuxCommands::shaders(const Facts& facts) {
 }
 
 std::optional<Command> LinuxCommands::play(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}};
+    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}, Command::Mode::kDetached};
 }
 
 // ---------------------------------------------------------------- the model

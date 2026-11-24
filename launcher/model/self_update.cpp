@@ -178,7 +178,8 @@ void SelfUpdate::started(int code, const std::string& out) {
     state_ = State::kIdle;
     runner_.add_log("Version " + version + " is in " + config_.appimage->string() + ".");
     std::string error;
-    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {}};
+    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {},
+                 Command::Mode::kDetached}; // (it outlives this one)
     auto job = starter_.start(open, {}, &error);
     if (!job) {
         runner_.finish(false, "Updated to " + version + ", but it cannot be opened",
