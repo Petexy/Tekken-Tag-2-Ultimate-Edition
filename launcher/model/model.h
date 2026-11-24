@@ -161,6 +161,7 @@ struct View {
     std::optional<SettingsView> settings;
     TaskView task;
     std::optional<Dialog> dialog;
+    bool operator==(const View&) const = default;
 };
 
 class LauncherModel {

@@ -131,6 +131,11 @@ public:
     void release_all();
     // Something is held that will repeat (the loop must keep ticking).
     bool holding() const;
+    // Whatever the next frame takes from it: actions, capture events, the mouse's motion, presses or wheel.
+    bool pending() const {
+        return !actions_.empty() || !capture_.empty() || mouse_.moved || mouse_.pressed || mouse_.released ||
+               mouse_.wheel != 0;
+    }
     double next_repeat_time() const;
 
 private:

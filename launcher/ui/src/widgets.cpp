@@ -809,7 +809,8 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             r = {r.center().x - r.w * s / 2, r.center().y - r.h * s / 2, r.w * s, r.h * s};
             const Quad q = skewed(r, kSeamTan);
             const bool dis = spec.disabled;
-            const float breathe = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / 1.6f);
+            const float breathe =
+                ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.ambient) * 2 * kPi / 1.6f);
             if (!dis) {
                 Rect low = r;
                 low.y += 12;
@@ -830,7 +831,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             cv.fill(q, Gradient::css(r, 100, {{0, col(c::kSlabA)}, {.45f, col(c::kSlabB)}, {1, col(c::kSlabC)}}));
             // Streaks and a sheen running through it (still under Reduce motion).
             if (!dis && !ctx.reduced) {
-                const float t = static_cast<float>(ctx.now);
+                const float t = static_cast<float>(ctx.ambient);
                 static constexpr float kL[6][4] = {{16, 180, 1.1f, 0}, {32, 120, .8f, .3f}, {50, 240, 1.3f, .6f},
                                                    {68, 160, .9f, .1f}, {84, 200, 1.2f, .45f}, {98, 110, .7f, .8f}};
                 for (const auto& l : kL) {
@@ -852,7 +853,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
                                 Gradient::linear3({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0), .5f,
                                                   rgba(255, 255, 255, .4f), rgba(255, 255, 255, 0)));
                 }
-                ctx.animate();
+                ctx.loop();
             }
             // Inner light along the top, shade along the bottom.
             cv.line(q.p[0] + Vec2{0, .5f}, q.p[1] + Vec2{0, .5f}, 1, rgba(255, 255, 255, .45f));
@@ -1020,14 +1021,14 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             if (none && !spec.busy) dashed(cv, q, 1, 4, 3, mix(border, rgb(0xffffff), f));
             else cv.stroke(q, 1, mix(border, rgb(0xffffff), f));
             if (checking && !ctx.reduced) {
-                const float ph = std::fmod(static_cast<float>(ctx.now) / 1.3f, 1.f);
+                const float ph = std::fmod(static_cast<float>(ctx.ambient) / 1.3f, 1.f);
                 const float x0 = r.x + r.w * (1.5f - 3 * ph) - r.w * .4f;
                 const float a = std::max(r.x, x0), b2 = std::min(r.right(), x0 + r.w * .8f);
                 if (b2 > a)
                     cv.fill(sk_rect(r, {a, r.y, b2 - a, r.h}),
                             Gradient::linear3({x0, 0}, {x0 + r.w * .8f, 0}, rgba(98, 212, 255, 0), .5f,
                                               rgba(98, 212, 255, .25f), rgba(98, 212, 255, 0)));
-                ctx.animate();
+                ctx.loop();
             }
             // Code and name.
             const Color code_col = notowned   ? rgb(0x7d6a70)
@@ -1286,12 +1287,13 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
                           {x, centred_y(ctx.text, tx::kKeyName, r)}, c::kText);
             Color text_col = rgb(0xffffff);
             if (spec.capturing) {
-                const float pulse = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / .8f);
+                const float pulse =
+                    ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.ambient) * 2 * kPi / .8f);
                 surface(cv, kc,
                         Gradient::css(kc, 100, {{0, brightened(c::kWarn, 1 + .25f * pulse)}, {1, rgb(0xff9a2e)}}),
                         rgb(0xffffff));
                 text_col = rgb(0x1a1000);
-                if (!ctx.reduced) ctx.animate();
+                if (!ctx.reduced) ctx.loop();
             } else if (f > .5f) {
                 surface(cv, kc, Gradient::linear({0, kc.y}, {0, kc.bottom()}, rgb(0xffffff), rgb(0xd9dde8)),
                         spec.swapped ? c::kWarn : rgba(255, 255, 255, .28f));
@@ -1322,14 +1324,14 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
                     cv.fill(q, Gradient::css(r, 100, {{0, rgba(255, 42, 85, .42f)}, {1, rgba(120, 10, 40, .3f)}}));
                     if (!ctx.reduced) {
                         // Moving stripes.
-                        const float off = std::fmod(static_cast<float>(ctx.now) * 45, 20.f);
+                        const float off = std::fmod(static_cast<float>(ctx.ambient) * 45, 20.f);
                         cv.push_clip(r);
                         for (float x = r.x - r.h - 20 - off; x < r.right() + r.h; x += 20) {
                             const Vec2 a = sk(r, {x + 10, r.y}), b2 = sk(r, {x + 10 - r.h * .47f, r.bottom()});
                             cv.line(a, b2, 10 * .9f, rgba(255, 255, 255, .07f));
                         }
                         cv.pop_clip();
-                        ctx.animate();
+                        ctx.loop();
                     }
                     cv.stroke(q, 1, rgba(255, 210, 220, .85f));
                     name_col = icon_col = rgb(0xffffff);
@@ -1433,10 +1435,10 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
         if (tone == Tone::Bad) a = rgb(0x5e0a1f), mid = rgb(0xa8183a), z = rgb(0xff2a55);
         float x0 = 0, x1 = s.user[0];
         if (pulse) {
-            const float t = ctx.reduced ? .5f : .5f - .5f * std::cos(static_cast<float>(ctx.now) * kPi / 1.1f);
+            const float t = ctx.reduced ? .5f : .5f - .5f * std::cos(static_cast<float>(ctx.ambient) * kPi / 1.1f);
             x0 = (-0.4f + 3.1f * t) * .3f;
             x1 = x0 + .3f;
-            if (!ctx.reduced) ctx.animate();
+            if (!ctx.reduced) ctx.loop();
         }
         x0 = std::clamp(x0, 0.f, 1.f), x1 = std::clamp(x1, 0.f, 1.f);
         if (x1 > x0) {
@@ -1471,11 +1473,11 @@ void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bo
             surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
             float x = ctx.rect.x + 13;
             if (dot) {
-                const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.now) * 2 * kPi);
+                const float blink = ctx.reduced ? 1 : .625f + .375f * std::cos(static_cast<float>(ctx.ambient) * 2 * kPi);
                 const Vec2 ctr{x + 3.5f, ctx.rect.y + ctx.rect.h / 2};
                 ctx.canvas.radial(ctr, 9, tc.text.faded(.5f * blink));
                 ctx.canvas.circle(ctr, 3.5f, tc.text.faded(blink));
-                if (!ctx.reduced) ctx.animate();
+                if (!ctx.reduced) ctx.loop();
                 x += 13;
             }
             ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);

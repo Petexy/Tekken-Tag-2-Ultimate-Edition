@@ -221,11 +221,14 @@ void Window::close_pads() {
 }
 
 void Window::pads_tick(double now, bool game_running) {
+    game_running_ = game_running;
     const bool want = focused_ && visible_ && !game_running && now - focus_since_ >= theme::input::kPadInitDelay;
-    if (want && !pads_on_) {
+    if (want && !pads_on_ && !pads_failed_) {
         if (SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
             pads_on_ = true;
             open_pads();
+        } else {
+            pads_failed_ = true;  // (tried again when the focus comes back)
         }
     } else if (!want && pads_on_) {
         close_pads();
@@ -240,7 +243,8 @@ void Window::pads_tick(double now, bool game_running) {
 
 double Window::next_pad_poll() const {
     if (pads_on_) return last_poll_ + (pads_.empty() ? .5 : theme::input::kPadPollInterval);
-    if (focused_ && visible_) return focus_since_ + theme::input::kPadInitDelay;
+    // (When they are opened: not while the game runs, nor after they could not be.)
+    if (focused_ && visible_ && !game_running_ && !pads_failed_) return focus_since_ + theme::input::kPadInitDelay;
     return 1e18;
 }
 
@@ -251,8 +255,10 @@ bool Window::translate(const SDL_Event& e, RawEvent& out, double now) {
     auto to_points = [&](float x, float y) { return Vec2{x * density / scale_, y * density / scale_}; };
     switch (e.type) {
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        // (The first one usually comes after the start, which already counted as focused: the pads stay open.)
+        if (!focused_) focus_since_ = now;
         focused_ = true;
-        focus_since_ = now;
+        pads_failed_ = false;
         return false;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         focused_ = false;

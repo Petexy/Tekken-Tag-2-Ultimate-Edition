@@ -268,12 +268,36 @@ int App::run() {
     stage_->snap();
     last_ = t0;
     idle_since_ = t0;
+    next_tick_ = t0 + kModelTick;
+    test_idle_hooks(t0);
     while (!quit_) {
         const double t = now();
-        const bool busy = ui_->animating() || stage_->animating() || wipe_->active(t) || router_.holding() || first_ ||
-                          readouts_animating(t);
-        pump_input(t, !busy && !o_.testing);
-        frame(now());
+        // Drawn only when something changed (ARCHITECTURE sec 7, U9): input or a program's or thread's news, the
+        // model's timers, a real animation (vsync-paced), an ambient frame (<= kAmbientHz while ambient motion runs);
+        // at most ~2 frames a second while the game runs and the window is elsewhere, or while it is hidden.
+        const bool moving = animating(t);
+        const bool slow = slowed();
+        double draw_at = 1e18;  // when the next frame is due without any news
+        if (o_.testing || first_) draw_at = t;
+        else if (moving || dirty_) draw_at = slow ? std::max(t, last_drawn_ + kSlowFrame) : t;
+        if (pump_input(t, draw_at)) dirty_ = true;
+        const double t2 = now();
+        bool draw = o_.testing || first_ || moving || dirty_ || t2 >= stage_->next_ambient_time(t2) ||
+                    (toast_until_ > last_drawn_ && t2 >= toast_until_);
+        // (The model's clock: notes, the task's auto-hide, the update's watch. Drawn when that changed the view.)
+        if (t2 >= next_tick_) {
+            next_tick_ = t2 + kModelTick;
+            if (!draw) draw = model_changed(t2);
+        }
+        if (draw && slow && !o_.testing && !first_ && t2 < last_drawn_ + kSlowFrame) {
+            dirty_ = true;  // (later: at most ~2 frames a second)
+            draw = false;
+        }
+        if (draw) {
+            dirty_ = false;
+            last_drawn_ = t2;
+            frame(t2);
+        }
         sounds_tick();
         if (o_.testing) test_tick(now());
     }
@@ -282,21 +306,102 @@ int App::run() {
     return exit_code_;
 }
 
-void App::pump_input(double t, bool wait) {
+// A real animation runs (springs, the wipe, the readouts, a held key's repeats): frames at the display's rate.
+// Decorative loops (PaintContext::loop) and the stage's ambient layer are not: they wait for ambient frames.
+bool App::animating(double t) const {
+    return ui_->animating() || stage_->animating() || wipe_->active(t) || router_.holding() || first_ ||
+           readouts_animating(t);
+}
+
+// The game runs and the player is in it (the window lost the focus), or the window cannot be seen.
+bool App::slowed() const {
+    if (o_.testing) return false;
+    return !window_.visible() || (!window_.focused() && model_ && model_->facts().game_running);
+}
+
+// The model's timers looked at without a frame: drawn when they changed what the window shows.
+bool App::model_changed(double t) {
+    model_->tick(t);
+    std::vector<m::Effect> effects = model_->take_effects();
+    if (!effects.empty()) {
+        handle(std::move(effects));
+        return true;
+    }
+    return !(model_->view() == view_);
+}
+
+// The ambient clock: the time decorative loops are drawn at. It runs while ambient motion runs (U9: focused,
+// visible, not reduced, the game not running, input in the last 20 s) and stands still otherwise, so a paused
+// loop is a still picture that goes on from there. Tests: the (held) clock itself.
+double App::ambient_clock(double t) {
+    if (o_.testing) return t;
+    const bool live = stage_->ambient_running(t);
+    if (live && ambient_since_ < 0) ambient_since_ = t;
+    if (!live && ambient_since_ >= 0) {
+        ambient_base_ += t - ambient_since_;
+        ambient_since_ = -1;
+    }
+    return ambient_since_ < 0 ? ambient_base_ : ambient_base_ + (t - ambient_since_);
+}
+
+// Events that change nothing by themselves: the joysticks' raw reports (their gamepad events are used), sensors,
+// batteries, audio devices, the clipboard. (A stick's motion counts when it moved the router: pump_input.)
+static bool quiet_event(Uint32 type) {
+    switch (type) {
+    case SDL_EVENT_JOYSTICK_AXIS_MOTION:
+    case SDL_EVENT_JOYSTICK_BALL_MOTION:
+    case SDL_EVENT_JOYSTICK_HAT_MOTION:
+    case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+    case SDL_EVENT_JOYSTICK_BUTTON_UP:
+    case SDL_EVENT_JOYSTICK_ADDED:
+    case SDL_EVENT_JOYSTICK_REMOVED:
+    case SDL_EVENT_JOYSTICK_BATTERY_UPDATED:
+    case SDL_EVENT_JOYSTICK_UPDATE_COMPLETE:
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+    case SDL_EVENT_GAMEPAD_ADDED:
+    case SDL_EVENT_GAMEPAD_REMOVED:
+    case SDL_EVENT_GAMEPAD_REMAPPED:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
+    case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+    case SDL_EVENT_GAMEPAD_UPDATE_COMPLETE:
+    case SDL_EVENT_GAMEPAD_STEAM_HANDLE_UPDATED:
+    case SDL_EVENT_SENSOR_UPDATE:
+    case SDL_EVENT_AUDIO_DEVICE_ADDED:
+    case SDL_EVENT_AUDIO_DEVICE_REMOVED:
+    case SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED:
+    case SDL_EVENT_CLIPBOARD_UPDATE:
+    case SDL_EVENT_POLL_SENTINEL:
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool App::pump_input(double t, double draw_at) {
     SDL_Event ev;
     bool got;
-    if (wait) {
-        double wake = std::min({stage_->next_ambient_time(), router_.holding() ? router_.next_repeat_time() : 1e18,
-                                window_.next_pad_poll(), t + 0.25});
-        if (toast_until_ > t) wake = std::min(wake, toast_until_);
-        const int ms = static_cast<int>(std::clamp((wake - t) * 1000, 0.0, 250.0));
-        got = SDL_WaitEventTimeout(&ev, ms);
-    } else if (o_.testing) {
+    bool changed = false;
+    if (o_.testing) {
         // (Offscreen: no vsync to pace the loop.)
         got = SDL_WaitEventTimeout(&ev, 8);
-    } else {
+    } else if (draw_at <= t) {
         got = SDL_PollEvent(&ev);
+    } else {
+        double wake = std::min({draw_at, stage_->next_ambient_time(t),
+                                router_.holding() ? router_.next_repeat_time() : 1e18, window_.next_pad_poll(),
+                                next_tick_});
+        if (toast_until_ > t) wake = std::min(wake, toast_until_);
+        // (Rounded up: a wait cut to 0 ms would spin until the wake.)
+        const int ms = static_cast<int>(std::ceil(std::clamp((wake - t) * 1000, 0.0, kModelTick * 1000)));
+        got = SDL_WaitEventTimeout(&ev, ms);
     }
+    // The pads first: a press that came with a key (a Steam Controller's A and the Enter Steam types) is then read
+    // in the same pass as the key, and the router counts them once.
+    const bool game_running = model_->facts().game_running;
+    window_.pads_tick(now(), game_running);
     while (got) {
         if (ev.type == SDL_EVENT_QUIT || ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             handle(model_->request_close(now()));
@@ -315,11 +420,19 @@ void App::pump_input(double t, bool wait) {
         }
         RawEvent raw;
         if (!o_.testing && window_.translate(ev, raw, now()) && !raw.filtered) {
+            // (A stick's small motion moves nothing: no frame for it, and it is not the player's input.)
+            const bool was = router_.pending();
+            const Glyphs glyphs = router_.glyphs();
             router_.feed(raw);
-            stage_->note_input(now());
+            if (raw.kind != RawEvent::AxisMotion || router_.pending() != was || router_.glyphs() != glyphs ||
+                router_.holding()) {
+                stage_->note_input(now());
+                changed = true;
+            }
         } else if (o_.testing) {
             window_.translate(ev, raw, now());
         }
+        if (!quiet_event(ev.type)) changed = true;
         got = SDL_PollEvent(&ev);
     }
     // (Tests: their input, as the devices would give it.)
@@ -333,9 +446,11 @@ void App::pump_input(double t, bool wait) {
         router_.feed(raw);
         stage_->note_input(now());
         it = test_raw_.erase(it);
+        changed = true;
     }
-    window_.pads_tick(now(), model_->facts().game_running);
-    stage_->set_ambient(window_.focused() && window_.visible());
+    if (!o_.testing) test_idle_hooks(now());
+    // Ambient motion only while the window is seen and has the player: not while the game runs (U9).
+    stage_->set_ambient(window_.focused() && window_.visible() && !game_running);
     // Programs' lines and ends, posted work, later starts handed over.
     host_->pump();
     std::deque<std::function<void()>> work;
@@ -343,6 +458,7 @@ void App::pump_input(double t, bool wait) {
         std::lock_guard<std::mutex> lock(posted_mutex_);
         work.swap(posted_);
     }
+    if (!work.empty()) changed = true;
     for (auto& w : work) w();
     if (o_.instance) {
         for (const Forwarded& f : o_.instance->take()) {
@@ -351,8 +467,10 @@ void App::pump_input(double t, bool wait) {
                     model_->mutable_facts().chosen_game = normal(fs::path(std::u8string(a.begin(), a.end())));
             }
             SDL_RaiseWindow(window_.sdl());
+            changed = true;
         }
     }
+    return changed;
 }
 
 void App::frame(double t) {
@@ -409,6 +527,7 @@ void App::frame(double t) {
     in.mouse = router_.take_mouse();
     in.reduced_motion = model_->launcher_settings().reduce_motion;
     in.glyphs = router_.glyphs();
+    in.ambient = ambient_clock(t);
     for (const ActionEvent& a : in.actions)
         if (a.action == ttt2::ui::Action::Up || a.action == ttt2::ui::Action::Down)
             last_dy_ = a.action == ttt2::ui::Action::Up ? -1 : 1;
@@ -446,10 +565,55 @@ void App::frame(double t) {
     if (!o_.smoke.empty() && smoke()) quit_ = true;
     if (!o_.testing || o_.real_window) {
         SDL_RenderPresent(window_.renderer());
+        if (presents_) {
+            std::fprintf(presents_, "%.4f\n", now() - presents_t0_);
+            std::fflush(presents_);
+        }
         if (first_) window_.show();
     }
     first_ = false;
+    // (What the events do shows on the next frame.)
+    if (!events.empty()) dirty_ = true;
     on_events(events);
+}
+
+// Player-like starts for the idle tests (tests/idle.sh), none of them a test run: TTT2_LAUNCHER_TEST_PRESENTS=FILE
+// writes the time of each frame put on the screen (seconds from the start); TTT2_LAUNCHER_TEST_PAD=1 connects a
+// virtual gamepad once the gamepads are opened; TTT2_LAUNCHER_TEST_BLUR=SECONDS takes the focus away then (as the
+// game's window does).
+void App::test_idle_hooks(double t) {
+    if (!test_idle_read_) {
+        test_idle_read_ = true;
+        presents_t0_ = t;
+        if (const char* f = std::getenv("TTT2_LAUNCHER_TEST_PRESENTS"); f && *f) presents_ = std::fopen(f, "w");
+        const char* pad = std::getenv("TTT2_LAUNCHER_TEST_PAD");
+        test_pad_ = pad && *pad && std::string(pad) != "0";
+        if (const char* b = std::getenv("TTT2_LAUNCHER_TEST_BLUR"); b && *b) test_blur_at_ = t + std::atof(b);
+        return;
+    }
+    if (test_pad_id_ && !SDL_WasInit(SDL_INIT_GAMEPAD)) test_pad_id_ = 0;  // (gone with the gamepads: again later)
+    if (test_pad_ && !test_pad_id_ && SDL_WasInit(SDL_INIT_GAMEPAD)) {
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+        desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+        desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+        desc.name = "Test pad";
+        test_pad_id_ = SDL_AttachVirtualJoystick(&desc);
+        if (!test_pad_id_) std::fprintf(stderr, "@idle pad %s\n", SDL_GetError());
+    }
+    if (test_pad_id_ && !test_pad_open_ && window_.pads_open() > 0) {
+        test_pad_open_ = true;  // (opened as a player's: polled from now on)
+        std::fprintf(stderr, "@idle pad connected\n");
+    }
+    if (test_blur_at_ >= 0 && t >= test_blur_at_) {
+        test_blur_at_ = -1;
+        SDL_Event e{};
+        e.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+        e.window.windowID = SDL_GetWindowID(window_.sdl());
+        SDL_PushEvent(&e);
+        std::fprintf(stderr, "@idle focus lost\n");
+    }
 }
 
 void App::sync_log() {
