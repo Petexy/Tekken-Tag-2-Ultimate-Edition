@@ -7,6 +7,7 @@
 #include "check.h"
 #include "fakes.h"
 #include "replay.h"
+#include "preflight.h"
 #include "self_update.h"
 #include "settings.h"
 #include "status.h"
@@ -435,6 +436,58 @@ void self_update() {
     }
 }
 
+// ---------------------------------------------------------------- preflight (before an install, Linux)
+
+struct FakeProbe final : Probe {
+    bool game = true;
+    std::vector<std::string> missing;
+    bool compiler = true;
+    uint64_t free = 100'000'000'000, work_system = 1;
+    bool exists(const fs::path&) override { return game; }
+    std::vector<std::string> missing_cpu_features() override { return missing; }
+    std::optional<Compiler> find_compiler(std::string* why) override {
+        if (compiler) return Compiler{"/usr/bin/clang++", "clang++ 21.1.6"};
+        if (why) *why = "no C++ compiler was found";
+        return std::nullopt;
+    }
+    Distro distro() override { return Distro{"arch", "Arch Linux", "", {"arch"}, false}; }
+    std::optional<uint64_t> free_space(const fs::path&) override { return free; }
+    uint64_t file_system(const fs::path& folder) override { return folder.filename() == "build" ? work_system : 1; }
+    uint64_t size_of(const fs::path&) override { return 0; }
+};
+
+void preflight() {
+    current = "preflight";
+    const fs::path game = "/home/player/TTT2.wua", folder = "/home/player/Games/Tekken Tag Tournament 2",
+                   work = "/home/player/.cache/ttt2/build";
+    FakeProbe probe;
+    auto checks = run_checks(game, folder, work, probe);
+    CHECK_EQ(checks.size(), size_t(4));
+    CHECK(failed_check(checks).empty());
+    CHECK_EQ(checks[0].detail, std::string("TTT2.wua"));
+    CHECK_EQ(checks[2].detail, std::string("clang++ 21.1.6 (/usr/bin/clang++)"));
+    CHECK(checks[3].detail.ends_with("needed (the game, and building its program)"));
+
+    probe.game = false;
+    probe.missing = {"avx2", "bmi2", "fma"};
+    probe.compiler = false;
+    probe.free = 1'000'000'000;
+    probe.work_system = 2;
+    checks = run_checks(game, folder, work, probe);
+    CHECK_EQ(checks.size(), size_t(5));
+    CHECK_EQ(failed_check(checks), std::string("Game: /home/player/TTT2.wua does not exist"));
+    CHECK(checks[1].detail.starts_with("Lacks avx2, bmi2, fma: the game program needs an x86-64-v3 processor"));
+    CHECK_EQ(checks[2].detail, std::string("No C++ compiler was found. The game program is compiled on this PC: install "
+                                           "Clang with"));
+    CHECK_EQ(checks[2].command, std::string("sudo pacman -S --needed clang"));
+    CHECK(checks[3].detail.ends_with("needed (the game): make room on that disk, or choose a folder on another"));
+    CHECK_EQ(checks[4].title, std::string("Free space for building"));
+
+    const std::string stopped = stopped_text(139, "one\ntwo\nSegmentation fault\n", "/home/player/game.log", true);
+    CHECK(stopped.starts_with("The game stopped with an error (exit code 139). Its last lines:\n"));
+    CHECK(stopped.ends_with("\nAll it wrote is in /home/player/game.log."));
+}
+
 // ---------------------------------------------------------------- the model, from golden cases' fixtures
 
 json::Value fixture(const fs::path& golden, const std::string& name) {
@@ -569,6 +622,33 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK_EQ(h.model.task().view().title, std::string("Cannot add characters"));
     }});
 
+    current = "install flow";
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h", {0, [](Harness& h) {
+        auto e = h.model.activate("install", h.now);
+        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseGame);
+        e = h.model.chosen_game("/home/player/TTT2.wua", h.now);
+        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kChooseFolder);
+        e = h.model.chosen_folder("/home/player/Games", h.now);
+        CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kRunPreflight);
+        CHECK(h.model.facts().preflight && h.model.facts().preflight->running);
+        CHECK(h.model.view().game.state == GameState::kChecking);
+        // A check failed: said, shown, and nothing starts.
+        h.model.preflight_done({{false, "Game", "/home/player/TTT2.wua does not exist", {}}}, h.now);
+        CHECK_EQ(h.model.said(), std::string("Game: /home/player/TTT2.wua does not exist"));
+        CHECK(!h.model.task().running());
+        bool again = false;
+        for (const Action& a : actions_of(h.model.view())) again = again || a.id == "check-again";
+        CHECK(again);
+        // All pass: the install starts (its started record first, for Resume).
+        h.model.activate("check-again", h.now);
+        h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now);
+        CHECK(h.model.task().running());
+        CHECK(h.model.task().spec().kind == TaskKind::kInstall);
+        CHECK_EQ(h.env.records.size(), size_t(1));
+        const auto& argv = h.model.task().spec().command.argv;
+        CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
+    }});
+
     current = "unknown ids";
     replay(installed, Caps::linux_caps(), scratch / "f", {0, [](Harness& h) {
         h.model.activate("no-such-thing", h.now);
@@ -625,6 +705,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     display(scratch / "display");
     task_runner();
     self_update();
+    preflight();
     model_rules(golden, scratch / "model");
     every_id(golden, scratch / "ids", Caps::linux_caps());
     every_id(golden, scratch / "ids", Caps::windows_caps());

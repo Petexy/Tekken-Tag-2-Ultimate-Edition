@@ -202,6 +202,8 @@ void invariants(const std::string& shot, const std::vector<Action>& actions, con
         if (listed(a.id, caps.windows ? kLinuxOnly : kWindowsOnly)) {
             fail(__FILE__, __LINE__, shot + ": " + a.id + " is not " + caps.platform_name + "'s");
         }
+        // U7: every item has its describe block (the blue side): what it is at least.
+        if (a.describe.title.empty()) fail(__FILE__, __LINE__, shot + ": " + a.id + " has no describe block");
         // U7: a disabled item stays, and says why (in the blue side: describe.why).
         if (!a.enabled && a.describe.why.empty()) fail(__FILE__, __LINE__, shot + ": " + a.id + " is disabled without a why");
     }
