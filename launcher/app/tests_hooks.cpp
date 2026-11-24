@@ -244,11 +244,14 @@ void App::test_capture(double t) {
 bool App::test_input(const std::string& name, const std::vector<std::string>& args, double t) {
     const std::string arg = args.empty() ? std::string() : args[0];
     const auto key = [&](const std::string& k, double at) {
-        const SDL_Scancode code = SDL_GetScancodeFromName(k.c_str());
+        // ("Ctrl+H": with Ctrl held.)
+        const bool ctrl = k.starts_with("Ctrl+") && k.size() > 5;
+        const SDL_Scancode code = SDL_GetScancodeFromName(ctrl ? k.c_str() + 5 : k.c_str());
         if (code == SDL_SCANCODE_UNKNOWN) return false;
         RawEvent down;
         down.kind = RawEvent::KeyDown;
         down.device = Device::Keyboard;
+        down.ctrl = ctrl;
         down.code = static_cast<int>(code);
         RawEvent up = down;
         up.kind = RawEvent::KeyUp;
@@ -331,8 +334,10 @@ bool App::test_input(const std::string& name, const std::vector<std::string>& ar
 }
 
 void App::test_tick(double t) {
+    // (The browser reading its places, a folder, its folders' counts: off the UI thread.)
+    const bool reading = picker_ && (picker_->loading || picker_->counting || !picker_->places_ready);
     const bool busy = model_->busy() || working_ > 0 || stage_->animating() || wipe_->active(t) ||
-                      readouts_animating(t) || !test_raw_.empty();
+                      readouts_animating(t) || !test_raw_.empty() || reading;
     if (busy) {
         idle_since_ = t;
         frames_idle_ = 0;
@@ -496,9 +501,35 @@ void App::test_tick(double t) {
         test_said(view_.dialog.has_value() || model_->view().dialog.has_value(), {});
     } else if (n == "focus") {
         const std::vector<std::string> ids = ui_->focusable_ids();
-        if (std::find(ids.begin(), ids.end(), arg) == ids.end()) return test_said(false, "no " + arg + " that can take the focus");
+        // (A browser row not in view is not declared: it is when it has the focus.)
+        const bool row = picker_ && arg.starts_with("pe:") &&
+                         std::strtoul(arg.c_str() + 3, nullptr, 10) < picker_->entries.size();
+        if (!row && std::find(ids.begin(), ids.end(), arg) == ids.end())
+            return test_said(false, "no " + arg + " that can take the focus");
         ui_->focus(arg, true);
         test_said(true, {});
+    } else if (n == "rows") {
+        // The rows of a list in view (inside their scroll container's view, as painted): how many, how wide.
+        const std::string& prefix = arg;
+        const float least = static_cast<float>(std::atof(args.size() > 1 ? args[1].c_str() : "0"));
+        int shown = 0, narrow = 0, declared = 0;
+        float lo = 1e9f, hi = 0;
+        std::string first_narrow;
+        const Rect view = ui_->rect(picker_ ? "pk/crimson" : "");
+        for (const std::string& id : ui_->focusable_ids()) {
+            if (!id.starts_with(prefix)) continue;
+            ++declared;
+            const Rect r = ui_->rect(id);
+            if (!view.empty() && (r.y < view.y - .5f || r.bottom() > view.bottom() + .5f)) continue;
+            ++shown;
+            lo = std::min(lo, r.w);
+            hi = std::max(hi, r.w);
+            if (r.w < least && narrow++ == 0) first_narrow = id;
+        }
+        char said[200];
+        std::snprintf(said, sizeof said, "%d in view of %d declared, %.0f-%.0f points wide%s%s", shown, declared,
+                      shown ? lo : 0.f, hi, narrow ? ", narrower than wanted: " : "", first_narrow.c_str());
+        test_said(shown > 0 && narrow == 0, said);
     } else if (n == "toggle") {
         // (As a click: the launcher's own ids too, "slot:game" opens its file browser.)
         activate(arg);

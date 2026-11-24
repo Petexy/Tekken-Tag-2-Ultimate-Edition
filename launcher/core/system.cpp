@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cerrno>
+#include <csignal>
 #include <cstdlib>
 #include <fstream>
 #include <functional>
@@ -154,11 +155,31 @@ std::optional<std::string> run_output(const std::vector<std::string>& argv) {
     posix_spawn_file_actions_adddup2(&actions, pipe_fds[1], STDOUT_FILENO);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    // (Called off the UI thread - the preflight's compiler probe -, so not through ProcessHost; it keeps ProcessHost's
+    // rules for the child (C5): every file the launcher has open beyond 0-2 is closed in it, whoever opened it and
+    // however (another thread, a library without O_CLOEXEC), no signal blocked, SIGPIPE back to its default.
+    // posix_spawn is made for threaded programs (glibc: CLONE_VM | CLONE_VFORK, nothing but the file actions and
+    // execve in the child); the probe is waited for here, so no PR_SET_PDEATHSIG is needed.)
+#if defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+    posix_spawn_file_actions_addclosefrom_np(&actions, 3);
+#else
+#error "run_output needs posix_spawn_file_actions_addclosefrom_np (glibc 2.34)"
+#endif
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    sigset_t none, defaults;
+    sigemptyset(&none);
+    sigemptyset(&defaults);
+    sigaddset(&defaults, SIGPIPE);
+    posix_spawnattr_setsigmask(&attr, &none);
+    posix_spawnattr_setsigdefault(&attr, &defaults);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF);
     std::vector<char*> args;
     for (const std::string& a : argv) args.push_back(const_cast<char*>(a.c_str()));
     args.push_back(nullptr);
     pid_t pid = 0;
-    const int spawned = posix_spawnp(&pid, args[0], &actions, nullptr, args.data(), environ);
+    const int spawned = posix_spawnp(&pid, args[0], &actions, &attr, args.data(), environ);
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&actions);
     ::close(pipe_fds[1]);
     std::string out;

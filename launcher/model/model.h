@@ -116,7 +116,7 @@ struct Effect {
     enum class Kind {
         kChooseGame,   // a .wua (Install…; Windows: Set Up Game's archive): then chosen_game()
         kChooseFolder, // where to install (then chosen_folder()); Windows: folder:<key> (text = the key)
-        kRunPreflight, // run_checks(path, path2, work) off the UI thread: then preflight_done()
+        kRunPreflight, // run_checks(path, path2, work) off the UI thread: then preflight_done(..., generation)
         kUninstall,    // uninstall(places, path, uninstall) off the UI thread: then uninstall_done()
         kOpenUrl,      // text
         kOpenPath,     // a folder or a file (path)
@@ -131,6 +131,7 @@ struct Effect {
     std::string text;
     fs::path path, path2;
     UninstallOptions uninstall{};
+    uint64_t generation = 0; // kRunPreflight: the request its answer goes with (Preflight::generation)
 };
 
 // What the model asks of the PC (the app's real one, a test's).
@@ -147,6 +148,9 @@ struct Environment {
     virtual std::string log_end(const fs::path& log) = 0; // a log's last 64 KB
     virtual bool exists(const fs::path& path) = 0;
     virtual fs::path build_work() = 0; // Places::build_work()
+    // Whether the installed game still runs (one cheap look: Linux /proc), asked every kGameWatchSeconds while a
+    // game the launcher did not start runs. Unless an OS can tell: what the facts say.
+    virtual bool game_runs(const Facts& facts) { return facts.game_running; }
 };
 
 enum class Page { kMain, kSettings };
@@ -167,6 +171,7 @@ class LauncherModel {
 public:
     static constexpr double kStatusSeconds = 5;         // back in the window: looked at again after this
     static constexpr double kReleaseSeconds = 6 * 3600; // GitHub asked again after this
+    static constexpr double kGameWatchSeconds = 2;      // a game started elsewhere: looked for again after this
 
     struct Parts {
         Commands& commands;
@@ -186,7 +191,9 @@ public:
 
     // ---- events from the app
     void start(double now);     // the window opened: look, the status, GitHub
-    void tick(double now);      // timers: notes, auto-hide, the update's watch
+    void tick(double now);      // timers: notes, auto-hide, the update's watch, a game started elsewhere
+    // When tick() has something to do next by itself (the loop wakes for it), a large number when nothing.
+    double next_tick(double now) const;
     void activated(double now); // the window active again (6 h: GitHub; 5 s: the status)
     void deactivated();         // keys held are forgotten (not a key chosen while tests run)
     std::vector<Effect> activate(const std::string& id, double now);
@@ -195,7 +202,9 @@ public:
     // Answers to effects.
     std::vector<Effect> chosen_game(const fs::path& game, double now);
     std::vector<Effect> chosen_folder(const fs::path& folder, double now);
-    std::vector<Effect> preflight_done(const std::vector<Check>& checks, double now);
+    // The checks' answer to kRunPreflight `generation`: an answer to an earlier request (another folder, or checked
+    // again since) is dropped; the install starts only when they pass and no task runs.
+    std::vector<Effect> preflight_done(const std::vector<Check>& checks, double now, uint64_t generation);
     void uninstall_done(const UninstallReport& report, double now);
     void opened_updated(const std::string& error, double now); // Windows: "" when the new launcher opened
     // Keys while Settings is open (U4): true when used.
@@ -268,6 +277,8 @@ private:
     std::string status_out_, status_err_, owned_out_, main_out_, release_out_, release_err_;
     bool status_again_ = false, release_checking_ = false, main_checking_ = false;
     double status_time_ = -1e9, release_time_ = -1e9, now_ = 0;
+    double game_look_ = 0;          // a game started elsewhere: when it is looked for next
+    uint64_t preflight_serial_ = 0; // the last kRunPreflight asked
     bool quit_after_task_ = false;
     std::string folders_note_;
     double folders_note_until_ = -1;

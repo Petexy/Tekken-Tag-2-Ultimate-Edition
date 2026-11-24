@@ -288,6 +288,12 @@ void LauncherModel::start(double now) {
 
 void LauncherModel::tick(double now) {
     now_ = now;
+    // A game started elsewhere (seen by look()): looked for again now and then, so that its end is seen without a
+    // refresh (the old launcher's 2 s poll) - Home leaves PLAYING, Update and Uninstall can run again.
+    if (facts_.game_running && !facts_.game_started_here && now >= game_look_) {
+        game_look_ = now + kGameWatchSeconds;
+        facts_.game_running = parts_.environment.game_runs(facts_);
+    }
     runner_.tick(now);
     keys_.tick(now);
     if (self_update_) self_update_->tick(now);
@@ -298,6 +304,11 @@ void LauncherModel::tick(double now) {
     done_job_.reset();
     if (before_ && before_done_) before_answered(now);
     sync();
+}
+
+double LauncherModel::next_tick(double now) const {
+    (void)now;
+    return facts_.game_running && !facts_.game_started_here ? game_look_ : 1e18;
 }
 
 void LauncherModel::activated(double now) {
@@ -810,16 +821,23 @@ std::vector<Effect> LauncherModel::chosen_folder(const fs::path& chosen, double 
         return {};
     }
     facts_.game_error.clear();
-    facts_.preflight = Preflight{facts_.chosen_game, *folder, true, {}};
-    return {Effect{Effect::Kind::kRunPreflight, {}, facts_.chosen_game, *folder, {}}};
+    facts_.preflight = Preflight{facts_.chosen_game, *folder, true, {}, ++preflight_serial_};
+    return {Effect{Effect::Kind::kRunPreflight, {}, facts_.chosen_game, *folder, {}, preflight_serial_}};
 }
 
-std::vector<Effect> LauncherModel::preflight_done(const std::vector<Check>& checks, double now) {
-    if (!facts_.preflight) return {};
+std::vector<Effect> LauncherModel::preflight_done(const std::vector<Check>& checks, double now, uint64_t generation) {
+    // (Not the request asked last - another folder chosen, or checked again while it ran: dropped; the last one's
+    // answer comes too.)
+    if (!facts_.preflight || facts_.preflight->generation != generation || !facts_.preflight->running) return {};
     facts_.preflight->running = false;
     facts_.preflight->checks = checks;
     if (const std::string failed = failed_check(checks); !failed.empty()) {
         said_ = failed;
+        return {};
+    }
+    // (A task began while the checks ran: they stay on Home, Check Again starts the install once it has ended.)
+    if (runner_.running()) {
+        refuse("Another task is running", "Wait for it to end, then install.", now);
         return {};
     }
     const fs::path game = facts_.preflight->game, folder = facts_.preflight->folder;
@@ -987,7 +1005,9 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         if (facts_.preflight) {
             facts_.preflight->running = true;
             facts_.preflight->checks.clear();
-            effects.push_back({Effect::Kind::kRunPreflight, {}, facts_.preflight->game, facts_.preflight->folder, {}});
+            facts_.preflight->generation = ++preflight_serial_;
+            effects.push_back({Effect::Kind::kRunPreflight, {}, facts_.preflight->game, facts_.preflight->folder, {},
+                               preflight_serial_});
         }
     } else if (id == "preflight-cancel") {
         facts_.preflight.reset();

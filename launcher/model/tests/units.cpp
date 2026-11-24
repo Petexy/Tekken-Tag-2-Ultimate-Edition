@@ -696,20 +696,120 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                 CHECK(h.model.facts().preflight && h.model.facts().preflight->running);
                 CHECK(h.model.view().game.state == GameState::kChecking);
                 // A check failed: said, shown, and nothing starts.
-                h.model.preflight_done({{false, "Game", "/home/player/TTT2.wua does not exist", {}}}, h.now);
+                h.model.preflight_done({{false, "Game", "/home/player/TTT2.wua does not exist", {}}}, h.now,
+                                       e[0].generation);
                 CHECK_EQ(h.model.said(), std::string("Game: /home/player/TTT2.wua does not exist"));
                 CHECK(!h.model.task().running());
                 bool again = false;
                 for (const Action& a : actions_of(h.model.view())) again = again || a.id == "check-again";
                 CHECK(again);
                 // All pass: the install starts (its started record first, for Resume).
-                h.model.activate("check-again", h.now);
-                h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now);
+                e = h.model.activate("check-again", h.now);
+                CHECK(e.size() == 1 && e[0].kind == Effect::Kind::kRunPreflight);
+                h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now, e[0].generation);
                 CHECK(h.model.task().running());
                 CHECK(h.model.task().spec().kind == TaskKind::kInstall);
                 CHECK_EQ(h.env.records.size(), size_t(1));
                 const auto& argv = h.model.task().spec().command.argv;
                 CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
+            }});
+
+    // REVIEW2_app #7: an answer goes with its request only.
+    current = "a preflight's answer for another folder is dropped";
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
+           {0, [](Harness& h) {
+                h.model.chosen_game("/home/player/TTT2.wua", h.now);
+                const auto a = h.model.chosen_folder("/home/player/A", h.now);
+                const auto b = h.model.chosen_folder("/home/player/B", h.now);
+                CHECK(a.size() == 1 && b.size() == 1 && a[0].generation != b[0].generation);
+                // A's checks pass after B was chosen: nothing starts, B is still being checked.
+                h.model.preflight_done({{true, "Free space", "A has room", {}}}, h.now, a[0].generation);
+                CHECK(!h.model.task().running());
+                CHECK(h.model.facts().preflight && h.model.facts().preflight->running &&
+                      h.model.facts().preflight->folder == fs::path("/home/player/B/Tekken Tag Tournament 2"));
+                // B's: the install goes into B.
+                h.model.preflight_done({{true, "Free space", "B has room", {}}}, h.now, b[0].generation);
+                CHECK(h.model.task().running());
+                const auto& argv = h.model.task().spec().command.argv;
+                CHECK(argv.size() == 4 && argv[3] == "/home/player/B/Tekken Tag Tournament 2");
+            }});
+    current = "a preflight checked again: the earlier answer is dropped";
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
+           {0, [](Harness& h) {
+                h.model.chosen_game("/home/player/TTT2.wua", h.now);
+                const auto first = h.model.chosen_folder("/home/player/Games", h.now);
+                const auto again = h.model.activate("check-again", h.now);
+                CHECK(again.size() == 1 && again[0].generation != first[0].generation);
+                h.model.preflight_done({{false, "Free space", "full", {}}}, h.now, first[0].generation);
+                CHECK(h.model.facts().preflight && h.model.facts().preflight->running);
+                CHECK(h.model.facts().preflight->checks.empty());
+                h.model.preflight_done({{true, "Free space", "room", {}}}, h.now, again[0].generation);
+                CHECK(h.model.task().running());
+                // (An answer that comes twice starts nothing more.)
+                h.model.preflight_done({{true, "Free space", "room", {}}}, h.now, again[0].generation);
+                CHECK_EQ(count_started(h.starter, "install"), 1);
+            }});
+    current = "a preflight passing while a task runs starts no install";
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
+           {0, [](Harness& h) {
+                h.model.chosen_game("/home/player/TTT2.wua", h.now);
+                const auto e = h.model.chosen_folder("/home/player/Games", h.now);
+                TaskSpec other;
+                other.kind = TaskKind::kUpdate;
+                other.title = "Another task";
+                other.command.argv = {"sleep", "100"};
+                h.model.task().start(std::move(other), h.now);
+                CHECK(h.model.task().running());
+                h.model.preflight_done({{true, "Game", "TTT2.wua", {}}}, h.now, e[0].generation);
+                CHECK(h.model.task().spec().title == "Another task");
+                CHECK_EQ(count_started(h.starter, "install"), 0);
+                CHECK_EQ(h.model.said(), std::string("Wait for it to end, then install."));
+                // The checks stay, Check Again starts it later.
+                CHECK(h.model.facts().preflight && !h.model.facts().preflight->running);
+            }});
+
+    // REVIEW2_app #5: a game started elsewhere is watched until it ends (every kGameWatchSeconds, cheaply).
+    current = "a game started elsewhere is watched";
+    replay(installed, Caps::linux_caps(), scratch / "a",
+           {0, [](Harness& h) {
+                CHECK(!h.model.facts().game_running);
+                CHECK(h.model.next_tick(h.now) > 1e17);
+                h.env.running_outside = true;
+                h.model.activate("refresh", h.now);
+                h.settle();
+                CHECK(h.model.facts().game_running && !h.model.facts().game_started_here);
+                CHECK_EQ(h.model.view().game.pill.text, std::string("Running"));
+                h.model.tick(h.now);
+                const int looks = h.env.game_looks;
+                CHECK(looks >= 1);
+                CHECK(h.model.next_tick(h.now) <= h.now + LauncherModel::kGameWatchSeconds + 1e-9);
+                // It ends: seen within kGameWatchSeconds, without a refresh.
+                h.env.running_outside = false;
+                h.now += 1;
+                h.model.tick(h.now);
+                CHECK(h.model.facts().game_running);
+                CHECK_EQ(h.env.game_looks, looks);
+                h.now += LauncherModel::kGameWatchSeconds;
+                h.model.tick(h.now);
+                CHECK(!h.model.facts().game_running);
+                CHECK_EQ(h.env.game_looks, looks + 1);
+                CHECK_EQ(h.model.view().game.pill.text, std::string("Installed"));
+                // Nothing to watch now: no more looks.
+                h.now += 10;
+                h.model.tick(h.now);
+                CHECK_EQ(h.env.game_looks, looks + 1);
+                CHECK(h.model.next_tick(h.now) > 1e17);
+            }});
+    current = "a game started here is not looked for";
+    replay(installed, Caps::linux_caps(), scratch / "a",
+           {0, [](Harness& h) {
+                h.model.activate("play", h.now);
+                CHECK(h.model.facts().game_running && h.model.facts().game_started_here);
+                const int looks = h.env.game_looks;
+                h.now += 10;
+                h.model.tick(h.now);
+                CHECK_EQ(h.env.game_looks, looks);
+                CHECK(h.model.next_tick(h.now) > 1e17);
             }});
 
     current = "Windows' commands";

@@ -194,5 +194,15 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_BINARY_DIR}/video-fallback)
     list(APPEND _app_tests launcher_app_video_fallback)
     set_tests_properties(launcher_app_video_fallback PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
+    # The in-app browser (REVIEW2_app #3/#6): long lists at two sizes, Show hidden, and a folder slow to open
+    # (tests/slow_folders.c, an LD_PRELOAD: the window never waits for it).
+    add_library(launcher_slow_folders MODULE tests/slow_folders.c)
+    target_link_libraries(launcher_slow_folders PRIVATE ${CMAKE_DL_LIBS})
+    add_test(NAME launcher_app_picker
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/picker.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/picker ${Python3_EXECUTABLE}
+                $<TARGET_FILE:launcher_slow_folders>)
+    list(APPEND _app_tests launcher_app_picker)
+    set_tests_properties(launcher_app_picker PROPERTIES TIMEOUT 600)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

@@ -26,6 +26,7 @@
 #include "ttt2ui/widgets.h"
 #include "ttt2ui/window.h"
 
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <map>
@@ -136,8 +137,16 @@ private:
     void drill_out(const std::string& to = {});
     bool drilled() const;
     void toast(const std::string& title, const std::string& text, bool bad = true);
-    void run_preflight(const fs::path& game, const fs::path& folder);
+    void run_preflight(const fs::path& game, const fs::path& folder, uint64_t generation);
     void run_uninstall(const fs::path& folder, UninstallOptions options);
+    // Work on a thread of its own, joined at the end (the preflight, the uninstall); threads that have ended are
+    // joined and forgotten whenever another one starts.
+    void spawn(std::function<void()> work);
+    void prune_threads();
+    // Work that may never end (reading a folder on a drive that hangs): a thread that is not joined; what it posts
+    // after the window has gone is dropped (Mailbox).
+    using Poster = std::function<void(std::function<void()>)>;
+    void run_detached(std::function<void(const Poster& post)> work);
     void answer_game(const fs::path& game);
     void sync_log();
     std::string focused_label() const;
@@ -229,8 +238,16 @@ private:
 
     // ---- the in-app browser (picker.cpp)
     void open_picker(bool folder, const std::string& purpose);
-    void picker_dir(const fs::path& dir);
+    // Lists `dir` off the UI thread (its answer posted back, an older one dropped). `fallbacks`: `dir` may not be
+    // there (then its nearest parent that is, else the first of them). `refocus`: the same folder listed again (Show
+    // hidden): its entries stay until the new list comes, and that entry keeps the focus.
+    void picker_dir(const fs::path& dir, const std::vector<fs::path>& fallbacks = {}, const fs::path& refocus = {});
+    struct Listing;
+    void picker_listed(uint64_t generation, Listing listing);
+    void picker_counted(uint64_t generation, std::vector<int> counts);
+    void picker_toggle_hidden();
     void picker_screen(const ui::Box& crimson, const ui::Box& blue);
+    void picker_rows();
     bool picker_activate(const std::string& id);
     void picker_chosen(const fs::path& path);
     void close_picker();
@@ -249,6 +266,8 @@ private:
     bool smoke_done_ = false;
     // press:/pad:/steam:/click:/hover: test actions: input as the devices give it (through the router).
     bool test_input(const std::string& name, const std::vector<std::string>& args, double now);
+    // A key the window takes before the router does (Ctrl+H in the browser): true when it was taken.
+    bool shortcut(const ui::RawEvent& raw);
 
     // ---- Windows (windows_app.cpp): getting ready before the model (C9 bootstrap, --query state), the state
     // asked again after each task, Settings > Folders saved.
@@ -311,8 +330,18 @@ private:
     // posted work
     std::mutex posted_mutex_;
     std::deque<std::function<void()>> posted_;
-    std::vector<std::thread> threads_;
+    struct Worker {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::vector<Worker> threads_;
     int working_ = 0; // threads not ended (preflight, uninstall)
+    // Where detached threads post: closed (app = null) when the window goes.
+    struct Mailbox {
+        std::mutex mutex;
+        App* app = nullptr;
+    };
+    std::shared_ptr<Mailbox> mailbox_;
 
     // what is shown
     Screen screen_ = Screen::kHome;
@@ -368,9 +397,24 @@ private:
         std::string error;
         std::optional<uint64_t> free;
         std::string back_focus;
+        uint64_t session = 0;     // this opening (its places' answer)
+        uint64_t generation = 0;  // the listing asked for last (an older answer is dropped)
+        bool places_ready = false;
+        bool loading = false;     // dir's listing has not come yet
+        bool counting = false;    // its folders' items are being counted
+        fs::path refocus;         // the entry to focus again when the listing comes (Show hidden)
+        // install_target(dir) (Linux, the install folder's browser): read with the listing, not every frame.
+        bool target_known = false;
+        std::optional<fs::path> target;
+        std::string target_why;
+        // The rows as declared (virtualised: only those in or near the view, the focused one's and the last).
+        float last_scroll = 0;    // the crimson scroll the rows were last laid out with
+        int declared = 0;         // rows declared in the last frame
     };
     std::optional<Picker> picker_;
     std::string picker_key_; // the browser's entry the blue side shows
+    uint64_t picker_serial_ = 0;
+    bool picker_hidden_ = false; // Show hidden (Ctrl+H): names starting with a dot listed too
 
     // tests
     size_t test_next_ = 0;
