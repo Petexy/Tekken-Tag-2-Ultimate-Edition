@@ -7,11 +7,6 @@
 
 namespace launcher::model {
 
-bool SystemProbe::exists(const fs::path& path) {
-    std::error_code ec;
-    return fs::is_regular_file(path, ec) || fs::is_directory(path, ec);
-}
-
 std::vector<Check> run_checks(const fs::path& game, const fs::path& folder, const fs::path& work, Probe& probe) {
     std::vector<Check> checks;
     if (probe.exists(game))

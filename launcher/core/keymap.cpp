@@ -4,15 +4,18 @@
 
 #include "files.h"
 
+#ifndef _WIN32
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 
 namespace launcher {
 namespace {
@@ -474,6 +477,34 @@ Keymap Keymap::parse(std::string_view text, Notes* notes) {
 Keymap Keymap::load(const fs::path& file, Notes* notes) {
     Notes unused;
     Notes& out = notes ? *notes : unused;
+#ifdef _WIN32
+    // (Windows: a file, at most 64 KiB, read whole.)
+    std::error_code ec;
+    const fs::file_status st = fs::status(file, ec);
+    if (ec || !fs::exists(st)) {
+        if (ec && ec != std::errc::no_such_file_or_directory && ec != std::errc::not_a_directory)
+            out.error = ec.message();
+        return Keymap();
+    }
+    if (!fs::is_regular_file(st)) {
+        out.error = "it is not a file";
+        return Keymap();
+    }
+    std::ifstream in(file, std::ios::binary);
+    if (!in) {
+        out.error = "it cannot be opened";
+        return Keymap();
+    }
+    std::string text;
+    char buffer[4096];
+    while (in.read(buffer, sizeof buffer) || in.gcount() > 0) {
+        text.append(buffer, static_cast<size_t>(in.gcount()));
+        if (text.size() > static_cast<size_t>(kMaxFileSize)) {
+            out.error = "it is larger than 64 KiB";
+            return Keymap();
+        }
+    }
+#else
     // As the game reads it: never a pipe or a device, which could block (or
     // never end), and checked again on what was opened, which the name may no
     // longer be.
@@ -513,6 +544,7 @@ Keymap Keymap::load(const fs::path& file, Notes* notes) {
         out.error = why;
         return Keymap();
     }
+#endif
     return parse(text, &out);
 }
 

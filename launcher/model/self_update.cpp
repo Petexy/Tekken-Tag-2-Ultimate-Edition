@@ -7,18 +7,6 @@
 
 namespace launcher::model {
 
-std::optional<uint64_t> RealUpdateFiles::size(const fs::path& file) {
-    std::error_code ec;
-    const uintmax_t n = fs::file_size(file, ec);
-    if (ec) return std::nullopt;
-    return static_cast<uint64_t>(n);
-}
-
-void RealUpdateFiles::remove(const fs::path& file) {
-    std::error_code ec;
-    fs::remove(file, ec);
-}
-
 std::string full_sentence(std::string text) {
     if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = static_cast<char>(text[0] - 'a' + 'A');
     if (!text.empty() && text.back() != '.') text += '.';
@@ -190,7 +178,8 @@ void SelfUpdate::started(int code, const std::string& out) {
     state_ = State::kIdle;
     runner_.add_log("Version " + version + " is in " + config_.appimage->string() + ".");
     std::string error;
-    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {}};
+    Command open{{config_.appimage->string()}, {{kReplacesVariable, std::to_string(config_.pid)}}, {}, {}, {},
+                 Command::Mode::kDetached}; // (it outlives this one)
     auto job = starter_.start(open, {}, &error);
     if (!job) {
         runner_.finish(false, "Updated to " + version + ", but it cannot be opened",

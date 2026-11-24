@@ -9,10 +9,14 @@
 # With TTT2_LAUNCHER_ONLY (no game tools, no kit) only the new interface is
 # built: the Windows release .exe cross-built on Linux
 # (windows/make_launcher_exe.py) and the source ZIP's first start.
+# (core/ and model/ build on any OS, also launcher-only and with MinGW: the new interface's logic.)
 if(NOT TTT2_LAUNCHER_ONLY)
     add_subdirectory(builder)
-    add_subdirectory(core)
-    add_subdirectory(model)
+endif()
+add_subdirectory(core)
+add_subdirectory(model)
+add_subdirectory(backend)
+if(NOT TTT2_LAUNCHER_ONLY)
     add_subdirectory(app)
 endif()
 add_subdirectory(ui)

@@ -73,6 +73,12 @@ struct WindowsCommands : Commands {
     Command query(const Facts& facts, const std::string& name) const;
     Command worker_command(const Facts& facts, const std::string& action, const std::vector<std::string>& names,
                            const std::string& outfits) const;
+    // `--query release`: GitHub's newest release, for the release .exe (none from a project ZIP or a build).
+    std::optional<Command> release(const Facts& facts) const;
+    // `--query check --action ACTION [names]`: what refuses a task before it starts (SetupProblem).
+    Command check(const Facts& facts, const std::string& action, const std::vector<std::string>& names) const;
+    // `--query save-settings`: Settings > Folders checked and saved; the folders go as a JSON object on its input.
+    Command save_settings(const Facts& facts, const std::map<std::string, std::string>& folders) const;
 
     std::optional<Command> status(const Facts& facts) override;
     std::optional<Command> owned(const Facts& facts) override;

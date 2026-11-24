@@ -18,6 +18,13 @@ target_include_directories(launcher_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(launcher_model PUBLIC ttt2_launcher_core)
 target_compile_features(launcher_model PUBLIC cxx_std_20)
 target_compile_options(launcher_model PRIVATE -Wall -Wextra -Wpedantic)
+# (What it looks at on Linux itself: the PC before an install, the AppImage's files. Windows: the model only, with
+# the portable core; its tests run on Linux.)
+if(WIN32)
+    return()
+endif()
+target_sources(launcher_model PRIVATE linux.cpp)
+target_link_libraries(launcher_model PUBLIC ttt2_launcher_core_linux)
 
 add_executable(launcher_model_test tests/model_test.cpp tests/replay.cpp tests/units.cpp)
 target_include_directories(launcher_model_test PRIVATE tests)

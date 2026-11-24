@@ -86,6 +86,30 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
               outfits.empty() ? "none" : outfits};
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.cwd = w.root;
+    // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
+    if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
+    return c;
+}
+
+std::optional<Command> WindowsCommands::release(const Facts& facts) const {
+    if (facts.python.empty() || facts.windows.root.empty() || !facts.self_update) return std::nullopt;
+    return query(facts, "release");
+}
+
+Command WindowsCommands::check(const Facts& facts, const std::string& action,
+                               const std::vector<std::string>& names) const {
+    Command c = query(facts, "check");
+    c.argv.insert(c.argv.end(), {"--action", action});
+    c.argv.insert(c.argv.end(), names.begin(), names.end());
+    return c;
+}
+
+Command WindowsCommands::save_settings(const Facts& facts, const std::map<std::string, std::string>& folders) const {
+    Command c = query(facts, "save-settings");
+    std::string object;
+    for (const auto& [key, value] : folders) object += (object.empty() ? "" : ", ") + json::quote(key) + ": " +
+                                                       json::quote(value);
+    c.input = "{" + object + "}";
     return c;
 }
 
@@ -183,7 +207,7 @@ Command LinuxCommands::shaders(const Facts& facts) {
 }
 
 std::optional<Command> LinuxCommands::play(const Facts& facts) {
-    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}};
+    return Command{{(facts.install.folder / kProgramName).string()}, {}, {}, game_log, {}, Command::Mode::kDetached};
 }
 
 // ---------------------------------------------------------------- the model

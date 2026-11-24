@@ -226,7 +226,8 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         facts.windows.build = home / "repo/build-windows-tools";
         facts.windows.config = home / "repo/local/windows-launcher.json";
         if (install == "installed") {
-            facts.windows.play = Command{{(folder / "TTT2 Ultimate.exe").string()}, {}, folder, {}, {}};
+            facts.windows.play =
+                Command{{(folder / "TTT2 Ultimate.exe").string()}, {}, folder, {}, {}, Command::Mode::kDetached};
         }
     }
     KeyFile keys(keyboard_file);
