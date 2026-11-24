@@ -34,7 +34,7 @@ void chroma_text(Canvas& canvas, TextEngine& text, const TextStyle& style, std::
 void icon(Canvas& canvas, Icons& icons, const std::string& name, const Rect& box, Color color);
 
 // The Tag Split focus highlight: give it to Ui::set_highlight.
-void paint_focus_highlight(Canvas& canvas, const Rect& r, bool skewed, float alpha, double now);
+void paint_focus_highlight(Canvas& canvas, const Rect& r, Shape shape, float alpha, double now);
 
 // ---- prompt glyphs ------------------------------------------------------------------------------------------------
 enum class Prompt : std::uint8_t {

@@ -998,7 +998,8 @@ void Ui::step_animations() {
     else highlight_id_ = focused_;
     if (highlight_id_ != focused_ && highlight_.settled(.5f)) highlight_id_ = focused_;
     highlight_screen_ = highlight_.value().translated(o);
-    highlight_skewed_ = n.focus->skewed;
+    highlight_shape_ =
+        n.focus->straight_left ? Shape::StraightLeft : n.focus->skewed ? Shape::Skewed : Shape::Rect;
     highlight_alpha_ = 1;
 }
 
@@ -1127,7 +1128,7 @@ void Ui::paint(Canvas& canvas) {
         const Vec2 shift = drawn_shift(fi, &opacity);
         if (opacity > .002f) {
             canvas.push_clip(n.clip.outset(n.focus ? n.focus->pad + 12 : 12).translated(shift));
-            highlight_paint_(canvas, highlight_screen_.translated(shift), highlight_skewed_,
+            highlight_paint_(canvas, highlight_screen_.translated(shift), highlight_shape_,
                              highlight_alpha_ * opacity, frame_.now);
             canvas.pop_clip();
         }

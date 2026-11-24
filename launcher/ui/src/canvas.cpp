@@ -108,6 +108,38 @@ Quad skewed(const Rect& r, float tan) {
     return {{{r.x + d, r.y}, {r.x + r.w + d, r.y}, {r.x + r.w - d, r.y + r.h}, {r.x - d, r.y + r.h}}};
 }
 
+Quad straight_left(const Rect& r, float tan) {
+    const float d = r.h / 2 * tan;
+    return {{{r.x, r.y}, {r.x + r.w + d, r.y}, {r.x + r.w - d, r.y + r.h}, {r.x, r.y + r.h}}};
+}
+
+Quad shaped(const Rect& r, Shape shape, float tan) {
+    switch (shape) {
+        case Shape::Rect: return skewed(r, 0);
+        case Shape::Skewed: return skewed(r, tan);
+        case Shape::StraightLeft: return straight_left(r, tan);
+    }
+    return skewed(r, tan);
+}
+
+Vec2 shaped_point(const Rect& box, Vec2 p, Shape shape, float tan) {
+    const float dx = (box.y + box.h / 2 - p.y) * tan;  // the right edge's offset at this height
+    switch (shape) {
+        case Shape::Rect: return p;
+        case Shape::Skewed: return {p.x + dx, p.y};
+        case Shape::StraightLeft:
+            // Left edge fixed, right edge moved by dx, everything between in proportion.
+            return {box.w > 0 ? p.x + (p.x - box.x) / box.w * dx : p.x, p.y};
+    }
+    return p;
+}
+
+Quad shaped_part(const Rect& box, const Rect& part, Shape shape, float tan) {
+    return {{shaped_point(box, {part.x, part.y}, shape, tan), shaped_point(box, {part.right(), part.y}, shape, tan),
+             shaped_point(box, {part.right(), part.bottom()}, shape, tan),
+             shaped_point(box, {part.x, part.bottom()}, shape, tan)}};
+}
+
 Canvas::Canvas(SDL_Renderer* renderer, TextureRegistry& textures) : renderer_(renderer), textures_(textures) {}
 Canvas::~Canvas() = default;
 

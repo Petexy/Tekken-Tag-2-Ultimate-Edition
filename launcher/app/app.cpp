@@ -426,7 +426,7 @@ void App::frame(double t) {
     }
     if (o_.testing) test_audit(t);
     window_.set_drag_area({0, 0, in.size.x, theme::kTopBand},
-                          {ui_->rect("tabs"), ui_->rect("sound"), ui_->rect("quit"), ui_->rect("frame")});
+                          {ui_->rect("tabs"), ui_->rect("sound"), ui_->rect("frame")});
 
     const Vec2 px = window_.pixels();
     canvas_->begin(window_.scale(), static_cast<int>(px.x), static_cast<int>(px.y));
@@ -528,7 +528,7 @@ void App::top_band() {
     top.align = Align::Center;
     top.w = Size::fixed(size.x);
     top.h = Size::fixed(theme::kTopBand);
-    top.pad = {30, 0, 22, 0};
+    top.pad = {30, 0, 0, 0};  // (the caption buttons sit in the window's top-right corner)
     auto g = ui.open("top", top);
     brand(ui, "brand", "Ultimate", "Launcher");
     int to_update = 0;
@@ -545,10 +545,10 @@ void App::top_band() {
     text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
     icon_button(ui, "sound",
                 {sounds_ ? "stroke:sound-on" : "stroke:sound-off", sounds_ ? "Sound on" : "Sound off", sounds_},
-                Box{.margin = {0, 0, 10, 0}});
-    icon_button(ui, "quit", {"stroke:power", "Quit"});
-    caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), false,
-                    Box{.margin = {10, 0, 0, 0}});
+                Box{.margin = {0, 0, 18, 0}});
+    // Quit is the window's close button (X) in the top-right corner, where Windows puts it (user 2026-11-24).
+    caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), true,
+                    Box{.h = Size::fixed(theme::kTopBand)});
 }
 
 std::string App::focused_label() const {

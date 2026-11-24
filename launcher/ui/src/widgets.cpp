@@ -50,9 +50,10 @@ Quad sk_rect(const Rect& box, const Rect& part, float tan = kSeamTan) {
 }
 
 // The look's row surface: rest fill, the focused gradient faded in by `f`.
+// (Crimson lists: Shape::StraightLeft, their left edges in line with the window's.)
 void row_surface(Canvas& cv, const Rect& r, float f, Color rest_fill, Color rest_border, Color focus_a, Color focus_b,
-                 Color focus_border) {
-    const Quad q = skewed(r, kSeamTan);
+                 Color focus_border, Shape shape = Shape::StraightLeft) {
+    const Quad q = shaped(r, shape, kSeamTan);
     cv.fill(q, rest_fill);
     if (f > 0) cv.fill(q, Gradient::css(r, 100, {{0, focus_a.faded(f)}, {1, focus_b.faded(f)}}));
     cv.stroke(q, 1, mix(rest_border, focus_border, f));
@@ -146,23 +147,23 @@ void icon(Canvas& canvas, Icons& icons, const std::string& name, const Rect& box
     icons.draw(canvas, name, box, color, line ? IconMode::Mask : IconMode::Colour);
 }
 
-void paint_focus_highlight(Canvas& cv, const Rect& r, bool skew, float alpha, double now) {
+void paint_focus_highlight(Canvas& cv, const Rect& r, Shape shape, float alpha, double now) {
     if (alpha <= 0 || r.empty()) return;
-    const float tan = skew ? kSeamTan : 0;
-    const Quad q = skewed(r, tan);
+    const float tan = kSeamTan;
+    const Quad q = shaped(r, shape, tan);
     cv.glow(q, 30, rgba(45, 128, 255, .22f * alpha));
     cv.glow(q, 14, rgba(255, 255, 255, .3f * alpha));
-    cv.stroke(skewed(r.outset(1), tan), 1, rgba(0, 0, 0, .45f * alpha));
+    cv.stroke(shaped(r.outset(1), shape, tan), 1, rgba(0, 0, 0, .45f * alpha));
     cv.stroke(q, 2, rgba(255, 255, 255, alpha));
     // A faint inner light and a sheen passing now and then.
-    cv.stroke(skewed(r.outset(-2), tan), 3, rgba(255, 255, 255, .07f * alpha));
+    cv.stroke(shaped(r.outset(-2), shape, tan), 3, rgba(255, 255, 255, .07f * alpha));
     const float period = 2.6f, t = static_cast<float>(std::fmod(now, static_cast<double>(period))) / period;
     if (t < .6f) {
         const float x = r.x - 80 + t / .6f * 1400;
         const float x0 = std::max(r.x + 2, x), x1 = std::min(r.right() - 2, x + 60);
         if (x1 > x0) {
             const Rect band{x0, r.y + 2, x1 - x0, r.h - 4};
-            const Quad bq = sk_rect(r, band, tan);
+            const Quad bq = shaped_part(r, band, shape, tan);
             cv.fill(bq, Gradient::linear3({x, 0}, {x + 60, 0}, rgba(255, 255, 255, 0), .5f,
                                           rgba(255, 255, 255, .16f * alpha), rgba(255, 255, 255, 0)));
         }
@@ -170,7 +171,7 @@ void paint_focus_highlight(Canvas& cv, const Rect& r, bool skew, float alpha, do
     // Corner accents: red top-left, blue bottom-right (5 points thick, 20 long), skewed with the frame.
     const Color red = c::kRed.faded(alpha), blue = c::kBlue.faded(alpha);
     auto bar = [&](const Rect& part, Color col) {
-        const Quad pq = sk_rect(r, part, tan);
+        const Quad pq = shaped_part(r, part, shape, tan);
         cv.glow(pq, 5, col.faded(.5f));
         cv.fill(pq, col);
     };
@@ -744,24 +745,29 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
 
 void caption_buttons(Ui& ui, const std::string& id, bool minimise, bool fullscreen_toggle, bool is_fullscreen,
                      bool close, const Box& box) {
+    // Like Windows' own caption buttons: no gaps, no frames, flush with the window's top and right edges (give the
+    // group the band's full height: they sit at its top); hovered: a light wash, the close button Windows' red.
     Box b = box;
     b.layout = Layout::Row;
-    b.gap = 6;
-    b.align = Align::Center;
+    b.gap = 0;
+    b.align = Align::Start;
     auto g = ui.open(id, b);
     auto one = [&](const std::string& part, const std::string& ic, bool danger) {
         Focus f;
         f.nav = false;
+        f.skewed = false;
+        f.pad = 0;
         Box bb;
-        bb.w = Size::fixed(34);
-        bb.h = Size::fixed(34);
+        bb.w = Size::fixed(m::kCaptionButtonWidth);
+        bb.h = Size::fixed(m::kCaptionButtonHeight);
         ui.leaf(id + "/" + part, bb, {}, [ic, danger](PaintContext& ctx) {
-            const float hv = ctx.hover_t;
-            const Color fill = danger ? mix(rgba(255, 255, 255, .05f), rgba(255, 42, 85, .75f), hv)
-                                      : mix(rgba(255, 255, 255, .05f), rgba(255, 255, 255, .14f), hv);
-            surface(ctx.canvas, ctx.rect, fill, rgba(255, 255, 255, .16f));
-            icon(ctx.canvas, ctx.icons, ic, {ctx.rect.x + 9, ctx.rect.y + 9, 16, 16},
-                 mix(c::kTabHover, rgb(0xffffff), hv));
+            const float hv = std::max(ctx.hover_t, ctx.focus_t);
+            if (hv > .001f)
+                ctx.canvas.fill_rect(ctx.rect, danger ? rgba(196, 43, 28, hv) : rgba(255, 255, 255, .1f * hv));
+            const float g = m::kCaptionGlyph;
+            const Vec2 cc = ctx.rect.center();
+            icon(ctx.canvas, ctx.icons, ic, {cc.x - g / 2, cc.y - g / 2, g, g},
+                 mix(rgba(230, 234, 242, .82f), rgb(0xffffff), hv));
         }, &f);
     };
     if (minimise) one("min", "stroke:minimise", false);
@@ -794,8 +800,9 @@ void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const 
 // ---- crimson lists --------------------------------------------------------------------------------------------------
 
 void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     Box b = with_height(box, m::kSlabHeight);
-    if (zero(b.margin)) b.margin = {12, 0, 0, 18};
+    if (zero(b.margin)) b.margin = {0, 0, 0, 18};  // (its left edge in line with the rows under it)
     focus.pad = 8;
     focus.disabled = focus.disabled || spec.disabled;
     ui.leaf(
@@ -804,17 +811,17 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             Canvas& cv = ctx.canvas;
             const float f = ctx.focus_t;
             Rect r = ctx.rect;
-            // Focused: 2 % larger and brighter, its glow breathing.
+            // Focused: 2 % taller (its upright left edge stays in line with the rows) and brighter, its glow breathing.
             const float s = 1 + .02f * f;
-            r = {r.center().x - r.w * s / 2, r.center().y - r.h * s / 2, r.w * s, r.h * s};
-            const Quad q = skewed(r, kSeamTan);
+            r = {r.x, r.center().y - r.h * s / 2, r.w, r.h * s};
+            const Quad q = straight_left(r, kSeamTan);
             const bool dis = spec.disabled;
             const float breathe = ctx.reduced ? 0 : .5f + .5f * std::sin(static_cast<float>(ctx.now) * 2 * kPi / 1.6f);
             if (!dis) {
                 Rect low = r;
                 low.y += 12;
                 low.h -= 8;
-                cv.glow(skewed(low, kSeamTan), 26 + 8 * f * breathe, rgba(255, 42, 85, .42f + .2f * f * breathe));
+                cv.glow(straight_left(low, kSeamTan), 26 + 8 * f * breathe, rgba(255, 42, 85, .42f + .2f * f * breathe));
             }
             const float bright = 1 + .08f * f;
             auto col = [&](Color cc) {
@@ -839,7 +846,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
                     const float a = std::max(0.f, x0), b2 = std::min(r.w, x1);
                     if (b2 <= a) continue;
                     const Rect part{r.x + a, r.y + l[0] * s, b2 - a, 2};
-                    cv.fill(sk_rect(r, part), Gradient::linear({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0),
+                    cv.fill(shaped_part(r, part, Shape::StraightLeft, kSeamTan), Gradient::linear({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0),
                                                                rgba(255, 255, 255, .55f)));
                 }
                 const float ph = std::fmod(t, 3.4f) / 3.4f;
@@ -848,7 +855,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
                     const float x0 = -180 + e * 900, x1 = x0 + 140;
                     const float a = std::max(0.f, x0), b2 = std::min(r.w, x1);
                     if (b2 > a)
-                        cv.fill(sk_rect(r, {r.x + a, r.y, b2 - a, r.h}),
+                        cv.fill(shaped_part(r, {r.x + a, r.y, b2 - a, r.h}, Shape::StraightLeft, kSeamTan),
                                 Gradient::linear3({r.x + x0, 0}, {r.x + x1, 0}, rgba(255, 255, 255, 0), .5f,
                                                   rgba(255, 255, 255, .4f), rgba(255, 255, 255, 0)));
                 }
@@ -856,7 +863,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             }
             // Inner light along the top, shade along the bottom.
             cv.line(q.p[0] + Vec2{0, .5f}, q.p[1] + Vec2{0, .5f}, 1, rgba(255, 255, 255, .45f));
-            cv.fill(sk_rect(r, {r.x, r.bottom() - 3, r.w, 3}), rgba(0, 0, 0, .25f));
+            cv.fill(shaped_part(r, {r.x, r.bottom() - 3, r.w, 3}, Shape::StraightLeft, kSeamTan), rgba(0, 0, 0, .25f));
             // Content (upright): the word, two small lines, the Accept glyph when focused.
             const TextStyle big =
                 spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
@@ -877,6 +884,7 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
 }
 
 void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     const bool tall = !spec.caption.empty();
     Box b = with_height(box, tall ? 72 : spec.compact ? 50 : m::kMenuRowHeight);
     focus.disabled = focus.disabled || spec.disabled;
@@ -1116,6 +1124,7 @@ void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, co
 }
 
 void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     const bool two = !spec.detail.empty();
     Box b = with_height(box, two ? 52 : m::kSettingRowHeight);
     TextEngine& te = ui.text();
@@ -1255,6 +1264,7 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
 }
 
 void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     Box b = with_height(box, m::kKeyRowHeight);
     if (zero(b.margin)) b.margin.bottom = 5;
     TextEngine& te = ui.text();
@@ -1315,7 +1325,7 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
                 Canvas& cv = ctx.canvas;
                 const Rect r = ctx.rect;
                 const StepState st = spec.state;
-                const Quad q = skewed(r, kSeamTan);
+                const Quad q = straight_left(r, kSeamTan);
                 Color name_col = c::kRedDim, icon_col = c::kRedFaint, count_col = c::kRedFaint;
                 switch (st) {
                 case StepState::Current:
@@ -1379,6 +1389,7 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
 }
 
 void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     Box b = with_height(box, m::kFileRowHeight);
     TextEngine& te = ui.text();
     ui.leaf(
@@ -1848,6 +1859,7 @@ void log_view(Ui& ui, const std::string& id, LogView& log, const Box& box) {
 // ---- dialog parts --------------------------------------------------------------------------------------------------
 
 void option_row(Ui& ui, const std::string& id, const OptionRowSpec& spec, Focus focus, const Box& box) {
+    focus.straight_left = true;
     // .opt: min 44 high, padding 8 18 8 20, check box 20, gap 14, text 600 14.5/1.25.
     static constexpr TextStyle kText{theme::Font::BodySemiBold, 14.5f, 0, false, 1.25f};
     static constexpr float kLeft = 20 + 20 + 14, kRight = 18;

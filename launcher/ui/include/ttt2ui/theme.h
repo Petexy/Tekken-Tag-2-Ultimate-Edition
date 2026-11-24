@@ -180,6 +180,8 @@ constexpr float kFocusPad = 6;              // the focus highlight's distance ar
 constexpr float kScrollBarWidth = 4, kScrollBarGrab = 12;
 constexpr float kWindowDragStrip = 76;      // the top band is the drag strip
 constexpr float kResizeEdge = 6;
+// The window's own minimise / fullscreen / close buttons: flush in the top-right corner, as Windows draws its own.
+constexpr float kCaptionButtonWidth = 46, kCaptionButtonHeight = 34, kCaptionGlyph = 14;
 constexpr float kCaptionButton = 46;        // minimise / fullscreen / close
 }  // namespace metric
 
