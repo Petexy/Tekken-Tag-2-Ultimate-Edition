@@ -134,6 +134,14 @@ h=$(home steam installed)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=focus:settings;steam:south;wait:0.5" -- --frames "$h/frames"
 clean "$h" 7
 [ "$(grep -c '@cue tab' "$h/out.txt")" = 1 ] || fail "steam: $(grep -c '@cue tab' "$h/out.txt") tab switches for one A"
+# (The other order: the key first, the pad's report after the key's frame, on the Settings page by then: still one.)
+h=$(home steam-key installed)
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=focus:settings;steam-key:south;wait:0.5" -- --frames "$h/frames"
+clean "$h" 7
+[ "$(grep -c '@cue tab' "$h/out.txt")" = 1 ] || fail "steam-key: $(grep -c '@cue tab' "$h/out.txt") tab switches for one A"
+[ "$(sed -n '/@cue tab/,$p' "$h/out.txt" | grep -v '@cue move' | grep -c '@cue')" = 1 ] ||
+    fail "steam-key: the pad's report of the A acted on the Settings page"
+grep -q '@frames idle ok (focus fullscreen,' "$h/out.txt" || fail "steam-key: $(grep -m 1 '@frames idle' "$h/out.txt")"
 
 # F6: Home after every combination of the Display settings (changed in Settings, one at a time: a Gray code walk).
 settings=(fullscreen interpolation input-delay async-shaders precompile-shaders)

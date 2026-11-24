@@ -152,6 +152,8 @@ private:
     Action key_action(const RawEvent& e) const;
     Action pad_action(int button, Glyphs kind) const;
     void emit(Action a, Device d, std::uint32_t id, double press_time, bool repeat);
+    // The same action from another device this soon after it (kSamePress): one press reported twice.
+    bool same_press(Action a, Device d, std::uint32_t id, double t) const;
 
     std::vector<ActionEvent> actions_;
     std::vector<CaptureEvent> capture_;

@@ -92,10 +92,11 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
             const auto resolution = display::resolution_named(rest);
             ok = resolution.has_value();
             if (ok) a.args = {std::string(display::name_of(*resolution))};
-        } else if (a.name == "press" || a.name == "pad" || a.name == "steam" || a.name == "click" ||
-                   a.name == "hover" || a.name == "tab") {
+        } else if (a.name == "press" || a.name == "pad" || a.name == "steam" || a.name == "steam-key" ||
+                   a.name == "click" || a.name == "hover" || a.name == "tab") {
             // Input as the devices give it (the SDL launcher): press:<SDL key name>, pad:<button>, steam:<button>
-            // (the pad's button and the key Steam types for it at once), click:<id>, hover:<id>, tab:<next|prev|
+            // (the pad's button and the key Steam types for it at once), steam-key:<button> (the same, the key
+            // arriving first and the pad's report after the key's frame), click:<id>, hover:<id>, tab:<next|prev|
             // home|fighters|settings>.
             a.args = {rest};
             ok = !rest.empty();

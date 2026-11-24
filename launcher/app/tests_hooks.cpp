@@ -239,7 +239,8 @@ void App::test_capture(double t) {
 // Input of a test step, through the router like the devices': press:<key> (an SDL scancode name: Return, Escape,
 // Q, E, Down...), pad:<button> (south east west north lb rb lt rt up down left right start back), steam:<button>
 // (the Steam Controller in desktop mode: the pad's button AND the key Steam types for it, at the same moment),
-// click:<id> / hover:<id> (the mouse on an item's centre).
+// steam-key:<button> (the same press in the other order: the key first, the pad's report 30 ms later, after the
+// key's frame, as a pad read at its poll arrives), click:<id> / hover:<id> (the mouse on an item's centre).
 bool App::test_input(const std::string& name, const std::vector<std::string>& args, double t) {
     const std::string arg = args.empty() ? std::string() : args[0];
     const auto key = [&](const std::string& k, double at) {
@@ -298,6 +299,13 @@ bool App::test_input(const std::string& name, const std::vector<std::string>& ar
         const PadName* p = button(arg, t);
         if (!p || !*p->key) return test_said(false, "Steam types no key for " + arg), true;
         key(p->key, t + 0.004);
+        test_said(true, {});
+        return true;
+    }
+    if (name == "steam-key") {
+        const PadName* p = button(arg, t + 0.03);
+        if (!p || !*p->key) return test_said(false, "Steam types no key for " + arg), true;
+        key(p->key, t);
         test_said(true, {});
         return true;
     }

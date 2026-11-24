@@ -12,8 +12,11 @@
 # - F4: a fighter tile's drill-in lock by keys, pad and pointer (the pointer crosses the locked tiles without
 #   taking the focus; a click on a tile unlocks onto it; the blue buttons take clicks);
 # - F3: the blue side shows the focused fighter only (no second fighter's name);
+# - the Steam Controller's double reports (each button is the pad's AND a key Steam types, in either order) on a
+#   tile, Back in a drill-in and on a page, a dialog's opening: one action each;
 # - U4: choosing a key (a key, Esc, the 10 s countdown) and the Steam Controller's double report on a key row
-#   (its A is the pad button AND an Enter typed by Steam: one press, the Enter is not taken as the key);
+#   (its A is the pad button AND an Enter typed by Steam, in either order: one press, the Enter is not taken as the
+#   key, the pad's report is not B);
 # - adding and removing a character with the stub importer, and Cancel while it runs.
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4
@@ -130,6 +133,35 @@ clean "$h" 7
 has "$h" '@frames idle ok (focus outfits:kazumi,'
 hasnt "$h" '@cue drill-out'
 
+# The Steam Controller's A and B, each a pad button AND a key Steam types, in either order (the key first: the pad's
+# report comes at the next poll, after the key's frame): one Accept or Back wherever it lands, never a second one on
+# what the first opened (REVIEW2 #2).
+for how in steam steam-key; do
+    h=$(home "$how-drill-in")
+    run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;focus:tile:josie;$how:south;wait:0.5" -- --frames "$h/frames"
+    clean "$h" 7
+    [ "$(sed -n '/@cue drill-in/,$p' "$h/out.txt" | grep -v '@cue move' | grep -c '@cue')" = 1 ] ||
+        fail "$how-drill-in: $(grep '@cue' "$h/out.txt" | grep -v move | tr '\n' '|')"
+    has "$h" '@frames idle ok (focus fighter:josie,'
+    h=$(home "$how-drill-out")
+    run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;focus:tile:josie;pad:south;wait:0.4;$how:east;wait:0.5" -- \
+        --frames "$h/frames"
+    clean "$h" 7
+    [ "$(sed -n '/@cue drill-out/,$p' "$h/out.txt" | grep -v '@cue move' | grep -c '@cue')" = 1 ] ||
+        fail "$how-drill-out: $(grep '@cue' "$h/out.txt" | grep -v move | tr '\n' '|')"
+    has "$h" '@frames idle ok (focus tile:josie,'
+    h=$(home "$how-back-tab")
+    run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;$how:east;wait:0.5" -- --frames "$h/frames"
+    clean "$h" 7
+    [ "$(grep -c '@cue tab' "$h/out.txt")" = 2 ] || fail "$how-back-tab: $(grep -c '@cue tab' "$h/out.txt") tab changes"
+    has "$h" '@frames idle ok (focus play,'
+    h=$(home "$how-dialog")
+    run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=focus:uninstall;$how:south;wait:0.6" -- --frames "$h/frames"
+    clean "$h" 7
+    [ "$(grep -c '@cue accept' "$h/out.txt")" = 1 ] || fail "$how-dialog: the dialog's button was pressed too"
+    has "$h" '@frames idle ok (focus uninstall-cancel,'
+done
+
 # U4: choosing a key.
 h=$(home keys-take)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:j;quit"
@@ -154,6 +186,15 @@ has "$h" '@capture start key:dpad_up'
 has "$h" '@capture end no key was taken yet'
 [ "$(grep -c '@capture start' "$h/out.txt")" = 1 ] || fail "keys-steam: one A started choosing more than once"
 hasnt "$h" 'is Return'
+# The other order (REVIEW2 #2): the Enter Steam types arrives first and starts choosing; the pad's report of the same
+# A, read at the next poll 30 ms later, is not the pad's B: choosing goes on, the next key is taken.
+h=$(home keys-steam-key)
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;steam-key:south;wait:0.5;press:j;quit"
+clean "$h"
+has "$h" '@capture start key:dpad_up'
+has "$h" '@capture end D-pad Up is J'
+[ "$(grep -c '@capture' "$h/out.txt")" = 2 ] || fail "keys-steam-key: $(grep '@capture' "$h/out.txt" | tr '\n' '|')"
+hasnt "$h" '@cue back'
 # A key it refuses (F11 stays with the game): its note, a refusal cue, choosing goes on until a key it takes.
 h=$(home keys-refuse)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:F11;press:j;quit"

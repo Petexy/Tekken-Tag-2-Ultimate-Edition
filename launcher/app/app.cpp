@@ -435,14 +435,16 @@ bool App::pump_input(double t, double draw_at) {
         if (!quiet_event(ev.type)) changed = true;
         got = SDL_PollEvent(&ev);
     }
-    // (Tests: their input, as the devices would give it.)
+    // (Tests: their input, as the devices would give it: in the order and at the times the devices gave it, so a
+    // slow frame never pulls one press apart nor puts its parts in another order.)
+    std::stable_sort(test_raw_.begin(), test_raw_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     for (auto it = test_raw_.begin(); it != test_raw_.end();) {
         if (it->first > now() + 1e-9) {
             ++it;
             continue;
         }
         RawEvent raw = it->second;
-        raw.time = now();
+        raw.time = it->first;
         router_.feed(raw);
         stage_->note_input(now());
         it = test_raw_.erase(it);
