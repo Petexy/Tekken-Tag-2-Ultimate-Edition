@@ -48,7 +48,7 @@ public:
     Sounds(const Sounds&) = delete;
     Sounds& operator=(const Sounds&) = delete;
 
-    // Off by default (the launcher's setting). Off: nothing plays and the device is closed at once.
+    // Off until enabled (the launcher's setting, on by default). Off: nothing plays and the device is closed at once.
     void set_enabled(bool on);
     bool enabled() const;
     // The installed game's folder (the install folder, its game/ folder, or empty: none). Its sounds are read in the

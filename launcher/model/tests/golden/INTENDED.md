@@ -12,7 +12,7 @@ Windows views (`kTkDifferences`); anything else that differs fails.
   Install and Resume too, because Settings now also has the launcher's own
   section.
 - **I2 The launcher's own settings** (U6, U9, U17): a section "Ultimate
-  Launcher" after Keyboard with Sounds (off by default), Reduce motion and
+  Launcher" after Keyboard with Sounds (on by default), Reduce motion and
   Text size (100 %, 125 %, 150 %).
 - **I3 Play reads display.ini when it is pressed.** The old app used what
   Settings had last read, so "Prepare shaders before playing" set by hand (or

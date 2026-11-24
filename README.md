@@ -536,7 +536,7 @@ graphics driver update): "Shaders in the background" lets the game go on
 meanwhile, so the new thing may appear a few frames late instead, and
 "Prepare shaders before playing" makes Play first prepare every shader the
 game has already used on this PC (it cannot know the ones it has never
-shown). Both are off by default. They
+shown). The first is off by default, the second on. They
 are kept in `~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which
 can be edited by hand too:
 

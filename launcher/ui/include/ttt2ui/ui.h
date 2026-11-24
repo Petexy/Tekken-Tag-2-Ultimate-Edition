@@ -86,6 +86,7 @@ struct Focus {
     int group = 0;           // e.g. -1 crimson list, 1 blue readout: up/down stay in their group
     bool skewed = true;      // the highlight's shape
     bool straight_left = false;  // ... with an upright left edge (crimson lists: Shape::StraightLeft)
+    bool straight_left_first = false;  // ... only when first in its line (crimson buttons: the one at the edge)
     float pad = theme::metric::kFocusPad;
     bool is_default = false; // focused when nothing else is
     bool adjust = false;     // Left/Right give Change -1/+1 instead of moving (selectors)
@@ -130,6 +131,7 @@ struct PaintContext {
     bool reduced;        // Reduce motion
     Glyphs glyphs;
     bool* more;          // set *more = true while the painting animates (the loop then draws the next frame)
+    bool line_start;     // the first in its line of a row (or any item of a column): it has nothing before it
     // The ambient clock (FrameInput::ambient): endless decorative loops (a sheen, a blinking dot, a pulse, moving
     // stripes) take their phase from it and call loop(), never animate(). Like the stage's ambient layer (U9) they
     // never count as animation: the loop draws them at most theme::motion::kAmbientHz times a second, and the clock
@@ -281,6 +283,7 @@ private:
         bool modal = false;
         bool mirrored = false;  // Box::mirror here or above
         float slot_x = 0;       // the left edge of the room its parent gave it (the seam fit measures from it)
+        bool line_start = true; // nothing before it in its line (rows: the first of each line)
         // layout
         float pref_w = 0, w = 0, h = 0, x = 0, y = 0, content_h = 0;
         float fit_w = -1, fit_dx = 0;

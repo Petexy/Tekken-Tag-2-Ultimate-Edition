@@ -560,7 +560,7 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
         }
         if (!running) {
             auto b = ui.open("pre/btns", fit(Box{.layout = Layout::Row, .margin = {0, 10, 0, 0}, .gap = 12,
-                                                 .wrap = true},
+                                                 .line_gap = 12, .wrap = true},
                                              SeamFit::CrimsonRect));
             ButtonSpec again;
             again.label = "Check Again";
@@ -694,7 +694,8 @@ void App::home_task(const Box& crimson, const Box& blue) {
                 step_row(ui, "task/step" + std::to_string(i), s, fit({}, SeamFit::CrimsonSkewed));
             }
         }
-        auto b = ui.open("task/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12, .wrap = true},
+        auto b = ui.open("task/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12,
+                                              .line_gap = 12, .wrap = true},
                                           SeamFit::CrimsonRect));
         const bool can_play = ok && (task_kind_ == m::TaskKind::kInstall || task_kind_ == m::TaskKind::kUpdate) &&
                               action("play") && action("play")->enabled;

@@ -160,7 +160,7 @@ struct SetupProblem {
 
 // The launcher's own settings (launcher.ini beside display.ini): new.
 struct LauncherSettings {
-    bool sounds = false;        // U17: off by default
+    bool sounds = true;         // U17: on by default
     bool reduce_motion = false; // U9 (the app sets it from the OS where readable, until chosen)
     int text_size = 100;        // U6: percent (kTextSizes)
     int prompts = 0;            // the button prompts shown: an index into kPrompts (0: from the last device used)

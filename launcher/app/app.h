@@ -168,6 +168,7 @@ private:
     void top_band();
     void bottom_band();
     void task_strip();
+    std::string strip_from_;  // the item focused before the task strip's button (Up from it goes back there)
     void dialog_band();
     std::vector<ui::Hint> hints() const;
 
