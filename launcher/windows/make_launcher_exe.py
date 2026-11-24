@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Makes the Windows release's launcher, as make_appimage.sh makes the Linux one.
 
-    python3 launcher/windows/make_launcher_exe.py [--stub EXE | --cxx COMPILER] [--allow-dirty] OUTPUT
+    python3 launcher/windows/make_launcher_exe.py [--stub EXE | --cxx COMPILER | --cmake-target TARGET]
+                                                  [--build-dir DIR] [--allow-dirty] OUTPUT
 
 OUTPUT is the .exe to write (Ultimate_Launcher-x86_64.exe for a release). It is
 launcher/windows/entry.cpp compiled for 64-bit Windows, with this project's
@@ -18,6 +19,13 @@ launcher updates its files from that branch's newer commits instead.
 --cxx COMPILER  else it is compiled here: with x86_64-w64-mingw32-g++ by default,
                 and its windres, which puts the files in it (with its icon and
                 version details when rsvg-convert is there too)
+--cmake-target TARGET
+                else a program of the new interface (launcher/ui; launcher_smoke
+                to test this), cross-built by CMake with MinGW-w64
+                (cmake/toolchain-mingw64.cmake), SDL 3 built in (from
+                third_party/SDL: python3 tools/setup_deps.py --launcher) and
+                the files as its resource 100; in --build-dir DIR (else a
+                temporary folder)
 --allow-dirty   pack the working tree as it is, with uncommitted changes and new
                 files Git does not ignore (tests: a release is made from a commit)
 
@@ -178,15 +186,53 @@ def compile_launcher(cxx, windres, number, work, files):
     return out.read_bytes()
 
 
+def cmake_build(target, build_dir, work, files):
+    """TARGET, a launcher program of launcher/ui (ttt2_launcher_program), built by CMake for 64-bit Windows with the
+    files in it: the launcher alone (TTT2_LAUNCHER_ONLY), SDL built in (TTT2_LAUNCHER_SDL=static), stripped, its
+    paths relative to the project as make_appimage.sh's (the same .exe from the same commit anywhere)."""
+    for tool in ('cmake', 'ninja'):
+        if not shutil.which(tool): die(tool + ' is not installed')
+    if not (REPO / 'third_party/SDL/CMakeLists.txt').is_file():
+        die("SDL's source is missing: python3 tools/setup_deps.py --launcher")
+    build = Path(build_dir).resolve() if build_dir else work / 'build'
+    build.mkdir(parents=True, exist_ok=True)
+    # (in the build folder, which a kept one then builds again as it was)
+    payload_file, icon = build / 'release-files.bin', build / 'release-icon.ico'
+    payload_file.write_bytes(files)
+    rsvg = shutil.which('rsvg-convert')
+    if rsvg:
+        make_icon(icon, rsvg)
+    else:
+        print('make_launcher_exe.py: no icon: needs rsvg-convert', file=sys.stderr)
+    prefix_maps = '-ffile-prefix-map=%s/= -ffile-prefix-map=%s/=' % (REPO, build)
+    subprocess.run(['cmake', '-S', str(REPO), '-B', str(build), '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
+                    '-DCMAKE_TOOLCHAIN_FILE=' + str(REPO / 'cmake/toolchain-mingw64.cmake'),
+                    '-DTTT2_LAUNCHER_ONLY=ON', '-DTTT2_LAUNCHER_SDL=static',
+                    '-DTTT2_LAUNCHER_PAYLOAD=' + payload_file.as_posix(),
+                    '-DTTT2_LAUNCHER_ICON=' + (icon.as_posix() if rsvg else ''),
+                    '-DCMAKE_C_FLAGS=' + prefix_maps, '-DCMAKE_CXX_FLAGS=' + prefix_maps,
+                    '-DCMAKE_EXE_LINKER_FLAGS=-s'], check=True)
+    cache = (build / 'CMakeCache.txt').read_text(encoding='utf-8', errors='replace')
+    if 'TTT2_LAUNCHER_SDL_MODE:INTERNAL=static' not in cache.splitlines():
+        die('the build does not have SDL built in (TTT2_LAUNCHER_SDL=static)')
+    subprocess.run(['cmake', '--build', str(build), '--target', target], check=True)
+    program = build / 'launcher' / (target + '.exe')
+    if not program.is_file(): die('%s did not make %s (not a launcher/ui program?)' % (target, program))
+    return program.read_bytes()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('output', type=Path)
     which = parser.add_mutually_exclusive_group()
     which.add_argument('--stub', type=Path)
     which.add_argument('--cxx', default='x86_64-w64-mingw32-g++')
+    which.add_argument('--cmake-target')
+    parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--windres')
     parser.add_argument('--allow-dirty', action='store_true')
     args = parser.parse_args()
+    if args.build_dir and not args.cmake_target: parser.error('--build-dir is for --cmake-target')
     number = version(REPO)
     output = args.output.resolve()
     if not output.parent.is_dir(): die('%s is not a folder' % output.parent)
@@ -205,6 +251,8 @@ def main():
             if program[-TRAILER.size:][-len(MAGIC):] == MAGIC:
                 die('%s already holds files: give the launcher as built' % args.stub)
             program += payload(files)
+        elif args.cmake_target:
+            program = cmake_build(args.cmake_target, args.build_dir, Path(temporary), payload(files))
         else:
             program = compile_launcher(args.cxx, args.windres, number, Path(temporary), payload(files))
         part = output.with_name(output.name + '.part')
