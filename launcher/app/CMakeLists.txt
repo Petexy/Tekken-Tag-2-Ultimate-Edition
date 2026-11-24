@@ -188,5 +188,11 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
         list(APPEND _app_tests launcher_app_way_back)
         set_tests_properties(launcher_app_way_back PROPERTIES TIMEOUT 300)
     endif()
+    # C2's other video driver when the one the player named fails (compat review #5): a headless cage, else skipped.
+    add_test(NAME launcher_app_video_fallback
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/video_fallback.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_BINARY_DIR}/video-fallback)
+    list(APPEND _app_tests launcher_app_video_fallback)
+    set_tests_properties(launcher_app_video_fallback PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)
