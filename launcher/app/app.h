@@ -142,6 +142,36 @@ private:
     std::string check_copy(const std::string& row) const;
     bool check_has_copy(const std::string& row) const { return !check_copy(row).empty(); }
 
+    // ---- Fighters (fighters.cpp)
+    struct FighterGroup {
+        std::string key, title, game; // "t7" / "dlc" / "t8", "Tekken 7 DLC", kTekken7
+        const m::GameGroup* group = nullptr;
+        bool dlc = false;
+        std::vector<const m::FighterRow*> rows;
+    };
+    // A fighter in the task that runs: their turn (0 waiting, 1 now, 2 done), their share of the bar.
+    struct FighterTask {
+        bool in = false;
+        int index = 0, count = 0, state = 0;
+        double fraction = 0;
+        const char* verb = "";
+        std::string detail;
+    };
+    std::vector<FighterGroup> fighter_groups() const;
+    const Fighter* status_fighter(const std::string& name) const;
+    const m::FighterRow* fighter_row(const std::string& name) const;
+    std::vector<m::Action> fighter_actions(const m::FighterRow& row) const;
+    FighterTask fighter_task(const std::string& name) const;
+    std::vector<m::Action> group_actions(const FighterGroup& group) const;
+    void fighters(const ui::Box& crimson, const ui::Box& blue);
+    void fighters_early(const ui::Box& crimson, const ui::Box& blue);
+    void fighters_blue(const ui::Box& blue, const std::vector<FighterGroup>& groups);
+    void fighter_view(const std::string& name);
+    void group_view(const std::string& group, const std::string& action_id, const std::vector<FighterGroup>& groups);
+    void outfits_view();
+    void needs_view();
+    bool fighters_activate(const std::string& id);
+
     // ---- the in-app browser (picker.cpp)
     void open_picker(bool folder, const std::string& purpose);
     void picker_dir(const fs::path& dir);
@@ -223,6 +253,13 @@ private:
         std::string opener, target;
     };
     std::optional<Drill> drill_;
+
+    // Fighters
+    std::string fighters_key_;                       // what the blue side shows ("f:<name>", "g:<group>:<id>", ...)
+    ui::Readout fighters_ro_;
+    std::map<std::string, std::string> group_of_button_;  // a group action's id -> its group's key
+    // Every action the screen declared this frame (Fighters, Settings): their whys, labels and kinds.
+    std::map<std::string, m::Action> screen_actions_;
 
     // the in-app browser
     struct Picker {

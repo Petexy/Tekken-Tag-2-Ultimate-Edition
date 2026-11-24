@@ -38,6 +38,7 @@ add_executable(ttt2-launcher
     main.cpp
     app.cpp
     home.cpp
+    fighters.cpp
     picker.cpp
     tests_hooks.cpp
     backend_linux.cpp)

@@ -370,8 +370,10 @@ void App::declare() {
         blue.shift = d;
     }
     // (The root is a Stack: each half places itself by its margins.)
+    screen_actions_.clear();
     if (picker_) picker_screen(crimson, blue);
     else if (screen_ == Screen::kHome) home(crimson, blue);
+    else if (screen_ == Screen::kFighters) fighters(crimson, blue);
     else placeholder(crimson, blue);
     task_strip();
     if (view_.dialog) dialog_band();
@@ -480,6 +482,20 @@ std::vector<Hint> App::hints() const {
     if (drilled()) {
         if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? "Copy" : focused_label());
         h.push_back({Prompt::Back, "Back"});
+        h.push_back({Prompt::Tabs, "Tabs"});
+        return h;
+    }
+    if (screen_ == Screen::kFighters) {
+        if (f.starts_with("tile:")) {
+            accept("Options");
+            if (const m::Action* o = action("outfits:" + f.substr(5)); o && o->enabled)
+                h.push_back({Prompt::Context1, "Outfits"});
+        } else if (f == "fx:needs" || f == "fx:early") {
+            accept("Options");
+        } else if (const m::Action* a = action(f); a && a->enabled) {
+            accept(a->kind == m::ActionKind::kCheck ? (a->checked ? "Untick" : "Tick") : a->label);
+        }
+        h.push_back({Prompt::Back, "Home"});
         h.push_back({Prompt::Tabs, "Tabs"});
         return h;
     }
@@ -707,6 +723,7 @@ const m::Action* App::action(const std::string& id) const {
         if (view_.notice.update.id == id) return &view_.notice.update;
         if (view_.notice.page && view_.notice.page->id == id) return &*view_.notice.page;
     }
+    if (const auto it = screen_actions_.find(id); it != screen_actions_.end()) return &it->second;
     return nullptr;
 }
 
@@ -747,6 +764,16 @@ void App::on_events(const std::vector<Event>& events) {
             break;
         case EventKind::Context2:
             if (task_screen_ && screen_ == Screen::kHome && !view_.dialog && !picker_) activate("details");
+            break;
+        case EventKind::Context1:
+            // (Fighters: F / X ticks the focused fighter's outfits.)
+            if (screen_ == Screen::kFighters && !view_.dialog && e.id.starts_with("tile:")) {
+                const std::string id = "outfits:" + e.id.substr(5);
+                if (const m::Action* o = action(id); o && o->enabled) {
+                    activate(id);
+                    cue(ttt2::app::Cue::Toggle);
+                }
+            }
             break;
         case EventKind::ClickOutside:
             if (view_.dialog) {
@@ -811,6 +838,7 @@ void App::activate(const std::string& id) {
     if (id == "slot:game") return open_picker(false, "game");
     if (id == "slot:folder") return open_picker(true, "folder");
     if (id == "strip/task") return handle(model_->activate("task", t));
+    if (screen_ == Screen::kFighters && fighters_activate(id)) return;
     if (id.starts_with("check:")) {
         // A check with commands to copy: they are on the blue side (FEEDBACK F4: drill in, crimson locked).
         if (const std::string copy = check_copy(id); !copy.empty()) drill_in(id, copy);

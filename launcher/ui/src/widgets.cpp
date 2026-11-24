@@ -1108,7 +1108,9 @@ void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, co
             bs.size = ButtonSize::Tiny;
             bs.disabled = hb.disabled;
             bs.half = Half::Crimson;
-            button(ui, hb.id, bs);
+            Focus f;
+            f.group = spec.focus_group;
+            button(ui, hb.id, bs, f);
         }
     }
 }

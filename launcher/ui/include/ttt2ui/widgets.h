@@ -152,6 +152,7 @@ struct GroupHeaderSpec {
     std::string title{}, count{}, sub{};
     Tone sub_tone = Tone::Neutral;
     std::vector<HeaderButton> buttons{};
+    int focus_group = 0;  // the buttons' Focus::group (a list's: -1, so up/down from its items reach them)
 };
 void group_header(Ui& ui, const std::string& id, const GroupHeaderSpec& spec, const Box& box = {});
 // A settings row with its value in place: Left/Right (or a click on an arrow) give Change -1/+1, Accept Activate.
