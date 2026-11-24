@@ -8,6 +8,7 @@
 #include "fakes.h"
 #include "replay.h"
 #include "preflight.h"
+#include "rules.h"
 #include "self_update.h"
 #include "settings.h"
 #include "status.h"
@@ -794,6 +795,112 @@ void every_id(const fs::path& golden, const fs::path& scratch, const Caps& caps)
 
 } // namespace
 
+// Windows: Set Up Game's folders saved and every task checked (main.py --query save-settings / check) before it
+// starts, each refusal in the player's words; the launcher's own update cannot be cancelled once it is replacing.
+void windows_before(const fs::path& scratch) {
+    current = "Windows: saved and checked before a task";
+    Facts f;
+    f.caps = Caps::windows_caps();
+    f.python = "/w/python/python.exe";
+    f.windows.root = "/w/files";
+    f.windows.build = "/w/files/build-windows-tools";
+    f.windows.config = "/w/files/local/windows-launcher.json";
+    f.windows.logs = "/w/TTT2Ultimate/logs";
+    f.windows.folders = {{"source", ""}, {"install", ""}, {"data", "/w/TTT2Ultimate"}};
+    FakeEnvironment env;
+    std::vector<std::string> queries; // (each program's --query or --worker word)
+    std::string check_code, save_code;
+    FakeStarter starter([&](Run& r) {
+        const auto& a = r.command.argv;
+        for (size_t i = 0; i + 1 < a.size(); ++i)
+            if (a[i] == "--query" || a[i] == "--worker") queries.push_back(a[i + 1]);
+        r.lines = {{"Some line a module printed first", false}, {"answer", false}};
+    });
+    WindowsCommands commands;
+    commands.stamp = [] { return std::string("20261124-190000-1"); };
+    fs::create_directories(scratch);
+    KeyFile keys(scratch / "keyboard.ini");
+    LauncherModel::Parts parts{commands, starter, env, keys, nullptr, {}, {}, us_key_label, {}, {}};
+    parts.read_save = [&](const std::string& out, std::string*) -> std::optional<SetupProblem> {
+        if (out.find("answer") == std::string::npos) return std::nullopt;
+        return SetupProblem{save_code, save_code.empty() ? "" : "data", "", ""};
+    };
+    parts.read_check = [&](const std::string& out, std::string*) -> std::optional<SetupProblem> {
+        if (out.find("answer") == std::string::npos) return std::nullopt;
+        return SetupProblem{check_code, "", "", ""};
+    };
+    LauncherModel model(f, parts);
+    double now = 100;
+    const auto settle = [&] {
+        for (int i = 0; i < 50; ++i) {
+            starter.pump();
+            model.tick(now += 0.05);
+        }
+    };
+    settle();
+    queries.clear();
+
+    // Set Up Game: the folders chosen, confirmed: saved, checked, then the worker.
+    model.chosen_game("/w/Downloads/TTT2.wua", now);
+    model.chosen_folder("/w/Games/TTT2", now);
+    CHECK(model.view().dialog && model.view().dialog->id == "setup");
+    check_code = "installer_letters";
+    model.activate("setup-confirm", now);
+    settle();
+    CHECK(queries.size() == 2 && queries[0] == "save-settings" && queries[1] == "check");
+    CHECK(!model.task().running());
+    CHECK_EQ(model.task().view().title, std::string("Setting up the game: not started"));
+    CHECK(!model.task().view().detail.empty());
+
+    check_code.clear();
+    queries.clear();
+    model.activate("setup-confirm", now); // (the dialog is gone: nothing)
+    model.chosen_folder("/w/Games/TTT2", now);
+    model.activate("setup-confirm", now);
+    settle();
+    // (then the status asked again: what the task changed)
+    CHECK(queries.size() >= 3 && queries[0] == "save-settings" && queries[1] == "check" && queries[2] == "setup");
+    CHECK_EQ(model.task().view().title, std::string("The game is set up"));
+
+    // A refused save says which folder, in words.
+    save_code = "data_name";
+    queries.clear();
+    model.chosen_folder("/w/Games/TTT2", now);
+    model.activate("setup-confirm", now);
+    settle();
+    CHECK(queries.size() == 1 && queries[0] == "save-settings");
+    CHECK_EQ(model.task().view().title, std::string("Setting up the game: not started"));
+
+    current = "Windows: every check's sentence";
+    for (const char* code : {"inputs", "tools_folder", "installer_letters", "tools_letters", "project_length",
+                             "tools_length", "no_build", "no_install", "no_paths", "no_fighters", "title"}) {
+        const std::string text = setup_problem_text({code, "install", "é", "C:/Games/é"});
+        CHECK(!text.empty() && text.back() == '.' && text.find(code) == std::string::npos);
+    }
+    CHECK(setup_problem_text({"installer_letters", "install", "é", "C:/Games/é"}).find("é") != std::string::npos);
+    for (const char* code : {"data_name", "relative"}) {
+        const std::string text = save_problem_text({code, "data", "", ""});
+        CHECK(!text.empty() && text.back() == '.' && text.find(code) == std::string::npos);
+    }
+
+    current = "Windows: no Cancel once the new launcher is put in place";
+    FakeStarter held;
+    held.set_script([](Run& r) {
+        r.lines = {{"@step update Downloading the new launcher", false}, {"@step update Putting it in place", false}};
+        r.held = true;
+    });
+    TaskRunner t(held, Caps::windows_caps());
+    TaskSpec spec;
+    spec.kind = TaskKind::kLauncherUpdate;
+    spec.title = "Updating the launcher";
+    spec.command.argv = {"python.exe", "main.py", "--worker", "launcher"};
+    CHECK(t.start(spec, now));
+    held.pump();
+    t.tick(now);
+    CHECK(!t.cancellable());
+    CHECK(t.view().button.label.empty());
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -804,6 +911,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     model_rules(golden, scratch / "model");
     every_id(golden, scratch / "ids", Caps::linux_caps());
     every_id(golden, scratch / "ids", Caps::windows_caps());
+    windows_before(scratch / "windows-before");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

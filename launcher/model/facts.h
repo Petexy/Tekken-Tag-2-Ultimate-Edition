@@ -136,6 +136,7 @@ struct WindowsState {
     std::string branch;           // a test build's branch (not main), empty otherwise
     std::string commit;           // this build's commit (40 hex), empty when not known (project ZIP)
     std::map<std::string, std::string> folders; // Settings > Folders: source, title, install, data, packs, saves, tools
+    std::map<std::string, std::string> folder_defaults; // each one's default (Settings > Folders' Default), "" none
     fs::path logs, latest_log;                  // <data>/logs, and its newest *.log (empty: none)
     // Why Play cannot start the game: "" (it can), "exe" (the installed game's program is missing),
     // "source" (a development build without its Wii U source).

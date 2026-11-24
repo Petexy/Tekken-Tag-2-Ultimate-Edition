@@ -39,9 +39,18 @@ std::vector<Place> places(const fs::path& home, const std::string& user) {
     out.push_back({"home", "Home", home, "stroke:home"});
     if (is_dir(home / "Downloads")) out.push_back({"downloads", "Downloads", home / "Downloads", "stroke:down"});
     if (is_dir(home / "Games")) out.push_back({"games", "Games", home / "Games", "stroke:folder"});
+#ifdef _WIN32
+    // Windows: each drive (C:, D:, ...).
+    (void)user;
+    for (char d = 'A'; d <= 'Z'; ++d) {
+        const fs::path root = std::string(1, d) + ":\\";
+        if (is_dir(root)) out.push_back({std::string("drive:") + d, std::string(1, d) + ":", root, "stroke:drive"});
+    }
+    return out;
+#endif
     // Mounted drives (SD cards, other disks) as the desktop mounts them.
     if (!user.empty()) {
-        for (const fs::path base : {fs::path("/run/media") / user, fs::path("/media") / user}) {
+        for (const fs::path& base : {fs::path("/run/media") / user, fs::path("/media") / user}) {
             std::error_code ec;
             fs::directory_iterator it(base, fs::directory_options::skip_permission_denied, ec);
             if (ec) continue;

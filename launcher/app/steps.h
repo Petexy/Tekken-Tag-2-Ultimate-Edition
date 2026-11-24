@@ -24,3 +24,17 @@ std::vector<StepLine> build_steps(const std::vector<std::string>& log, bool ende
 int current_step(const std::vector<StepLine>& steps);
 
 } // namespace launcher::app
+
+namespace launcher::app {
+
+// Windows' first start (C9): how far "Start Ultimate Launcher.cmd --check" is, from its log
+// (local\windows-bootstrap.log: its "@step <id> <text>" lines since the last "@step check", curl's progress bar).
+struct BootstrapProgress {
+    std::string step;      // "check", "download", "verify", "unpack", "ready" ("" none yet)
+    std::string text;      // its words ("Downloading Python for the launcher")
+    double fraction = -1;  // the whole first start's part done, -1 when not known
+    double download = -1;  // the download's own part (curl's last percentage), -1 when none
+};
+BootstrapProgress bootstrap_progress(const std::string& log);
+
+} // namespace launcher::app

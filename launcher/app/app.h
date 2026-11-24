@@ -6,7 +6,11 @@
 // and the Effects it asks for. Screens: home.cpp (Home in every state, the install's task screen), picker.cpp (the
 // in-app file and folder browser). Test hooks (TTT2_LAUNCHER_TEST_*, --screenshot): tests_hooks.cpp.
 
+#ifdef _WIN32
+#include "backend_windows.h"
+#else
 #include "backend_linux.h"
+#endif
 #include "browser.h"
 #include "launcher_ini.h"
 #include "sound_cues.h"
@@ -53,7 +57,11 @@ struct Options {
     // cage with WLR_BACKENDS=headless) instead of SDL's offscreen driver.
     bool real_window = false;
     std::unique_ptr<SingleInstance> instance;
+    fs::path files; // Windows' release .exe: the folder its files are in (startup's Start::files)
 };
+
+// Wakes the loop (an event of its own): posted work or a program's lines are waiting.
+void wake_loop();
 
 enum class Screen : int { kHome = 0, kFighters = 1, kSettings = 2 };
 
@@ -134,6 +142,9 @@ private:
     void home_first_run(const ui::Box& crimson, const ui::Box& blue);
     void home_unfinished(const ui::Box& crimson, const ui::Box& blue);
     void home_preflight(const ui::Box& crimson, const ui::Box& blue);
+    void home_setup(const ui::Box& crimson, const ui::Box& blue); // Windows before Set Up Game
+    void more_view();                                                 // Windows' More, drilled into from Home
+    void more_describe();
     void home_task(const ui::Box& crimson, const ui::Box& blue);
     // How far the task is as its screen shows it (a build: its steps, each one share), -1 when unknown.
     double task_fraction() const;
@@ -214,9 +225,29 @@ private:
     // press:/pad:/steam:/click:/hover: test actions: input as the devices give it (through the router).
     bool test_input(const std::string& name, const std::vector<std::string>& args, double now);
 
+    // ---- Windows (windows_app.cpp): getting ready before the model (C9 bootstrap, --query state), the state
+    // asked again after each task, Settings > Folders saved.
+#ifdef _WIN32
+    bool windows_ready();
+    void ready_frame(double now);
+    void ready_declare();
+    void windows_state_again();
+    void save_folders();
+    std::unique_ptr<WindowsReady> ready_;
+    std::optional<WindowsFiles> win_files_;
+    std::unique_ptr<m::Job> state_job_, save_job_;
+    std::string state_out_, save_out_;
+    bool state_again_ = false;
+    fs::path exe_; // the release .exe these files came from ("" a CMake build)
+#endif
+    void folders_from_state(const m::WindowsState& state);
+
     Options o_;
+#ifndef _WIN32
     Places places_;
     std::optional<fs::path> appimage_;
+#endif
+    fs::path display_file_, keyboard_file_, owned_cache_;
     std::string banner_;
 
     // toolkit
@@ -238,10 +269,12 @@ private:
     // model
     std::unique_ptr<ProcessHost> host_;
     std::unique_ptr<backend::ProcessStarter> starter_;
-    std::unique_ptr<LinuxEnvironment> env_;
-    m::LinuxCommands commands_;
+    std::unique_ptr<m::Environment> env_;
+    std::unique_ptr<m::Commands> commands_;
     std::unique_ptr<m::KeyFile> keys_;
+#ifndef _WIN32
     LinuxUpdateFiles files_;
+#endif
     std::unique_ptr<m::LauncherModel> model_;
     m::View view_;
 

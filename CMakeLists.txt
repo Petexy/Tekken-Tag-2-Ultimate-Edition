@@ -77,7 +77,12 @@ if(TTT2_TOOLS_ONLY)
         # portable part and launcher/model).
         add_subdirectory(launcher/core)
         add_subdirectory(launcher/model)
+        add_subdirectory(launcher/backend)
         add_subdirectory(launcher/ui)
+        # C1: the target ttt2-launcher a player's Set Up Game builds (tools/build_windows_*.ps1) is the native
+        # launcher on this SDL3 DLL (launcher/app); the Tk window's starter (launcher/windows/entry.cpp) is
+        # ttt2-launcher-classic.
+        add_subdirectory(launcher/app)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME windows_installer_test COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tests/windows_installer_test.py $<TARGET_FILE:windows_installer_driver>)

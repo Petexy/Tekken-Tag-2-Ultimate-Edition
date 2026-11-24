@@ -41,6 +41,18 @@ std::string folder_name(const fs::path& p) {
     return n.empty() ? p.string() : n;
 }
 
+// Settings > Folders' names, as the picker's title says them.
+std::string folder_title(const std::string& key) {
+    if (key == "source") return "Wii U archive's folder";
+    if (key == "title") return "extracted game";
+    if (key == "install") return "installation folder";
+    if (key == "data") return "data folder";
+    if (key == "packs") return "characters folder";
+    if (key == "saves") return "saves folder";
+    if (key == "tools") return "Windows tools folder";
+    return key + " folder";
+}
+
 } // namespace
 
 void App::open_picker(bool folder, const std::string& purpose) {
@@ -52,7 +64,11 @@ void App::open_picker(bool folder, const std::string& purpose) {
     p.places = places(home, user ? user : "");
     p.back_focus = ui_->focused();
     const m::Facts& f = model_->facts();
-    const fs::path from = folder ? slot_folder_ : f.chosen_game.empty() ? home / "Downloads" : f.chosen_game.parent_path();
+    fs::path from = folder ? slot_folder_ : f.chosen_game.empty() ? home / "Downloads" : f.chosen_game.parent_path();
+    if (purpose.starts_with("folder:") || purpose == "setup-folder") {
+        const auto it = f.windows.folders.find(purpose == "setup-folder" ? "install" : purpose.substr(7));
+        from = it == f.windows.folders.end() || it->second.empty() ? home : fs::path(it->second);
+    }
     picker_ = std::move(p);
     picker_dir(start_folder(from, {home / "Downloads", home}));
     wipe_->start(now(), 1, model_->launcher_settings().reduce_motion);
@@ -98,7 +114,13 @@ void App::picker_chosen(const fs::path& path) {
         } else {
             model_->mutable_facts().chosen_game = path;
         }
-        ui_->focus("slot:game", true);
+        // (Windows' Set Up Game opens the folder's browser next: it keeps the focus.)
+        if (!picker_) ui_->focus("slot:game", true);
+    } else if (p.purpose == "setup-folder") {
+        handle(model_->chosen_folder(path, now()));
+    } else if (p.purpose.starts_with("folder:")) {
+        set_folder(p.purpose.substr(7), path.string());
+        ui_->focus("fold:" + p.purpose.substr(7), true);
     } else {
         slot_folder_ = path;
         ui_->focus("slot:folder", true);
@@ -130,6 +152,22 @@ bool App::picker_activate(const std::string& id) {
     }
     if (id == "pk/choose-here") {
         picker_chosen(p.dir);
+        return true;
+    }
+    if (id == "pk/new") {
+        // (No typing: "New folder", "New folder 2", ...; renamed later in the file manager if wanted.)
+        std::error_code ec;
+        fs::path made;
+        for (int n = 1; n < 100 && made.empty(); ++n) {
+            const fs::path f = p.dir / (n == 1 ? std::string("New folder") : "New folder " + std::to_string(n));
+            if (!fs::exists(f, ec) && fs::create_directory(f, ec)) made = f;
+        }
+        if (made.empty()) {
+            toast("No new folder", ec ? ec.message() : std::string("This folder cannot hold another one."));
+            return true;
+        }
+        picker_dir(made);
+        cue(ttt2::app::Cue::Accept);
         return true;
     }
     if (id == "pk/choose") {
@@ -165,7 +203,9 @@ bool App::picker_activate(const std::string& id) {
 void App::picker_screen(const Box& crimson, const Box& blue) {
     Ui& ui = *ui_;
     Picker& p = *picker_;
-    const std::string title = p.folder ? "Choose where to install" : "Choose the game's .wua";
+    const std::string title = !p.folder                         ? "Choose the game's .wua"
+                              : p.purpose.starts_with("folder:") ? "Choose the " + folder_title(p.purpose.substr(7))
+                                                                 : "Choose where to install";
     {
         auto g = ui.open("pk/crimson", crimson);
         section_label(ui, "pk/label", title, Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect));
@@ -312,18 +352,28 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         big("pk/b-name", folder_name(p.dir));
         std::vector<Fact> list = {{"Where", {{m::shown_path(p.dir), kValue}}}};
         if (p.free) list.push_back({"Free", {{size_text(*p.free), kValue}}, false});
-        if (p.folder) {
+#ifndef _WIN32
+        if (p.folder && p.purpose == "folder") {
             std::string why;
             const auto target = launcher::install_target(p.dir, &why);
             list.push_back({"The game", {{target ? m::shown_path(*target) : why, target ? kValue : c::kWarn}}});
         }
+#endif
         facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         std::string para = "Choose a .wua in the list on the left: the launcher marks the ones that can be the game.";
-        if (p.folder) {
+        if (p.purpose.starts_with("folder:")) {
+            para = "Choose This Folder takes it as the " + folder_title(p.purpose.substr(7)) +
+                   "; New Folder makes an empty one in it.";
+        } else if (p.purpose == "setup-folder") {
+            para = "The game is installed into this folder: about 30 GB with its tools. New Folder makes an empty "
+                   "one in it.";
+        } else if (p.folder) {
+#ifndef _WIN32
             const auto target = launcher::install_target(p.dir);
             para = target && normal(*target) == normal(p.dir)
                        ? "The game goes into this folder itself (it is empty): about 16 GB, plus 3 GB while building."
                        : "The game goes into its own folder in here: about 16 GB, plus 3 GB while building.";
+#endif
         }
         text(ui, "pk/b-para", TextSpec{.text = para, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
              fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
@@ -335,6 +385,10 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
             ch.size = ButtonSize::Small;
             ch.prompt = Prompt::Accept;
             button(ui, "pk/choose-here", ch, blue_focus());
+            ButtonSpec nf;
+            nf.label = "New Folder";
+            nf.size = ButtonSize::Small;
+            button(ui, "pk/new", nf, blue_focus());
         }
         button(ui, "pk/system", sys, blue_focus());
     });

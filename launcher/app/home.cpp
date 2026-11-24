@@ -82,9 +82,13 @@ float App::share() const {
 bool App::tall() const { return screen_ == Screen::kHome && task_screen_ && !picker_; }
 
 std::string App::slot_target() const {
+#ifdef _WIN32
+    return m::shown_path(slot_folder_);
+#else
     std::string why;
     const auto t = launcher::install_target(slot_folder_, &why);
     return m::shown_path(t ? *t : slot_folder_ / "Tekken Tag Tournament 2");
+#endif
 }
 
 void App::home(const Box& crimson, const Box& blue) {
@@ -94,7 +98,7 @@ void App::home(const Box& crimson, const Box& blue) {
     case m::GameState::kNotFinished: return home_unfinished(crimson, blue);
     case m::GameState::kChecking:
     case m::GameState::kCannotInstall: return home_preflight(crimson, blue);
-    default: return home_first_run(crimson, blue);
+    default: return model_->facts().caps.setup_game ? home_setup(crimson, blue) : home_first_run(crimson, blue);
     }
 }
 
@@ -265,6 +269,11 @@ void App::home_installed(const Box& crimson, const Box& blue) {
         if (action("open-folder"))
             menu_row(ui, "open-folder", {"stroke:folder", "Open the game folder"}, crimson_focus(),
                      fit({}, SeamFit::CrimsonSkewed));
+        if (const m::Action* more = action("more")) {
+            MenuRowSpec s{"stroke:dots", "More", "Build, install, logs"};
+            s.disabled = !more->enabled;
+            menu_row(ui, "more", s, crimson_focus(false, !more->enabled), fit({}, SeamFit::CrimsonSkewed));
+        }
         if (const m::Action* un = action("uninstall")) {
             MenuRowSpec s{"stroke:trash", "Uninstall"};
             s.danger = true;
@@ -291,6 +300,8 @@ void App::home_installed(const Box& crimson, const Box& blue) {
         {"Version", {{f.game_built.empty() ? "Unknown" : m::shown_build(f.game_built), kValue}}},
         {"Folder", {{m::shown_path(f.install.folder), kValue}}},
         {"Fighters", fighters_runs, false}};
+    // (Drilled into More: its entries and what the focused one does take the facts' place.)
+    if (drilled() && drill_->opener == "more") return more_view();
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     notice_card();
     const std::string& fo = ui.focused();
@@ -298,6 +309,104 @@ void App::home_installed(const Box& crimson, const Box& blue) {
                         fo == "notice-update" || fo == "release-page"))
         readout_key_ = fo;
     home_readout(readout_key_);
+}
+
+// Windows before Set Up Game (window.py's card): Set Up Game asks for the archive and the folder (the in-app
+// browser), then confirms; More has the developers' and the logs' entries.
+void App::home_setup(const Box& crimson, const Box& blue) {
+    Ui& ui = *ui_;
+    const m::Facts& f = model_->facts();
+    const m::Action* setup = action("setup");
+    {
+        auto g = ui.open("home/crimson", crimson);
+        section_label(ui, "home/menu-label", "Set Up", Half::Crimson, {},
+                      fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
+        if (setup) {
+            SlabSpec s{"Set Up", "from your", "own .wua"};
+            s.mid = true;
+            s.disabled = !setup->enabled;
+            slab(ui, "setup", s, crimson_focus(true, !setup->enabled),
+                 fit(Box{.margin = {12, 0, 0, 18}}, SeamFit::CrimsonSkewed));
+        }
+        auto rows = ui.open("home/rows", Box{.gap = 10});
+        menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "settings", {"stroke:gear", "Settings"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        if (const m::Action* more = action("more")) {
+            MenuRowSpec s{"stroke:dots", "More", "Build, install, logs"};
+            s.disabled = !more->enabled;
+            menu_row(ui, "more", s, crimson_focus(false, !more->enabled), fit({}, SeamFit::CrimsonSkewed));
+        }
+    }
+    auto g = ui.open("home/blue", blue);
+    game_head("Native PC port · built from your own copy");
+    const auto folder = [&](const char* key) {
+        const auto it = f.windows.folders.find(key);
+        return it == f.windows.folders.end() ? std::string() : it->second;
+    };
+    const std::string source = folder("source"), install = folder("install");
+    section_label(ui, "home/needs-label", "What the setup needs", Half::Blue, {},
+                  fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
+    const Fact list[] = {
+        {"Your copy", {{"TEKKEN TAG TOURNAMENT 2 WII U EDITION: European, update 16, as a .wua archive", kValue}}, false},
+        {"Archive", {{source.empty() ? "Chosen when you set up" : m::shown_path(source), source.empty() ? c::kBlueDim
+                                                                                                      : kValue}},
+         !source.empty()},
+        {"Folder", {{install.empty() ? "Chosen when you set up" : m::shown_path(install), install.empty() ? c::kBlueDim
+                                                                                                        : kValue}},
+         !install.empty()},
+        {"Space", {{"About 30 GB and internet: the tools are downloaded once", kValue}}, false}};
+    // (Drilled into More: its entries and what the focused one does take the facts' place.)
+    if (drilled() && drill_->opener == "more") return more_view();
+    facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
+    notice_card();
+    const std::string& fo = ui.focused();
+    if (!fo.empty() && (ui.rect(fo).x < stage_->seam_now().x_at(ui.rect(fo).center().y) ||
+                        fo == "notice-update" || fo == "release-page"))
+        readout_key_ = fo;
+    home_readout(readout_key_);
+}
+
+// Windows' More, drilled into from its row: its entries on the blue side (the crimson side locked, F4).
+void App::more_view() {
+    Ui& ui = *ui_;
+    section_label(ui, "more/label", "More", Half::Blue, {}, fit(Box{.margin = {0, 6, 0, 8}}, SeamFit::BlueRect));
+    for (const m::Action& a : view_.game.more) screen_actions_[a.id] = a;
+    more_describe();
+    auto col = ui.open("more/list", fit(Box{.margin = {0, 12, 0, 0}, .gap = 8, .align = Align::End},
+                                        SeamFit::BlueRect));
+    for (const m::Action& a : view_.game.more) {
+        ButtonSpec b;
+        b.label = a.label;
+        b.kind = ButtonKind::Blue;
+        b.size = ButtonSize::Small;
+        b.disabled = !a.enabled;
+        Focus fo;
+        fo.group = 1;
+        fo.disabled = !a.enabled;
+        button(ui, a.id, b, fo);
+    }
+}
+
+// What the focused More entry does (its row's words, else the launcher's), and why it cannot now.
+void App::more_describe() {
+    Ui& ui = *ui_;
+    const m::Action* a = action(ui.focused());
+    if (a && ui.focused().starts_with("more:")) {
+        std::string body = a->describe.explain.empty() ? a->tooltip : a->describe.explain;
+        if (body.empty()) {
+            const std::string& id = a->id;
+            body = id == "more:build"           ? "Builds the Windows game program again from the extracted game (a while)."
+                   : id == "more:install"       ? "Installs the built game into the installation folder."
+                   : id == "more:update"        ? "Puts the newest built program into the installed game."
+                   : id == "more:setup-again"   ? "Set Up Game again: another archive or folder."
+                   : id == "more:open-logs"     ? "Opens the folder of every task's log."
+                                                : "Opens the newest task's log.";
+        }
+        describe_panel(ui, "more/xpl", a->label, body, fit({}, SeamFit::BlueSkewed));
+        if (!a->enabled && !a->why.empty())
+            note(ui, "more/why", Tone::Warn, a->why, fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect),
+                 "stroke:warn");
+    }
 }
 
 void App::home_first_run(const Box& crimson, const Box& blue) {
@@ -623,9 +732,14 @@ void App::home_task(const Box& crimson, const Box& blue) {
         button(ui, "details", details, crimson_focus());
     }
     auto g = ui.open("home/blue", blue);
+#ifdef _WIN32
+    const fs::path folder = task_kind_ == m::TaskKind::kLauncherUpdate && !exe_.empty() ? exe_.parent_path()
+                                                                                        : f.install.folder;
+#else
     const fs::path folder = task_kind_ == m::TaskKind::kInstall && !f.installing.empty() ? f.installing
                             : task_kind_ == m::TaskKind::kLauncherUpdate && appimage_    ? appimage_->parent_path()
                                                                                          : f.install.folder;
+#endif
     section_label(ui, "task/label", running ? "Progress" : "What happened", Half::Blue, {}, fit({}, SeamFit::BlueRect));
     {
         auto k = ui.open("task/kick", fit(Box{.layout = Layout::Row, .h = Size::fixed(26), .margin = {0, 0, 0, 8},

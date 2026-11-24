@@ -3,10 +3,23 @@
 #include "preflight.h"
 #include "rules.h"
 #include "uninstall.h"
+#ifdef _WIN32
+#include "win32.h"
+#endif
 
 #define SDL_MAIN_NOIMPL
 #include <SDL3/SDL_main.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -19,16 +32,17 @@ using namespace ttt2::ui;
 namespace c = theme::color;
 namespace tx = theme::text;
 
-namespace {
-
 // The loop's own event: posted work or a program's lines are waiting (ProcessHost's wake, threads, file dialogs).
-const Uint32 kWake = SDL_EVENT_USER;
+static const Uint32 kWake = SDL_EVENT_USER;
 
+// (Also windows_app.cpp's.)
 void wake_loop() {
     SDL_Event e{};
     e.type = kWake;
     SDL_PushEvent(&e);
 }
+
+namespace {
 
 bool full_kind(m::TaskKind k) {
     return k == m::TaskKind::kInstall || k == m::TaskKind::kUpdate || k == m::TaskKind::kUninstall ||
@@ -42,7 +56,11 @@ Box fitted(Box b, SeamFit f) {
 
 } // namespace
 
-App::App(Options options) : o_(std::move(options)), places_(Places::from_environment()) {}
+App::App(Options options) : o_(std::move(options)) {
+#ifndef _WIN32
+    places_ = Places::from_environment();
+#endif
+}
 
 App::~App() {
     for (std::thread& t : threads_)
@@ -98,29 +116,87 @@ bool App::open_window() {
 }
 
 void App::make_model() {
-    host_ = std::make_unique<ProcessHost>(wake_loop);
-    starter_ = std::make_unique<backend::ProcessStarter>(*host_);
+    if (!host_) host_ = std::make_unique<ProcessHost>(wake_loop);
+    if (!starter_) starter_ = std::make_unique<backend::ProcessStarter>(*host_);
+#ifdef _WIN32
+    // (windows_ready() has the state: its folders and files.)
+    const backend::WindowsStateAnswer& answer = ready_->answer();
+    m::Facts facts = windows_start_facts(*win_files_, o_.game);
+    backend::apply_windows_state(answer, facts);
+    env_ = std::make_unique<WindowsEnvironment>(win_files_->build);
+    auto commands = std::make_unique<m::WindowsCommands>();
+    commands->stamp = [] {
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        char b[40];
+        std::snprintf(b, sizeof b, "%04u%02u%02u-%02u%02u%02u-%03u000", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+                      t.wSecond, t.wMilliseconds);
+        return std::string(b);
+    };
+    commands_ = std::move(commands);
+    display_file_ = answer.display_file;
+    keyboard_file_ = answer.keyboard_file;
+    const auto data = facts.windows.folders.find("data");
+    owned_cache_ = data == facts.windows.folders.end() || data->second.empty()
+                       ? fs::path()
+                       : fs::path(data->second) / "launcher" / "dlc-owned.json";
+    exe_ = answer.exe;
+    banner_ = std::string("ttt2-launcher ") + TTT2_LAUNCHER_VERSION + " (Windows): files " +
+              win_files_->root.string() + ", python " + facts.python.string();
+    folders_from_state(facts.windows);
+#else
     env_ = std::make_unique<LinuxEnvironment>(places_);
     m::Facts facts = start_facts(places_, program_file().parent_path(), o_.game, &appimage_, &banner_);
-    std::fprintf(stderr, "%s\n", banner_.c_str());
-    commands_.importer_env =
+    auto commands = std::make_unique<m::LinuxCommands>();
+    commands->importer_env =
         m::importer_environment(facts.kit, [](const fs::path& p) { std::error_code ec; return fs::exists(p, ec); });
-    commands_.game_log = places_.game_log();
-    keys_ = std::make_unique<m::KeyFile>(places_.keyboard());
-    m::LauncherModel::Parts parts{commands_, *starter_, *env_, *keys_, nullptr, {}, {}, sdl_key_label};
-    parts.display_file = places_.display();
+    commands->game_log = places_.game_log();
+    commands_ = std::move(commands);
+    display_file_ = places_.display();
+    keyboard_file_ = places_.keyboard();
+    owned_cache_ = places_.owned_cache();
+#endif
+    if (!owned_cache_.empty() && !facts.owned.has_answer) {
+        if (const auto saved = saved_ownership(owned_cache_)) {
+            facts.owned.answer = saved->owned;
+            facts.owned.has_answer = true;
+        }
+    }
+    std::fprintf(stderr, "%s\n", banner_.c_str());
+    keys_ = std::make_unique<m::KeyFile>(keyboard_file_);
+    m::LauncherModel::Parts parts{*commands_, *starter_, *env_, *keys_, nullptr, {}, {}, sdl_key_label, {}, {}};
+    parts.display_file = display_file_;
     parts.key_label = sdl_key_label;
+#ifdef _WIN32
+    // (Before each task: Set Up Game's folders saved, then --query check.)
+    parts.read_save = [](const std::string& out, std::string* error) -> std::optional<m::SetupProblem> {
+        backend::QueryError e;
+        const auto saved = backend::parse_save_settings(out, &e);
+        if (!saved && error) *error = e.text;
+        return saved ? std::optional<m::SetupProblem>(saved->problem) : std::nullopt;
+    };
+    parts.read_check = [](const std::string& out, std::string* error) {
+        backend::QueryError e;
+        auto problem = backend::parse_check(out, &e);
+        if (!problem && error) *error = e.text;
+        return problem;
+    };
+#endif
+#ifndef _WIN32
     if (appimage_) {
         parts.update_files = &files_;
         parts.update.appimage = appimage_;
     }
+    parts.update.pid = static_cast<int>(getpid());
+#else
+    parts.update.pid = static_cast<int>(GetCurrentProcessId());
+#endif
     parts.update.version = TTT2_LAUNCHER_VERSION;
     if (const char* releases = std::getenv("TTT2_LAUNCHER_RELEASES"); releases && *releases) {
         parts.update.releases = releases;
         parts.update.custom_releases = true;
     }
     parts.update.user_agent = std::string("ttt2-launcher/") + TTT2_LAUNCHER_VERSION;
-    parts.update.pid = static_cast<int>(getpid());
     model_ = std::make_unique<m::LauncherModel>(std::move(facts), parts);
     model_->set_monitors(sdl_monitors());
     // The launcher's own settings (launcher.ini beside display.ini).
@@ -136,10 +212,19 @@ void App::make_model() {
     slot_folder_ = (fs::is_directory(home / "Games", ec) ? home / "Games" : home) / launcher::kProgramName;
 }
 
+// Settings > Folders' values and defaults as the state says (Windows).
+void App::folders_from_state(const m::WindowsState& state) {
+    folder_defaults_ = state.folder_defaults;
+    folders_changed_ = false;
+}
+
 // ---------------------------------------------------------------- the loop
 
 int App::run() {
     if (!open_window()) return 1;
+#ifdef _WIN32
+    if (!windows_ready()) return exit_code_;
+#endif
     make_model();
     const double t0 = now();
     model_->start(t0);
@@ -254,6 +339,10 @@ void App::frame(double t) {
     }
     if (task_was_running_ && !running && !runner.last().cancelled)
         cue(runner.last().ok ? ttt2::app::Cue::TaskDone : ttt2::app::Cue::TaskFailed);
+#ifdef _WIN32
+    // (What a task changed: the install, the build, the logs. Asked again after each one, C8.)
+    if (task_was_running_ && !running) windows_state_again();
+#endif
     task_was_running_ = running;
     sync_log();
     view_ = model_->view();
@@ -626,6 +715,7 @@ void App::dialog_band() {
     const char* label = d.id == "uninstall"       ? "Uninstall"
                         : d.id == "stop-and-quit" ? "Quit"
                         : d.id == "remove-all"    ? "Remove all"
+                        : d.id == "setup"         ? "Set Up"
                                                   : "Message";
     {
         auto cg = ui.open("dlg/crimson", L.crimson);
@@ -699,6 +789,18 @@ void App::dialog_band() {
         what.push_back({"Removed", WhatTone::Removed, {{m::joined_most(shown, 8) + ": their packs, from the game."}}});
         what.push_back({"Stays", WhatTone::Kept, {{"The game's own fighters and the other game's characters."}}});
         what.push_back({"Later", WhatTone::Neutral, {{d.text}}});
+    } else if (d.id == "setup") {
+        // (Windows: the archive and the folder just chosen, and what the setup does with them.)
+        const auto& folders = model_->facts().windows.folders;
+        const auto folder = [&](const char* key) {
+            const auto it = folders.find(key);
+            return it == folders.end() ? std::string() : it->second;
+        };
+        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(folder("source")), true}}});
+        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(folder("install")), true}}});
+        what.push_back({"Needs",
+                        WhatTone::Neutral,
+                        {{"Internet for its tools (downloaded once), at least 30 GB free, and a while."}}});
     } else {
         what.push_back({"", WhatTone::Neutral, {{d.text}}});
         for (const m::Line& l : d.lines)
@@ -970,6 +1072,11 @@ void App::handle(std::vector<m::Effect> effects) {
             break;
         }
         case m::Effect::Kind::kChooseFolder: {
+            // (Windows: Set Up Game's folder, or Settings > Folders' folder:<key>: the in-app browser.)
+            if (model_->facts().caps.windows) {
+                open_picker(true, e.text == "install" ? std::string("setup-folder") : "folder:" + e.text);
+                break;
+            }
             const fs::path folder =
                 pending_choose_ == "resume" ? model_->facts().install.folder : slot_folder_;
             handle(model_->chosen_folder(folder, now()));
@@ -991,16 +1098,51 @@ void App::handle(std::vector<m::Effect> effects) {
         case m::Effect::Kind::kCopy:
             if (copy_text(e.text)) toast("Copied", e.text, false);
             break;
-        case m::Effect::Kind::kSaveOwned: save_ownership(places_.owned_cache(), e.text); break;
+        case m::Effect::Kind::kSaveOwned:
+            if (!owned_cache_.empty()) save_ownership(owned_cache_, e.text);
+            break;
         case m::Effect::Kind::kQuit: quit_ = true; break;
-        case m::Effect::Kind::kOpenMenu:
+        case m::Effect::Kind::kOpenMenu: {
+            // Windows' More: its entries on the blue side, drilled into from its row (F4).
+            for (const m::Action& a : model_->view().game.more) {
+                if (!a.enabled) continue;
+                drill_in("more", a.id);
+                break;
+            }
+            break;
+        }
         case m::Effect::Kind::kSaveFolders:
-        case m::Effect::Kind::kOpenUpdated: break; // (Windows)
+#ifdef _WIN32
+            save_folders();
+#endif
+            break;
+        case m::Effect::Kind::kOpenUpdated: {
+#ifdef _WIN32
+            // The updated .exe, started on its own; it waits for this launcher to end (C3, TTT2_LAUNCHER_AFTER).
+            m::Command c;
+            const fs::path exe = exe_;
+            c.argv = {win32::narrow(exe.native())};
+            c.cwd = exe.parent_path();
+            c.env["TTT2_LAUNCHER_AFTER"] = std::to_string(GetCurrentProcessId());
+            c.mode = m::Command::Mode::kDetached;
+            c.log_file = win_files_->root / "local" / "launcher-reopened.log";
+            std::string error;
+            auto job = exe.empty() ? nullptr : starter_->start(c, {}, &error);
+            if (exe.empty()) error = "the launcher's .exe is not known";
+            model_->opened_updated(job || error.empty() ? std::string() : error, now());
+            if (job) quit_ = true;
+#endif
+            break;
+        }
         }
     }
 }
 
 void App::run_preflight(const fs::path& game, const fs::path& folder) {
+#ifdef _WIN32
+    (void)game;
+    (void)folder;
+#else
     const fs::path work = places_.build_work();
     ++working_;
     threads_.emplace_back([this, game, folder, work] {
@@ -1011,9 +1153,14 @@ void App::run_preflight(const fs::path& game, const fs::path& folder) {
             handle(model_->preflight_done(checks, now()));
         });
     });
+#endif
 }
 
 void App::run_uninstall(const fs::path& folder, UninstallOptions options) {
+#ifdef _WIN32
+    (void)folder;
+    (void)options;
+#else
     const Places places = places_;
     ++working_;
     threads_.emplace_back([this, places, folder, options] {
@@ -1023,6 +1170,7 @@ void App::run_uninstall(const fs::path& folder, UninstallOptions options) {
             model_->uninstall_done(report, now());
         });
     });
+#endif
 }
 
 } // namespace launcher::app

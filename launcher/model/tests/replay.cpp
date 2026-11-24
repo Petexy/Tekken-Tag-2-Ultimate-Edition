@@ -232,7 +232,7 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
     }
     KeyFile keys(keyboard_file);
     FakeFiles files;
-    LauncherModel::Parts parts{commands, starter, env, keys, nullptr, {}, {}, us_key_label};
+    LauncherModel::Parts parts{commands, starter, env, keys, nullptr, {}, {}, us_key_label, {}, {}};
     parts.display_file = display_file;
     if (c["appimage"].boolean() && !caps.windows) {
         facts.self_update = true;

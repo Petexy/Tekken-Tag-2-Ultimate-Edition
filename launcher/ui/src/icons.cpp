@@ -29,7 +29,7 @@ constexpr StrokeIcon kStrokeIcons[] = {
     {"up", R"(<path d="M12 19V6M6 11l6-6 6 6"/>)"},
     {"ban", R"(<circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/>)"},
     {"diamond", R"(<path d="M12 4l7 8-7 8-7-8z"/>)"},
-    {"dots", R"(<path d="M6 12h.01M12 12h.01M18 12h.01"/>)"},
+    {"dots", R"(<circle cx="6" cy="12" r=".9"/><circle cx="12" cy="12" r=".9"/><circle cx="18" cy="12" r=".9"/>)"},  // (circles: a zero-length path draws nothing)
     {"warn", R"(<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>)"},
     {"info", R"(<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/>)"},
     {"users",

@@ -1,5 +1,6 @@
 // The launcher program's parts without a window: the in-app browser's folders and the install's steps.
 
+#include <algorithm>
 #include "browser.h"
 #include "steps.h"
 
@@ -53,7 +54,13 @@ void test_browser(const std::filesystem::path& scratch) {
     check(size_text(5) == "5 B", "size_text B");
     check(start_folder(scratch / "b" / "gone" / "deeper", {}) == scratch / "b", "start_folder: the nearest there");
     const auto ps = places(scratch, "");
+#ifdef _WIN32
+    // (Windows: the drives last, C: always.)
+    check(ps.size() >= 2 && ps.front().id == "home" && ps.back().id.starts_with("drive:"), "places: Home first, drives last");
+    check(std::any_of(ps.begin(), ps.end(), [](const Place& p) { return p.id == "drive:C"; }), "places: drive C:");
+#else
     check(ps.size() >= 2 && ps.front().id == "home" && ps.back().id == "root", "places: Home first, Computer last");
+#endif
 }
 
 void test_steps() {
@@ -85,8 +92,24 @@ void test_steps() {
 
 } // namespace
 
+void test_bootstrap() {
+    using launcher::app::bootstrap_progress;
+    check(bootstrap_progress("").step.empty(), "bootstrap: nothing yet");
+    const std::string old = "@step check Checking\r\n@step download Downloading\r\n####  40.0%\r\n@step ready Ready\r\n";
+    const std::string now = old + "Launcher runtime ready\r\n@step check Checking the launcher's tools\r\n"
+                                  "@step download Downloading Python for the launcher\r\n"
+                                  "\r#####                12.5%\r##########           50,0%";
+    const auto p = bootstrap_progress(now);
+    check(p.step == "download" && p.text == "Downloading Python for the launcher", "bootstrap: the last run's step");
+    check(p.download > .49 && p.download < .51, "bootstrap: curl's last percentage (" + std::to_string(p.download) + ")");
+    check(p.fraction > .4 && p.fraction < .5, "bootstrap: the whole's part");
+    const auto r = bootstrap_progress(now + "\r\n@step verify Checking the download\r\n@step unpack Unpacking\r\n");
+    check(r.step == "unpack" && r.fraction > .85 && r.fraction < .9, "bootstrap: unpacking");
+}
+
 int main(int argc, char** argv) {
     const std::filesystem::path scratch = argc > 1 ? argv[1] : "app-test";
+    test_bootstrap();
     test_browser(scratch);
     test_steps();
     if (failures) {

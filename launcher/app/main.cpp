@@ -9,6 +9,15 @@
 #include "startup.h"
 
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -47,7 +56,7 @@ bool size_of(const char* text, int& w, int& h) {
 
 } // namespace
 
-int main(int argc, char** argv) {
+static int launcher_main(int argc, char** argv) {
     namespace st = launcher::startup;
     const std::vector<std::string> args = st::arguments(argc, argv);
     const char* actions = std::getenv("TTT2_LAUNCHER_TEST_ACTIONS");
@@ -64,6 +73,7 @@ int main(int argc, char** argv) {
 
     launcher::app::Options o;
     o.instance = std::move(start.instance);
+    o.files = start.files;
     for (size_t i = 0; i < start.args.size(); ++i) {
         const std::string& a = start.args[i];
         const bool more = i + 1 < start.args.size();
@@ -121,3 +131,10 @@ int main(int argc, char** argv) {
     launcher::app::App app(std::move(o));
     return app.run();
 }
+
+#ifdef _WIN32
+// (A GUI program: no console. Its arguments are read from the wide command line by startup.)
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { return launcher_main(0, nullptr); }
+#else
+int main(int argc, char** argv) { return launcher_main(argc, argv); }
+#endif

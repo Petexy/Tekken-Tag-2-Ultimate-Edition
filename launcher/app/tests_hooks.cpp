@@ -485,7 +485,7 @@ void App::test_tick(double t) {
                                                    : s.precompile_shaders;
             if (on != (arg == "yes")) handle(model_->activate(n, t));
         }
-        const display::Loaded back = display::load(places_.display());
+        const display::Loaded back = display::load(display_file_);
         if (!back.error.empty()) test_said(false, back.error);
         else test_said(true, m::display_summary(back.settings));
     } else if (test_input(n, args, t)) {

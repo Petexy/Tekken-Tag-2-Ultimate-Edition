@@ -302,4 +302,66 @@ bool busy(const Facts& facts, bool release_checking, bool main_checking) {
            (facts.preflight && facts.preflight->running) || release_checking || main_checking;
 }
 
+// ---- Windows' refusals
+
+namespace {
+
+std::string folder_name(const std::string& key) {
+    if (key == "source") return "Wii U archive";
+    if (key == "title") return "extracted game";
+    if (key == "install") return "installation folder";
+    if (key == "data") return "data folder";
+    if (key == "packs") return "characters folder";
+    if (key == "saves") return "saves folder";
+    if (key == "tools") return "Windows tools folder";
+    return key + " folder";
+}
+
+} // namespace
+
+std::string setup_problem_text(const SetupProblem& p) {
+    const std::string& c = p.code;
+    if (c.empty()) return {};
+    if (c == "inputs") return "Choose your Wii U archive (.wua) and an installation folder first.";
+    if (c == "tools_folder")
+        return "Set Up Game builds into the project's build-windows-tools folder: start the launcher from its own "
+               "files, not from another build folder.";
+    if (c == "installer_letters") {
+        const std::string what = p.what == "install" ? "installation folder" : p.what == "source" ? "Wii U archive"
+                                                                                                  : p.what;
+        return "The " + what + " (" + p.path + ") has letters the game's installer cannot be given on this PC: " +
+               p.letters + ". Choose one whose path has only plain letters, such as C:\\Games\\TTT2.";
+    }
+    if (c == "tools_letters") {
+        const std::string what = p.what == "project" ? "launcher's files folder" : "Windows tools folder";
+        return "The " + what + " (" + p.path + ") has letters the Windows build tools cannot read: " + p.letters +
+               ". Use a folder whose path has only plain letters, such as C:\\TTT2 (outside OneDrive); the "
+               "release Ultimate_Launcher-x86_64.exe keeps its files in such a folder by itself.";
+    }
+    if (c == "project_length")
+        return "The launcher's files are in a folder whose path is too long for the Windows build tools (" + p.path +
+               "). Put a fresh copy in a short folder such as D:\\TTT2, then set up again; your archive need not "
+               "move.";
+    if (c == "tools_length")
+        return "The Windows tools folder's path is too long (" + p.path +
+               "): choose a shorter one in Settings > Folders.";
+    if (c == "no_build") return "Build the Windows game first: More > Build / Rebuild.";
+    if (c == "no_install") return "Choose a complete installation before updating it (Settings > Folders).";
+    if (c == "no_paths")
+        return "Choose the Wii U source and the installation folder first (Settings > Folders), then install.";
+    if (c == "no_fighters") return "Choose at least one character.";
+    if (c == "title")
+        return "The game's extracted files are not usable: set up the game again, or choose its folder in "
+               "Settings > Folders.";
+    return "The launcher's files refused it (" + c + ").";
+}
+
+std::string save_problem_text(const SetupProblem& p) {
+    if (p.code.empty()) return {};
+    if (p.code == "data_name")
+        return "The data folder must end in TTT2Ultimate, so that the game and the launcher share their settings.";
+    if (p.code == "relative") return "The " + folder_name(p.what) + " must be a full path, with its drive.";
+    return "The launcher's files refused the folders (" + p.code + ").";
+}
+
 } // namespace launcher::model

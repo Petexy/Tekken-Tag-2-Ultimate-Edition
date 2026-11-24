@@ -15,7 +15,7 @@ and that launcher updates the .exe from this repository's releases
 (self_update.py). One made on a branch other than main is a test build: its
 launcher updates its files from that branch's newer commits instead.
 
---stub EXE      entry.cpp as CMake built it for Windows (build-windows-*/ttt2-launcher.exe)
+--stub EXE      entry.cpp as CMake built it for Windows (build-windows-*/ttt2-launcher-classic.exe)
 --cxx COMPILER  else it is compiled here: with x86_64-w64-mingw32-g++ by default,
                 and its windres, which puts the files in it (with its icon and
                 version details when rsvg-convert is there too)

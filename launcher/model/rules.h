@@ -76,4 +76,10 @@ bool newer_on_main(const Facts& facts, const std::string& fighter);
 // answer, the preflight, GitHub): tests and screenshots wait for none.
 bool busy(const Facts& facts, bool release_checking, bool main_checking);
 
+// Windows: the player's sentence for what `--query check` refused before a task ("" when nothing: code ""), as
+// window.py and setup_game.py said it; and for what `--query save-settings` refused (code "data_name" /
+// "relative", what = the folder's key).
+std::string setup_problem_text(const SetupProblem& problem);
+std::string save_problem_text(const SetupProblem& problem);
+
 } // namespace launcher::model

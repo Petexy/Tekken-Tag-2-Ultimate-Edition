@@ -61,6 +61,7 @@ def state(settings):
             'commit': self_update.build_commit(), 'branch': self_update.test_branch() if exe else None,
             'root': str(settings.root), 'build': str(settings.build), 'config': str(settings.file),
             'settings': {key: str(settings.values.get(key) or '') for key in FOLDERS},
+            'defaults': {key: str(getattr(settings, 'defaults', {}).get(key) or '') for key in FOLDERS},
             'installed': path_or_none(installed), 'installed_by': installed_by(settings),
             'icon': str(icon) if icon and icon.is_file() else None,
             'logs': str(logs), 'latest_log': str(found[-1]) if found else None,

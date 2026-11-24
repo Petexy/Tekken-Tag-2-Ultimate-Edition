@@ -63,6 +63,7 @@ class Settings:
         self.values = dict(source=first(self.build / 'ttt2-game.txt'), title=str(title) if title.exists() else '',
                            install=recorded, data=str(data), packs=str(data / 'characters'),
                            saves=str(saves if saves.exists() else data / 'save'), tools=tools or str(self.root / 'local/windows-tools'))
+        self.defaults = dict(self.values)  # (Settings > Folders' Default in the new launcher)
         if self.file.exists(): self.values.update(json.loads(self.file.read_text(encoding='utf-8')))
         if not self.installed(): self.values['install'] = self.found_install(recorded) or self.values['install']
 

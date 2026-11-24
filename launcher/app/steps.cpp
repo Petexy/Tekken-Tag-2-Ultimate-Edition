@@ -3,6 +3,8 @@
 #include "protocol.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 
 namespace launcher::app {
 
@@ -81,6 +83,50 @@ int current_step(const std::vector<StepLine>& steps) {
         if (steps[i].state == StepLine::State::kDone) last = static_cast<int>(i) + 1;
     }
     return last;
+}
+
+} // namespace launcher::app
+
+namespace launcher::app {
+
+BootstrapProgress bootstrap_progress(const std::string& log) {
+    BootstrapProgress p;
+    const size_t start = log.rfind("@step check");
+    if (start == std::string::npos) return p;
+    // (Lines end in \n or \r\n; curl's bar rewrites its line with \r.)
+    size_t at = start;
+    while (at < log.size()) {
+        size_t end = log.find_first_of("\r\n", at);
+        if (end == std::string::npos) end = log.size();
+        const std::string line = log.substr(at, end - at);
+        at = end + 1;
+        if (line.starts_with("@step ")) {
+            const size_t sp = line.find(' ', 6);
+            p.step = line.substr(6, sp == std::string::npos ? std::string::npos : sp - 6);
+            p.text = sp == std::string::npos ? std::string() : line.substr(sp + 1);
+            while (!p.text.empty() && (p.text.back() == ' ' || p.text.back() == '\t')) p.text.pop_back();
+            continue;
+        }
+        if (p.step != "download") continue;
+        // curl --progress-bar: "#####          12.3%"
+        const size_t pct = line.rfind('%');
+        if (pct == std::string::npos) continue;
+        size_t b = pct;
+        while (b > 0 && (std::isdigit(static_cast<unsigned char>(line[b - 1])) || line[b - 1] == '.' ||
+                         line[b - 1] == ',')) --b;
+        if (b == pct) continue;
+        std::string number = line.substr(b, pct - b);
+        std::replace(number.begin(), number.end(), ',', '.');
+        const double v = std::atof(number.c_str());
+        if (v >= 0 && v <= 100) p.download = v / 100;
+    }
+    // The download is most of it; checking and unpacking the rest.
+    if (p.step == "check") p.fraction = 0;
+    else if (p.step == "download") p.fraction = 0.05 + 0.75 * std::max(0.0, p.download);
+    else if (p.step == "verify") p.fraction = 0.82;
+    else if (p.step == "unpack") p.fraction = 0.88;
+    else if (p.step == "ready") p.fraction = 1;
+    return p;
 }
 
 } // namespace launcher::app
