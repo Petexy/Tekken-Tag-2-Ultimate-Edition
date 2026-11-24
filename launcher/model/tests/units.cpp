@@ -7,6 +7,7 @@
 #include "check.h"
 #include "fakes.h"
 #include "replay.h"
+#include "self_update.h"
 #include "settings.h"
 #include "status.h"
 
@@ -314,6 +315,126 @@ void task_runner() {
     CHECK(stopped_why(Caps::linux_caps(), 137).starts_with("It was stopped: Killed (code 137"));
 }
 
+// ---------------------------------------------------------------- the AppImage's update
+
+std::string release_json(const std::string& version, const std::string& digest = {}) {
+    return "{\"tag_name\": \"v" + version + "\", \"html_url\": \"https://example.com/v" + version +
+           "\", \"assets\": [{\"name\": \"Ultimate_Launcher-x86_64.AppImage\", \"state\": \"uploaded\", "
+           "\"size\": 1000, \"browser_download_url\": \"https://example.com/U.AppImage\"" +
+           (digest.empty() ? "" : ", \"digest\": \"sha256:" + digest + "\"") + "}]}";
+}
+
+struct UpdateRig {
+    FakeStarter starter;
+    FakeFiles files;
+    TaskRunner runner{starter, Caps::linux_caps()};
+    SelfUpdate update;
+    std::string answer = release_json("0.9.0");
+    std::string says = "Ultimate Launcher 0.9.0"; // what the new one's --version prints
+    bool version_hangs = false;
+    std::vector<Command> opened;
+    explicit UpdateRig()
+        : update(runner, starter, files,
+                 SelfUpdate::Config{fs::path("/home/player/Ultimate_Launcher-x86_64.AppImage"), "0.8.0",
+                                    "https://api.example.com/latest", false, "ttt2-launcher/0.8.0", 42}) {
+        starter.set_script([this](Run& r) {
+            const auto& argv = r.command.argv;
+            const auto has = [&](const std::string& a) { return std::find(argv.begin(), argv.end(), a) != argv.end(); };
+            if (has("--version")) {
+                if (version_hangs) r.held = true;
+                else r.lines = {{says, false}};
+            } else if (argv[0] == "/home/player/Ultimate_Launcher-x86_64.AppImage") {
+                opened.push_back(r.command);
+                r.held = true;
+            } else if (has("Accept: application/vnd.github+json")) {
+                r.lines = {{answer, false}};
+            }
+        });
+    }
+};
+
+void self_update() {
+    current = "self-update";
+    {
+        UpdateRig rig;
+        ReleaseAnswer seen;
+        rig.update.on_release = [&](const ReleaseAnswer& a) { seen = a; };
+        CHECK(!rig.update.start(1));
+        CHECK(rig.runner.running());
+        CHECK_EQ(rig.runner.view().title, std::string("Updating the launcher"));
+        rig.starter.pump();
+        CHECK(seen.release && seen.release->version == "0.9.0");
+        CHECK(!rig.runner.running());
+        CHECK(rig.runner.last().ok);
+        CHECK_EQ(rig.runner.last().title, std::string("Updated to 0.9.0"));
+        CHECK(rig.update.opened());
+        CHECK(rig.opened.size() == 1 && rig.opened[0].env.at(kReplacesVariable) == "42");
+    }
+    {
+        UpdateRig rig;
+        rig.answer = release_json("0.8.0");
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK(rig.runner.last().ok);
+        CHECK_EQ(rig.runner.last().title, std::string("The launcher is up to date"));
+        CHECK_EQ(rig.runner.last().detail, std::string("Version 0.8.0 is the newest."));
+        CHECK(!rig.update.opened());
+    }
+    {
+        UpdateRig rig;
+        rig.answer = release_json("0.9.0", std::string(64, 'f'));
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK(!rig.runner.last().ok);
+        CHECK_EQ(rig.runner.last().detail,
+                 std::string("The download of version 0.9.0 is damaged: its SHA-256 is not GitHub's."));
+        CHECK(!rig.files.removed.empty());
+        CHECK(rig.opened.empty());
+    }
+    {
+        UpdateRig rig;
+        rig.says = "Ultimate Launcher 0.8.5";
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK_EQ(rig.runner.last().detail, std::string("The AppImage released as version 0.9.0 is version 0.8.5."));
+    }
+    {
+        UpdateRig rig;
+        rig.version_hangs = true;
+        rig.update.start(1);
+        rig.starter.pump();
+        CHECK(rig.runner.running());
+        rig.update.tick(1 + SelfUpdate::kVersionSeconds + 1);
+        rig.starter.pump();
+        CHECK(!rig.runner.running());
+        CHECK_EQ(rig.runner.last().detail,
+                 std::string("Version 0.9.0 does not start: it did not answer within 60 seconds."));
+    }
+    {
+        UpdateRig rig;
+        rig.files.cannot = "Read-only file system";
+        const auto refused = rig.update.start(1);
+        CHECK(refused && refused->why.find("cannot be written to (Read-only file system)") != std::string::npos);
+        CHECK(!rig.runner.running());
+    }
+    {
+        UpdateRig rig;
+        rig.files.downloader = false;
+        const auto refused = rig.update.start(1);
+        CHECK(refused && refused->why.starts_with("Downloading needs curl or wget: install curl"));
+    }
+    {
+        UpdateRig rig;
+        rig.update.start(1);
+        rig.runner.cancel();
+        rig.starter.pump();
+        CHECK(!rig.runner.running());
+        CHECK(rig.runner.last().cancelled);
+        CHECK_EQ(rig.runner.last().title, std::string("Update cancelled"));
+        CHECK(rig.opened.empty());
+    }
+}
+
 // ---------------------------------------------------------------- the model, from golden cases' fixtures
 
 json::Value fixture(const fs::path& golden, const std::string& name) {
@@ -503,6 +624,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     keys();
     display(scratch / "display");
     task_runner();
+    self_update();
     model_rules(golden, scratch / "model");
     every_id(golden, scratch / "ids", Caps::linux_caps());
     every_id(golden, scratch / "ids", Caps::windows_caps());
