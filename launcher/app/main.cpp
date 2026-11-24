@@ -10,19 +10,23 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
 namespace {
 
 const char* const kUsage =
-    "usage: ttt2-launcher [GAME.wua] [--screenshot FILE [--size WxH] [--scale S]] | --version\n"
+    "usage: ttt2-launcher [GAME.wua] [--screenshot FILE | --frames DIR [--at MS,...]] [--size WxH] [--scale S]\n"
+    "       ttt2-launcher --version\n"
     "  Installs Tekken Tag Tournament 2 from your own .wua (the game program is built on this PC),\n"
     "  starts it, and adds Tekken 7's and Tekken 8's characters from your own copies of them.\n"
     "  --screenshot FILE  saves the window as a PNG once it has loaded (after the test actions of\n"
     "                     TTT2_LAUNCHER_TEST_ACTIONS), then quits (for tests; drawn offscreen)\n"
     "  --size WxH         the window's size for --screenshot (default 1280x800)\n"
     "  --scale S          the interface's scale for --screenshot\n"
+    "  --frames DIR       after the last test action: frames at --at MS,MS,... (default\n"
+    "                     0,50,100,200,400,700) and once settled, each checked; then quits\n"
     "  --version          prints its version (\"ttt2-launcher <ver>\")\n";
 
 void wake() {
@@ -46,11 +50,11 @@ int main(int argc, char** argv) {
     const std::vector<std::string> args = st::arguments(argc, argv);
     const char* actions = std::getenv("TTT2_LAUNCHER_TEST_ACTIONS");
     bool screenshot = false;
-    for (const std::string& a : args) screenshot = screenshot || a == "--screenshot";
+    for (const std::string& a : args) screenshot = screenshot || a == "--screenshot" || a == "--frames";
     st::Program program;
     program.version = TTT2_LAUNCHER_VERSION;
     program.usage = kUsage;
-    program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}};
+    program.options = {{"--screenshot", 1}, {"--size", 1}, {"--scale", 1}, {"--frames", 1}, {"--at", 1}};
     program.unique = !screenshot && !(actions && *actions);
     program.wake = wake;
     st::Start start = st::begin(args, program);
@@ -70,6 +74,16 @@ int main(int argc, char** argv) {
             }
         } else if (a == "--scale" && more) {
             o.scale = static_cast<float>(std::atof(start.args[++i].c_str()));
+        } else if (a == "--frames" && more) {
+            o.frames = start.args[++i];
+        } else if (a == "--at" && more) {
+            const std::string list = start.args[++i];
+            for (size_t at = 0; at < list.size();) {
+                const size_t comma = list.find(',', at);
+                o.frames_at.push_back(std::atoi(list.substr(at, comma - at).c_str()));
+                if (comma == std::string::npos) break;
+                at = comma + 1;
+            }
         } else if (!a.empty() && a[0] != '-') {
             o.game = launcher::normal(a);
         }
@@ -83,7 +97,14 @@ int main(int argc, char** argv) {
         }
         o.tests = std::move(*parsed);
     }
-    o.testing = !o.screenshot.empty() || (actions && *actions);
+    if (!o.frames.empty()) {
+        if (o.frames_at.empty()) o.frames_at = {0, 50, 100, 200, 400, 700};
+        std::sort(o.frames_at.begin(), o.frames_at.end());
+        std::error_code ec;
+        std::filesystem::create_directories(o.frames, ec);
+    }
+    o.testing = !o.screenshot.empty() || !o.frames.empty() || (actions && *actions);
+    if (const char* c = std::getenv("TTT2_LAUNCHER_TEST_CUES"); c && *c && std::string(c) != "0") o.trace_cues = true;
     if (const char* shots = std::getenv("TTT2_LAUNCHER_TEST_SHOTS"); shots && *shots) {
         o.shots = shots;
         std::error_code ec;

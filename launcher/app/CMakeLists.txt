@@ -86,5 +86,11 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/e2e ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_e2e)
     set_tests_properties(launcher_app_e2e PROPERTIES TIMEOUT 240)
+    # Frame sequences and the screens' rules (FEEDBACK F1/F4/F6): tests/frames.sh.
+    add_test(NAME launcher_app_frames
+        COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frames.sh $<TARGET_FILE:ttt2-launcher>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/frames ${Python3_EXECUTABLE})
+    list(APPEND _app_tests launcher_app_frames)
+    set_tests_properties(launcher_app_frames PROPERTIES TIMEOUT 600)
 endif()
 set_tests_properties(${_app_tests} PROPERTIES LABELS launcher)

@@ -12,7 +12,10 @@
 #include "rules.h"
 #include "settings.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -98,15 +101,183 @@ void App::test_watch_task() {
     }
 }
 
+// Every frame of a test run: nothing of a half closer to its seam than the gutter (it would leave its plate), a
+// highlight on whatever has the focus. Each problem is said once ("@audit failed <step>: <problem>").
+void App::test_audit(double t) {
+    std::vector<std::string> problems = ui_->audit();
+    // Once it has settled (this frame too: a change that came without input, as checks' results, starts a move):
+    // the highlight on the focused item, and something focused when anything can be (FEEDBACK F1/F6: no empty or
+    // stale focus frame until the next input).
+    if (settled(t) && !ui_->animating() && !stage_->animating()) {
+        const Rect h = painted_highlight_, f = painted_focus_rect_;
+        if (!painted_focus_.empty() && !f.empty() &&
+            (std::fabs(h.x - f.x) > 1 || std::fabs(h.y - f.y) > 1 || std::fabs(h.w - f.w) > 1 ||
+             std::fabs(h.h - f.h) > 1))
+            problems.push_back("the highlight is not on " + painted_focus_ + " once settled");
+        if (painted_focus_.empty() && !ui_->focusable_ids().empty()) problems.push_back("nothing has the focus");
+    }
+    for (const std::string& p : problems) {
+        ++audit_failures_;
+        if (std::find(audit_seen_.begin(), audit_seen_.end(), p) != audit_seen_.end()) continue;
+        if (audit_seen_.size() >= 40) continue;
+        audit_seen_.push_back(p);
+        std::fprintf(stderr, "@audit failed %s: %s\n", audit_where_.empty() ? "start" : audit_where_.c_str(),
+                     p.c_str());
+    }
+}
+
+// --frames: the frames after the last action at the times asked for (the clock held and stepped), then the frame
+// once everything has settled; each one is saved and checked: the audit, and the highlight exactly on the focused
+// item (no empty or stale frame, FEEDBACK F1).
+void App::test_capture(double t) {
+    const auto check = [&](const std::string& name) {
+        std::string error;
+        if (!window_.screenshot((o_.frames / (name + ".png")).string(), &error))
+            std::fprintf(stderr, "@frames %s failed %s\n", name.c_str(), error.c_str());
+        std::vector<std::string> problems = ui_->audit();
+        // (As painted: events move the focus after the frame.)
+        const Rect h = painted_highlight_, f = painted_focus_rect_;
+        if (!painted_focus_.empty() && !f.empty() &&
+            (std::fabs(h.x - f.x) > 1 || std::fabs(h.y - f.y) > 1 || std::fabs(h.w - f.w) > 1 ||
+             std::fabs(h.h - f.h) > 1)) {
+            char b[200];
+            std::snprintf(b, sizeof b, "the highlight %.0f,%.0f %.0fx%.0f is not on %s at %.0f,%.0f %.0fx%.0f", h.x,
+                          h.y, h.w, h.h, painted_focus_.c_str(), f.x, f.y, f.w, f.h);
+            problems.push_back(b);
+        }
+        if (painted_focus_.empty()) problems.push_back("nothing has the focus");
+        std::string all;
+        for (const std::string& p : problems) all += (all.empty() ? "" : "; ") + p;
+        std::fprintf(stderr, "@frames %s %s%s%s (focus %s, seam %.1f)\n", name.c_str(),
+                     problems.empty() ? "ok" : "failed", all.empty() ? "" : " ", all.c_str(), painted_focus_.c_str(),
+                     static_cast<double>(stage_->seam_now().c));
+        std::fflush(stderr);
+    };
+    const auto at = [&](size_t i) { return capture_t0_ + o_.frames_at[i] / 1000.0; };
+    if (capture_i_ < o_.frames_at.size()) {
+        if (t + 1e-6 >= at(capture_i_)) {
+            char name[16];
+            std::snprintf(name, sizeof name, "f%04d", o_.frames_at[capture_i_]);
+            check(name);
+            ++capture_i_;
+        }
+        const double next = capture_i_ < o_.frames_at.size() ? std::min(t + 1.0 / 60, at(capture_i_)) : t + 1.0 / 60;
+        clock_.hold(next);
+        return;
+    }
+    if (!settled(t) && t - capture_t0_ < 10) {
+        clock_.hold(t + 1.0 / 60);
+        return;
+    }
+    check("idle");
+    capturing_ = false;
+    clock_.release();
+    if (o_.screenshot.empty()) quit_ = true;
+}
+
+// Input of a test step, through the router like the devices': press:<key> (an SDL scancode name: Return, Escape,
+// Q, E, Down...), pad:<button> (south east west north lb rb lt rt up down left right start back), steam:<button>
+// (the Steam Controller in desktop mode: the pad's button AND the key Steam types for it, at the same moment),
+// click:<id> / hover:<id> (the mouse on an item's centre).
+bool App::test_input(const std::string& name, const std::vector<std::string>& args, double t) {
+    const std::string arg = args.empty() ? std::string() : args[0];
+    const auto key = [&](const std::string& k, double at) {
+        const SDL_Scancode code = SDL_GetScancodeFromName(k.c_str());
+        if (code == SDL_SCANCODE_UNKNOWN) return false;
+        RawEvent down;
+        down.kind = RawEvent::KeyDown;
+        down.device = Device::Keyboard;
+        down.code = static_cast<int>(code);
+        RawEvent up = down;
+        up.kind = RawEvent::KeyUp;
+        test_raw_.push_back({at, down});
+        test_raw_.push_back({at + 0.06, up});
+        return true;
+    };
+    struct PadName {
+        const char* name;
+        int button;
+        const char* key;  // what Steam types for it in desktop mode
+    };
+    static const PadName pads[] = {{"south", pad::South, "Return"},      {"east", pad::East, "Escape"},
+                                   {"west", pad::West, ""},              {"north", pad::North, ""},
+                                   {"lb", pad::LeftShoulder, ""},        {"rb", pad::RightShoulder, ""},
+                                   {"lt", pad::LeftTrigger, ""},         {"rt", pad::RightTrigger, ""},
+                                   {"up", pad::DpadUp, "Up"},            {"down", pad::DpadDown, "Down"},
+                                   {"left", pad::DpadLeft, "Left"},      {"right", pad::DpadRight, "Right"},
+                                   {"start", pad::Start, ""},            {"back", pad::Back, ""}};
+    const auto button = [&](const std::string& b, double at) -> const PadName* {
+        for (const PadName& p : pads) {
+            if (b != p.name) continue;
+            RawEvent down;
+            down.kind = RawEvent::ButtonDown;
+            down.device = Device::Gamepad;
+            down.device_id = 7;
+            down.code = p.button;
+            down.pad_kind = Glyphs::Xbox;
+            RawEvent up = down;
+            up.kind = RawEvent::ButtonUp;
+            test_raw_.push_back({at, down});
+            test_raw_.push_back({at + 0.06, up});
+            return &p;
+        }
+        return nullptr;
+    };
+    if (name == "press") {
+        if (!key(arg, t)) test_said(false, "no key named " + arg);
+        else test_said(true, {});
+        return true;
+    }
+    if (name == "pad") {
+        if (!button(arg, t)) test_said(false, "no pad button " + arg);
+        else test_said(true, {});
+        return true;
+    }
+    if (name == "steam") {
+        const PadName* p = button(arg, t);
+        if (!p || !*p->key) return test_said(false, "Steam types no key for " + arg), true;
+        key(p->key, t + 0.004);
+        test_said(true, {});
+        return true;
+    }
+    if (name == "click" || name == "hover") {
+        const Rect r = ui_->rect(arg);
+        if (r.empty()) return test_said(false, "no " + arg + " on the screen"), true;
+        const Vec2 c = r.center();
+        RawEvent move;
+        move.kind = RawEvent::MouseMove;
+        move.device = Device::Mouse;
+        move.pos = c;
+        move.delta = {12, 0};
+        test_raw_.push_back({t, move});
+        // (Real motion: far enough to count, and after the keyboard's navigation pause.)
+        move.delta = {12, 0};
+        test_raw_.push_back({t + 0.02, move});
+        if (name == "click") {
+            RawEvent down = move;
+            down.kind = RawEvent::MouseDown;
+            down.code = 1;
+            RawEvent up = down;
+            up.kind = RawEvent::MouseUp;
+            test_raw_.push_back({t + 0.05, down});
+            test_raw_.push_back({t + 0.1, up});
+        }
+        test_said(true, {});
+        return true;
+    }
+    return false;
+}
+
 void App::test_tick(double t) {
     const bool busy = model_->busy() || working_ > 0 || stage_->animating() || wipe_->active(t) ||
-                      readout_.animating(t);
+                      readout_.animating(t) || !test_raw_.empty();
     if (busy) {
         idle_since_ = t;
         frames_idle_ = 0;
     } else {
         ++frames_idle_;
     }
+    if (capturing_) return test_capture(t);
     if (!test_start_shot_) {
         if (!settled(t)) return;
         test_start_shot_ = true;
@@ -186,7 +357,15 @@ void App::test_tick(double t) {
     char prefix[16];
     std::snprintf(prefix, sizeof prefix, "%02d-", test_number_);
     test_label_ = prefix + test_now_.label();
+    audit_where_ = test_label_;
     test_running_shot_ = test_cancelled_ = test_task_seen_ = false;
+    // --frames: the last action starts the capture (the clock held from now on).
+    if (!o_.frames.empty() && test_next_ == o_.tests.size()) {
+        capturing_ = true;
+        capture_t0_ = t;
+        capture_i_ = 0;
+        clock_.hold(t);
+    }
     test_since_ = t;
     std::fprintf(stderr, "@test %s started\n", test_now_.text.c_str());
     std::fflush(stderr);
@@ -309,6 +488,16 @@ void App::test_tick(double t) {
         const display::Loaded back = display::load(places_.display());
         if (!back.error.empty()) test_said(false, back.error);
         else test_said(true, m::display_summary(back.settings));
+    } else if (test_input(n, args, t)) {
+    } else if (n == "tab") {
+        // (As the shoulder buttons: Q / E.)
+        const int to = arg == "next"       ? (static_cast<int>(screen_) + 1) % 3
+                       : arg == "prev"     ? (static_cast<int>(screen_) + 2) % 3
+                       : arg == "fighters" ? 1
+                       : arg == "settings" ? 2
+                                           : 0;
+        go(static_cast<Screen>(to));
+        test_said(true, {});
     } else if (n == "wait") {
         test_until_ = t + std::atof(arg.c_str());
         test_wait_ = TestWait::kTime;

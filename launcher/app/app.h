@@ -8,6 +8,7 @@
 
 #include "backend_linux.h"
 #include "browser.h"
+#include "sound_cues.h"
 #include "model.h"
 #include "single_instance.h"
 #include "starter.h"
@@ -42,10 +43,35 @@ struct Options {
     std::vector<TestAction> tests;  // TTT2_LAUNCHER_TEST_ACTIONS
     bool testing = false;           // test actions or a screenshot: offscreen, nothing opened on the desktop
     fs::path shots;                 // TTT2_LAUNCHER_TEST_SHOTS
+    // --frames DIR --at MS,MS,...: after the LAST test action, frames at those milliseconds (a stepped clock, no
+    // input), then one once everything has settled ("idle"), each checked (Tag Split rule, highlight on its item).
+    fs::path frames;
+    std::vector<int> frames_at;
+    bool trace_cues = false;        // TTT2_LAUNCHER_TEST_CUES: each sound cue as "@cue <name>" (Sound on or off)
     std::unique_ptr<SingleInstance> instance;
 };
 
 enum class Screen : int { kHome = 0, kFighters = 1, kSettings = 2 };
+
+// The window's clock: real time, or held and stepped by hand (frame captures: each frame exactly when wanted).
+class AppClock final : public ui::Clock {
+public:
+    double now() const override { return held_ ? virtual_ : real_.now() - offset_; }
+    void hold(double t) {
+        virtual_ = t;
+        held_ = true;
+    }
+    void release() {
+        offset_ = real_.now() - virtual_;
+        held_ = false;
+    }
+    bool held() const { return held_; }
+
+private:
+    ui::SystemClock real_;
+    double virtual_ = 0, offset_ = 0;
+    bool held_ = false;
+};
 
 class App {
 public:
@@ -54,6 +80,8 @@ public:
     int run();
     // Work for the UI thread (from any thread: threads' ends, file dialogs); the loop wakes for it.
     void post(std::function<void()> work);
+    // What plays the sound cues (sound_cues.h); called on the UI thread, only while Sound is on.
+    void set_sound_hook(ttt2::app::SoundHook hook) { sound_ = std::move(hook); }
 
 private:
     // ---- the loop (app.cpp)
@@ -67,6 +95,13 @@ private:
     void refused(const std::string& id);
     void handle(std::vector<m::Effect> effects);
     void go(Screen to);
+    void cue(ttt2::app::Cue c);
+    // The drill-in lock (FEEDBACK F4): `opener` (a crimson item) gave the focus to `target` on the blue side; the
+    // crimson half is locked (ui::Box::locked, the stage's veil) until Back or a click on it. drill_out: the focus
+    // goes to `to` (a crimson item clicked), else back to the opener.
+    void drill_in(const std::string& opener, const std::string& target);
+    void drill_out(const std::string& to = {});
+    bool drilled() const;
     void toast(const std::string& title, const std::string& text, bool bad = true);
     void run_preflight(const fs::path& game, const fs::path& folder);
     void run_uninstall(const fs::path& folder, UninstallOptions options);
@@ -100,6 +135,9 @@ private:
     void notice_card();
     void placeholder(const ui::Box& crimson, const ui::Box& blue);
     std::string slot_target() const;
+    // A preflight check row's command to copy (its action id "copy:..."), "" when it has none.
+    std::string check_copy(const std::string& row) const;
+    bool check_has_copy(const std::string& row) const { return !check_copy(row).empty(); }
 
     // ---- the in-app browser (picker.cpp)
     void open_picker(bool folder, const std::string& purpose);
@@ -115,6 +153,10 @@ private:
     void shot(const std::string& name);
     void test_said(bool ok, const std::string& message);
     void test_watch_task();
+    void test_audit(double now);    // (every frame of a test run: the Tag Split rule; "@audit failed ...")
+    void test_capture(double now);  // (--frames)
+    // press:/pad:/steam:/click:/hover: test actions: input as the devices give it (through the router).
+    bool test_input(const std::string& name, const std::vector<std::string>& args, double now);
 
     Options o_;
     Places places_;
@@ -131,7 +173,7 @@ private:
     std::unique_ptr<ui::SplitStage> stage_;
     std::unique_ptr<ui::Wipe> wipe_;
     ui::InputRouter router_;
-    ui::SystemClock clock_;
+    AppClock clock_;
     ui::Readout readout_;
     ui::LogView log_;
     size_t log_seen_ = 0;
@@ -172,6 +214,12 @@ private:
     bool toast_bad_ = true;
     double toast_until_ = -1;
     bool sounds_ = false;
+    ttt2::app::SoundHook sound_;
+    struct Drill {
+        Screen screen;
+        std::string opener, target;
+    };
+    std::optional<Drill> drill_;
 
     // the in-app browser
     struct Picker {
@@ -202,6 +250,16 @@ private:
     int test_quit_ = 0;        // TTT2_LAUNCHER_TEST_QUIT_AT: 1 Quit pressed, 2 its dialog's picture taken
     double test_quit_at_ = 0;  // when that picture is taken
     int exit_code_ = 0;
+    std::vector<std::pair<double, ui::RawEvent>> test_raw_;  // input of test actions, fed when due
+    bool capturing_ = false;
+    double capture_t0_ = 0;
+    size_t capture_i_ = 0;
+    std::vector<std::string> audit_seen_;
+    int audit_failures_ = 0;
+    std::string audit_where_;  // what the audit lines name (the test step)
+    // The frame as painted (events are handled after it: a focus they move shows on the next frame).
+    std::string painted_focus_;
+    ui::Rect painted_highlight_{}, painted_focus_rect_{};
 };
 
 } // namespace launcher::app

@@ -192,6 +192,18 @@ void App::pump_input(double t, bool wait) {
         }
         got = SDL_PollEvent(&ev);
     }
+    // (Tests: their input, as the devices would give it.)
+    for (auto it = test_raw_.begin(); it != test_raw_.end();) {
+        if (it->first > now() + 1e-9) {
+            ++it;
+            continue;
+        }
+        RawEvent raw = it->second;
+        raw.time = now();
+        router_.feed(raw);
+        stage_->note_input(now());
+        it = test_raw_.erase(it);
+    }
     window_.pads_tick(now(), model_->facts().game_running);
     stage_->set_ambient(window_.focused() && window_.visible());
     // Programs' lines and ends, posted work, later starts handed over.
@@ -231,9 +243,27 @@ void App::frame(double t) {
             ui_->focus("task", true);
         }
     }
+    if (task_was_running_ && !running && !runner.last().cancelled)
+        cue(runner.last().ok ? ttt2::app::Cue::TaskDone : ttt2::app::Cue::TaskFailed);
     task_was_running_ = running;
     sync_log();
     view_ = model_->view();
+    if (drill_ && (drill_->screen != screen_ || picker_ || view_.dialog)) drill_.reset();
+
+    // The seam first: this frame is laid out for the split as it is DRAWN now (springing), never for a target or
+    // an old split (FEEDBACK F1). It leans toward the half that had the focus.
+    {
+        const Rect fr = ui_->rect(ui_->focused());
+        const int side = view_.dialog || fr.empty()                                   ? 0
+                         : fr.center().x > stage_->seam_now().x_at(fr.center().y) ? 1
+                                                                                  : -1;
+        stage_->set_target(share(), tall(), drilled() ? 1 : side);
+        stage_->set_locked(drilled() ? -1 : 0);
+        if (first_) stage_->snap();
+        stage_->update(t, static_cast<float>(std::clamp(t - last_, 0.0, .25)), window_.points(),
+                       model_->launcher_settings().reduce_motion);
+        last_ = t;
+    }
 
     FrameInput in;
     in.size = window_.points();
@@ -250,14 +280,15 @@ void App::frame(double t) {
     declare();
     ui_->end();
     const std::vector<Event> events = ui_->take_events();
-
-    const Rect fr = ui_->rect(ui_->focused());
-    const int side =
-        view_.dialog || fr.empty() ? 0 : fr.center().x > stage_->layout_seam(share()).x_at(fr.center().y) ? 1 : -1;
-    stage_->set_target(share(), tall(), side);
-    if (first_) stage_->snap();
-    stage_->update(t, static_cast<float>(std::clamp(t - last_, 0.0, .25)), in.size, in.reduced_motion);
-    last_ = t;
+    painted_focus_ = ui_->focused();
+    painted_highlight_ = ui_->highlight_rect();
+    painted_focus_rect_ = ui_->focus_rect();
+    if (drilled()) {
+        // (Its blue actions gone - nothing left to reach there: back to the opener.)
+        const std::vector<std::string> ids = ui_->focusable_ids();
+        if (std::find(ids.begin(), ids.end(), ui_->focused()) == ids.end()) drill_out();
+    }
+    if (o_.testing) test_audit(t);
     window_.set_drag_area({0, 0, in.size.x, theme::kTopBand},
                           {ui_->rect("tabs"), ui_->rect("sound"), ui_->rect("quit"), ui_->rect("frame")});
 
@@ -314,7 +345,7 @@ void App::declare() {
     Ui& ui = *ui_;
     const Vec2 size = ui.frame().size;
     top_band();
-    const float sh = share();
+    const float sh = stage_->share_now();
     const Seam seam = stage_->layout_seam(sh);
     const Rect cr = stage_->crimson_area(sh), bl = stage_->blue_area(sh);
     Box crimson;
@@ -331,6 +362,8 @@ void App::declare() {
     blue.w = Size::fixed(bl.w + 16 + 16);
     blue.h = Size::fixed(std::max(60.f, bl.h + 14));
     blue.pad = {16, 0, 16, 8};
+    blue.mirror = true;  // FEEDBACK F2: the blue half's straight edge is its right one
+    crimson.locked = drilled();
     if (wipe_->active(ui.now())) {
         const Vec2 d = wipe_->new_offset(ui.now());
         crimson.shift = d;
@@ -444,10 +477,16 @@ std::vector<Hint> App::hints() const {
         h.push_back({Prompt::Tabs, "Tabs"});
         return h;
     }
+    if (drilled()) {
+        if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? "Copy" : focused_label());
+        h.push_back({Prompt::Back, "Back"});
+        h.push_back({Prompt::Tabs, "Tabs"});
+        return h;
+    }
     if (!disabled) {
         if (f == "fighters" || f == "settings") accept("Open");
         else if (f == "slot:game" || f == "slot:folder") accept("Choose");
-        else if (f.starts_with("check:")) accept("");
+        else if (f.starts_with("check:")) accept(check_has_copy(f) ? "Commands" : "");
         else accept(focused_label());
     }
     if (screen_ != Screen::kHome) h.push_back({Prompt::Back, "Home"});
@@ -613,7 +652,10 @@ void App::dialog_band() {
 
 void App::go(Screen to) {
     if (to == screen_) return;
-    saved_focus_[static_cast<int>(screen_)] = ui_->focused();
+    cue(ttt2::app::Cue::TabSwitch);
+    // (A drill-in ends with its screen; the screen keeps the opener as its focus.)
+    saved_focus_[static_cast<int>(screen_)] = drilled() ? drill_->opener : ui_->focused();
+    drill_.reset();
     const int dir = static_cast<int>(to) > static_cast<int>(screen_) ? 1 : -1;
     // The model's page follows (Settings reads display.ini and the keys when opened).
     if (to == Screen::kSettings && model_->page() != m::Page::kSettings) handle(model_->activate("settings", now()));
@@ -623,6 +665,29 @@ void App::go(Screen to) {
     stage_->note_input(now());
     const auto it = saved_focus_.find(static_cast<int>(to));
     ui_->focus(it != saved_focus_.end() ? it->second : std::string(), true);
+}
+
+void App::cue(ttt2::app::Cue c) {
+    if (o_.trace_cues) std::fprintf(stderr, "@cue %s\n", ttt2::app::cue_name(c));
+    if (sounds_ && sound_) sound_(c);
+}
+
+bool App::drilled() const { return drill_ && drill_->screen == screen_ && !picker_ && !view_.dialog; }
+
+void App::drill_in(const std::string& opener, const std::string& target) {
+    drill_ = Drill{screen_, opener, target};
+    ui_->focus(target);
+    stage_->note_input(now());
+    cue(ttt2::app::Cue::DrillIn);
+}
+
+void App::drill_out(const std::string& to) {
+    if (!drill_) return;
+    const std::string opener = drill_->opener;
+    drill_.reset();
+    ui_->focus(to.empty() ? opener : to);
+    stage_->note_input(now());
+    cue(ttt2::app::Cue::DrillOut);
 }
 
 void App::toast(const std::string& title, const std::string& text, bool bad) {
@@ -655,19 +720,28 @@ void App::on_events(const std::vector<Event>& events) {
             break;
         case EventKind::Back:
             if (view_.dialog) {
+                cue(ttt2::app::Cue::Back);
                 activate(view_.dialog->cancel);
+            } else if (drilled()) {
+                drill_out();
             } else if (picker_) {
+                cue(ttt2::app::Cue::Back);
                 close_picker();
             } else if (screen_ != Screen::kHome) {
                 go(Screen::kHome);
             } else if (task_screen_) {
                 if (model_->task().running()) {
-                    if (model_->task().cancellable()) activate("task");
+                    if (model_->task().cancellable()) {
+                        cue(ttt2::app::Cue::Back);
+                        activate("task");
+                    }
                 } else {
+                    cue(ttt2::app::Cue::Back);
                     activate("task/close");
                 }
             } else if (view_.game.state == m::GameState::kChecking ||
                        view_.game.state == m::GameState::kCannotInstall) {
+                cue(ttt2::app::Cue::Back);
                 activate("preflight-cancel");
             }
             break;
@@ -675,12 +749,34 @@ void App::on_events(const std::vector<Event>& events) {
             if (task_screen_ && screen_ == Screen::kHome && !view_.dialog && !picker_) activate("details");
             break;
         case EventKind::ClickOutside:
-            if (view_.dialog) activate(view_.dialog->cancel);
+            if (view_.dialog) {
+                cue(ttt2::app::Cue::Back);
+                activate(view_.dialog->cancel);
+            }
+            break;
+        case EventKind::Unlock:
+            // (A click on the locked crimson half: back, onto the item clicked if there was one.)
+            if (drilled()) drill_out(e.delta ? e.id : std::string());
             break;
         case EventKind::Fullscreen: window_.toggle_fullscreen(); break;
-        case EventKind::FocusMoved: break;
-        case EventKind::Refused: refused(e.id); break;
-        case EventKind::Activate: activate(e.id); break;
+        case EventKind::FocusMoved: cue(ttt2::app::Cue::Move); break;
+        case EventKind::Change: cue(ttt2::app::Cue::Toggle); break;
+        case EventKind::Refused:
+            cue(ttt2::app::Cue::Refuse);
+            refused(e.id);
+            break;
+        case EventKind::Activate: {
+            using ttt2::app::Cue;
+            const m::Action* a = action(e.id);
+            const bool tab = e.id.starts_with("tab:") || e.id == "fighters" || e.id == "settings" || e.id == "ph/home";
+            if (e.id == "play" || e.id == "task/play") cue(Cue::Play);
+            else if (e.id == "sound" || (a && a->kind == m::ActionKind::kCheck)) {
+                // (Sound: its cue after the switch, so turning it on is heard.)
+            } else if (!tab && !(e.id.starts_with("check:") && check_has_copy(e.id))) cue(Cue::Accept);
+            activate(e.id);
+            if (e.id == "sound" || (a && a->kind == m::ActionKind::kCheck)) cue(Cue::Toggle);
+            break;
+        }
         default: break;
         }
     }
@@ -698,7 +794,7 @@ void App::activate(const std::string& id) {
     const double t = now();
     stage_->note_input(t);
     if (picker_ && picker_activate(id)) return;
-    if (id == "tab:home") return go(Screen::kHome);
+    if (id == "tab:home" || id == "ph/home") return go(Screen::kHome);
     if (id == "tab:fighters" || id == "fighters") return go(Screen::kFighters);
     if (id == "tab:settings") return go(Screen::kSettings);
     if (id == "settings" && !view_.dialog) return go(Screen::kSettings);
@@ -715,7 +811,11 @@ void App::activate(const std::string& id) {
     if (id == "slot:game") return open_picker(false, "game");
     if (id == "slot:folder") return open_picker(true, "folder");
     if (id == "strip/task") return handle(model_->activate("task", t));
-    if (id.starts_with("check:")) return;
+    if (id.starts_with("check:")) {
+        // A check with commands to copy: they are on the blue side (FEEDBACK F4: drill in, crimson locked).
+        if (const std::string copy = check_copy(id); !copy.empty()) drill_in(id, copy);
+        return;
+    }
     if (id == "task/close") {
         task_screen_ = false;
         if (!model_->task().running() && view_.task.shown) handle(model_->activate("task", t));

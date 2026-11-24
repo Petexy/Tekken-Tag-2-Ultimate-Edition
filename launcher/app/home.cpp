@@ -294,7 +294,7 @@ void App::home_installed(const Box& crimson, const Box& blue) {
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     notice_card();
     const std::string& fo = ui.focused();
-    if (!fo.empty() && (ui.rect(fo).x < stage_->layout_seam(share()).x_at(ui.rect(fo).center().y) ||
+    if (!fo.empty() && (ui.rect(fo).x < stage_->seam_now().x_at(ui.rect(fo).center().y) ||
                         fo == "notice-update" || fo == "release-page"))
         readout_key_ = fo;
     home_readout(readout_key_);
@@ -353,7 +353,7 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
     }
     notice_card();
     const std::string& fo = ui.focused();
-    if (!fo.empty() && (ui.rect(fo).x < stage_->layout_seam(share()).x_at(ui.rect(fo).center().y) ||
+    if (!fo.empty() && (ui.rect(fo).x < stage_->seam_now().x_at(ui.rect(fo).center().y) ||
                         fo == "notice-update" || fo == "release-page"))
         readout_key_ = fo;
     home_readout(readout_key_);
@@ -393,14 +393,28 @@ void App::home_unfinished(const Box& crimson, const Box& blue) {
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     notice_card();
     const std::string& fo = ui.focused();
-    if (!fo.empty() && (ui.rect(fo).x < stage_->layout_seam(share()).x_at(ui.rect(fo).center().y) ||
+    if (!fo.empty() && (ui.rect(fo).x < stage_->seam_now().x_at(ui.rect(fo).center().y) ||
                         fo == "notice-update" || fo == "release-page"))
         readout_key_ = fo;
     home_readout(readout_key_);
 }
 
+std::string App::check_copy(const std::string& row) const {
+    if (!row.starts_with("check:")) return {};
+    const size_t want = std::strtoul(row.c_str() + 6, nullptr, 10);
+    size_t i = 0;
+    for (const m::Line& l : view_.game.body) {
+        if (l.kind != m::Line::Kind::kCheck) continue;
+        if (i++ != want) continue;
+        for (const m::Action& a : l.actions)
+            if (a.id.starts_with("copy:")) return a.id;
+        return {};
+    }
+    return {};
+}
+
 // The checks before an install: each check on the crimson side, the focused one's details (and its command to
-// copy) on the blue side.
+// copy) on the blue side. Accept on a check with a command goes to its Copy button (the drill-in lock).
 void App::home_preflight(const Box& crimson, const Box& blue) {
     Ui& ui = *ui_;
     const m::Facts& f = model_->facts();
@@ -707,7 +721,7 @@ void App::placeholder(const Box& crimson, const Box& blue) {
         section_label(ui, "ph/label", fighters ? "Fighters" : "Settings", Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         MenuRowSpec s{fighters ? "stroke:users" : "stroke:gear", "Back to Home"};
-        menu_row(ui, "tab:home", s, crimson_focus(true), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "ph/home", s, crimson_focus(true), fit({}, SeamFit::CrimsonSkewed));
     }
     auto g = ui.open("ph/blue", blue);
     section_label(ui, "ph/b-label", fighters ? "Roster" : "Settings", Half::Blue, {}, fit({}, SeamFit::BlueRect));
