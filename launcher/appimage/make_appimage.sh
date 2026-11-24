@@ -4,7 +4,7 @@
 # packed with the AppImage type 2 runtime. Nothing of the game is in it: the
 # game program is built on the player's PC from their own .wua.
 #
-#   launcher/appimage/make_appimage.sh [--runtime-cache DIR] [--ui gtk|sdl] OUTPUT BUILD_DIR
+#   launcher/appimage/make_appimage.sh [--runtime-cache DIR] OUTPUT BUILD_DIR
 #
 # OUTPUT      the .AppImage to write
 # BUILD_DIR   a build folder of its own (new, empty, or one this script made):
@@ -13,14 +13,11 @@
 # --runtime-cache DIR (else $TTT2_APPIMAGE_CACHE, else BUILD_DIR/appimage-cache):
 #             where the runtime is downloaded to, once (it must be the one
 #             pinned below, runtime_sha256)
-# --ui gtk|sdl  the launcher's interface: gtk (for now the default), or sdl,
-#             the new one on SDL 3 built in (TTT2_LAUNCHER_SDL=static, from
-#             third_party/SDL: python3 tools/setup_deps.py --launcher), which
-#             may then need no library but the C and C++ runtimes' (the GTK
-#             ones are no longer known). Its program is launcher_target below:
-#             until launcher/app's ttt2-launcher is the SDL program, the
-#             stand-in launcher_standin (launcher/standin), installed as
-#             usr/bin/ttt2-launcher with the menu entry and icon.
+# (--ui sdl, the only interface since the GTK one is gone, is still taken.)
+#
+# The launcher (launcher/app's ttt2-launcher) has SDL 3 built in
+# (TTT2_LAUNCHER_SDL=static, from third_party/SDL: python3 tools/setup_deps.py
+# --launcher) and needs no library but the C and C++ runtimes'.
 #
 # Needs CMake 3.24+, Ninja, Clang, LLD, readelf, objdump, mksquashfs (with
 # zstd), sha256sum, and curl or wget for the first download; rsvg-convert for a PNG
@@ -35,9 +32,9 @@
 # writes no ISA level; the image is checked for one, and for AVX-512
 # instructions, before it is packed.
 #
-# The AppImage uses the system's GTK 4, GLib and C++ runtime (the kit's
-# programs too: a static libstdc++ would be this system's, compiled for its
-# processor). It is checked to need no newer glibc or libstdc++ than Ubuntu
+# The AppImage uses the system's C++ runtime (the kit's programs too: a static
+# libstdc++ would be this system's, compiled for its processor); the launcher
+# opens the display's libraries (X11, Wayland) when it starts. It is checked to need no newer glibc or libstdc++ than Ubuntu
 # 24.04 has, and no library it lacks (OpenSSL 3's, not 4's), also for the game
 # program the kit links (see below). AppRun
 # changes nothing of the environment, as
@@ -52,10 +49,6 @@ runtime_url=https://github.com/AppImage/type2-runtime/releases/download/continuo
 # tagged builds differ): a new one is taken only after it was looked at.
 runtime_sha256=617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46
 app_id=io.github.petexy.TekkenTag2UltimateEdition
-# The SDL interface's program (--ui sdl): the build target installed as
-# usr/bin/ttt2-launcher. launcher_standin until launcher/app's ttt2-launcher is
-# the SDL program; then ttt2-launcher (and the lines for the stand-in below go).
-launcher_target=launcher_standin
 
 die() {
     echo "make_appimage.sh: $*" >&2
@@ -63,15 +56,15 @@ die() {
 }
 
 usage() {
-    echo "usage: $0 [--runtime-cache DIR] [--ui gtk|sdl] OUTPUT BUILD_DIR"
+    echo "usage: $0 [--runtime-cache DIR] OUTPUT BUILD_DIR"
 }
 
 cache=${TTT2_APPIMAGE_CACHE:-}
-ui=gtk
+ui=sdl
 while [ $# -gt 0 ]; do
     case $1 in
         --ui)
-            [ $# -ge 2 ] || die "--ui needs gtk or sdl"
+            [ $# -ge 2 ] || die "--ui needs sdl"
             ui=$2
             shift 2
             ;;
@@ -105,8 +98,9 @@ if [ $# -ne 2 ]; then
     exit 2
 fi
 case $ui in
-    gtk | sdl) ;;
-    *) die "--ui is gtk or sdl, not $ui" ;;
+    sdl) ;;
+    gtk) die "the GTK launcher is gone: the launcher is the SDL one (leave --ui out)" ;;
+    *) die "--ui is sdl, not $ui" ;;
 esac
 
 repo=$(cd "$(dirname "$0")/../.." && pwd -P)
@@ -130,7 +124,7 @@ done
 if [ -e "$build" ]; then
     [ -d "$build" ] || die "$build is not a folder"
     if [ -f "$build/CMakeCache.txt" ]; then
-        # (UNINITIALIZED where no option() takes it: a build without the GTK launcher, which declares it)
+        # (UNINITIALIZED where no option() takes it: a build without launcher/app, which declares it)
         grep -Eqx 'TTT2_LAUNCHER_BUILD_TREE_PATHS:(BOOL|UNINITIALIZED)=OFF' "$build/CMakeCache.txt" ||
             die "$build is another build folder: give this script one of its own"
     elif [ -n "$(ls -A "$build")" ]; then
@@ -154,30 +148,15 @@ for pc in /usr/lib/openssl-3/pkgconfig /usr/lib64/openssl-3/pkgconfig; do
         break
     fi
 done
-# The new interface has SDL built in (and the build stops unless SDL has
-# what the launcher needs: cmake/LauncherSDL.cmake).
-interface=()
-targets=(ttt2-launcher ttt2_kit)
-if [ "$ui" = sdl ]; then
-    interface=(-DTTT2_LAUNCHER_SDL=static)
-    targets=("$launcher_target" ttt2_kit)
-    # (The stand-in is installed as ttt2-launcher, and the GTK launcher, which
-    # alone looks for pkg-config, left out.)
-    if [ "$launcher_target" = launcher_standin ]; then
-        interface+=(-DTTT2_LAUNCHER_STANDIN_INSTALL=ON -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON)
-    fi
-fi
+# The launcher has SDL built in (and the build stops unless SDL has what the
+# launcher needs: cmake/LauncherSDL.cmake).
 cmake --fresh -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     "-DCMAKE_C_FLAGS=$prefix_maps" "-DCMAKE_CXX_FLAGS=$prefix_maps" -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
     -DTTT2_LAUNCHER_BUILD_TREE_PATHS=OFF -DTTT2_GENERATED_DIR= -DTTT2_RPX= ${openssl[@]+"${openssl[@]}"} \
-    ${interface[@]+"${interface[@]}"}
-if [ "$ui" = sdl ]; then
-    release_check_static_sdl "$build"
-else
-    grep -qx 'GTK4_FOUND:INTERNAL=1' "$build/CMakeCache.txt" || die "GTK 4.10 or newer (its development files) is needed"
-fi
-cmake --build "$build" --target "${targets[@]}"
+    -DTTT2_LAUNCHER_SDL=static
+release_check_static_sdl "$build"
+cmake --build "$build" --target ttt2-launcher ttt2_kit
 
 # 2. The AppDir: what cmake --install puts in usr/, and the AppImage's own
 # files at its root.
@@ -269,17 +248,12 @@ done
 # Nor may they, or the game program (kit.ini's libraries, found on the
 # player's PC), need a library those distributions lack: a newer one of this
 # system (0.6.0's kit needed OpenSSL 4's libcrypto.so.4, so Install stopped at
-# once, with code 127, everywhere else). The new launcher needs none but the C
+# once, with code 127, everywhere else). The launcher needs none but the C
 # and C++ runtimes' (SDL is built in, the display's libraries are opened when
 # it starts).
 known_libraries=(libc.so.6 libm.so.6 ld-linux-x86-64.so.2 libgcc_s.so.1 libstdc++.so.6 libcrypto.so.3 libz.so.1
     libzstd.so.1 libvulkan.so.1 libSDL3.so.0 libshaderc_shared.so.1)
-if [ "$ui" = gtk ]; then
-    known_libraries+=(libgtk-4.so.1 libpangocairo-1.0.so.0 libpango-1.0.so.0 libharfbuzz.so.0 libgdk_pixbuf-2.0.so.0
-        libcairo-gobject.so.2 libcairo.so.2 libgraphene-1.0.so.0 libgio-2.0.so.0 libgobject-2.0.so.0 libglib-2.0.so.0)
-else
-    release_check_launcher_libraries "$appdir/usr/bin/ttt2-launcher"
-fi
+release_check_launcher_libraries "$appdir/usr/bin/ttt2-launcher"
 for program in "$appdir/usr/bin/ttt2-launcher" "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" \
     "$appdir/usr/lib/ttt2/kit/bin/cafe-recomp" "$appdir/usr/lib/ttt2/kit/native/decimate.so" \
     "$appdir/usr/lib/ttt2/kit/native/oodle.so" "$appdir/usr/lib/ttt2/kit/kit.ini"; do

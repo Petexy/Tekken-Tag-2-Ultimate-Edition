@@ -1,5 +1,5 @@
-# The Tk window's starter (entry.cpp: the .exe of releases up to 0.8.0, make_launcher_exe.py --stub); the
-# native launcher is launcher/app (target ttt2-launcher, C1).
+# The classic starter (entry.cpp: the .exe of releases up to 0.8.0, make_launcher_exe.py --stub: it runs main.py,
+# which builds the native launcher from these files); the native launcher is launcher/app (target ttt2-launcher, C1).
 # Its version is the Linux launcher's (one release has both).
 file(STRINGS ${CMAKE_SOURCE_DIR}/launcher/builder/CMakeLists.txt version_line REGEX "^set\\(TTT2_LAUNCHER_VERSION [0-9.]+\\)")
 string(REGEX REPLACE "^set\\(TTT2_LAUNCHER_VERSION ([0-9.]+)\\)$" "\\1" windows_launcher_version "${version_line}")
@@ -19,17 +19,16 @@ set_target_properties(ttt2-launcher-classic PROPERTIES RUNTIME_OUTPUT_DIRECTORY 
 
 add_test(NAME windows_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_setup.py)
 add_test(NAME windows_launcher_update_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_self_update.py)
-add_test(NAME windows_launcher_keys_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_keys.py)
 add_test(NAME windows_launcher_query_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_query.py)
 # The source ZIP's way to the new launcher (main.py without --worker: build_launcher.py).
 add_test(NAME windows_build_launcher_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/test_build_launcher.py)
-# The release .exe made of this build's launcher: it says its version and
-# unpacks its files (as entry.cpp reads them).
-add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_launcher_exe.py
-    $<TARGET_FILE:ttt2-launcher-classic> ${windows_launcher_version})
+# The classic starter made a release .exe: it says its version and unpacks its files (as entry.cpp reads them). (The
+# native launcher's own: windows_launcher_exe_test, launcher/app.)
+add_test(NAME windows_launcher_classic_exe_test COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_launcher_exe.py $<TARGET_FILE:ttt2-launcher-classic> ${windows_launcher_version})
 # The launcher's own checks are for its developers (CI runs them): a player's
 # setup leaves them out (ctest -LE launcher), as the launcher is already running.
 set_tests_properties(windows_launcher_backend_test windows_first_run_test windows_launcher_update_test
-    windows_launcher_keys_test windows_launcher_query_test windows_build_launcher_test windows_launcher_exe_test
+    windows_launcher_query_test windows_build_launcher_test windows_launcher_classic_exe_test
     PROPERTIES LABELS launcher)

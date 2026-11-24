@@ -67,7 +67,7 @@ if(TTT2_LAUNCHER_SDL_MODE STREQUAL "system")
     target_link_libraries(ttt2_launcher_sdl INTERFACE SDL3::SDL3)
     message(STATUS "Launcher interface: the system's SDL ${SDL3_VERSION} (${SDL3_DIR})")
     # (SDL's imported targets are seen only in the directory that found them and below it: the DLL's path is kept
-    # for programs made in other directories, launcher/standin's and launcher/app's.)
+    # for programs made in other directories, launcher/app's.)
     if(WIN32 AND TARGET SDL3::SDL3-shared)
         get_target_property(dll SDL3::SDL3-shared LOCATION)
         set_property(GLOBAL PROPERTY TTT2_LAUNCHER_SDL_DLL "${dll}")

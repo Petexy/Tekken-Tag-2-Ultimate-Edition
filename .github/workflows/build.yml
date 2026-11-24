@@ -20,11 +20,10 @@ jobs:
         run: >-
           pacman -Syu --noconfirm --needed git cmake ninja clang gcc python
           python-numpy python-pillow zstd zlib openssl vulkan-headers
-          vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+          vulkan-icd-loader sdl3 shaderc mingw-w64-gcc
           libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
           libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
           alsa-lib systemd-libs dbus mesa
-        # (gtk4: the GTK launcher, launcher/app, until its ttt2-launcher is the SDL program; then it goes.)
       - uses: actions/checkout@v6
       # (--launcher: SDL's source too, built into the new launcher's release programs)
       - run: python tools/setup_deps.py --launcher
@@ -38,7 +37,6 @@ jobs:
       - run: python launcher/windows/test_backend.py
       - run: python launcher/windows/test_setup.py
       - run: python launcher/windows/test_self_update.py
-      - run: python launcher/windows/test_keys.py
       - run: python launcher/windows/test_query.py
       - run: python launcher/windows/test_build_launcher.py
       - name: Launcher with SDL built in (as its release programs)
@@ -71,12 +69,11 @@ jobs:
       - run: python tools/setup_deps.py --launcher
       - name: AppImage of the new launcher
         # (Git refuses a repository another user owns: the checkout's, here in a container run as root.)
-        # (--ui sdl: until launcher/app's ttt2-launcher is the SDL program and sdl is the default)
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p build-release
-          launcher/appimage/make_appimage.sh --ui sdl build-release/Ultimate_Launcher-x86_64.AppImage build-appimage
+          launcher/appimage/make_appimage.sh build-release/Ultimate_Launcher-x86_64.AppImage build-appimage
           launcher/appimage/release_checks.sh --launcher build-appimage/AppDir/usr/bin/ttt2-launcher
           # What an old launcher asks the new AppImage before it switches to it (here without FUSE).
           version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
@@ -106,9 +103,8 @@ jobs:
           unset DISPLAY WAYLAND_DISPLAY
           python launcher/windows/make_launcher_exe.py build-release/Ultimate_Launcher-x86_64.exe
           version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
-          # (the program as built, without files: launcher/CMakeLists.txt's TTT2_LAUNCHER_RELEASE_TARGET; ONE LINE AT
-          # THE SWITCH: ttt2-launcher.exe once launcher/app's ttt2-launcher is the SDL program)
-          program=$(ls build-launcher-windows/launcher/launcher_standin.exe)
+          # (the program as built, without files: launcher/CMakeLists.txt's TTT2_LAUNCHER_RELEASE_TARGET)
+          program=$(ls build-launcher-windows/launcher/ttt2-launcher.exe)
           cd launcher/windows && python test_launcher_exe.py "../../$program" "$version" \
             ../../build-release/Ultimate_Launcher-x86_64.exe
   windows:
@@ -148,8 +144,8 @@ jobs:
             --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
           if ($LASTEXITCODE -ne 0) { Get-Content local/launcher-build.log -Tail 40; exit 1 }
           $said = Get-Content "$env:RUNNER_TEMP/ttt2-launcher-ui.json" -Raw | ConvertFrom-Json
-          # (the stand-in's answer, until launcher/app's ttt2-launcher is the program: a frame was drawn)
-          if ($said.program -eq 'launcher_standin' -and -not $said.frame) { $said; exit 1 }
+          # (the launcher's answer: its first frame was drawn with this PC's display)
+          if ($said.program -ne 'ttt2-launcher' -or -not $said.frame) { $said; exit 1 }
       - name: Source ZIP first-run runtime check
         shell: cmd
         run: call "Start Ultimate Launcher.cmd" --check

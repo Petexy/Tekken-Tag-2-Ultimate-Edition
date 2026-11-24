@@ -126,8 +126,6 @@ refuse a game whose executable is not the one they were built from.
   newer), OpenSSL 3, zstd and zlib; for the launcher MinGW too (optional: the
   Tekken 7 and Tekken 8 helpers are then built in). The launcher draws its own
   window with SDL 3, without GTK.
-<!-- switch: true once launcher/app's ttt2-launcher is the SDL program; until then the Linux launcher is the GTK one
-     (GTK 4.10 or newer, without which it is left out) and gtk4 belongs in the pacman line below -->
 - For the launcher's release programs (the AppImage, the Windows `.exe`):
   SDL 3's own source at its pinned revision, built into them
   (`python3 tools/setup_deps.py --launcher`), with the development files of
@@ -251,8 +249,6 @@ project files are reused; the game and its assets are never downloaded.
 Setup logs remain under the selected data folder. The game archive is kept.
 
 
-<!-- switch: the next sentence is true once launcher/app's ttt2-launcher is the SDL program (ARCHITECTURE C1); until
-     then build-windows-tools/ttt2-launcher.exe is the Python launcher's starter (entry.cpp) -->
 Set Up Game also builds the launcher there: `build-windows-tools/ttt2-launcher.exe`
 (SDL3.dll beside it), the same program as the release `.exe` and the ZIP's first
 start make. The ZIP startup path obtains a private Python automatically (its Tk
@@ -289,8 +285,8 @@ startup errors are saved beside the executable in `launcher.log` (the release
 `.exe`'s in `local/launcher.log` of its folder in `%LOCALAPPDATA%`). Build/install
 tasks finish before the window closes. Import cancellation requests cleanup and
 keeps completed extraction data. Only the release `.exe` updates itself (a
-project ZIP is updated as a whole); this frontend does not implement the GTK
-key-capture screen or the Linux uninstall interface.
+project ZIP is updated as a whole); the Linux uninstall is not part of the
+Windows launcher.
 
 
 `ttt2-launcher` (**Ultimate Launcher**) does the installing and
@@ -345,8 +341,6 @@ importer; nothing of the game):
 python3 tools/setup_deps.py --launcher           # SDL 3's source, built into the launcher
 launcher/appimage/make_appimage.sh Ultimate_Launcher-x86_64.AppImage build-appimage
 ```
-<!-- switch: until launcher/app's ttt2-launcher is the SDL program, make_appimage.sh needs `--ui sdl` for this (its
-     default is still the GTK launcher, which uses the system's GTK 4.10 or newer) -->
 
 It builds in a folder of its own (here `build-appimage`; Git ignores it and
 the AppImage), needs LLD and `mksquashfs`,
@@ -391,8 +385,6 @@ its icon and version details (the icon needs `rsvg-convert`); the same commit
 makes the same bytes. `--cxx COMPILER` makes the Python launcher's `.exe` of
 0.4.0 to 0.8.0 instead (`launcher/windows/entry.cpp`), and `--stub` appends the
 files to a launcher CMake built for Windows already (tests).
-<!-- switch: the program is the stand-in (launcher/standin, make_launcher_exe.py's DEFAULT_CMAKE_TARGET) until
-     launcher/app's ttt2-launcher is the SDL program -->
 Made on a branch other than `main`, it is a test build, which updates its files
 from that branch (above); a release is made on `main`.
 The files are a resource rather than data after the program because virus

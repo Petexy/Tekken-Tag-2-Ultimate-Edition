@@ -44,9 +44,8 @@ import self_update
 import setup_game
 
 ROOT = Path(__file__).resolve().parents[2]
-# The program built and started. ONE LINE AT THE SWITCH: 'ttt2-launcher' once launcher/app's ttt2-launcher is the SDL
-# program (until then the new launcher's stand-in, launcher/standin).
-PROGRAM_TARGET = 'launcher_standin'
+# The program built and started: the native launcher (launcher/app).
+PROGRAM_TARGET = 'ttt2-launcher'
 # What a build is made of besides the files (a change here builds again).
 BUILD_FORMAT = '1'
 SDL_CONFIG = 'x86_64-w64-mingw32/lib/cmake/SDL3'

@@ -5,7 +5,8 @@ unpacks its files as the release unpacks them on a player's PC. Asset-free.
 
 LAUNCHER_EXE is the program as built, without files (the tests append theirs); RELEASE_EXE, when given, a release
 .exe made of it (make_launcher_exe.py), tested as it is: its version, its files, and a start as a player's (its
-files into the files folder, the .old.exe an update left deleted, a frame drawn: --screenshot).
+files into the files folder, the .old.exe an update left deleted, the launcher it replaces waited for, its first frame
+drawn: --ui-smoke-test, offscreen under Wine, which has no display here).
 
 On Windows the programs run themselves; elsewhere through Wine when it is there: without a display, without
 winemenubuilder (no menu entries or file types of the Wine prefix in the desktop's menus). The start as a player's
@@ -13,6 +14,7 @@ writes into the files folder under LOCALAPPDATA, which Windows takes from the en
 but Wine from its prefix: under Wine it runs only with WINEPREFIX set to a prefix of the tests' own."""
 from pathlib import Path
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -61,6 +63,8 @@ class LauncherExe(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name); self.made = 0
+        # (A program built with SDL as a DLL, as Set Up Game builds it: SDL3.dll and the like go along with it.)
+        for dll in STUB.parent.glob('*.dll'): shutil.copy2(dll, self.folder / dll.name)
     def exe(self, files, damage=False):
         data = bytearray(STUB.read_bytes() + payload(files))
         if damage: data[len(STUB.read_bytes()) + 10] ^= 1
@@ -167,11 +171,17 @@ class ReleaseExe(unittest.TestCase):
             env = {'LOCALAPPDATA': str(local)}
         root = local / 'TTT2Ultimate/launcher'
         if root.exists(): shutil.rmtree(root)
-        shot = self.folder / 'frame.png'
+        said = self.folder / 'frame.json'
+        if WINE: env['TTT2_LAUNCHER_TEST_VIDEO'] = 'offscreen'
         # (A launcher that ended long ago: the start waits for it, then goes on.)
-        result = run_exe(exe, '--screenshot', path(shot), TTT2_LAUNCHER_AFTER='999999', **env)
+        result = run_exe(exe, '--ui-smoke-test', path(said), TTT2_LAUNCHER_AFTER='999999', **env)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(shot.is_file() and shot.read_bytes()[:8] == b'\x89PNG\r\n\x1a\n')
+        frame = json.loads(said.read_text(encoding='utf-8'))
+        self.assertEqual(frame['program'], 'ttt2-launcher')
+        self.assertEqual(frame['version'], VERSION)
+        self.assertTrue(frame['frame'] and not frame['error'], frame)
+        self.assertEqual((frame['after'], frame['after_ended'], frame['after_left']), ('999999', True, ''))
+        self.assertEqual(frame['digest'], files_digest(RELEASE))
         self.assertFalse((apps / 'Ultimate_Launcher-x86_64.old.exe').exists())
         self.assertEqual((root / self_update.STAMP).read_text(encoding='utf-8').splitlines()[0],
                          files_digest(RELEASE))

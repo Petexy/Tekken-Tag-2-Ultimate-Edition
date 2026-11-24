@@ -280,7 +280,7 @@ class Pieces(unittest.TestCase):
         self.assertTrue(lock['sdl']['url'].endswith('/%s-devel-%s-mingw.zip' % tuple(lock['sdl']['folder'].split('-'))))
 
     def test_program_target_is_one_the_build_has(self):
-        sources = (REPO / 'launcher/standin/CMakeLists.txt').read_text() + (REPO / 'launcher/app/CMakeLists.txt').read_text()
+        sources = (REPO / 'launcher/app/CMakeLists.txt').read_text()
         self.assertTrue(re.search(r'add_executable\(%s\b' % re.escape(bl.PROGRAM_TARGET), sources), bl.PROGRAM_TARGET)
 
 

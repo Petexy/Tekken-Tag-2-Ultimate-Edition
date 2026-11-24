@@ -51,9 +51,8 @@ sys.path.insert(0, str(HERE))
 from self_update import BUILD_BRANCH, BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
 
 ICON = REPO / 'launcher/app/io.github.petexy.TekkenTag2UltimateEdition.svg'
-# The release's program: launcher_standin (launcher/standin) until launcher/app's ttt2-launcher is the SDL program;
-# then ttt2-launcher.
-DEFAULT_CMAKE_TARGET = 'launcher_standin'
+# The release's program: the native launcher (launcher/app).
+DEFAULT_CMAKE_TARGET = 'ttt2-launcher'
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
