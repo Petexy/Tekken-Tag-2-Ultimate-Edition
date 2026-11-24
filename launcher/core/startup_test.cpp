@@ -477,10 +477,23 @@ Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN).run([sy
     check(claim_instance(options).result == InstanceClaim::Result::kOldLauncher, "old launcher: found again");
     // (It activated itself when it started; then once more with the token.)
     check(wait_until([&] { return old->has("ACTIVATE tok2"); }, 10), "old launcher: activated, the token " + old->all());
+    const auto activations = [&] {
+        int n = 0;
+        for (const auto& l : old->out) n += l.rfind("ACTIVATE", 0) == 0;
+        return n;
+    };
+    const int before = activations();
     options.after = true;
-    options.after_seconds = 1;
+    options.after_seconds = 1.5;
+    options.message = {{}, "tok3"};
     claim = claim_instance(options);
     check(claim.result == InstanceClaim::Result::kFailed, "old launcher: one replacing it waits, then fails");
+    check_eq(claim.error, std::string("The Ultimate Launcher this one replaces is still running."),
+             "old launcher: why it failed");
+    // (Asked to show itself once while waited for, not every 100 ms: compat review #8.)
+    wait_until([&] { return activations() > before; }, 5);
+    wait_until([] { return false; }, 0.5);
+    check_eq(activations() - before, 1, "old launcher: activated once while waited for " + old->all());
     old->process->terminate();
     check(wait_until([&] { return old->code != -1; }, 60), "old launcher: ended");
     options.after = false;

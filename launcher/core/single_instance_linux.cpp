@@ -144,8 +144,9 @@ std::string file_uri(const std::string& path) {
 enum class Old { kNone, kActivated, kRunning };
 
 // Asks a GApplication holding `name` to show itself (org.freedesktop.Application.Activate, or Open with the .wua),
-// with the activation token. kRunning: it is there but did not answer.
-Old activate_old(const InstanceOptions& options) {
+// with the activation token. kRunning: it is there but did not answer. `activate` false: only whether it is there
+// (kRunning), nothing asked of it.
+Old activate_old(const InstanceOptions& options, bool activate = true) {
     if (options.old_bus_name.empty() || !std::getenv("DBUS_SESSION_BUS_ADDRESS")) return Old::kNone;
     DBus dbus;
     if (!dbus.load()) return Old::kNone;
@@ -155,44 +156,46 @@ Old activate_old(const InstanceOptions& options) {
     Old result = Old::kNone;
     if (dbus.name_has_owner(bus, options.old_bus_name.c_str(), nullptr)) {
         result = Old::kRunning;
-        std::vector<std::string> uris;
-        for (const std::string& arg : options.message.args) {
-            if (!arg.empty() && arg[0] == '/') uris.push_back(file_uri(arg));
-        }
-        void* call = dbus.new_method_call(options.old_bus_name.c_str(), options.old_object_path.c_str(),
-                                          "org.freedesktop.Application", uris.empty() ? "Activate" : "Open");
-        if (call) {
-            Iter args, list, entry, variant;
-            dbus.iter_init_append(call, &args);
-            bool ok = true;
-            if (!uris.empty()) {
-                ok = dbus.iter_open_container(&args, kArray, "s", &list);
-                for (const std::string& uri : uris) {
-                    const char* text = uri.c_str();
-                    ok = ok && dbus.iter_append_basic(&list, kString, &text);
+        if (activate) {
+            std::vector<std::string> uris;
+            for (const std::string& arg : options.message.args) {
+                if (!arg.empty() && arg[0] == '/') uris.push_back(file_uri(arg));
+            }
+            void* call = dbus.new_method_call(options.old_bus_name.c_str(), options.old_object_path.c_str(),
+                                              "org.freedesktop.Application", uris.empty() ? "Activate" : "Open");
+            if (call) {
+                Iter args, list, entry, variant;
+                dbus.iter_init_append(call, &args);
+                bool ok = true;
+                if (!uris.empty()) {
+                    ok = dbus.iter_open_container(&args, kArray, "s", &list);
+                    for (const std::string& uri : uris) {
+                        const char* text = uri.c_str();
+                        ok = ok && dbus.iter_append_basic(&list, kString, &text);
+                    }
+                    ok = ok && dbus.iter_close_container(&args, &list);
+                }
+                ok = ok && dbus.iter_open_container(&args, kArray, "{sv}", &list);
+                if (!options.message.token.empty()) {
+                    // (GTK reads either: Wayland's xdg-activation token, X11's startup notification id.)
+                    for (const char* key : {"activation-token", "desktop-startup-id"}) {
+                        const char* value = options.message.token.c_str();
+                        ok = ok && dbus.iter_open_container(&list, kDictEntry, nullptr, &entry) &&
+                             dbus.iter_append_basic(&entry, kString, &key) &&
+                             dbus.iter_open_container(&entry, kVariant, "s", &variant) &&
+                             dbus.iter_append_basic(&variant, kString, &value) &&
+                             dbus.iter_close_container(&entry, &variant) && dbus.iter_close_container(&list, &entry);
+                    }
                 }
                 ok = ok && dbus.iter_close_container(&args, &list);
-            }
-            ok = ok && dbus.iter_open_container(&args, kArray, "{sv}", &list);
-            if (!options.message.token.empty()) {
-                // (GTK reads either: Wayland's xdg-activation token, X11's startup notification id.)
-                for (const char* key : {"activation-token", "desktop-startup-id"}) {
-                    const char* value = options.message.token.c_str();
-                    ok = ok && dbus.iter_open_container(&list, kDictEntry, nullptr, &entry) &&
-                         dbus.iter_append_basic(&entry, kString, &key) &&
-                         dbus.iter_open_container(&entry, kVariant, "s", &variant) &&
-                         dbus.iter_append_basic(&variant, kString, &value) &&
-                         dbus.iter_close_container(&entry, &variant) && dbus.iter_close_container(&list, &entry);
+                if (ok) {
+                    if (void* reply = dbus.send_with_reply_and_block(bus, call, 5000, nullptr)) {
+                        dbus.message_unref(reply);
+                        result = Old::kActivated;
+                    }
                 }
+                dbus.message_unref(call);
             }
-            ok = ok && dbus.iter_close_container(&args, &list);
-            if (ok) {
-                if (void* reply = dbus.send_with_reply_and_block(bus, call, 5000, nullptr)) {
-                    dbus.message_unref(reply);
-                    result = Old::kActivated;
-                }
-            }
-            dbus.message_unref(call);
         }
     }
     dbus.connection_close(bus);
@@ -280,6 +283,7 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
     const Address a = address_of(options.name);
     const auto t0 = Clock::now();
     const double patience = options.after ? options.after_seconds : 2;
+    bool asked_old = false; // (an old launcher is asked to show itself once, not at each try: compat review #8)
     for (;;) {
         const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0) {
@@ -289,7 +293,8 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
         }
         if (bind(fd, reinterpret_cast<const sockaddr*>(&a.address), a.size) == 0 && listen(fd, 16) == 0) {
             // This is the new launcher; an old one may still run (it has no socket).
-            const Old old = activate_old(options);
+            const Old old = activate_old(options, !asked_old);
+            asked_old = true;
             if (old != Old::kNone && !options.after) {
                 close(fd);
                 claim.result = InstanceClaim::Result::kOldLauncher;

@@ -186,6 +186,14 @@ static int launcher_main(int argc, char** argv) {
     // (Tests that start it as a player would: a name of their own, so that they never reach a launcher in use.)
     program.instance_name = environment("TTT2_LAUNCHER_TEST_INSTANCE");
     program.wake = wake;
+#ifndef _WIN32
+    // (Before any window: the player is told in a message box too, as C2's failures are, not only on standard error,
+    // which a start from the desktop's menu shows nowhere; compat review #8. Tests' starts only write it.)
+    program.tell = [quiet = !environment("TTT2_LAUNCHER_TEST_SMOKE").empty()](const std::string& text) {
+        std::fprintf(stderr, "ttt2-launcher: %s\n", text.c_str());
+        if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Ultimate Launcher", text.c_str(), nullptr);
+    };
+#endif
     st::Start start = st::begin(args, program);
     if (start.exit >= 0) return start.exit;
 
