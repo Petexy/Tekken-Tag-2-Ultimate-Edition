@@ -126,6 +126,21 @@ class Inputs(Project):
         self.assertFalse([n for n in names if n.endswith('.pyc') or n.startswith('launcher/builder/kit')])
 
 
+class ProgramsPlace(unittest.TestCase):
+    def test_set_up_game_and_the_texts_name_the_programs_place(self):
+        # (compat review #6: CMake puts the program in <build>/launcher; the one of 0.8.0 at the top is removed.)
+        self.assertIn('RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher"',
+                      (REPO / 'launcher/ui/CMakeLists.txt').read_text(encoding='utf-8'))
+        self.assertIn('`build-windows-tools/launcher/ttt2-launcher.exe`', (REPO / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('build-windows-*/launcher/ttt2-launcher.exe',
+                      (REPO / 'launcher/windows/make_launcher_exe.py').read_text(encoding='utf-8'))
+        script = (REPO / 'tools/build_windows_tools.ps1').read_text(encoding='utf-8')
+        built = script.index('--target cafe-recomp')
+        removed = script.index('Remove-Item -LiteralPath "$root/build-windows-tools/ttt2-launcher.exe"')
+        self.assertGreater(removed, built)
+        self.assertIn(' ttt2-launcher ', script[built:script.index('\n', built)])
+
+
 class Folders(Project):
     def test_build_home_has_only_plain_letters_as_the_exe_files_folder(self):
         sep = os.sep
