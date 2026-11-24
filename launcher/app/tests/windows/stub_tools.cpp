@@ -9,6 +9,8 @@
 //   certutil.exe -hashfile FILE SHA256  %TTT2_STUB_HASH% as the file's hash
 //   findstr.exe  /i /x TEXT FILE        0 when a line of FILE is TEXT (any case), else 1
 //   tar.exe      -xzf ARCHIVE -C DIR    DIR\python\python.exe and pythonw.exe: copies of this program
+//   holder.exe   FILE SECONDS           FILE written and held as the starter of 0.4 to 0.8.0 holds launcher.log for
+//                                       its Python (shared for reading only), "held" on standard output, then ended
 
 #include <windows.h>
 
@@ -188,6 +190,19 @@ int main() {
     if (name == "certutil") return certutil(a);
     if (name == "findstr") return findstr(a);
     if (name == "tar") return tar(a);
+    if (name == "holder" && a.size() == 2) {
+        const std::wstring file(path_of(a[0]).wstring());
+        HANDLE h = CreateFileW(file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return 3;
+        DWORD wrote = 0;
+        WriteFile(h, "the bridge's log\r\n", 18, &wrote, nullptr);
+        std::printf("held\n");
+        std::fflush(stdout);
+        pause(std::atof(a[1].c_str()));
+        CloseHandle(h);
+        return 0;
+    }
     std::fprintf(stderr, "stub tools: copy me as python/curl/certutil/findstr/tar.exe (not %s)\n", name.c_str());
     return 2;
 }

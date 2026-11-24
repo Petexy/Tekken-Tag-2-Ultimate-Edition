@@ -23,6 +23,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <share.h>
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -138,7 +140,18 @@ void log_to_file(const std::filesystem::path& file) {
     if (const auto size = fs::file_size(file, ec); !ec && size > (1u << 20))
         fs::rename(file, file.parent_path() / "launcher.old.log", ec);
 #ifdef _WIN32
-    if (!_wfreopen(file.c_str(), L"a", stderr)) return;
+    // (An old test build's starter, 0.4 to 0.8.0, holds launcher.log for its Python, the bridge, sharing it only for
+    // reading: then launcher-ui.log beside it, compat review #7. Only a file that opens is reopened as standard error:
+    // _wfreopen closes it first and would leave none when the file cannot be opened.)
+    fs::path chosen;
+    for (const fs::path& f : {file, file.parent_path() / L"launcher-ui.log"}) {
+        if (FILE* probe = _wfsopen(f.c_str(), L"a", _SH_DENYNO)) {
+            std::fclose(probe);
+            chosen = f;
+            break;
+        }
+    }
+    if (chosen.empty() || !_wfreopen(chosen.c_str(), L"a", stderr)) return;
 #else
     if (!std::freopen(file.c_str(), "a", stderr)) return;
 #endif

@@ -11,7 +11,8 @@
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
 # More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard), josé
 # (a José in every folder: the later queries reach Python, compat review #1), restore (a test build whose Update got
-# a newer program's files: the .exe puts its own back and says a new test build is needed, compat review #3).
+# a newer program's files: the .exe puts its own back and says a new test build is needed, compat review #3),
+# log-held (launcher.log held as an old test build's starter holds it: the log goes to launcher-ui.log, review #7).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -188,6 +189,28 @@ PY
     [ ! -e "$WORK/restore/root/launcher/app/newer.cpp" ] || fail restore "the update's own file left"
     grep -qx 'a\{40\}' "$WORK/restore/root/launcher/windows/build-commit" || fail restore "build-commit not put back"
     [ "$(grep -cx state "$WORK/restore/answers/queries.log" 2>/dev/null)" = 2 ] || fail restore "the state not asked twice"
+fi
+
+# An old test build's starter holds local/launcher.log (shared for reading only) while the bridge starts this launcher
+# with its standard error nowhere: its log goes to local/launcher-ui.log, and nothing is lost.
+if want_case log-held; then
+    make_root log-held installed yes
+    dir=$WORK/log-held
+    cp "$STUB" "$dir/holder.exe"
+    "$WINE" "$dir/holder.exe" "$(winpath "$dir/root/local/launcher.log")" 15 > "$dir/holder.out" 2>&1 &
+    holder=$!
+    for _ in $(seq 100); do grep -q held "$dir/holder.out" 2>/dev/null && break; sleep 0.2; done
+    grep -q held "$dir/holder.out" || fail log-held "the holder did not start"
+    code=0
+    TTT2_LAUNCHER_TEST_SMOKE="$(winpath "$dir/smoke.json")" TTT2_LAUNCHER_TEST_VIDEO=offscreen \
+        timeout 120 "$WINE" "$EXE" --files "$(winpath "$dir/root")" > /dev/null 2>&1 < /dev/null || code=$?
+    [ "$code" = 0 ] || fail log-held "exit $code"
+    grep -q "ttt2-launcher: smoke test:" "$dir/root/local/launcher-ui.log" 2>/dev/null ||
+        fail log-held "its log is not in launcher-ui.log"
+    grep -q "== .* ttt2-launcher" "$dir/root/local/launcher-ui.log" 2>/dev/null || fail log-held "no start line"
+    wait "$holder" 2>/dev/null || true # (it lets go after 15 s)
+    [ "$(cat "$dir/root/local/launcher.log")" = "$(printf "the bridge's log\r")" ] ||
+        fail log-held "the bridge's log was changed"
 fi
 
 if want_case josé; then
