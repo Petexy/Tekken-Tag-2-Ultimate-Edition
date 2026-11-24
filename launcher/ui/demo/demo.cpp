@@ -5,12 +5,15 @@
 //                    [--glyphs kb|xbox|ps|nintendo|generic] [--reduced] [--script FILE] [--frames N]
 //                    [--screenshot FILE [--compare REF.png [--tolerance T] [--max-changed N]]] [--write-reference F]
 //   launcher_ui_demo --version
+//   launcher_ui_demo --sounds-wav DIR [GAME_FOLDER]
 //
 // --screenshot: SDL's offscreen driver and the software renderer, a fixed clock (60 frames a second, N frames),
 // the ambient layer still, a seeded random source: the same picture every time. --script: input events at times
 // ("0.5 key Down", "1 pad South", "1.2 move 300 400", "1.3 click 300 400", "1.5 wheel -1"; '#' comments).
 // --compare: the frame scaled down to the reference's size; exit 3 when the mean difference is over T (default 4)
 // or more than --max-changed pixels (default 200 of a 320 x 200 reference) differ by more than 48 in a channel.
+// --sounds-wav: every cue's sound (the launcher's own, and the game's from GAME_FOLDER when given) as WAV files to
+// listen to; no window, no audio device.
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -31,6 +34,7 @@
 #include <string>
 #include <vector>
 
+#include "ttt2ui/sound.h"
 #include "ttt2ui/stage.h"
 #include "ttt2ui/widgets.h"
 #include "ttt2ui/window.h"
@@ -923,7 +927,8 @@ int usage(bool error) {
     say("usage: launcher_ui_demo [--screen home|fighters|settings|widgets] [--dialog] [--size WxH] [--scale S]\n"
         "                        [--glyphs kb|xbox|ps|nintendo|generic]\n"
         "                        [--reduced] [--script FILE] [--frames N] [--screenshot FILE] [--compare REF.png]\n"
-        "                        [--tolerance T] [--max-changed N] [--write-reference FILE] | --version\n",
+        "                        [--tolerance T] [--max-changed N] [--write-reference FILE] | --version\n"
+        "       launcher_ui_demo --sounds-wav DIR [GAME_FOLDER]\n",
         error);
     return error ? 2 : 0;
 }
@@ -932,6 +937,12 @@ int run(const std::vector<std::string>& args) {
     if (!args.empty() && args[0] == "--version") {
         say("launcher_ui_demo " TTT2_LAUNCHER_VERSION "\n");
         return 0;
+    }
+    if (!args.empty() && args[0] == "--sounds-wav") {
+        if (args.size() < 2 || args.size() > 3) return usage(true);
+        const int n = write_sound_wavs(args[1], args.size() > 2 ? args[2] : std::string());
+        say(std::to_string(n) + " sound files written to " + args[1] + "\n", n == 0);
+        return n ? 0 : 1;
     }
     std::string screenshot, script_path, compare_path, reference_out;
     int width = 1280, height = 800, frames = 90, screen = 0, max_changed = 200;
