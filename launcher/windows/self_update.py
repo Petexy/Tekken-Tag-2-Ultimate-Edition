@@ -42,6 +42,9 @@ LATEST = 'https://api.github.com/repos/Petexy/Tekken-Tag-2-Ultimate-Edition/rele
 EXE_VARIABLE = 'TTT2_LAUNCHER_EXE'
 # The pid of the launcher an update replaces: the new .exe waits for it to end.
 REPLACES_VARIABLE = 'TTT2_LAUNCHER_AFTER'
+# The launcher's window's pid, which the new launcher (launcher/core/startup.h) gives the workers it starts: the
+# update's worker is a program of its own there, and the window it replaces is that one, not the worker (C3).
+UI_PID_VARIABLE = 'TTT2_LAUNCHER_UI_PID'
 # entry.cpp's trailer after its files: their size, count, SHA-256, magic.
 TRAILER = struct.Struct('<QQ32s8s')
 MAGIC = b'TTT2PAY1'
@@ -409,6 +412,8 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
         if compare_versions(said, release.version) != 0:
             raise UpdateError('The launcher released as version %s is version %s.' % (release.version, said))
         if cancelled(): raise Cancelled()
+        # (From here on it is never cancelled, C3: the launcher hides Cancel once it says so.)
+        say('@step update Putting version %s in place' % release.version)
         try:
             replace(file, exe)
         except OSError as error:
@@ -549,6 +554,7 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     files[BUILD_COMMIT] = (head + '\n').encode()
     files[BUILD_BRANCH] = (branch + '\n').encode()
     if cancelled(): raise Cancelled()
+    # (From here on it is never cancelled, C3: the launcher hides Cancel once it says so.)
     say('@step update Putting %s in place' % head[:7])
     try:
         install_files(root, files)
@@ -560,9 +566,16 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     return head
 
 
+def ui_pid():
+    """The launcher's window's process: UI_PID_VARIABLE when the new launcher started this worker, else this one
+    (the Tk window runs in the process that updates)."""
+    value = os.environ.get(UI_PID_VARIABLE, '').strip()
+    return value if value.isdigit() and int(value) > 0 else str(os.getpid())
+
+
 def open_updated(exe):
-    """The new .exe opened; it waits for this launcher to end first."""
+    """The new .exe opened; it waits for this launcher (its window, ui_pid) to end first."""
     flags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-    subprocess.Popen([str(exe)], cwd=exe.parent, env=dict(os.environ, **{REPLACES_VARIABLE: str(os.getpid())}),
+    subprocess.Popen([str(exe)], cwd=exe.parent, env=dict(os.environ, **{REPLACES_VARIABLE: ui_pid()}),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      close_fds=True, creationflags=flags)

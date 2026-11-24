@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -271,13 +272,22 @@ std::shared_ptr<Process::State> start_process(const std::shared_ptr<ProcessHost:
     envp.push_back(nullptr);
     const std::string cwd = spec.cwd.string();
 
-    int null = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
-    if (null < 0) return fail(std::string("cannot open /dev/null: ") + std::strerror(errno));
+    if (spec.input.size() > ProcessSpec::kMaxInput) return fail("too much input for " + spec.argv[0]);
+    // Standard input: the null device, or a socket the input is sent through (a socket: no SIGPIPE when the program
+    // ends without reading it, MSG_NOSIGNAL).
+    int input[2] = {-1, -1};
+    if (task && !spec.input.empty() && ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, input) != 0)
+        return fail(std::string("cannot make pipes: ") + std::strerror(errno));
+    int null = input[1] >= 0 ? input[1] : ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+    if (null < 0) {
+        close_fd(input[0]);
+        return fail(std::string("cannot open /dev/null: ") + std::strerror(errno));
+    }
     int out[2] = {-1, -1}, err[2] = {-1, -1}, report[2] = {-1, -1}, wake[2] = {-1, -1};
     int output = -1, log = -1;
     const auto close_all = [&] {
-        for (int* fd : {&null, &out[0], &out[1], &err[0], &err[1], &report[0], &report[1], &wake[0], &wake[1],
-                        &output, &log}) {
+        for (int* fd : {&null, &input[0], &out[0], &out[1], &err[0], &err[1], &report[0], &report[1], &wake[0],
+                        &wake[1], &output, &log}) {
             close_fd(*fd);
         }
     };
@@ -352,6 +362,20 @@ std::shared_ptr<Process::State> start_process(const std::shared_ptr<ProcessHost:
     state->os->wake[0] = wake[0];
     state->os->wake[1] = wake[1];
     wake[0] = wake[1] = -1;
+    if (input[0] >= 0) {
+        // (Sent on a thread of its own: a program that writes before it reads never waits for this one.)
+        std::thread([fd = input[0], data = spec.input] {
+            for (size_t done = 0; done < data.size();) {
+                const ssize_t n = ::send(fd, data.data() + done, data.size() - done, MSG_NOSIGNAL);
+                if (n < 0 && errno == EINTR) continue;
+                if (n <= 0) break;
+                done += static_cast<size_t>(n);
+            }
+            ::shutdown(fd, SHUT_WR);
+            ::close(fd);
+        }).detach();
+        input[0] = -1;
+    }
 
     auto reader = std::make_shared<Reader>();
     reader->state = state;

@@ -2,7 +2,8 @@
 # processes (starter), and on Windows the answers of `main.py --query` (windows_backend). No SDL: tested on its own,
 # Windows' answers from recorded JSON (tests/windows), on Linux too.
 add_library(launcher_backend STATIC
-    starter.cpp)
+    starter.cpp
+    windows_backend.cpp)
 target_include_directories(launcher_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(launcher_backend PUBLIC launcher_model)
 target_compile_features(launcher_backend PUBLIC cxx_std_20)

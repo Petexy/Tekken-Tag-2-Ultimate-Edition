@@ -83,6 +83,10 @@ struct ProcessSpec {
     fs::path output;
     // Windows tasks: made by terminate(), for the worker to stop itself (empty: terminate() ends it at once).
     fs::path cancel_file;
+    // Tasks: written to its standard input, which then ends (main.py --query save-settings' JSON); at most
+    // kMaxInput bytes. Empty: standard input is the null device.
+    std::string input;
+    static constexpr size_t kMaxInput = 1 << 16;
 };
 
 struct ProcessEvents {

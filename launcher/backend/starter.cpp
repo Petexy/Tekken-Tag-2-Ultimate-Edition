@@ -14,6 +14,7 @@ ProcessSpec process_spec(const model::Command& command) {
                                                                     : ProcessSpec::Mode::kTask;
     spec.output = command.log_file;
     spec.cancel_file = command.cancel_file;
+    spec.input = command.input;
     return spec;
 }
 

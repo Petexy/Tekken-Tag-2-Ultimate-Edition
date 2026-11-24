@@ -91,6 +91,28 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
     return c;
 }
 
+std::optional<Command> WindowsCommands::release(const Facts& facts) const {
+    if (facts.python.empty() || facts.windows.root.empty() || !facts.self_update) return std::nullopt;
+    return query(facts, "release");
+}
+
+Command WindowsCommands::check(const Facts& facts, const std::string& action,
+                               const std::vector<std::string>& names) const {
+    Command c = query(facts, "check");
+    c.argv.insert(c.argv.end(), {"--action", action});
+    c.argv.insert(c.argv.end(), names.begin(), names.end());
+    return c;
+}
+
+Command WindowsCommands::save_settings(const Facts& facts, const std::map<std::string, std::string>& folders) const {
+    Command c = query(facts, "save-settings");
+    std::string object;
+    for (const auto& [key, value] : folders) object += (object.empty() ? "" : ", ") + json::quote(key) + ": " +
+                                                       json::quote(value);
+    c.input = "{" + object + "}";
+    return c;
+}
+
 std::optional<Command> WindowsCommands::status(const Facts& facts) {
     if (facts.python.empty() || facts.windows.root.empty()) return std::nullopt;
     return query(facts, "status");

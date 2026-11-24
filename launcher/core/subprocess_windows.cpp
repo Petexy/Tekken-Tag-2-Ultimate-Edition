@@ -106,6 +106,29 @@ bool make_pipe(HANDLE* read, HANDLE* write) {
     return true;
 }
 
+// A pipe the program reads its standard input from (its end inheritable), with room for `size` bytes, so that the
+// launcher's write does not wait for the program.
+bool make_input_pipe(size_t size, HANDLE* write, HANDLE* read) {
+    static std::atomic<unsigned> serial{0};
+    const std::wstring name = L"\\\\.\\pipe\\ttt2-launcher-in-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                              std::to_wstring(serial++) + L"-" + std::to_wstring(GetTickCount64());
+    *write = CreateNamedPipeW(name.c_str(), PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                              PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1,
+                              static_cast<DWORD>(size + 4096), 0, 0, nullptr);
+    if (*write == INVALID_HANDLE_VALUE) {
+        *write = nullptr;
+        return false;
+    }
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+    *read = CreateFileW(name.c_str(), GENERIC_READ, 0, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (*read == INVALID_HANDLE_VALUE) {
+        *read = nullptr;
+        close_handle(*write);
+        return false;
+    }
+    return true;
+}
+
 struct Pipe {
     HANDLE handle = nullptr;
     OVERLAPPED ov{};
@@ -268,13 +291,20 @@ std::shared_ptr<Process::State> start_process(const std::shared_ptr<ProcessHost:
     };
     const bool task = spec.mode != ProcessSpec::Mode::kDetached;
     SECURITY_ATTRIBUTES inherit{sizeof inherit, nullptr, TRUE};
-    HANDLE in = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING,
-                            FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (in == INVALID_HANDLE_VALUE) return fail("cannot open NUL: " + win32::last_error_text());
+    if (spec.input.size() > ProcessSpec::kMaxInput) return fail("too much input for " + spec.argv[0]);
+    // Standard input: NUL, or a pipe the input is written to (its buffer holds all of it).
+    HANDLE input = nullptr, in = nullptr;
+    if (task && !spec.input.empty()) {
+        if (!make_input_pipe(spec.input.size(), &input, &in)) return fail("cannot make pipes: " + win32::last_error_text());
+    } else {
+        in = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (in == INVALID_HANDLE_VALUE) return fail("cannot open NUL: " + win32::last_error_text());
+    }
     HANDLE out_read = nullptr, out_write = nullptr, err_read = nullptr, err_write = nullptr, output = nullptr,
            log = nullptr;
     const auto close_all = [&] {
-        for (HANDLE* h : {&in, &out_read, &out_write, &err_read, &err_write, &output, &log}) close_handle(*h);
+        for (HANDLE* h : {&input, &in, &out_read, &out_write, &err_read, &err_write, &output, &log}) close_handle(*h);
     };
     if (task) {
         if (!make_pipe(&out_read, &out_write) || !make_pipe(&err_read, &err_write)) {
@@ -344,6 +374,17 @@ std::shared_ptr<Process::State> start_process(const std::shared_ptr<ProcessHost:
     if (!started) {
         close_all();
         return fail("cannot run " + spec.argv[0] + ": " + win32::error_text(code));
+    }
+
+    if (input) {
+        // (Written on a thread of its own: a program that writes before it reads never waits for this one.)
+        std::thread([input, data = spec.input] {
+            DWORD written = 0;
+            WriteFile(input, data.data(), static_cast<DWORD>(data.size()), &written, nullptr);
+            FlushFileBuffers(input);
+            CloseHandle(input);
+        }).detach();
+        input = nullptr;
     }
 
     HANDLE job = nullptr;

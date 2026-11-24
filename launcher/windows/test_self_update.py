@@ -182,6 +182,25 @@ def archive(files, commit=HEAD, others=()):
         for name in others: z.writestr(name, b'x')
     return data.getvalue()
 
+class OpenUpdated(unittest.TestCase):
+    """The new .exe waits for the launcher's window to end (C3): the new launcher names it (TTT2_LAUNCHER_UI_PID), as
+    its update runs in a worker program of its own; the Tk window updated in its own process."""
+    def opened_after(self, **environment):
+        exe = Path(tempfile.gettempdir()) / 'Ultimate_Launcher-x86_64.exe'
+        with mock.patch.dict(os.environ, environment), mock.patch('subprocess.Popen') as popen:
+            if 'TTT2_LAUNCHER_UI_PID' not in environment: os.environ.pop('TTT2_LAUNCHER_UI_PID', None)
+            self_update.open_updated(exe)
+        (command,), options = popen.call_args
+        self.assertEqual(command, [str(exe)])
+        return options['env']['TTT2_LAUNCHER_AFTER']
+    def test_the_new_launchers_window(self):
+        self.assertEqual(self.opened_after(TTT2_LAUNCHER_UI_PID='4242'), '4242')
+    def test_this_process_without_it(self):
+        self.assertEqual(self.opened_after(), str(os.getpid()))
+        for value in ('', 'abc', '0', '-5'):
+            with self.subTest(value=value):
+                self.assertEqual(self.opened_after(TTT2_LAUNCHER_UI_PID=value), str(os.getpid()))
+
 class Files(unittest.TestCase):
     """A test build's files updated in place from its branch (update_files)."""
     def setUp(self):

@@ -202,8 +202,12 @@ int child_main(const std::vector<std::string>& a) {
         return 0;
     }
     if (what == "stdin") {
-        const int c = std::getchar();
-        out(c == EOF ? "eof\n" : "data\n");
+#ifdef _WIN32
+        _setmode(_fileno(stdin), _O_BINARY);
+#endif
+        std::string text;
+        for (int c; (c = std::getchar()) != EOF;) text += static_cast<char>(c);
+        out(text.empty() ? "eof\n" : "read [" + text + "]\n");
         return 0;
     }
     if (what == "sleep") {
@@ -471,6 +475,21 @@ void test_environment(ProcessHost& host) {
     if (!run) return;
     wait_end(host, *run, 10);
     check_eq(joined(run->out()), joined({"eof"}), "stdin: nothing to read");
+    // Input given: all of it, then its end (main.py --query save-settings' JSON).
+    ProcessSpec given = child({"stdin"});
+    given.input = "{\"data\": \"C:\\\\Jos\xc3\xa9\"}\tend";
+    run = start(host, given);
+    if (!run) return;
+    wait_end(host, *run, 10);
+    check_eq(joined(run->out()), joined({"read [" + given.input + "]"}), "stdin: the input given");
+    given.input = std::string(ProcessSpec::kMaxInput, 'x');
+    run = start(host, given);
+    if (!run) return;
+    wait_end(host, *run, 10);
+    check_eq(run->out().empty() ? 0 : run->out()[0].size(), ProcessSpec::kMaxInput + 7, "stdin: 64 KiB of input");
+    given.input += "y";
+    std::string error;
+    check(!host.start(given, {}, &error) && error.find("too much input") != std::string::npos, "stdin: no more");
 }
 
 void test_quoting(ProcessHost& host) {

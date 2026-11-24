@@ -26,6 +26,7 @@ struct Command {
     // update workers (C3: in no job that ends with the launcher, never killed; Cancel only makes cancel_file).
     enum class Mode { kTask, kDetached, kSelfUpdate };
     Mode mode = Mode::kTask;
+    std::string input{}; // its standard input (Windows' save-settings JSON); empty: none
     bool operator==(const Command&) const = default;
 };
 

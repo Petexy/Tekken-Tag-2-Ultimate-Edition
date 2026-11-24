@@ -1,0 +1,2 @@
+Some line a module printed first
+{"settings": {"source": "", "title": "", "install": "/w/Games/Jos\u00e9 TTT2", "data": "/w/appdata/TTT2Ultimate", "packs": "/w/packs", "saves": "/w/appdata/TTT2Ultimate/save", "tools": "/w/tools"}, "protocol": 1}

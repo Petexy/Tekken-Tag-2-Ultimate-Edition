@@ -703,6 +703,18 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK(w.worker(f, TaskKind::kUpdateInstalled)->argv[8] == "update");
         CHECK(!w.worker(f, TaskKind::kUninstall));
         CHECK(w.remove(f, {"kazumi"}).argv.back() == "kazumi");
+        // The new launcher's other questions (launcher/windows/query.py).
+        CHECK(!w.release(f)); // (no release .exe: nothing to update)
+        f.self_update = true;
+        CHECK(w.release(f) && w.release(f)->argv.back() == "release" && w.release(f)->argv[7] == "--query");
+        const Command check = w.check(f, "import", {"kazumi", "geese"});
+        const std::vector<std::string> check_tail = {"--query", "check", "--action", "import", "kazumi", "geese"};
+        CHECK(std::vector<std::string>(check.argv.end() - 6, check.argv.end()) == check_tail);
+        CHECK(check.input.empty() && check.mode == Command::Mode::kTask);
+        const Command save = w.save_settings(f, {{"data", "C:\\Users\\Jos\xc3\xa9\\TTT2Ultimate"}, {"packs", "a\"b"}});
+        CHECK_EQ(save.argv.back(), std::string("save-settings"));
+        CHECK_EQ(save.input, std::string("{\"data\": \"C:\\\\Users\\\\Jos\\u00e9\\\\TTT2Ultimate\", \"packs\": \"a\\\"b\"}"));
+        CHECK_EQ(json::quote("\xf0\x9f\x8e\xae\x01\xff"), std::string("\"\\ud83c\\udfae\\u0001\\ufffd\""));
         // How each runs (core/subprocess.h): the update workers never in a job nor killed (C3), the rest tasks.
         CHECK(import.mode == Command::Mode::kTask && status->mode == Command::Mode::kTask);
         CHECK(w.worker(f, TaskKind::kLauncherUpdate)->mode == Command::Mode::kSelfUpdate);

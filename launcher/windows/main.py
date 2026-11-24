@@ -1,5 +1,6 @@
 """Windows Ultimate Launcher. Run through ttt2-launcher.exe or Python 3 + Tk: the window
-(window.py), or with --worker one of its tasks, which the window runs as a program of its own."""
+(window.py), or with --worker one of its tasks, which the window runs as a program of its own, or with
+--query one of the new launcher's questions (query.py: one JSON answer, no window)."""
 from pathlib import Path
 import argparse
 import sys
@@ -7,6 +8,7 @@ import threading
 import traceback
 
 from backend import Settings, worker
+import query
 import self_update
 
 
@@ -20,9 +22,12 @@ def main():
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--outfits', default='none')     # (an import: whose outfits, as import_character.py)
+    parser.add_argument('--query', choices=query.NAMES)
+    parser.add_argument('--action', choices=query.ACTIONS) # (--query check: before which task)
     parser.add_argument('fighters', nargs='*')
     args = parser.parse_args()
     settings = Settings(args.build_dir, args.config)
+    if args.query: return query.main(args.query, settings, args.fighters, args.action)
     if args.worker:
         cancelled = lambda: bool(args.cancel_file and args.cancel_file.exists())
         # (The launcher's update stops only where it can: never half-way through replacing the .exe or its files.)
