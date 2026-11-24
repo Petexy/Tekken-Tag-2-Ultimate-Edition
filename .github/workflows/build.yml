@@ -39,6 +39,7 @@ jobs:
       - run: python launcher/windows/test_self_update.py
       - run: python launcher/windows/test_keys.py
       - run: python launcher/windows/test_query.py
+      - run: python launcher/windows/test_build_launcher.py
       - name: Launcher with SDL built in (as its release programs)
         shell: bash
         run: |

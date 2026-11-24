@@ -66,6 +66,13 @@ target_link_libraries(ttt2_launcher_sdl INTERFACE ttt2_launcher_glibc_floor)
 if(TTT2_LAUNCHER_SDL_MODE STREQUAL "system")
     target_link_libraries(ttt2_launcher_sdl INTERFACE SDL3::SDL3)
     message(STATUS "Launcher interface: the system's SDL ${SDL3_VERSION} (${SDL3_DIR})")
+    # (SDL's imported targets are seen only in the directory that found them and below it: the DLL's path is kept
+    # for programs made in other directories, launcher/standin's and launcher/app's.)
+    if(WIN32 AND TARGET SDL3::SDL3-shared)
+        get_target_property(dll SDL3::SDL3-shared LOCATION)
+        set_property(GLOBAL PROPERTY TTT2_LAUNCHER_SDL_DLL "${dll}")
+        unset(dll)
+    endif()
 else()
     include(ExternalProject)
     file(READ "${TTT2_REPO_ROOT}/dependencies.launcher.lock.json" lock)
@@ -189,9 +196,10 @@ endif()
 # ttt2_launcher_sdl_runtime(<target>): with the system's SDL on Windows, SDL3.dll is copied beside <target> after it
 # is built (as the game does); elsewhere nothing is needed.
 function(ttt2_launcher_sdl_runtime target)
-    if(WIN32 AND TTT2_LAUNCHER_SDL_MODE STREQUAL "system" AND TARGET SDL3::SDL3-shared)
+    get_property(dll GLOBAL PROPERTY TTT2_LAUNCHER_SDL_DLL)
+    if(WIN32 AND TTT2_LAUNCHER_SDL_MODE STREQUAL "system" AND dll)
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${target}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${dll}" $<TARGET_FILE_DIR:${target}>
             VERBATIM)
     endif()
 endfunction()

@@ -4,7 +4,8 @@
 // starts (launcher/core/startup.h: --version, --help, --unpack, TTT2_LAUNCHER_AFTER, one launcher per user, the
 // release .exe's files into the files folder), then opens a window and draws one frame with SDL:
 //
-//   launcher_standin [GAME.wua] [--files DIR] [--screenshot FILE] | --version | --help | --unpack DIR (Windows)
+//   launcher_standin [GAME.wua] [--files DIR] [--build-dir DIR] [--config FILE] [--screenshot FILE]
+//                    [--ui-smoke-test FILE] | --version | --help | --unpack DIR (Windows)
 //
 // With TTT2_LAUNCHER_STANDIN_LOG set (tests: what an old launcher's update opened), it adds what it found to that
 // file and ends after the frame: "start" (its version, the launcher it waited for and whether that one had ended,
@@ -12,8 +13,10 @@
 // renderer, the colour read back) or "no-frame" (why); TTT2_LAUNCHER_STANDIN_VIDEO=offscreen draws it offscreen with the
 // software renderer (Wine does not pass SDL_VIDEO_DRIVER on, and a start by an old launcher's update has no
 // arguments of the test's). --screenshot FILE (as the launcher's: a test run, not the one
-// launcher of the user, drawn offscreen by the software renderer) writes the frame as a PNG and ends too. Otherwise
-// the window stays until it is closed.
+// launcher of the user, drawn offscreen by the software renderer) writes the frame as a PNG and ends too;
+// --ui-smoke-test FILE (CI, through the source ZIP's bridge, launcher/windows/build_launcher.py) draws the frame with
+// this PC's video driver, writes what it found as JSON and ends. --build-dir and --config (the bridge passes them where
+// they are not the files' usual ones) are taken and only noted. Otherwise the window stays until it is closed.
 
 #include "startup.h"
 
@@ -41,7 +44,7 @@
 
 namespace {
 
-const char kUsage[] = "usage: ttt2-launcher [GAME.wua] [--files DIR] | --version\n"
+const char kUsage[] = "usage: ttt2-launcher [GAME.wua] [--files DIR] [--build-dir DIR] [--config FILE] | --version\n"
                       "(launcher_standin: the new launcher's stand-in in its packaging and tests)\n";
 
 std::string environment(const char* name) {
@@ -71,6 +74,22 @@ void note(const std::string& log, const std::string& line) {
     if (!file) return;
     std::fprintf(file, "%s\n", line.c_str());
     std::fclose(file);
+}
+
+// `text` as a JSON string.
+std::string json_string(const std::string& text) {
+    std::string out = "\"";
+    for (const char c : text) {
+        if (c == '"' || c == '\\') out += '\\';
+        if (static_cast<unsigned char>(c) < 0x20) {
+            char escape[8];
+            std::snprintf(escape, sizeof escape, "\\u%04x", static_cast<unsigned>(c));
+            out += escape;
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
 }
 
 std::string word(std::string text) {
@@ -165,11 +184,14 @@ int run(const std::vector<std::string>& args) {
     launcher::startup::Program program;
     program.version = TTT2_LAUNCHER_VERSION;
     program.usage = kUsage;
-    program.options = {{"--files", 1}, {"--screenshot", 1}};
-    std::string screenshot;
-    for (size_t i = 0; i + 1 < args.size(); ++i)
+    program.options = {{"--files", 1}, {"--screenshot", 1}, {"--build-dir", 1}, {"--config", 1},
+                       {"--ui-smoke-test", 1}};
+    std::string screenshot, smoke;
+    for (size_t i = 0; i + 1 < args.size(); ++i) {
         if (args[i] == "--screenshot") screenshot = args[i + 1];
-    program.unique = screenshot.empty();
+        if (args[i] == "--ui-smoke-test") smoke = args[i + 1];
+    }
+    program.unique = screenshot.empty() && smoke.empty();
     launcher::startup::Start start = launcher::startup::begin(args, program);
     if (start.exit >= 0) return start.exit;
 
@@ -190,8 +212,21 @@ int run(const std::vector<std::string>& args) {
     note(log, line);
 
     std::string said;
-    const std::string why = draw(log.empty() && screenshot.empty(), screenshot, &said);
+    const std::string why = draw(log.empty() && screenshot.empty() && smoke.empty(), screenshot, &said);
     note(log, why.empty() ? "frame " + said : "no-frame " + word(why));
+    if (!smoke.empty()) {
+        std::string json = "{\"program\": \"launcher_standin\", \"version\": " + json_string(TTT2_LAUNCHER_VERSION);
+        json += ", \"args\": [";
+        for (size_t i = 0; i < start.args.size(); ++i) json += (i ? ", " : "") + json_string(start.args[i]);
+        json += "], \"frame\": " + json_string(why.empty() ? said : "") + ", \"error\": " + json_string(why) + "}\n";
+        std::FILE* file = std::fopen(smoke.c_str(), "wb");
+        if (!file || std::fputs(json.c_str(), file) < 0) {
+            if (file) std::fclose(file);
+            std::fprintf(stderr, "ttt2-launcher: cannot write %s\n", smoke.c_str());
+            return 1;
+        }
+        std::fclose(file);
+    }
     if (!why.empty()) {
         std::fprintf(stderr, "ttt2-launcher: %s\n", why.c_str());
         return 1;

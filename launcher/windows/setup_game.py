@@ -166,19 +166,48 @@ def prepare_rpx(settings, run):
 MAX_PROJECT_PATH = 110
 MAX_TOOLS_PATH = 150
 
-def validate_setup_paths(settings):
-    def windows_length(path):
-        return len(str(path).encode('utf-16-le')) // 2
+def windows_length(path):
+    return len(str(path).encode('utf-16-le')) // 2
+
+
+def _tools_path(settings):
+    return settings.values.get('tools') or settings.root / 'local/windows-tools'
+
+
+def _validate_lengths(settings):
     if windows_length(settings.root) > MAX_PROJECT_PATH:
         raise ValueError(
             'The extracted project folder path is too long for Windows build tools. '
             'Extract a fresh copy into a short folder such as D:/TTT2 or C:/Games/TTT2 '
             '(Start Ultimate Launcher.cmd must be directly inside that folder), then start setup again. '
             'Your game archive does not need to move. Current project: ' + str(settings.root))
-    tools = settings.values.get('tools') or settings.root / 'local/windows-tools'
+    tools = _tools_path(settings)
     if windows_length(tools) > MAX_TOOLS_PATH:
         raise ValueError('The Windows tools folder path is too long. Choose a shorter tools folder '
                          'in Paths, or use a fresh project copy in D:/TTT2. Current tools: ' + str(tools))
+
+
+def _validate_plain_letters(settings):
+    # CMake runs some build steps through batch files it writes in UTF-8, which cmd.exe reads in the console's
+    # code page (850 on an Italian Windows): a letter such as à in the path breaks them ("path not found").
+    for what, path in (('project folder', settings.root), ('Windows tools folder', _tools_path(settings))):
+        if not str(path).isascii():
+            letters = ''.join(sorted({c for c in str(path) if not c.isascii()}))
+            raise ValueError('The %s path has letters the Windows build tools cannot read (%s). Extract a fresh copy '
+                             'into a folder whose path has only plain letters, such as C:/TTT2 (outside OneDrive), '
+                             'then start setup again; or use Ultimate_Launcher-x86_64.exe, which keeps its files in '
+                             'such a folder by itself. Current %s: %s' % (what, letters, what, path))
+
+
+def validate_build_paths(settings):
+    """What the Windows build tools need of the project and tools folders (also the new launcher's build from a
+    project ZIP: build_launcher.py, before it downloads anything)."""
+    _validate_lengths(settings)
+    _validate_plain_letters(settings)
+
+
+def validate_setup_paths(settings):
+    _validate_lengths(settings)
     # The game's installer gets its source and folder in the ANSI code page: a letter it has not is lost.
     from backend import unreadable_letters
     for what, key in (('installation folder', 'install'), ('Wii U archive', 'source')):
@@ -186,15 +215,7 @@ def validate_setup_paths(settings):
             raise ValueError('The %s path has letters the game\'s installer cannot be given on this PC (%s). Choose one '
                              'whose path has only plain letters, such as C:/Games/TTT2. Current %s: %s'
                              % (what, letters, what, settings.values[key]))
-    # CMake runs some build steps through batch files it writes in UTF-8, which cmd.exe reads in the console's
-    # code page (850 on an Italian Windows): a letter such as à in the path breaks them ("path not found").
-    for what, path in (('project folder', settings.root), ('Windows tools folder', tools)):
-        if not str(path).isascii():
-            letters = ''.join(sorted({c for c in str(path) if not c.isascii()}))
-            raise ValueError('The %s path has letters the Windows build tools cannot read (%s). Extract a fresh copy '
-                             'into a folder whose path has only plain letters, such as C:/TTT2 (outside OneDrive), '
-                             'then start setup again; or use Ultimate_Launcher-x86_64.exe, which keeps its files in '
-                             'such a folder by itself. Current %s: %s' % (what, letters, what, path))
+    _validate_plain_letters(settings)
 
 
 def setup(settings, run):
