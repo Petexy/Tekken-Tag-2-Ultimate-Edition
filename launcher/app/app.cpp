@@ -560,8 +560,11 @@ void App::frame(double t) {
             ui_->focus("task", true);
         }
     }
-    if (task_was_running_ && !running && !runner.last().cancelled)
-        cue(runner.last().ok ? ttt2::app::Cue::TaskDone : ttt2::app::Cue::TaskFailed);
+    if (task_was_running_ && !running && !runner.last().cancelled) {
+        // (The shaders prepared before the game are Play's own: the game starts, no chime over Play's sound.)
+        if (!runner.last().ok) cue(ttt2::app::Cue::TaskFailed);
+        else if (runner.spec().kind != m::TaskKind::kShaders) cue(ttt2::app::Cue::TaskDone);
+    }
     if (task_was_running_ && !running) ++portraits_generation_;
 #ifdef _WIN32
     // (What a task changed: the install, the build, the logs. Asked again after each one, C8.)
@@ -814,6 +817,14 @@ std::vector<Hint> App::hints() const {
             if (b.id == view_.dialog->cancel && b.id != f) h.push_back({Prompt::Back, b.label});
         return h;
     }
+    if (f == "strip/task") {
+        // (The task strip's button: Cancel, or what the task's end offers.)
+        if (view_.task.button.enabled) accept(view_.task.button.label);
+        if (picker_) h.push_back({Prompt::Back, "Back"});
+        else if (screen_ != Screen::kHome) h.push_back({Prompt::Back, "Home"});
+        h.push_back({Prompt::Tabs, "Tabs"});
+        return h;
+    }
     if (picker_) {
         if (f.starts_with("pp:") || f == "pk/here") accept(f == "pk/here" && picker_->folder ? "Choose" : "Open");
         else if (f.starts_with("pe:")) {
@@ -938,6 +949,12 @@ void App::task_strip() {
     const bool toast = toast_until_ > t;
     const m::TaskView& tv = view_.task;
     const bool task = tv.shown && !(task_screen_ && screen_ == Screen::kHome);
+    // Its button is reached by moving down from the screen (Up goes back to where the player came from); when it goes,
+    // the focus goes back there too.
+    const std::string& fo = ui.focused();
+    const bool has_button = !toast && task && !tv.button.label.empty();
+    if (fo != "strip/task" && !fo.empty()) strip_from_ = fo;
+    else if (fo == "strip/task" && !has_button && !strip_from_.empty()) ui.focus(strip_from_);
     if (!toast && !task) return;
     const float h = 62;
     Box band;
@@ -977,7 +994,8 @@ void App::task_strip() {
         b.kind = tv.running ? ButtonKind::Danger : ButtonKind::Ghost;
         b.disabled = !tv.button.enabled;
         Focus f;
-        f.nav = false;
+        f.up = strip_from_;
+        f.left = f.right = f.down = "-";
         button(ui, "strip/task", b, f);
     }
 }
@@ -1019,7 +1037,7 @@ void App::dialog_band() {
             }
         }
         auto bg = ui.open("dlg/btns", fitted(Box{.layout = Layout::Row, .margin = {0, 6, 0, 0}, .gap = 12,
-                                                 .wrap = true},
+                                                 .line_gap = 12, .wrap = true},
                                              SeamFit::CrimsonRect));
         for (const m::Action& a : d.buttons) {
             ButtonSpec b;

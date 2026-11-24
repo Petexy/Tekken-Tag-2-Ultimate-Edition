@@ -4,10 +4,12 @@
 #
 #   sounds.sh LAUNCHER STUB WORK PYTHON [GAME_FOLDER]
 #
-# - Sound on (launcher.ini): moving (Move), a button (Accept) and the next tab (Tab) write sound to the file;
+# - Sound on (launcher.ini), and with no launcher.ini at all (on by default): moving (Move), a button (Accept) and the
+#   next tab (Tab) write sound to the file;
 # - Sound off: the same steps open no audio device at all (no file);
 # - the top band's Sound button turns the same setting on (launcher.ini says so) and what follows is heard;
-# - Play, then the launcher quits at once: the Play sound is still written whole (the launcher waits for it);
+# - Play, then the launcher quits at once: the Play sound is still written whole (the launcher waits for it), and the
+#   shaders prepared before the game (on by default) add no chime of their own;
 # - GAME_FOLDER (optional: an installed Tekken Tag Tournament 2, only read): the game's own sounds are the ones used.
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4 GAME=${5:-}
@@ -18,8 +20,8 @@ fail() {
     failures=$((failures + 1))
 }
 
-# home NAME SOUND [GAME]: a scratch home with the game installed (by this kit), launcher.ini's sounds=SOUND; GAME:
-# that install's archives seen through a link (read only).
+# home NAME SOUND [GAME]: a scratch home with the game installed (by this kit), launcher.ini's sounds=SOUND (SOUND
+# empty: no launcher.ini); GAME: that install's archives seen through a link (read only).
 home() {
     local h=$WORK/$1
     mkdir -p "$h/.config/ttt2" "$h/run" "$h/Games" && chmod 700 "$h/run"
@@ -30,7 +32,7 @@ home() {
     echo "$g" > "$h/.config/ttt2/installed"
     touch "$g/.ttt2-install"
     echo "kit $(head -n1 "$STUB/kit/VERSION")" > "$g/.ttt2-build"
-    printf 'sounds=%s\n' "$2" > "$h/.config/ttt2/launcher.ini"
+    [ -n "$2" ] && printf 'sounds=%s\n' "$2" > "$h/.config/ttt2/launcher.ini"
     if [ -n "${3:-}" ]; then
         mkdir -p "$g/game/content"
         ln -s "$3/game/content/hdd" "$g/game/content/hdd"
@@ -81,6 +83,12 @@ run "$h" "$steps"
 s=$(sounding "$h")
 at_least "$s" 0.3 || fail "on: $s s of sound for Move, Accept and Tab"
 grep -q "@sounds the launcher's own sounds" "$h/out.txt" || fail "on: $(grep '@sounds' "$h/out.txt")"
+
+h=$(home default "")
+run "$h" "$steps"
+[ "$(cues "$h")" = "move accept tab " ] || fail "default: cues $(cues "$h")"
+s=$(sounding "$h")
+at_least "$s" 0.3 || fail "default (no launcher.ini): $s s of sound for Move, Accept and Tab"
 
 h=$(home off no)
 run "$h" "$steps"

@@ -348,7 +348,7 @@ void test_format() {
     }
     check(!text.empty() && text.back() == '\n', "the text ends with a newline");
     check(lines.size() == 8, "a header of two lines and six settings: " + std::to_string(lines.size()) + " lines");
-    check(!display::Settings{}.precompile_shaders, "the launcher prepares no shaders unless the player chooses so");
+    check(display::Settings{}.precompile_shaders, "the launcher prepares shaders before Play unless told not to");
     check(!display::Settings{}.async_shaders, "shaders compile as they are needed unless the player chooses otherwise");
     if (lines.size() == 8) {
         check(lines[0].starts_with("# ") && lines[1].starts_with("# "), "the header is a comment");
@@ -359,7 +359,7 @@ void test_format() {
         check(lines[4].starts_with("interpolation = yes  # "), "interpolation line: " + lines[4]);
         check(lines[5].starts_with("input_delay = no  # "), "input delay line: " + lines[5]);
         check(lines[6].starts_with("async_shaders = no  # "), "shaders line: " + lines[6]);
-        check(lines[7].starts_with("precompile_shaders = no  # "), "prepared shaders line: " + lines[7]);
+        check(lines[7].starts_with("precompile_shaders = yes  # "), "prepared shaders line: " + lines[7]);
     }
 
     // Everything the launcher can write is read back as it was meant.
@@ -401,7 +401,8 @@ void test_path(const fs::path& scratch) {
 void test_load(const fs::path& scratch) {
     const fs::path file = scratch / "display.ini";
     const std::string name = file.string();
-    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no, shaders in the background no, shaders prepared by the launcher no";
+    const std::string defaults = "fullscreen no, resolution auto, interpolation yes, input delay no, "
+                                 "shaders in the background no, shaders prepared by the launcher yes";
     fs::remove(file);
     const display::Loaded missing = display::load(file);
     check(missing.settings == display::Settings{} && missing.error.empty(), "missing file: defaults, no error");
@@ -422,7 +423,7 @@ void test_load(const fs::path& scratch) {
     const std::vector<std::string> log{
         "display: " + name + ":2: unknown setting \"vsync\", line ignored",
         "display: fullscreen yes, resolution 2560x1440, interpolation yes, input delay no, shaders in the background no, "
-        "shaders prepared by the launcher no (from " + name + ")"};
+        "shaders prepared by the launcher yes (from " + name + ")"};
     check(loaded.log == log, "file: log " + joined(loaded.log));
 
     const display::Settings written{true, Resolution::k1080, false, true, true, true};

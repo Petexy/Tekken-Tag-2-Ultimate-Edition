@@ -190,9 +190,10 @@ void display(const fs::path& scratch) {
     CHECK(d.settings().resolution == display::Resolution::k720);
     CHECK(!d.settings().interpolation);
     // What Play reads is the file's, when it is read.
-    std::ofstream(file) << "precompile_shaders = yes\n";
-    CHECK(d.read().precompile_shaders);
-    CHECK(!d.settings().precompile_shaders);
+    CHECK(d.settings().precompile_shaders);  // (on by default)
+    std::ofstream(file) << "precompile_shaders = no\n";
+    CHECK(!d.read().precompile_shaders);
+    CHECK(d.settings().precompile_shaders);
 
     // Saving fails (display.ini is a folder): the error, and the controls show what the game reads.
     fs::remove(file, ec);
@@ -620,6 +621,23 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                                                               h.settle();
                                                               CHECK(h.model.facts().game_started_here);
                                                           }});
+    current = "Play without the shaders when display.ini says no";
+    replay(installed, Caps::linux_caps(), scratch / "b2", {0, [&](Harness& h) {
+                                                               std::ofstream(scratch / "b2/display.ini")
+                                                                   << "precompile_shaders = no\n";
+                                                               h.model.activate("play", h.now);
+                                                               CHECK(count_started(h.starter, "--precompile") == 0);
+                                                               CHECK(h.model.facts().game_started_here);
+                                                           }});
+    current = "Play prepares the shaders when display.ini does not say (on by default)";
+    replay(installed, Caps::linux_caps(), scratch / "b3", {0, [&](Harness& h) {
+                                                               fs::remove(scratch / "b3/display.ini");
+                                                               h.model.activate("play", h.now);
+                                                               CHECK(h.model.task().spec().kind == TaskKind::kShaders);
+                                                               CHECK(count_started(h.starter, "--precompile") == 1);
+                                                               h.settle();
+                                                               CHECK(h.model.facts().game_started_here);
+                                                           }});
 
     current = "close while a task runs (Linux)";
     replay(fixture(golden, "add-ok"), Caps::linux_caps(), scratch / "c",
@@ -804,6 +822,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
     replay(installed, Caps::linux_caps(), scratch / "a",
            {0, [](Harness& h) {
                 h.model.activate("play", h.now);
+                h.settle();  // (the shaders first: on by default)
                 CHECK(h.model.facts().game_running && h.model.facts().game_started_here);
                 const int looks = h.env.game_looks;
                 h.now += 10;

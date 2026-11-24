@@ -1625,6 +1625,10 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
     Box b = with_height(box, h);
     if (ui.mirrored()) b.hug = true;  // (blue: as wide as its label, at the right end - not a full-width bar)
     focus.disabled = focus.disabled || spec.disabled;
+    // (Crimson: the first of each line stands upright at the half's left edge, as the lists' rows do; the others keep
+    // the slant, so the gaps between them stay even.)
+    const bool upright = spec.half == Half::Crimson && !ui.mirrored();
+    if (upright) focus.straight_left_first = true;
     TextEngine& te = ui.text();
     const Glyphs g = ui.glyphs();
     ui.leaf(
@@ -1635,10 +1639,11 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
             if (spec.check) w += 20 + gap;
             return Vec2{w, h};
         },
-        [spec, pad, gap, st](PaintContext& ctx) {
+        [spec, pad, gap, st, upright](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
             const float f = ctx.focus_t;
+            const Shape shape = upright && ctx.line_start ? Shape::StraightLeft : Shape::Skewed;
             if (spec.disabled) cv.push_layer({}, f > .5f ? .7f : .42f);
             Gradient fill;
             Color border;
@@ -1668,7 +1673,11 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
                 break;
             }
             }
-            surface(cv, r, fill, border);
+            {
+                const Quad q = shaped(r, shape, kSeamTan);
+                cv.fill(q, fill);
+                if (border.a > 0) cv.stroke(q, 1, border);
+            }
             float w = ctx.text.width(st, spec.label);
             if (spec.prompt) w += prompt_width(ctx.text, ctx.glyphs, *spec.prompt) + gap;
             if (spec.check) w += 20 + gap;

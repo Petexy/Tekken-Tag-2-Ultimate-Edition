@@ -271,7 +271,7 @@ void App::ready_declare() {
         }
         if (failed) {
             auto b = ui.open("ready/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12,
-                                                   .wrap = true},
+                                                   .line_gap = 12, .wrap = true},
                                                SeamFit::CrimsonRect));
             if (r.failure().retry) {
                 ButtonSpec retry;

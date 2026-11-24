@@ -61,7 +61,16 @@ std::string intended_said(std::string line) {
     return line;
 }
 
-void intended(Dump& golden, const Dump& model) {
+// `display_ini`: the case's display.ini ("" for none).
+void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
+    // I6 "Prepare shaders before playing" is on by default (the old app's was off): where the case's display.ini
+    // does not say, the golden's switch is on.
+    if (display_ini.find("precompile_shaders") == std::string::npos) {
+        for (auto& [name, section] : golden)
+            for (Element& e : section)
+                if (e.kind == "switch" && e.text.count("id") && e.text.at("id") == "precompile-shaders")
+                    e.flags["on"] = true;
+    }
     {
         Section& task = golden["task"];
         for (size_t i = 0; i + 1 < task.size(); ++i) {
@@ -103,7 +112,7 @@ void intended(Dump& golden, const Dump& model) {
         add({"label", {{"t", "How this launcher looks and sounds."}, {"tone", "dim"}}, {}});
         add({"label", {{"t", "Sounds"}}, {}});
         add({"label", {{"t", "Short sounds when moving between and choosing items."}, {"tone", "dim"}}, {}});
-        add({"switch", {{"id", "sounds"}}, {{"on", false}, {"s", true}}});
+        add({"switch", {{"id", "sounds"}}, {{"on", true}, {"s", true}}});
         add({"label", {{"t", "Reduce motion"}}, {}});
         add({"label", {{"t", "No moving backgrounds, and pages change without sliding."}, {"tone", "dim"}}, {}});
         add({"switch", {{"id", "reduce-motion"}}, {{"on", false}, {"s", true}}});
@@ -157,7 +166,7 @@ void goldens(const fs::path& dir, const fs::path& scratch, const std::string& on
                 continue;
             }
             ++dumps;
-            intended(*golden, made->second);
+            intended(*golden, made->second, (*c)["display_ini"].is_string() ? (*c)["display_ini"].string() : "");
             const auto diff = compare(*golden, made->second, kNewIds);
             if (!diff.empty()) {
                 std::string text = shot + ":";
