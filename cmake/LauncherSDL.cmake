@@ -162,6 +162,16 @@ else()
         # (Only what is used is recorded as needed: libraries such as libdl.so.2 only hold glibc's old names.)
         target_link_options(ttt2_launcher_sdl INTERFACE "LINKER:--as-needed")
         target_link_libraries(ttt2_launcher_sdl INTERFACE m ${CMAKE_DL_LIBS} Threads::Threads)
+        # Linked by LLD where there is one and no linker was chosen (as make_appimage.sh links): GNU ld copies the x86
+        # ISA level of the system's startup files into every program, x86-64-v4 on a system built for its own
+        # processor (CachyOS), and glibc then refuses to start it on any processor without AVX-512; LLD writes none
+        # (release_checks.sh checks it).
+        if(NOT CMAKE_EXE_LINKER_FLAGS MATCHES "-fuse-ld=" AND NOT CMAKE_LINKER_TYPE)
+            find_program(TTT2_LD_LLD NAMES ld.lld)
+            if(TTT2_LD_LLD)
+                target_link_options(ttt2_launcher_sdl INTERFACE -fuse-ld=lld)
+            endif()
+        endif()
     endif()
     message(STATUS "Launcher interface: SDL ${revision} built here (static, ${TTT2_LAUNCHER_SDL_PREFIX})")
     unset(lock)

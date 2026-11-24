@@ -17,8 +17,10 @@
 #             the new one on SDL 3 built in (TTT2_LAUNCHER_SDL=static, from
 #             third_party/SDL: python3 tools/setup_deps.py --launcher), which
 #             may then need no library but the C and C++ runtimes' (the GTK
-#             ones are no longer known). Until ttt2-launcher is that
-#             program, sdl stops there: the GTK one needs GTK.
+#             ones are no longer known). Its program is launcher_target below:
+#             until launcher/app's ttt2-launcher is the SDL program, the
+#             stand-in launcher_standin (launcher/standin), installed as
+#             usr/bin/ttt2-launcher with the menu entry and icon.
 #
 # Needs CMake 3.24+, Ninja, Clang, LLD, readelf, objdump, mksquashfs (with
 # zstd), sha256sum, and curl or wget for the first download; rsvg-convert for a PNG
@@ -50,6 +52,10 @@ runtime_url=https://github.com/AppImage/type2-runtime/releases/download/continuo
 # tagged builds differ): a new one is taken only after it was looked at.
 runtime_sha256=617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46
 app_id=io.github.petexy.TekkenTag2UltimateEdition
+# The SDL interface's program (--ui sdl): the build target installed as
+# usr/bin/ttt2-launcher. launcher_standin until launcher/app's ttt2-launcher is
+# the SDL program; then ttt2-launcher (and the lines for the stand-in below go).
+launcher_target=launcher_standin
 
 die() {
     echo "make_appimage.sh: $*" >&2
@@ -124,7 +130,8 @@ done
 if [ -e "$build" ]; then
     [ -d "$build" ] || die "$build is not a folder"
     if [ -f "$build/CMakeCache.txt" ]; then
-        grep -qx 'TTT2_LAUNCHER_BUILD_TREE_PATHS:BOOL=OFF' "$build/CMakeCache.txt" ||
+        # (UNINITIALIZED where no option() takes it: a build without the GTK launcher, which declares it)
+        grep -Eqx 'TTT2_LAUNCHER_BUILD_TREE_PATHS:(BOOL|UNINITIALIZED)=OFF' "$build/CMakeCache.txt" ||
             die "$build is another build folder: give this script one of its own"
     elif [ -n "$(ls -A "$build")" ]; then
         die "$build is not empty and not a build folder"
@@ -150,7 +157,16 @@ done
 # The new interface has SDL built in (and the build stops unless SDL has
 # what the launcher needs: cmake/LauncherSDL.cmake).
 interface=()
-if [ "$ui" = sdl ]; then interface=(-DTTT2_LAUNCHER_SDL=static); fi
+targets=(ttt2-launcher ttt2_kit)
+if [ "$ui" = sdl ]; then
+    interface=(-DTTT2_LAUNCHER_SDL=static)
+    targets=("$launcher_target" ttt2_kit)
+    # (The stand-in is installed as ttt2-launcher, and the GTK launcher, which
+    # alone looks for pkg-config, left out.)
+    if [ "$launcher_target" = launcher_standin ]; then
+        interface+=(-DTTT2_LAUNCHER_STANDIN_INSTALL=ON -DCMAKE_DISABLE_FIND_PACKAGE_PkgConfig=ON)
+    fi
+fi
 cmake --fresh -S "$repo" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     "-DCMAKE_C_FLAGS=$prefix_maps" "-DCMAKE_CXX_FLAGS=$prefix_maps" -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
@@ -161,7 +177,7 @@ if [ "$ui" = sdl ]; then
 else
     grep -qx 'GTK4_FOUND:INTERNAL=1' "$build/CMakeCache.txt" || die "GTK 4.10 or newer (its development files) is needed"
 fi
-cmake --build "$build" --target ttt2-launcher ttt2_kit
+cmake --build "$build" --target "${targets[@]}"
 
 # 2. The AppDir: what cmake --install puts in usr/, and the AppImage's own
 # files at its root.
@@ -212,6 +228,15 @@ fi
 for part in decimate oodle; do
     [ -f "$appdir/usr/lib/ttt2/kit/native/$part.so" ] || die "the kit lacks the importer's $part.so"
 done
+# The menu entry starts ttt2-launcher with the launcher's icon, and the window
+# is known as the app (its id: Wayland's app id, X11's class).
+desktop=$appdir/usr/share/applications/$app_id.desktop
+[ -x "$appdir/usr/bin/ttt2-launcher" ] || die "the launcher was not installed"
+[ -f "$desktop" ] || die "the launcher's menu entry ($app_id.desktop) was not installed"
+[ -f "$appdir/usr/share/icons/hicolor/scalable/apps/$app_id.svg" ] || die "the launcher's icon was not installed"
+for line in "Exec=ttt2-launcher %f" "Icon=$app_id" "StartupWMClass=$app_id" "Type=Application"; do
+    grep -qxF "$line" "$desktop" || die "$app_id.desktop lacks the line $line"
+done
 
 # The kit's programs are copied as built: stripped like the launcher.
 strip=$(sed -n 's/^CMAKE_STRIP:FILEPATH=//p' "$build/CMakeCache.txt")
@@ -260,6 +285,13 @@ for program in "$appdir/usr/bin/ttt2-launcher" "$appdir/usr/lib/ttt2/kit/bin/ttt
     "$appdir/usr/lib/ttt2/kit/native/oodle.so" "$appdir/usr/lib/ttt2/kit/kit.ini"; do
     release_check_libraries "$program" "${known_libraries[@]}"
 done
+
+# What an older launcher asks a new AppImage before it puts it in its place:
+# its version, answered without a display (or anything of SDL), exactly.
+version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' "$repo/launcher/builder/CMakeLists.txt")
+said=$(env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS "$appdir/usr/bin/ttt2-launcher" --version) ||
+    die "ttt2-launcher --version failed"
+[ "$said" = "ttt2-launcher $version" ] || die "ttt2-launcher --version says \"$said\", not \"ttt2-launcher $version\""
 
 cat >"$appdir/AppRun" <<'EOF'
 #!/bin/sh
