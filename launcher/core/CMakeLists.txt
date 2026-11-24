@@ -32,7 +32,8 @@ add_library(ttt2_launcher_core STATIC
     test_actions.cpp
     ${runtime_src}/host/display_settings.cpp)
 if(WIN32)
-    target_sources(ttt2_launcher_core PRIVATE single_instance_windows.cpp subprocess_windows.cpp win32.cpp)
+    target_sources(ttt2_launcher_core PRIVATE linux_parts_windows.cpp single_instance_windows.cpp subprocess_windows.cpp
+        win32.cpp)
     target_link_libraries(ttt2_launcher_core PUBLIC shell32 user32)
 else()
     target_sources(ttt2_launcher_core PRIVATE single_instance_linux.cpp subprocess_linux.cpp)
