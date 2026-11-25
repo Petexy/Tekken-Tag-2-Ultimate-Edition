@@ -152,7 +152,8 @@ void Ui::assign_widths(int index) {
             Node& k = nodes_[static_cast<std::size_t>(c)];
             const bool grows = k.box.w.mode == Size::Grow && k.fit_w < 0;
             k.w = grows ? 0 : base_of(k);
-            sum += k.w + k.box.margin.horizontal();
+            // (A child the seam moves right, fit_dx, takes that much of the row too: place() puts it there.)
+            sum += k.w + k.box.margin.horizontal() + k.fit_dx;
             if (grows) weights += std::max(.0001f, k.box.w.value);
         }
         if (!n.children.empty()) sum += b.gap * static_cast<float>(n.children.size() - 1);
@@ -355,8 +356,10 @@ void Ui::place(int index, float x, float y) {
         }
     } else if (b.layout == Layout::Row && !b.wrap) {
         float used = 0;
-        for (int c : n.children)
-            used += nodes_[static_cast<std::size_t>(c)].w + nodes_[static_cast<std::size_t>(c)].box.margin.horizontal();
+        for (int c : n.children) {
+            const Node& k = nodes_[static_cast<std::size_t>(c)];
+            used += k.w + k.box.margin.horizontal() + k.fit_dx;
+        }
         if (!n.children.empty()) used += b.gap * static_cast<float>(n.children.size() - 1);
         const Align justify = n.mirrored && b.justify == Align::Start ? Align::End : b.justify;
         float cx = ix + std::max(0.f, cross(n, iw, used, justify));
