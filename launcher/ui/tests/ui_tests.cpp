@@ -261,6 +261,41 @@ TEST(layout_seam_staircase_fit) {
     CHECK_NEAR(x.x, std::round(seam.x_at(x.y) + theme::kSeamGap), .51f);
 }
 
+TEST(layout_row_counts_its_fitted_children) {
+    // A row fitted to the seam at its middle, with a card fitted at its own beside something taller (the fighter's
+    // portrait beside their words): the card sits further right than the row's start, and what grows beside it
+    // still ends at the half's edge - the row gives out its width less what the seam moves its children by.
+    Harness h;
+    const Seam seam{640, 414, theme::kSeamTan};
+    h.run([&](Ui& ui) {
+        Box half;
+        half.seam = seam;
+        half.mirror = true;
+        half.margin = {640, 102, 0, 0};
+        half.w = Size::fixed(560);
+        auto g = ui.open("blue", half);
+        Box row;
+        row.layout = Layout::Row;
+        row.gap = 22;
+        row.align = Align::Start;
+        row.fit = SeamFit::BlueSkewed;
+        auto r = ui.open("row", row);
+        Box card = fixed(150, 100);
+        card.fit = SeamFit::BlueSkewed;
+        ui.leaf("card", card, {}, {});
+        Box words;
+        words.w = Size::grow();
+        auto w = ui.open("words", words);
+        ui.leaf("tall", fixed(80, 300), {}, {});
+    });
+    const Rect card = h.ui.rect("card"), words = h.ui.rect("words");
+    CHECK_NEAR(card.x, std::round(seam.x_at(card.y + card.h / 2) + theme::kSeamGap), 1.01f);
+    CHECK(card.x > h.ui.rect("row").x + 10);  // (the case: the row's middle is lower, where the seam is further left)
+    CHECK_NEAR(words.x, card.right() + 22, .51f);
+    CHECK_NEAR(words.right(), 1200, .51f);
+    CHECK_NEAR(h.ui.rect("tall").right(), 1200, .51f);
+}
+
 TEST(layout_mirror_right_aligned) {
     // A mirrored (blue) half anchors everything to its right edge; fitted boxes keep the gap from the
     // seam on their left; rows go to the right end.
