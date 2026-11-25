@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# run_wine.sh BUILD WORK [SHOTS]: the Windows launcher (BUILD = a mingw build: launcher/ttt2-launcher.exe, SDL3.dll,
-# launcher/app/launcher_win_stub.exe) under headless Wine, drawn offscreen, against stand-ins (stub_tools.cpp): a
-# files folder with the real "Start Golden Fist Launcher.cmd" and stub curl/certutil/findstr/tar.exe, and a stub
+# run_wine.sh BUILD WORK [SHOTS]: the Windows launcher (BUILD = a mingw build: launcher/ttt2-launcher.exe, its
+# SDL3.dll unless SDL is built in, launcher/app/launcher_win_stub.exe) under headless Wine, drawn offscreen, against
+# stand-ins (stub_tools.cpp): a files folder with the real "Start Golden Fist Launcher.cmd" and stub curl/certutil/findstr/tar.exe, and a stub
 # python.exe answering --query from answers.py. Nothing is downloaded, no Python and no game runs, no window opens,
 # no sound plays. WORK holds its Wine prefix (its user folders inside WORK, never linked to the real home) and one
 # folder per case; SHOTS (optional) gets each case's pictures.
@@ -23,7 +23,7 @@ SRC=$(cd "$HERE/../../../.." && pwd)
 EXE=$B/launcher/ttt2-launcher.exe
 STUB=$B/launcher/app/launcher_win_stub.exe
 WINE=${WINE:-wine}
-for f in "$EXE" "$STUB" "$B/launcher/SDL3.dll"; do [ -f "$f" ] || { echo "run_wine: no $f" >&2; exit 2; }; done
+for f in "$EXE" "$STUB"; do [ -f "$f" ] || { echo "run_wine: no $f" >&2; exit 2; }; done
 
 unset DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 # (No sound reaches a speaker: Wine blanks SDL_AUDIO_DRIVER for Windows programs, so the launcher's tests choose
@@ -181,7 +181,7 @@ for name, data in updated.items():
 PY
     EXE_SAVED=$EXE
     EXE=$WORK/restore/test-build.exe
-    cp "$B/launcher/SDL3.dll" "$WORK/restore/"
+    if [ -f "$B/launcher/SDL3.dll" ]; then cp "$B/launcher/SDL3.dll" "$WORK/restore/"; fi
     run restore 0 "wait:1.0" TTT2_STUB_PROTOCOL_FROM_FILES=1
     EXE=$EXE_SAVED
     expect restore "@ready restored its own files (their protocol 2)"
