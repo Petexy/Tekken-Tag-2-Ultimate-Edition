@@ -75,8 +75,8 @@ PLAIN_FORMS = {'‘': "'", '’': "'", '‚': "'", '‛': "'", '′': "'", '´':
 # carriers, presentation.cpp): never kept, made plain or left out
 CARRIERS = frozenset('\u00a3\u00a5\u00a2\u00aa\uff3c\u00b3\u00bb')
 TAG = re.compile(r'<[#/]?[A-Za-z_][^<>]*>')     # the source games' markup in a text (Tekken 7's <#...>)
-# guillemet pairs (« » French and Russian, » « German) -> straight quotes without the spaces inside them
-GUILLEMETS = (re.compile(r'«\s*([^«»]*?)\s*»'), re.compile(r'»\s*([^«»]*?)\s*«'))
+# a guillemet's partner when it opens a quotation (« … » French and Russian, » … « German): _quoted
+GUILLEMETS = {'«': '»', '»': '«'}
 SPACES = re.compile(r'[ \t\r\n\f\v]+')
 
 
@@ -216,16 +216,45 @@ def glyph_codes(nfh):
     return {nfh[0x450 + 32 * i + 22] << 8 | nfh[0x450 + 32 * i + 23] for i in range(count)}
 
 
+def _quoted(text):
+    """Guillemets as straight quotes: paired from the left, each opening mark closed by its partner (GUILLEMETS: « … »
+    French and Russian, » … « German, either way in one text, one pair inside another), the spaces inside a pair
+    dropped; a mark with no partner is a straight quote too, without the spaces after it when it starts the text or
+    before it when it ends it (a quotation going on from the line before, or on in the next)."""
+    if not any(ch in GUILLEMETS for ch in text):
+        return text
+    opened, pairs = [], []                  # [(index, the closing mark)] of the marks open; [(open, close)]
+    for i, ch in enumerate(text):
+        if ch not in GUILLEMETS:
+            continue
+        if opened and ch == opened[-1][1]:
+            pairs.append((opened.pop()[0], i))
+        else:
+            opened.append((i, GUILLEMETS[ch]))
+    dropped = set()
+
+    def drop(i, step, end):                 # the spaces from i on (step 1) or back (step -1), up to end
+        while i != end and text[i].isspace():
+            dropped.add(i)
+            i += step
+    for a, b in pairs:
+        drop(a + 1, 1, b)
+        drop(b - 1, -1, a)
+    for i, _ in opened:
+        if not text[:i].strip():
+            drop(i + 1, 1, len(text))
+        elif not text[i + 1:].strip():
+            drop(i - 1, -1, -1)
+    return ''.join('"' if ch in GUILLEMETS else ch for i, ch in enumerate(text) if i not in dropped)
+
+
 def fit(text, glyphs=None):
     """A source game's text as the subtitles can show it: one line (line breaks and runs of spaces one space), no
     markup, every character one the font has (glyphs; None: typographic ones made plain, the rest kept) and none
-    the port draws as an icon (CARRIERS: guillemets become straight quotes, without the spaces inside them), others
-    made plain (PLAIN_FORMS, then without accents) or left out (an ideographic space stays where the font has it,
-    as in the title's own Japanese lines; a no-break space, which it lacks, becomes a space)."""
-    text = SPACES.sub(' ', TAG.sub('', text))
-    for pair in GUILLEMETS:
-        text = pair.sub(r'"\1"', text)
-    text = text.strip(' ')
+    the port draws as an icon (CARRIERS: guillemets become straight quotes, without the spaces inside a pair:
+    _quoted), others made plain (PLAIN_FORMS, then without accents) or left out (an ideographic space stays where the
+    font has it, as in the title's own Japanese lines; a no-break space, which it lacks, becomes a space)."""
+    text = _quoted(SPACES.sub(' ', TAG.sub('', text)).strip(' '))
     out = []
     for ch in text:
         if ord(ch) > 0xFFFF or unicodedata.category(ch) in ('Cc', 'Cf', 'Co', 'Cs'):

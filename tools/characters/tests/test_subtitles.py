@@ -158,6 +158,34 @@ class Fit(unittest.TestCase):
             self.assertEqual(S.fit('x\u00b3 \u00a3\u00a5\u00a2 end', font), 'x3 end')
             self.assertFalse(S.CARRIERS.intersection(S.fit('\u00aa\uff3c\u00bb \u00ab', font)))
 
+    def test_guillemets_paired_either_way(self):
+        """Guillemets pair from the left, each opening mark closed by its partner: « … » (French, Russian) and
+        » … « (German), two pairs in one text, both ways in one text, one pair inside another; the spaces inside a
+        pair go, those outside stay. (Made-up texts.)"""
+        glyphs = self.GLYPHS | {ord(c) for c in '«»Данети'}
+        for font in (glyphs, None):
+            for text, shown in (
+                    ('Er sagt »ja« und sie sagt »nein«.', 'Er sagt "ja" und sie sagt "nein".'),
+                    ('Il dit « oui » et « non ».', 'Il dit "oui" et "non".'),
+                    ('«Да» и «нет»',
+                     '"Да" и "нет"'),
+                    ('« one » then »two«', '"one" then "two"'),
+                    ('»one« then « two »', '"one" then "two"'),
+                    ('« He said « yes » today »', '"He said "yes" today"'),
+                    ('»He said »yes« today«', '"He said "yes" today"')):
+                self.assertEqual(S.fit(text, font), shown, text)
+
+    def test_an_unpaired_guillemet(self):
+        """A guillemet with no partner is a straight quote too: without the spaces after it when it starts the
+        text, before it when it ends it (a quotation going on from or into another line), else as it stands."""
+        glyphs = self.GLYPHS | {0xab, 0xbb}
+        for font in (glyphs, None):
+            self.assertEqual(S.fit('« Go on, then', font), '"Go on, then')
+            self.assertEqual(S.fit('go on, then »', font), 'go on, then"')
+            self.assertEqual(S.fit('Er sagt »ja', font), 'Er sagt "ja')
+            self.assertEqual(S.fit('He said « yes', font), 'He said " yes')
+            self.assertEqual(S.fit('«one» and « two', font), '"one" and " two')
+
     def test_cyrillic_kept(self):
         word = '\u0414\u0430, \u0451\u0436!'
         self.assertEqual(S.fit(word, self.GLYPHS | {ord(c) for c in word}), word)
