@@ -23,7 +23,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -42,10 +41,7 @@ std::atomic<uint32_t> g_name{0};
 
 namespace cafe::title {
 
-void prepare_player_name() {
-    const host::game::Loaded loaded = host::game::load(host::game::file_path());
-    for (const std::string& line : loaded.log) std::fprintf(stderr, "ttt2: %s\n", line.c_str());
-    const std::string& name = loaded.settings.player_name;
+void prepare_player_name(const std::string& name) {
     if (name.empty() || name.size() > host::game::kMaxNameLength) return;
     const uint32_t record = system_alloc(static_cast<uint32_t>(4 + name.size() + 1));
     uint8_t* bytes = guest_pointer(record);
