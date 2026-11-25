@@ -244,8 +244,9 @@ std::optional<Command> LinuxCommands::play(const Facts& facts) {
 // ---------------------------------------------------------------- the model
 
 LauncherModel::LauncherModel(Facts facts, Parts parts)
-    : facts_(std::move(facts)), parts_(parts), runner_(parts.starter, facts_.caps), display_(parts.display_file),
-      keys_(parts.keys, parts.key_label) {
+    : facts_(std::move(facts)), parts_(parts), runner_(parts.starter, facts_.caps),
+      game_(parts.display_file.empty() ? fs::path() : game_ini::beside(parts.display_file)),
+      display_(parts.display_file), keys_(parts.keys, parts.key_label) {
     if (parts_.update_files && parts_.update.appimage) {
         self_update_ = std::make_unique<SelfUpdate>(runner_, parts_.starter, *parts_.update_files, parts_.update);
         self_update_->on_release = [this](const ReleaseAnswer& answer) {
@@ -263,6 +264,7 @@ LauncherModel::LauncherModel(Facts facts, Parts parts)
     }
     runner_.on_end = [this](const TaskResult& r) { task_ended(r); };
     display_.load();
+    game_.load();
 }
 
 bool LauncherModel::busy() const {
@@ -296,6 +298,7 @@ void LauncherModel::tick(double now) {
     }
     runner_.tick(now);
     keys_.tick(now);
+    name_.tick(now);
     if (self_update_) self_update_->tick(now);
     if (folders_note_until_ >= 0 && now >= folders_note_until_) {
         folders_note_.clear();
@@ -1116,9 +1119,14 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         check_again(now);
     else if (id == "back") {
         keys_.close();
+        name_.stop();
         page_ = Page::kMain;
     } else if (id == "settings") {
         // Always there (the game's part when it is installed; Windows' folders always).
+        if (page_ != Page::kSettings || !name_.editing()) {
+            name_.stop();
+            game_.load();
+        }
         display_.load();
         keys_.load();
         page_ = Page::kSettings;
@@ -1258,7 +1266,17 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     else if (const auto command = rest("copy:"))
         effects.push_back({Effect::Kind::kCopy, *command, {}, {}, {}});
     // ---- Settings
-    else if (id == "fullscreen" || id == "interpolation" || id == "input-delay" || id == "async-shaders" ||
+    else if (id == "player-name") {
+        const SettingsView v = settings_view(facts_, settings_input());
+        const auto row = std::find_if(v.game.begin(), v.game.end(),
+                                      [](const SettingRow& r) { return r.control.id == "player-name"; });
+        if (row == v.game.end() || !row->control.enabled)
+            said_ = row == v.game.end() ? "no player name to type" : row->control.why;
+        else if (!name_.editing())
+            name_.begin(game_.settings().player_name, now);
+    } else if (id.starts_with("name:") || id.starts_with("name-key:")) {
+        name_key(id, now);
+    } else if (id == "fullscreen" || id == "interpolation" || id == "input-delay" || id == "async-shaders" ||
              id == "precompile-shaders") {
         const display::Settings& s = display_.settings();
         const bool on = id == "fullscreen"      ? s.fullscreen
@@ -1336,6 +1354,65 @@ std::vector<Effect> LauncherModel::take_effects() {
     return out;
 }
 
+SettingsInput LauncherModel::settings_input() const {
+    SettingsInput in;
+    in.game = &game_;
+    in.name = &name_;
+    in.display = &display_;
+    in.monitors = monitors_;
+    in.keys = &keys_;
+    in.launcher = launcher_;
+    in.folders_note = folders_note_;
+    return in;
+}
+
+void LauncherModel::name_key(const std::string& id, double now) {
+    if (!name_.editing()) {
+        said_ = "no name is being typed";
+        return;
+    }
+    if (id.starts_with("name-key:") && id.size() == 10) {
+        name_.key(id[9], now);
+    } else if (id == "name:space") {
+        name_.type(" ", now);
+    } else if (id == "name:backspace") {
+        name_.backspace();
+    } else if (id == "name:delete") {
+        name_.erase_next();
+    } else if (id == "name:clear") {
+        name_.clear();
+    } else if (id == "name:left") {
+        name_.left();
+    } else if (id == "name:right") {
+        name_.right();
+    } else if (id == "name:home") {
+        name_.home();
+    } else if (id == "name:end") {
+        name_.end();
+    } else if (id == "name:shift") {
+        name_.shift();
+    } else if (id == "name:cancel") {
+        name_.stop();
+        said_ = "kept: " + game_summary(game_.settings());
+    } else if (id == "name:done") {
+        const std::string tidy = game_ini::tidy_name(name_.draft());
+        if (const std::string why = game_ini::name_problem(tidy); !why.empty()) {
+            name_.refuse(why, now);
+            said_ = why;
+            return;
+        }
+        name_.stop();
+        // (A save that fails: its error on the page, the name as the file has it.)
+        said_ = game_.set_name(tidy) ? game_summary(game_.settings()) : game_.error();
+    } else {
+        said_ = "no " + id + " to activate";
+    }
+}
+
+void LauncherModel::type_name(std::string_view text, double now) {
+    if (name_.editing()) name_.type(text, now);
+}
+
 View LauncherModel::view() const {
     View v;
     v.page = page_;
@@ -1344,15 +1421,7 @@ View LauncherModel::view() const {
     v.notice = notice_view(facts_);
     v.game = game_view(facts_);
     v.characters = characters_view(facts_);
-    if (page_ == Page::kSettings) {
-        SettingsInput in;
-        in.display = &display_;
-        in.monitors = monitors_;
-        in.keys = &keys_;
-        in.launcher = launcher_;
-        in.folders_note = folders_note_;
-        v.settings = settings_view(facts_, in);
-    }
+    if (page_ == Page::kSettings) v.settings = settings_view(facts_, settings_input());
     v.task = runner_.view();
     if (update_shown()) {
         const Chain& c = *chain_;

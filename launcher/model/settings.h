@@ -1,12 +1,14 @@
 #pragma once
 
-// Settings: the game's display.ini (DisplayController: shown = saved, a save
+// Settings: the game's game.ini (GameController: the player's name, typed
+// with NameEditor), display.ini (DisplayController: shown = saved, a save
 // that fails puts the controls back), keyboard.ini (KeyCapture: choosing a
 // key) and, new, the launcher's own; on Windows also the folders. The
 // texts are the GTK app's (launcher/app/settings.cpp); Windows shows the same
 // (Tk's own had drifted: "Cannot save: ...").
 
 #include "facts.h"
+#include "game_ini.h"
 #include "view.h"
 
 #include <functional>
@@ -16,6 +18,81 @@
 #include <vector>
 
 namespace launcher::model {
+
+// ---------------------------------------------------------------- game.ini
+
+class GameController {
+public:
+    explicit GameController(fs::path file = {}) : file_(std::move(file)) {}
+    void set_file(fs::path file) { file_ = std::move(file); }
+    const fs::path& file() const { return file_; }
+
+    // Read game.ini (each time Settings opens): what it says, or no name with a note when it cannot be read or its
+    // name is not one the game can show.
+    void load();
+    // A name chosen (tidied: the spaces at both ends left out; "" the game's own): saved at once; false (error())
+    // when it cannot be, what is shown staying what the file has.
+    bool set_name(std::string_view name);
+
+    const game_ini::Settings& settings() const { return settings_; }
+    const std::string& note() const { return note_; }   // game.ini cannot be read (...) / its name cannot be used
+    const std::string& error() const { return error_; } // The game settings cannot be saved: ...
+    const std::vector<std::string>& log() const { return log_; }
+
+private:
+    fs::path file_;
+    game_ini::Settings settings_;
+    std::string note_, error_;
+    std::vector<std::string> log_;
+};
+
+// "game.ini: player name Mira" / "game.ini: no player name" (the test action's answer).
+std::string game_summary(const game_ini::Settings& settings);
+
+// Typing the player's name: the text so far and where the next character goes. What a name cannot have is not
+// taken (its refusal said for a moment); the on-screen keyboard's letters are capitals while shifted (by its Shift,
+// once; and at the start of an empty name).
+class NameEditor {
+public:
+    static constexpr double kRefusalSeconds = 3;
+
+    void begin(std::string_view name, double now);
+    void stop();
+    bool editing() const { return editing_; }
+
+    // Text typed (the keyboard's text, a paste, an on-screen key), at the caret.
+    void type(std::string_view text, double now);
+    // An on-screen letter or character key (its id's character): a capital while shifted.
+    void key(char c, double now);
+    void backspace();
+    void erase_next();
+    void clear();
+    void left();
+    void right();
+    void home() { caret_ = 0; }
+    void end() { caret_ = draft_.size(); }
+    void shift() { shifted_ = !shifted_; }
+    // The name is not one that can be kept: said as a refusal.
+    void refuse(std::string why, double now);
+    void tick(double now);
+    // When tick() has a refusal to take away, a large number when none.
+    double next_tick() const { return refusal_.empty() ? 1e18 : refusal_until_; }
+
+    const std::string& draft() const { return draft_; }
+    size_t caret() const { return caret_; }
+    bool shifted() const { return shifted_; }
+    const std::string& refusal() const { return refusal_; }
+
+private:
+    void edited() { shifted_ = draft_.empty(); }
+
+    bool editing_ = false;
+    std::string draft_;
+    size_t caret_ = 0;
+    bool shifted_ = false;
+    std::string refusal_;
+    double refusal_until_ = 0;
+};
 
 // ---------------------------------------------------------------- display.ini
 
@@ -162,6 +239,8 @@ int usage_of_xkb(int keycode);
 // ---------------------------------------------------------------- the page
 
 struct SettingsInput {
+    const GameController* game = nullptr;
+    const NameEditor* name = nullptr; // the player's name being typed, when editing()
     const DisplayController* display = nullptr;
     std::vector<Monitor> monitors; // from the monitor provider (the app's: SDL's displays)
     const KeyCapture* keys = nullptr;
