@@ -1,10 +1,12 @@
-# Tekken Tag 2 Ultimate Edition
+# Golden Fist Launcher
 
 <img width="1593" height="888" alt="image" src="https://github.com/user-attachments/assets/3bd58409-1442-4ce7-b9a6-8f036f38f4f8" />
 
 
-An unofficial native Linux port of **Tekken Tag Tournament 2 Wii U Edition**,
-made by static recompilation: the game's PowerPC code is translated to C++
+Golden Fist Launcher (called Ultimate Launcher up to 0.8.0) installs, updates
+and starts an unofficial native Linux port of **Tekken Tag Tournament 2 Wii U
+Edition**, and adds Tekken 7's and Tekken 8's fighters to it. The port is made
+by static recompilation: the game's PowerPC code is translated to C++
 ahead of time and runs as native x86-64 code on a reimplementation of the
 Wii U's system libraries. There is no CPU emulation; the game's GPU commands
 and shaders are translated to Vulkan as it runs.
@@ -149,7 +151,7 @@ are too old.
 ## Building
 
 ```bash
-git clone https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition.git && cd Tekken-Tag-2-Ultimate-Edition
+git clone https://github.com/Petexy/Golden-Fist-Launcher.git && cd Golden-Fist-Launcher
 python3 tools/setup_deps.py                      # ZArchive and AMD's addrlib, at pinned revisions
 # (python3 tools/setup_deps.py --launcher: SDL 3's source too, for the launcher's release programs only)
 
@@ -178,7 +180,7 @@ dumps from the debugging options under `local/` too.
 
 **Starting from a release (Windows 10/11, x64):**
 
-1. Download `Ultimate_Launcher-x86_64.exe` from the newest release and put it
+1. Download `Golden_Fist_Launcher-x86_64.exe` from the newest release and put it
    in a folder of yours (not Program Files: it replaces itself when it updates).
 2. Double-click it. The first start unpacks the launcher's files into
    `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
@@ -221,7 +223,7 @@ the build's first error; **Open Log** there opens the whole log.
    a path with letters such as à: CMake runs some build steps through batch
    files it writes in UTF-8, which `cmd.exe` reads in the console's code
    page, so such a letter turns into others and the step finds no folder.
-2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
+2. Double-click **Start Golden Fist Launcher.cmd** in that folder. The first start
    downloads and verifies a private Python runtime, then builds the launcher
    from the folder's files, once (a few minutes; a small window shows how far
    it is): with the C compiler, CMake, Ninja and SDL 3 that Set Up Game uses
@@ -231,7 +233,7 @@ the build's first error; **Open Log** there opens the whole log.
    starts open the launcher at once; it is built again only when its files
    change. When it cannot be built, that window says why, with **Open log**
    (`local\launcher-build.log`) and **Try again**; the release's
-   `Ultimate_Launcher-x86_64.exe` needs no build. No Python installation,
+   `Golden_Fist_Launcher-x86_64.exe` needs no build. No Python installation,
    Git installation, terminal commands or second project download are needed.
 3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
    update v16, and choose an installation folder.
@@ -292,7 +294,7 @@ project ZIP is updated as a whole); the Linux uninstall is not part of the
 Windows launcher.
 
 
-`ttt2-launcher` (**Ultimate Launcher**) does the installing and
+`ttt2-launcher` (**Golden Fist Launcher**) does the installing and
 the adding of fighters in a window, without a terminal. **Install…** asks for
 your `.wua` and a folder, checks the PC, builds the game program for it from
 the archive and installs the game with its menu entry, as `ttt2 --install`
@@ -342,7 +344,7 @@ importer; nothing of the game):
 
 ```bash
 python3 tools/setup_deps.py --launcher           # SDL 3's source, built into the launcher
-launcher/appimage/make_appimage.sh Ultimate_Launcher-x86_64.AppImage build-appimage
+launcher/appimage/make_appimage.sh Golden_Fist_Launcher-x86_64.AppImage build-appimage
 ```
 
 It builds in a folder of its own (here `build-appimage`; Git ignores it and
@@ -377,7 +379,7 @@ pushed shows nothing.
 The Windows launcher of a release is made on Linux too, from a commit:
 
 ```bash
-python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
+python3 launcher/windows/make_launcher_exe.py Golden_Fist_Launcher-x86_64.exe
 ```
 
 It is the launcher's own program cross-built for Windows by CMake with
@@ -833,6 +835,6 @@ the Barlow, Barlow Condensed and JetBrains Mono fonts (SIL Open Font License
   Engine 4.14 packages. The importer's code is its own.
 - [Excentrian](https://github.com/Excentrian), who designed the title
   screen's "ULTIMATE EDITION" subtitle
-  ([#9](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/9)):
+  ([#9](https://github.com/Petexy/Golden-Fist-Launcher/issues/9)):
   the port letters it after that design, its M and A from Excentrian's
   outlines.

@@ -71,7 +71,7 @@ std::string without_stop(std::string text) {
 std::vector<UpdatePart> update_parts(const Facts& facts, const UpdatePlan& plan) {
     std::vector<UpdatePart> parts;
     if (plan.launcher) {
-        parts.push_back({"launcher", "Ultimate Launcher " + plan.launcher_from + " → " + plan.launcher_to,
+        parts.push_back({"launcher", "Golden Fist Launcher " + plan.launcher_from + " → " + plan.launcher_to,
                          "Downloads " + plan.launcher_to + " in place of this " +
                              (facts.caps.windows ? std::string("launcher") : std::string("AppImage")) +
                              ", which then restarts by itself and goes on."});
@@ -141,8 +141,9 @@ void installed(const Facts& facts, GameView& v) {
                                ? "This game program was not built by the launcher. Update builds it again from the "
                                  "game in its folder."
                            : facts.caps.windows
-                               ? "An update of the game is ready (Ultimate Launcher " + shown_build(facts.this_build) +
-                                     "; the game is from " + shown_build(facts.game_built) + ")." + again
+                               ? "An update of the game is ready (Golden Fist Launcher " +
+                                     shown_build(facts.this_build) + "; the game is from " +
+                                     shown_build(facts.game_built) + ")." + again
                                : "An update of the game program is ready (" + facts.this_build + ", installed " +
                                      facts.game_built + ")." + again,
                            true);
@@ -452,7 +453,7 @@ Banner banner_view(const Facts& facts) {
 
 Header header_view(const Facts& facts, bool in_settings) {
     Header h;
-    h.title = in_settings ? "Settings" : "Ultimate Launcher";
+    h.title = in_settings ? "Settings" : "Golden Fist Launcher";
     if (in_settings) {
         Action back = button("back", "", true, {}, "Back");
         back.icon = Icon::kBack;

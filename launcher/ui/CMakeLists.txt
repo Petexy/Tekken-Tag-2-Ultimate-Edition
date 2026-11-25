@@ -93,7 +93,7 @@ endif()
 add_executable(launcher_ui_demo demo/demo.cpp)
 target_link_libraries(launcher_ui_demo PRIVATE ttt2_launcher_ui)
 ttt2_launcher_program(launcher_ui_demo NAME launcher_ui_demo FILENAME launcher_ui_demo.exe
-    DESCRIPTION "Ultimate Launcher (interface toolkit demo)")
+    DESCRIPTION "Golden Fist Launcher (interface toolkit demo)")
 
 # Its unit tests (no window): layout, focus, input timings, springs, text, per-id state.
 add_executable(launcher_ui_tests tests/ui_tests.cpp)
@@ -167,7 +167,7 @@ endif()
 
 add_executable(launcher_smoke smoke/smoke.cpp)
 ttt2_launcher_program(launcher_smoke NAME launcher_smoke FILENAME launcher_smoke.exe
-    DESCRIPTION "Ultimate Launcher (smoke test)")
+    DESCRIPTION "Golden Fist Launcher (smoke test)")
 
 # Its checks: --version without SDL, and a frame drawn offscreen with the software renderer, which it checks itself
 # (text, icon and shape where they belong, anti-aliased edges) before writing it as a PNG.

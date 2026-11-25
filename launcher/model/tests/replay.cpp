@@ -238,7 +238,7 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         facts.self_update = true;
         facts.custom_releases = true;
         parts.update_files = &files;
-        parts.update.appimage = home / "Ultimate_Launcher-x86_64.AppImage";
+        parts.update.appimage = home / "Golden_Fist_Launcher-x86_64.AppImage";
         parts.update.version = "0.8.0";
         parts.update.releases = "file://" + (home / "release.json").string();
         parts.update.custom_releases = true;

@@ -1,6 +1,6 @@
 #pragma once
 
-// The release .exe's files (Ultimate_Launcher-x86_64.exe): the project's files
+// The release .exe's files (Golden_Fist_Launcher-x86_64.exe): the project's files
 // make_launcher_exe.py puts in it as resource 100 (RCDATA) in the TTT2PAY1
 // format, which every launcher since 0.4.0 checks in a download
 // (self_update.py) and unpacks on the player's PC. Shared by
@@ -51,7 +51,7 @@ struct Entry {
     std::string_view data;
 };
 // The files, each path checked (not empty, no leading '/', no '\\' or ':', no empty, '.' or '..' part). Throws
-// "This Ultimate Launcher holds an unsafe path: <p>" / "... is damaged: download it again."
+// "This Golden Fist Launcher holds an unsafe path: <p>" / "... is damaged: download it again."
 std::vector<Entry> entries(const Payload& payload);
 
 // The files into `root` when they are not the ones unpacked there last (local/launcher-files.txt: their digest,
@@ -66,7 +66,7 @@ std::string unpacked_digest(const fs::path& root);
 
 #ifdef _WIN32
 // This program's own files: resource 100, else appended to `exe` (tests, make_launcher_exe.py --stub). Throws
-// "Cannot read Ultimate Launcher's own file." when it cannot read it.
+// "Cannot read Golden Fist Launcher's own file." when it cannot read it.
 std::optional<Payload> own(const fs::path& exe, bool check = true);
 // Where the release keeps its files: %LOCALAPPDATA%\TTT2Ultimate\launcher, unless that path has letters beyond
 // ASCII (a user name such as José: the game is built there, and the batch files CMake writes in UTF-8 lose such

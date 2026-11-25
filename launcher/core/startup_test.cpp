@@ -294,7 +294,7 @@ void test_payload() {
     } catch (const std::exception& e) {
         said = e.what();
     }
-    check_eq(said, std::string("This Ultimate Launcher is damaged: download it again."), "payload: damaged");
+    check_eq(said, std::string("This Golden Fist Launcher is damaged: download it again."), "payload: damaged");
     check(payload::read(damaged, false).has_value(), "payload: unchecked, as the trailer says");
     check(!fs::exists(g_root / "escape.txt") && !fs::exists(g_root / "unsafe"), "payload: nothing written");
 }
@@ -339,7 +339,7 @@ void test_one_launcher() {
     const std::string first_pid = first->line("UIPID ").substr(first->line("UIPID ").find("PID ") + 4);
     auto stubborn = launch({}, {{"TTT2_LAUNCHER_AFTER", "999999"}, {"TTT2_TEST_AFTER_SECONDS", "1"}});
     check(ended(stubborn) && stubborn->code == 1, "after: the name stays taken: 1 " + stubborn->all());
-    check(stubborn->has("TELL Another Ultimate Launcher is still running"), "after: the player is told");
+    check(stubborn->has("TELL Another launcher is still running"), "after: the player is told");
     auto replacing = launch({}, {{"TTT2_LAUNCHER_AFTER", first_pid}, {"TTT2_TEST_HOLD", "0.5"}});
     check(wait_until([&] { return replacing->has("READY") || replacing->code != -1; }, 30), "after: it runs");
     check(first->code != -1, "after: once the one it replaces ended");
@@ -356,12 +356,12 @@ void test_release() {
     // The test program with files appended is a release .exe as make_launcher_exe.py --stub makes them.
     const std::string self = read_file(g_self);
     const fs::path folder = g_root / "release";
-    const fs::path exe = folder / "Ultimate_Launcher-x86_64.exe", other = folder / "Other_Launcher.exe";
+    const fs::path exe = folder / "Golden_Fist_Launcher-x86_64.exe", other = folder / "Other_Launcher.exe";
     const std::string files1 = make_payload({{"a.txt", "one"}, {"launcher/windows/main.py", ""}});
     const std::string files2 = make_payload({{"a.txt", "two"}, {"launcher/windows/main.py", ""}});
     write_file(exe, self + files1);
     write_file(other, self + files2);
-    write_file(folder / "Ultimate_Launcher-x86_64.old.exe", "old");
+    write_file(folder / "Golden_Fist_Launcher-x86_64.old.exe", "old");
     const fs::path local = g_root / "appdata";
     const fs::path unpacked = local / "TTT2Ultimate" / "launcher";
     const std::map<std::string, std::string> vars = {{"LOCALAPPDATA", utf8(local)}};
@@ -389,13 +389,13 @@ void test_release() {
     check_eq(first->line("EXE "), utf8(exe), "release: TTT2_LAUNCHER_EXE");
     const std::string ids = first->line("UIPID ");
     check(ids.substr(0, ids.find(' ')) == ids.substr(ids.find("PID ") + 4), "release: TTT2_LAUNCHER_UI_PID " + ids);
-    check(!fs::exists(folder / "Ultimate_Launcher-x86_64.old.exe"), "release: the replaced .exe deleted");
+    check(!fs::exists(folder / "Golden_Fist_Launcher-x86_64.old.exe"), "release: the replaced .exe deleted");
 
     auto same = launch({}, vars, exe);
     check(ended(same) && same->code == 0 && !same->has("TELL"), "release: a second start hands over " + same->all());
     auto different = launch({}, vars, other);
     check(ended(different) && different->code == 0, "release: another version hands over too");
-    check(different->has("TELL Another Ultimate Launcher is already running. Close it to switch"),
+    check(different->has("TELL Another launcher is already running. Close it to switch"),
           "release: another version says to close the running one " + different->all());
     check_eq(read_file(unpacked / "a.txt"), std::string("one"), "release: and unpacks nothing");
     check(wait_until([&] { return first->code != -1; }, 30), "release: ended");
@@ -488,7 +488,7 @@ Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN).run([sy
     options.message = {{}, "tok3"};
     claim = claim_instance(options);
     check(claim.result == InstanceClaim::Result::kFailed, "old launcher: one replacing it waits, then fails");
-    check_eq(claim.error, std::string("The Ultimate Launcher this one replaces is still running."),
+    check_eq(claim.error, std::string("The launcher this one replaces is still running."),
              "old launcher: why it failed");
     // (Asked to show itself once while waited for, not every 100 ms: compat review #8.)
     wait_until([&] { return activations() > before; }, 5);

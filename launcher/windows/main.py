@@ -1,5 +1,5 @@
-"""Windows Ultimate Launcher's Python side. With --worker one of the launcher's tasks, which it runs as a program of
-its own; with --query one of its questions (query.py: one JSON answer); else (the project ZIP's Start Ultimate
+"""Windows Golden Fist Launcher's Python side. With --worker one of the launcher's tasks, which it runs as a program of
+its own; with --query one of its questions (query.py: one JSON answer); else (the project ZIP's Start Golden Fist
 Launcher.cmd, old test builds' .exe) the native launcher built from these files and started (build_launcher.py)."""
 from pathlib import Path
 import argparse
@@ -63,5 +63,5 @@ if __name__ == '__main__':
         if sys.stderr: sys.stderr.write(text)
         if sys.platform == 'win32' and not sys.stderr:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None, 'The launcher could not start. See local/windows-launcher-errors.log.', 'Ultimate Launcher', 16)
+            ctypes.windll.user32.MessageBoxW(None, 'The launcher could not start. See local/windows-launcher-errors.log.', 'Golden Fist Launcher', 16)
         raise SystemExit(1)

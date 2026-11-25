@@ -182,7 +182,7 @@ void App::ready_frame(double t) {
             open_with_desktop(file_url(ready_->failure().log), &error);
         } else if (accept && e.id == "ready:releases") {
             std::string error;
-            open_with_desktop("https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases", &error);
+            open_with_desktop("https://github.com/Petexy/Golden-Fist-Launcher/releases", &error);
         } else if (e.kind == EventKind::Back) {
             quit_ = true;
         }
@@ -200,7 +200,7 @@ void App::ready_declare() {
         top.h = Size::fixed(theme::kTopBand);
         top.pad = {30, 0, 0, 0};
         auto g = ui.open("top", top);
-        brand(ui, "brand", "Ultimate", "Launcher");
+        brand(ui, "brand", "Golden Fist", "Launcher");
         ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
         TextSpec version{std::string("Launcher ") + TTT2_LAUNCHER_VERSION, tx::kVersion, c::kFaint};
         version.drop = true;
@@ -301,7 +301,7 @@ void App::ready_declare() {
     }
     {
         auto g = ui.open("ready/blue", blue);
-        section_label(ui, "ready/b-label", "Ultimate Launcher", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+        section_label(ui, "ready/b-label", "Golden Fist Launcher", Half::Blue, {}, fit({}, SeamFit::BlueRect));
         const std::string about =
             failed ? r.failure().text
             : bootstrap

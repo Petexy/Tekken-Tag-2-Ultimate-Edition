@@ -108,7 +108,7 @@ struct Banner {
 };
 
 struct Header {
-    std::string title;           // "Ultimate Launcher" / "Settings"
+    std::string title;           // "Golden Fist Launcher" / "Settings"
     std::vector<Action> actions; // back, refresh, update-launcher
     bool update_offered = false; // the Update button stands out (a newer release)
     bool operator==(const Header&) const = default;
@@ -120,7 +120,7 @@ enum class GameState { kNotInstalled, kChecking, kCannotInstall, kInstalling, kN
 // leaves for later, with why).
 struct UpdatePart {
     std::string kind;
-    std::string title; // "Ultimate Launcher 0.8.0 → 0.9.0", "The game program", "Fighters", "Left for later"
+    std::string title; // "Golden Fist Launcher 0.8.0 → 0.9.0", "The game program", "Fighters", "Left for later"
     std::string text;  // what happens, in a sentence or two
     bool operator==(const UpdatePart&) const = default;
 };
@@ -249,7 +249,7 @@ struct SettingsView {
     std::vector<Action> folders_actions; // save-folders
     std::vector<Line> folders_notes;
     // The launcher's own (launcher.ini): new.
-    std::string launcher_title = "Ultimate Launcher";
+    std::string launcher_title = "Golden Fist Launcher";
     std::string launcher_about = "How this launcher looks and sounds.";
     std::vector<SettingRow> launcher;
     bool operator==(const SettingsView&) const = default;
@@ -270,7 +270,7 @@ struct TaskView {
     // after it, and, once all are done, what it brought. `count` 0: the task is not an update's part.
     struct Chain {
         int at = 0, count = 0;          // this part's number (1-based) and how many
-        std::string part;               // "Ultimate Launcher", "The game program", "Fighters"
+        std::string part;               // "Golden Fist Launcher", "The game program", "Fighters"
         std::vector<UpdatePart> next;   // the parts still to come after it (all of them when `waiting`: from it)
         bool waiting = false;           // the part `at` starts by itself once the launcher has looked again
         bool handed_over = false;       // the launcher's part is done: the new launcher goes on with the rest

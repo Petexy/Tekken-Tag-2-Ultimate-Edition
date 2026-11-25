@@ -290,7 +290,7 @@ struct Frame {
                       rgb(0xff4136, 0.85f));
         shapes.draw(renderer);
 
-        text.add(1, "ULTIMATE LAUNCHER", 16 * s, 10 * s, kWhite, 1.5f * s);
+        text.add(1, "GOLDEN FIST LAUNCHER", 16 * s, 10 * s, kWhite, 1.5f * s);
         text.add(0, "TAG SPLIT SMOKE", 64 * s, 118 * s, kWhite);
         text.add(3, "Barlow Condensed ExtraBold Italic, drawn from an stb_truetype atlas.", 66 * s, 222 * s, kFaint);
         text.add(0, "PLAY", 92 * s, 307 * s, kWhite);
@@ -409,7 +409,7 @@ int run(const std::vector<std::string>& args) {
     }
 
     SDL_SetMainReady();
-    SDL_SetAppMetadata("Ultimate Launcher smoke test", TTT2_LAUNCHER_VERSION, TTT2_LAUNCHER_APP_ID ".Smoke");
+    SDL_SetAppMetadata("Golden Fist Launcher smoke test", TTT2_LAUNCHER_VERSION, TTT2_LAUNCHER_APP_ID ".Smoke");
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
     if (!screenshot.empty()) {
         // Tests: no screen, no GPU.
@@ -423,7 +423,7 @@ int run(const std::vector<std::string>& args) {
     Frame frame;
     SDL_WindowFlags flags = SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                             SDL_WINDOW_HIDDEN;
-    frame.window = SDL_CreateWindow("Ultimate Launcher", width, height, flags);
+    frame.window = SDL_CreateWindow("Golden Fist Launcher", width, height, flags);
     if (frame.window) frame.renderer = SDL_CreateRenderer(frame.window, screenshot.empty() ? nullptr : "software");
     if (!frame.window || !frame.renderer) {
         say(std::string("launcher_smoke: no window: ") + SDL_GetError() + "\n", true);

@@ -4,7 +4,7 @@
 // files (the release .exe's files folder, or the project a CMake build is in) hold launcher/windows/main.py, which
 // answers `--query NAME` (one JSON object on its last line, launcher/backend/windows_backend.h) and runs the
 // `--worker` tasks; the private Python is local\windows-tools\python-runtime. Its first start without that Python
-// runs "Start Ultimate Launcher.cmd --check" hidden, its progress read from local\windows-bootstrap.log (the .exe
+// runs "Start Golden Fist Launcher.cmd --check" hidden, its progress read from local\windows-bootstrap.log (the .exe
 // never downloads anything itself, C9). Natively here: display.ini, keyboard.ini, opening folders and pages, Play.
 
 #include "backend.h"
@@ -43,7 +43,7 @@ model::Facts windows_start_facts(const WindowsFiles& files, const fs::path& chos
 
 // The first `--query state` (main.py finds its own launcher.json: the answer then names it for every later one).
 model::Command first_state_query(const WindowsFiles& files);
-// "Start Ultimate Launcher.cmd --check", hidden, in the files folder.
+// "Start Golden Fist Launcher.cmd --check", hidden, in the files folder.
 model::Command bootstrap_command(const WindowsFiles& files);
 
 class WindowsEnvironment final : public model::Environment {

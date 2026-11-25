@@ -2,7 +2,7 @@
 // No GTK, POSIX process code, game assets, or user-specific paths are embedded.
 //
 // As CMake builds it, it opens the launcher of the project it was built in.
-// The release's Ultimate_Launcher-x86_64.exe is this program with the
+// The release's Golden_Fist_Launcher-x86_64.exe is this program with the
 // project's files in it (make_launcher_exe.py): it keeps them in
 // %LOCALAPPDATA%\TTT2Ultimate\launcher (files_folder), unpacked again whenever they differ
 // from the last ones, and opens the launcher from there, which can replace
@@ -95,21 +95,21 @@ void wait_for_replaced() {
     }
 }
 
-// The private Python of the launcher's files, as "Start Ultimate Launcher.cmd"
+// The private Python of the launcher's files, as "Start Golden Fist Launcher.cmd"
 // gets it ready (downloaded and checked) in a console window of its own.
 fs::path release_python(const fs::path& root) {
     if(!environment(L"TTT2_PYTHON").empty()) return python(root);
     const fs::path interpreter=root/"local/windows-tools/python-runtime/python/python.exe";
     if(fs::is_regular_file(interpreter)) return interpreter;
     std::wstring shell=environment(L"ComSpec"); if(shell.empty()) shell=L"cmd.exe";
-    std::wstring command=L"cmd.exe /d /c \""+quote((root/L"Start Ultimate Launcher.cmd").wstring())+L" --check\"";
+    std::wstring command=L"cmd.exe /d /c \""+quote((root/L"Start Golden Fist Launcher.cmd").wstring())+L" --check\"";
     STARTUPINFOW startup{}; startup.cb=sizeof(startup); PROCESS_INFORMATION process{};
     if(!CreateProcessW(shell.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NEW_CONSOLE,nullptr,root.c_str(),&startup,&process))
         throw std::runtime_error("Cannot start the Windows command processor to get Python ready.");
     CloseHandle(process.hThread); WaitForSingleObject(process.hProcess,INFINITE);
     DWORD result=1; GetExitCodeProcess(process.hProcess,&result); CloseHandle(process.hProcess);
     if(result || !fs::is_regular_file(interpreter))
-        throw std::runtime_error("Ultimate Launcher could not get its Python ready. Check your internet connection and start it again. "
+        throw std::runtime_error("Golden Fist Launcher could not get its Python ready. Check your internet connection and start it again. "
                                  "Details: "+narrow((root/L"local/windows-bootstrap.log").wstring()));
     return interpreter;
 }
@@ -129,7 +129,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
         // (Asked by an update, before it puts this .exe in place.)
         if(!args.empty() && args[0]==L"--version") { say("ttt2-launcher " TTT2_LAUNCHER_VERSION "\n"); return 0; }
         wchar_t self[32768]; DWORD n=GetModuleFileNameW(nullptr,self,32768);
-        if(!n || n>=32768) throw std::runtime_error("Cannot locate Ultimate Launcher.");
+        if(!n || n>=32768) throw std::runtime_error("Cannot locate Golden Fist Launcher.");
         const fs::path exe=self;
         const auto files=launcher::payload::own(exe); // (none: a CMake build)
         const bool release=files.has_value();
@@ -184,14 +184,14 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
         DWORD result=1;
         GetExitCodeProcess(process.hProcess,&result); CloseHandle(process.hProcess);
         if(result && !check) {
-            const std::wstring text=L"Ultimate Launcher stopped with an error. Read "+logfile.wstring()+
+            const std::wstring text=L"Golden Fist Launcher stopped with an error. Read "+logfile.wstring()+
                 (release ? L"." : L". Python needs Tcl/Tk installed.");
-            MessageBoxW(nullptr,text.c_str(),L"Ultimate Launcher",MB_OK|MB_ICONERROR);
+            MessageBoxW(nullptr,text.c_str(),L"Golden Fist Launcher",MB_OK|MB_ICONERROR);
         }
         return static_cast<int>(result);
     } catch(const std::exception& error) {
         if(quiet) say(std::string("ttt2-launcher: ")+error.what()+"\n",STD_ERROR_HANDLE);
-        else MessageBoxW(nullptr,wide(error.what()).c_str(),L"Ultimate Launcher",MB_OK|MB_ICONERROR);
+        else MessageBoxW(nullptr,wide(error.what()).c_str(),L"Golden Fist Launcher",MB_OK|MB_ICONERROR);
         return 1;
     }
 }

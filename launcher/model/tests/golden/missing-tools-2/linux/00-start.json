@@ -1,6 +1,6 @@
 {
   "header": [
-    {"k": "label", "t": "Ultimate Launcher", "tone": "heading"},
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
     {"k": "button", "icon": "view-refresh-symbolic", "tip": "Check again", "s": true}
   ],
   "notice": [
@@ -23,7 +23,7 @@
     {"k": "label", "t": "Running"},
     {"k": "label", "t": "Missing", "tone": "dim"},
     {"k": "label", "t": "Pillow for Python\npactl (a silent sound output for them)\nMinGW (builds small helpers for Tekken 7 and Tekken 8)", "tone": "warning"},
-    {"k": "label", "t": "Ultimate Launcher cannot download them itself: this Python cannot use the downloaded wheels.", "tone": "dim"},
+    {"k": "label", "t": "Golden Fist Launcher cannot download them itself: this Python cannot use the downloaded wheels.", "tone": "dim"},
     {"k": "label", "t": "sudo pacman -S --needed python-pillow libpulse mingw-w64-gcc"},
     {"k": "button", "id": "copy:sudo pacman -S --needed python-pillow libpulse mingw-w64-gcc", "icon": "edit-copy-symbolic", "tip": "Copy", "cls": "flat", "s": true},
     {"k": "check", "id": "outfits-all", "t": "Import outfits for every character", "tip": "Outfits are complete bodies for the in-game costume chooser. Without them, a character has their default costume.", "on": false, "mixed": true, "s": true},

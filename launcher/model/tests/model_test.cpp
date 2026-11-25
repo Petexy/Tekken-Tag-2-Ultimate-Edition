@@ -146,7 +146,7 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
     Section& settings = golden["settings"];
     if (!settings.empty()) {
         const auto add = [&](Element e) { settings.push_back(std::move(e)); };
-        add({"label", {{"t", "Ultimate Launcher"}, {"tone", "heading"}}, {}});
+        add({"label", {{"t", "Golden Fist Launcher"}, {"tone", "heading"}}, {}});
         add({"label", {{"t", "How this launcher looks and sounds."}, {"tone", "dim"}}, {}});
         add({"label", {{"t", "Sounds"}}, {}});
         add({"label", {{"t", "Short sounds when moving between and choosing items."}, {"tone", "dim"}}, {}});
@@ -339,7 +339,7 @@ const TkDifference kTkDifferences[] = {
     {true, "settings", "L|R|ZL|ZR", "W0"},
     // I2 The launcher's own settings.
     {false, "settings",
-     "Ultimate Launcher|How this launcher looks and sounds\\.|Sounds|Short sounds when moving between and choosing "
+     "Golden Fist Launcher|How this launcher looks and sounds\\.|Sounds|Short sounds when moving between and choosing "
      "items\\.|Reduce motion|No moving backgrounds, and pages change without sliding\\.|Button prompts|The buttons "
      "the prompts show: those of the last device used, or always these\\.|Automatic|Text size|How large this "
      "launcher's text is\\.|100 %",
@@ -385,13 +385,13 @@ const TkDifference kTkDifferences[] = {
     {false, "characters", ".+ was made by an older version: update them to get what this one adds\\.|Update", "W7"},
     {true, "characters", ".+ was made by an older version: update them to get what this one adds\\.", "W7"},
     {false, "characters",
-     ".+ fights with Heihachi's moves for now: .*|.+ was made by a newer version of Ultimate "
+     ".+ fights with Heihachi's moves for now: .*|.+ was made by a newer version of Golden Fist "
      "Launcher and is not in the game: .*|.+ was made by an older version and is not in the game: "
      "add them again\\.|Remove|Remove All",
      "W7"},
     {false, "characters",
      "Their moves cannot be saved from Tekken 8 now: .*|Tekken 8 was updated to a version that "
-     "Ultimate Launcher cannot save moves from yet: .*",
+     "Golden Fist Launcher cannot save moves from yet: .*",
      "W7"},
     // I7 Home's UPDATE (the launcher, the game program and the characters in one) where Play was the suggested item.
     {false, "game", "Update", "I7"},

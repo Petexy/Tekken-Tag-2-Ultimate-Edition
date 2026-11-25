@@ -1,5 +1,5 @@
 // Stand-ins for the Windows launcher's tests under Wine (run_wine.sh): one program copied under the names of what
-// the launcher and "Start Ultimate Launcher.cmd" run. Nothing is downloaded and no Python runs.
+// the launcher and "Start Golden Fist Launcher.cmd" run. Nothing is downloaded and no Python runs.
 //
 //   python.exe   -c ...                 "Launcher runtime ready" (the .cmd's check of its Python)
 //                ... --query NAME       %TTT2_STUB_ANSWERS%\NAME.json as it is (save-settings: standard input is kept

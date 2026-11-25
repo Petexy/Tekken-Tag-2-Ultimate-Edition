@@ -848,8 +848,9 @@ void App::home_task(const Box& crimson, const Box& blue) {
     text(ui, "task/title", TextSpec{.text = big, .style = tx::kBig, .chroma = 3, .autofit_min = 26},
          fit({}, SeamFit::BlueRect));
     text(ui, "task/game",
-         TextSpec{task_kind_ == m::TaskKind::kLauncherUpdate ? "Ultimate Launcher" : "Tekken Tag Tournament 2",
-                  tx::kLastName, rgb(0xe9edf5)},
+         TextSpec{.text = task_kind_ == m::TaskKind::kLauncherUpdate ? "Golden Fist Launcher"
+                                                                     : "Tekken Tag Tournament 2",
+                  .style = tx::kLastName, .color = rgb(0xe9edf5), .autofit_min = 20},
          fit(Box{.margin = {0, 0, 0, 4}}, SeamFit::BlueRect));
     const std::string pct = fraction >= 0 ? std::to_string(static_cast<int>(std::floor(fraction * 100 + 1e-6))) + "%"
                                           : std::string("…");

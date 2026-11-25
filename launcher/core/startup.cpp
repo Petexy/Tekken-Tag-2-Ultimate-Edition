@@ -79,7 +79,7 @@ std::string absolute(const std::string& path) {
 fs::path own_exe() {
     std::wstring self(32768, L'\0');
     const DWORD n = GetModuleFileNameW(nullptr, self.data(), static_cast<DWORD>(self.size()));
-    if (!n || n >= self.size()) throw std::runtime_error("Cannot locate Ultimate Launcher.");
+    if (!n || n >= self.size()) throw std::runtime_error("Cannot locate Golden Fist Launcher.");
     self.resize(n);
     return fs::path(self);
 }
@@ -143,7 +143,7 @@ Start begin(const std::vector<std::string>& args, const Program& program) {
         }
         write_out(program.name + ": " + text + "\n", true);
 #ifdef _WIN32
-        MessageBoxW(nullptr, win32::wide(text).c_str(), L"Ultimate Launcher", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(nullptr, win32::wide(text).c_str(), L"Golden Fist Launcher", MB_OK | MB_ICONINFORMATION);
 #endif
     };
 
@@ -238,14 +238,14 @@ Start begin(const std::vector<std::string>& args, const Program& program) {
                 break;
             case InstanceClaim::Result::kForwarded:
                 if (!start.files_digest.empty() && claim.other_files != start.files_digest) {
-                    tell("Another Ultimate Launcher is already running. Close it to switch to this one, then start "
-                         "this one again.");
+                    tell("Another launcher is already running. Close it to switch to this one, then start this one "
+                         "again.");
                 }
                 start.exit = 0;
                 return start;
             case InstanceClaim::Result::kOldLauncher:
                 if (!claim.error.empty()) {
-                    tell("An older Ultimate Launcher is running. Close it, then start this one again.");
+                    tell("An older version of the launcher is running. Close it, then start this one again.");
                     start.exit = 1;
                 } else {
                     start.exit = 0;

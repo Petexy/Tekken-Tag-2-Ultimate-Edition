@@ -4,7 +4,7 @@
     python3 launcher/windows/make_launcher_exe.py [--cmake-target TARGET [--build-dir DIR] | --stub EXE |
                                                    --cxx COMPILER] [--allow-dirty] OUTPUT
 
-OUTPUT is the .exe to write (Ultimate_Launcher-x86_64.exe for a release). It is
+OUTPUT is the .exe to write (Golden_Fist_Launcher-x86_64.exe for a release). It is
 the launcher's program for 64-bit Windows with this project's files in it:
 Git's tracked files as they are in the working tree, batch files with Windows
 line ends, as resource 100 (RCDATA; appended after the program for a --stub,
@@ -162,11 +162,11 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "Ultimate Launcher"
+      VALUE "FileDescription", "Golden Fist Launcher"
       VALUE "FileVersion", "%(version)s"
       VALUE "InternalName", "ttt2-launcher"
-      VALUE "OriginalFilename", "Ultimate_Launcher-x86_64.exe"
-      VALUE "ProductName", "Tekken Tag 2 Ultimate Edition"
+      VALUE "OriginalFilename", "Golden_Fist_Launcher-x86_64.exe"
+      VALUE "ProductName", "Golden Fist Launcher"
       VALUE "ProductVersion", "%(version)s"
     END
   END
@@ -250,7 +250,9 @@ def main():
     files[BUILD_COMMIT] = git('rev-parse', 'HEAD').strip() + b'\n'
     branch = git('rev-parse', '--abbrev-ref', 'HEAD').strip()
     if branch != b'HEAD': files[BUILD_BRANCH] = branch + b'\n'
-    for needed in ('launcher/windows/main.py', 'Start Ultimate Launcher.cmd', 'launcher/builder/CMakeLists.txt'):
+    # (Start Ultimate Launcher.cmd: the name up to 0.8.0, which that version's test builds look for.)
+    for needed in ('launcher/windows/main.py', 'Start Golden Fist Launcher.cmd', 'Start Ultimate Launcher.cmd',
+                   'launcher/builder/CMakeLists.txt'):
         if needed not in files: die('the project lacks ' + needed)
     with tempfile.TemporaryDirectory(prefix='ttt2-launcher-exe-') as temporary:
         if args.stub:
@@ -269,7 +271,7 @@ def main():
     if not is_launcher_exe(part):
         part.unlink(); die('the .exe made is not a 64-bit Windows launcher')
     os.replace(part, output)
-    print('Made %s: Ultimate Launcher %s, %d files (%.1f MB)'
+    print('Made %s: Golden Fist Launcher %s, %d files (%.1f MB)'
           % (output, number, len(files), output.stat().st_size / 1e6))
 
 

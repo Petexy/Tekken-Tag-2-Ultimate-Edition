@@ -222,7 +222,7 @@ def owned():
     return dict({'owned': answer}, **({'errors': errors} if errors else {}))
 
 
-REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
+REPOSITORY = 'Petexy/Golden-Fist-Launcher'
 DEFINITIONS = 'tools/characters/ttt2char/characters/'
 
 

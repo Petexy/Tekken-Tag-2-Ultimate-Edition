@@ -315,7 +315,7 @@ void LauncherModel::tick(double now) {
             said_ = "The update has nothing more to do";
         } else {
             Chain c;
-            c.parts.push_back({"launcher", "Ultimate Launcher " + facts_.launcher_version, "Done."});
+            c.parts.push_back({"launcher", "Golden Fist Launcher " + facts_.launcher_version, "Done."});
             for (UpdatePart& p : update_parts(without, plan))
                 if (p.kind != "later") c.parts.push_back(std::move(p));
             c.at = 1;
@@ -1346,7 +1346,7 @@ View LauncherModel::view() const {
         ch.count = static_cast<int>(c.parts.size());
         ch.at = static_cast<int>(c.at) + 1;
         const std::string& kind = c.parts[c.at].kind;
-        ch.part = kind == "launcher" ? "Ultimate Launcher" : kind == "game" ? "The game program" : "Fighters";
+        ch.part = kind == "launcher" ? "The launcher" : kind == "game" ? "The game program" : "Fighters";
         for (size_t i = c.at + (c.next ? 0 : 1); i < c.parts.size() && !c.done; ++i) ch.next.push_back(c.parts[i]);
         ch.waiting = c.next;
         ch.handed_over = c.handed_over;

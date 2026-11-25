@@ -14,7 +14,7 @@ BEGIN
       VALUE "FileVersion", "@TTT2_LAUNCHER_VERSION@"
       VALUE "InternalName", "@rc_NAME@"
       VALUE "OriginalFilename", "@rc_FILENAME@"
-      VALUE "ProductName", "Tekken Tag 2 Ultimate Edition"
+      VALUE "ProductName", "Golden Fist Launcher"
       VALUE "ProductVersion", "@TTT2_LAUNCHER_VERSION@"
     END
   END

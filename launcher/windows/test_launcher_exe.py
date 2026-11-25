@@ -106,13 +106,13 @@ class LauncherExe(unittest.TestCase):
     @unittest.skipUnless((Path(__file__).resolve().parents[2] / '.git').exists() and shutil.which('git'),
                          'needs a Git checkout of the project')
     def test_project_release_exe(self):
-        out = self.folder / 'Ultimate_Launcher-x86_64.exe'
+        out = self.folder / 'Golden_Fist_Launcher-x86_64.exe'
         subprocess.run([sys.executable, str(Path(__file__).with_name('make_launcher_exe.py')), '--stub', str(STUB),
                         '--allow-dirty', str(out)], check=True)
         root = self.folder / 'project'
         self.assertEqual(unpack(out, root).returncode, 0)
         self.assertTrue((root / 'launcher/windows/main.py').is_file())
-        self.assertIn(b'\r\n', (root / 'Start Ultimate Launcher.cmd').read_bytes())
+        self.assertIn(b'\r\n', (root / 'Start Golden Fist Launcher.cmd').read_bytes())
 
 
 def files_digest(exe):
@@ -133,8 +133,8 @@ class ReleaseExe(unittest.TestCase):
         files = self_update.stored_files(RELEASE)
         self.assertIsNotNone(files)
         self.assertEqual(self_update.files_version(files), VERSION)
-        for needed in ('launcher/windows/main.py', 'launcher/windows/self_update.py', 'Start Ultimate Launcher.cmd',
-                       'launcher/windows/build-commit'):
+        for needed in ('launcher/windows/main.py', 'launcher/windows/self_update.py', 'Start Golden Fist Launcher.cmd',
+                       'Start Ultimate Launcher.cmd', 'launcher/windows/build-commit'):
             self.assertIn(needed, files)
         result = run_exe(RELEASE, '--version')
         self.assertEqual((result.returncode, result.stdout), (0, 'ttt2-launcher %s\n' % VERSION))
@@ -149,16 +149,16 @@ class ReleaseExe(unittest.TestCase):
         stamp = (root / self_update.STAMP).read_text(encoding='utf-8').splitlines()
         self.assertEqual(stamp[0], files_digest(RELEASE))
         self.assertEqual(sorted(stamp[1:]), sorted(files))
-        self.assertIn(b'\r\n', (root / 'Start Ultimate Launcher.cmd').read_bytes())
+        self.assertIn(b'\r\n', (root / 'Start Golden Fist Launcher.cmd').read_bytes())
 
     @unittest.skipUnless(os.name == 'nt' or OWN_PREFIX, 'under Wine: needs WINEPREFIX, a prefix of the tests\' own')
     def test_start_as_a_player(self):
         # Where the .exe was updated: the old one beside it, renamed (self_update.replace), to be deleted.
         apps = self.folder / 'apps'
         apps.mkdir()
-        exe = apps / 'Ultimate_Launcher-x86_64.exe'
+        exe = apps / 'Golden_Fist_Launcher-x86_64.exe'
         shutil.copyfile(RELEASE, exe)
-        (apps / 'Ultimate_Launcher-x86_64.old.exe').write_bytes(b'MZ the old one')
+        (apps / 'Golden_Fist_Launcher-x86_64.old.exe').write_bytes(b'MZ the old one')
         if WINE:
             said = subprocess.run([WINE, 'cmd', '/c', 'echo %LOCALAPPDATA%'], capture_output=True, text=True,
                                   env=environment()).stdout.strip().splitlines()[-1]
@@ -184,7 +184,7 @@ class ReleaseExe(unittest.TestCase):
         self.assertEqual(frame['digest'], files_digest(RELEASE))
         # (Its manifest's activeCodePage: UTF-8 is the ANSI code page of the whole program.)
         self.assertEqual(frame.get('code_page'), 65001, frame)
-        self.assertFalse((apps / 'Ultimate_Launcher-x86_64.old.exe').exists())
+        self.assertFalse((apps / 'Golden_Fist_Launcher-x86_64.old.exe').exists())
         self.assertEqual((root / self_update.STAMP).read_text(encoding='utf-8').splitlines()[0],
                          files_digest(RELEASE))
         self.assertEqual(self_update.version(root), VERSION)

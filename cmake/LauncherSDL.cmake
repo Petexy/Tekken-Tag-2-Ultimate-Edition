@@ -5,7 +5,7 @@
 #                             ttt2_launcher_sdl_runtime(<target>) copies its SDL3.dll beside the program.
 #   TTT2_LAUNCHER_SDL=static  third_party/SDL (python3 tools/setup_deps.py --launcher: the revision in
 #                             dependencies.launcher.lock.json) built here as a project of its own and linked in:
-#                             the release programs (AppImage, Ultimate_Launcher-x86_64.exe) need no SDL on the PC.
+#                             the release programs (AppImage, Golden_Fist_Launcher-x86_64.exe) need no SDL on the PC.
 #   empty (the default)       system when find_package(SDL3) finds it, else static when third_party/SDL is there,
 #                             else the launcher's interface is left out.
 #

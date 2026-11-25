@@ -322,7 +322,7 @@ void task_runner() {
 
 std::string release_json(const std::string& version, const std::string& digest = {}) {
     return "{\"tag_name\": \"v" + version + "\", \"html_url\": \"https://example.com/v" + version +
-           "\", \"assets\": [{\"name\": \"Ultimate_Launcher-x86_64.AppImage\", \"state\": \"uploaded\", "
+           "\", \"assets\": [{\"name\": \"Golden_Fist_Launcher-x86_64.AppImage\", \"state\": \"uploaded\", "
            "\"size\": 1000, \"browser_download_url\": \"https://example.com/U.AppImage\"" +
            (digest.empty() ? "" : ", \"digest\": \"sha256:" + digest + "\"") + "}]}";
 }
@@ -333,12 +333,12 @@ struct UpdateRig {
     TaskRunner runner{starter, Caps::linux_caps()};
     SelfUpdate update;
     std::string answer = release_json("0.9.0");
-    std::string says = "Ultimate Launcher 0.9.0"; // what the new one's --version prints
+    std::string says = "Golden Fist Launcher 0.9.0"; // what the new one's --version prints
     bool version_hangs = false;
     std::vector<Command> opened;
     explicit UpdateRig()
         : update(runner, starter, files,
-                 SelfUpdate::Config{fs::path("/home/player/Ultimate_Launcher-x86_64.AppImage"), "0.8.0",
+                 SelfUpdate::Config{fs::path("/home/player/Golden_Fist_Launcher-x86_64.AppImage"), "0.8.0",
                                     "https://api.example.com/latest", false, "ttt2-launcher/0.8.0", 42}) {
         starter.set_script([this](Run& r) {
             const auto& argv = r.command.argv;
@@ -348,7 +348,8 @@ struct UpdateRig {
                     r.held = true;
                 else
                     r.lines = {{says, false}};
-            } else if (argv.size() > 4 && argv[0] == "/bin/sh" && argv[4] == "/home/player/Ultimate_Launcher-x86_64.AppImage") {
+            } else if (argv.size() > 4 && argv[0] == "/bin/sh" &&
+                       argv[4] == "/home/player/Golden_Fist_Launcher-x86_64.AppImage") {
                 opened.push_back(r.command);
                 r.held = true;
             } else if (has("Accept: application/vnd.github+json")) {
@@ -378,9 +379,9 @@ void self_update() {
         // (C2: this version kept before the new one is put in its place; the new one opened through the way back.)
         CHECK((rig.files.steps == std::vector<std::string>{"keep", "replace"}));
         CHECK(rig.opened.size() == 1 &&
-              rig.opened[0].argv == open_with_rollback("/home/player/Ultimate_Launcher-x86_64.AppImage", "0.9.0"));
+              rig.opened[0].argv == open_with_rollback("/home/player/Golden_Fist_Launcher-x86_64.AppImage", "0.9.0"));
         CHECK(rig.opened.size() == 1 && rig.opened[0].argv[5] ==
-                                            "/home/player/.Ultimate_Launcher-x86_64.AppImage.previous");
+                                            "/home/player/.Golden_Fist_Launcher-x86_64.AppImage.previous");
     }
     {
         UpdateRig rig;
@@ -405,7 +406,7 @@ void self_update() {
     }
     {
         UpdateRig rig;
-        rig.says = "Ultimate Launcher 0.8.5";
+        rig.says = "Golden Fist Launcher 0.8.5";
         rig.update.start(1);
         rig.starter.pump();
         CHECK_EQ(rig.runner.last().detail, std::string("The AppImage released as version 0.9.0 is version 0.8.5."));
@@ -454,7 +455,8 @@ void self_update() {
         rig.starter.pump();
         CHECK(!rig.runner.last().ok && rig.opened.empty());
         CHECK(std::find(rig.files.removed.begin(), rig.files.removed.end(),
-                        fs::path("/home/player/.Ultimate_Launcher-x86_64.AppImage.previous")) != rig.files.removed.end());
+                        fs::path("/home/player/.Golden_Fist_Launcher-x86_64.AppImage.previous")) !=
+              rig.files.removed.end());
     }
     {
         UpdateRig rig;
@@ -1130,7 +1132,7 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
         CHECK(p.launcher && p.launcher_from == "0.8.0" && p.launcher_to == "0.9.0");
         CHECK(p.game && p.game_for == "0.9.0"); // (the new launcher builds it again for itself)
         const View v = h.model.view();
-        CHECK(v.game.update.size() == 3 && v.game.update[0].title == "Ultimate Launcher 0.8.0 → 0.9.0");
+        CHECK(v.game.update.size() == 3 && v.game.update[0].title == "Golden Fist Launcher 0.8.0 → 0.9.0");
         CHECK(v.game.update.size() == 3 &&
               v.game.update[0].text == "Downloads 0.9.0 in place of this AppImage, which then restarts by itself and "
                                        "goes on.");
@@ -1277,7 +1279,7 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
     const auto appimage_script = [&](std::vector<Command>& opened) {
         return [&](Run& r) {
             if (has_arg(r.command, "--version")) {
-                r.lines = {{"Ultimate Launcher 0.9.0", false}};
+                r.lines = {{"Golden Fist Launcher 0.9.0", false}};
             } else if (r.command.argv.size() > 4 && r.command.argv[0] == "/bin/sh") {
                 opened.push_back(r.command);
                 r.held = true;

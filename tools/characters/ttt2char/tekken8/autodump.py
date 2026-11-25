@@ -135,7 +135,7 @@ HELPER_BUILDS = {
 }
 REFUSED = 'this Tekken 8 build is not the one the helper knows'       # (its attach's answer for another build)
 UNKNOWN_BUILD = ('this Tekken 8 build (Steam build %s, a game update) is not the one the helper knows: Tekken 8 is not '
-                 'started (a later version of Tekken Tag 2 Ultimate Edition will know it)')
+                 'started (a later version of Golden Fist Launcher will know it)')
 
 # the movesets saved, and the helper's build and its run's logs ($XDG_CACHE_HOME/ttt2 as the game's and the
 # launcher's caches)

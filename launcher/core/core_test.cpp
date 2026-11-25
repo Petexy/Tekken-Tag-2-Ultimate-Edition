@@ -1028,8 +1028,8 @@ std::string read_all(const fs::path& file) {
 void test_way_back(const fs::path& root) {
     const fs::path folder = root / "way back";
     fs::create_directories(folder);
-    const fs::path image = folder / "Ultimate_Launcher-x86_64.AppImage", previous = previous_file(image);
-    check(previous == folder / ".Ultimate_Launcher-x86_64.AppImage.previous", "way back: its name");
+    const fs::path image = folder / "Golden_Fist_Launcher-x86_64.AppImage", previous = previous_file(image);
+    check(previous == folder / ".Golden_Fist_Launcher-x86_64.AppImage.previous", "way back: its name");
     // The versions are scripts here: the old one says who it is and why it was opened.
     const std::string old_one = "#!/bin/sh\necho \"old one: rolled back from [$TTT2_LAUNCHER_ROLLED_BACK] after [$TTT2_LAUNCHER_AFTER]\"\n";
     const auto install = [&](const std::string& script) {
@@ -1149,7 +1149,7 @@ void test_release(const fs::path& root) {
     check(!a.none && !a.release && a.error.starts_with("GitHub's answer is not readable"), "release: not JSON");
 
     // The AppImage it runs from: only with the program inside $APPDIR.
-    const fs::path image = root / "Ultimate_Launcher-x86_64.AppImage", mount = root / "mount";
+    const fs::path image = root / "Golden_Fist_Launcher-x86_64.AppImage", mount = root / "mount";
     write(image, "old");
     const fs::path program = mount / "usr/bin/ttt2-launcher";
     check(running_appimage(program, image.c_str(), mount.c_str()) == image, "release: running AppImage");
@@ -1159,7 +1159,7 @@ void test_release(const fs::path& root) {
               !running_appimage(program, "relative.AppImage", mount.c_str()) &&
               !running_appimage(program, (root / "gone.AppImage").c_str(), mount.c_str()),
           "release: no AppImage");
-    check(update_file(image) == root / ".Ultimate_Launcher-x86_64.AppImage.update", "release: update file");
+    check(update_file(image) == root / ".Golden_Fist_Launcher-x86_64.AppImage.update", "release: update file");
     check(cannot_replace(image).empty() && !cannot_replace(root / "missing/x.AppImage").empty(),
           "release: folder writable");
 

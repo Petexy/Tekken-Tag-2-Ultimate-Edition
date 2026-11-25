@@ -160,7 +160,7 @@ public:
             top.h = Size::fixed(theme::kTopBand);
             top.pad = {30, 0, 0, 0};  // (the caption buttons sit in the window's top-right corner)
             auto g = ui.open("top", top);
-            brand(ui, "brand", "Ultimate", "Launcher");
+            brand(ui, "brand", "Golden Fist", "Launcher");
             const int ups = static_cast<int>(std::count_if(
                 fighters_.begin(), fighters_.end(), [](const Fighter& f) { return f.state == TileState::Update; }));
             const Tab tabs[] = {{"tab:home", "Home", ""},
@@ -671,7 +671,7 @@ private:
             pill(ui, "kit/p-n", "Not added");
         }
         log_view(ui, "kit/log", log_, fit(Box{.h = Size::fixed(176), .margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
-        note(ui, "kit/note", Tone::Warn, "The game is from an older Ultimate Launcher: update it to play.",
+        note(ui, "kit/note", Tone::Warn, "The game is from an older version of the launcher: update it to play.",
              fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect), "stroke:warn");
         auto b = ui.open("kit/buttons", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
         Focus bf;
@@ -995,7 +995,7 @@ int run(const std::vector<std::string>& args) {
     SDL_SetMainReady();
     Window window;
     WindowOptions wo;
-    wo.title = "Ultimate Launcher (toolkit demo)";
+    wo.title = "Golden Fist Launcher (toolkit demo)";
     wo.app_id = TTT2_LAUNCHER_APP_ID ".Demo";
     wo.version = TTT2_LAUNCHER_VERSION;
     wo.size = {static_cast<float>(width), static_cast<float>(height)};

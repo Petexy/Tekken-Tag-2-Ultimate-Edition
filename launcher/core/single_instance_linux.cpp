@@ -358,7 +358,7 @@ struct BusService {
     }
 
     void reply(void* message, const char* error = nullptr) {
-        void* answer = error ? dbus.new_error(message, error, "Ultimate Launcher does not do this")
+        void* answer = error ? dbus.new_error(message, error, "Golden Fist Launcher does not do this")
                              : dbus.new_method_return(message);
         if (!answer) return;
         if (!error && std::strcmp(dbus.message_get_member(message), "DescribeAll") == 0) {
@@ -489,7 +489,7 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
                 close(fd);
                 if (seconds_since(t0) >= patience) {
                     claim.result = InstanceClaim::Result::kFailed;
-                    claim.error = "The Ultimate Launcher this one replaces is still running.";
+                    claim.error = "The launcher this one replaces is still running.";
                     return claim;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -542,8 +542,7 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
         }
         if (seconds_since(t0) >= patience) {
             claim.result = options.after ? InstanceClaim::Result::kFailed : InstanceClaim::Result::kAlone;
-            claim.error = options.after ? "Another Ultimate Launcher is still running: close it, then start this one "
-                                          "again."
+            claim.error = options.after ? "Another launcher is still running: close it, then start this one again."
                                         : "the running launcher does not listen";
             return claim;
         }

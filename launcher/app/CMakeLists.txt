@@ -1,4 +1,4 @@
-# ttt2-launcher: the players' launcher (Ultimate Launcher) in the Tag Split look, on the toolkit of ../ui (SDL 3)
+# ttt2-launcher: the players' launcher (Golden Fist Launcher) in the Tag Split look, on the toolkit of ../ui (SDL 3)
 # over the model of ../model (what the window shows and does) and core's processes (../backend). This folder has
 # the program: its loop, its screens, and what it asks of the OS (backend_sdl.cpp through SDL; backend_linux.cpp
 # Linux's install, kit and AppImage; backend_windows.cpp + windows_app.cpp Windows' files, first start and
@@ -63,7 +63,7 @@ else()
         launcher_model ttt2_launcher_core_linux Threads::Threads)
 endif()
 target_link_libraries(ttt2-launcher PRIVATE ttt2_launcher_game_art)  # (the added fighters' portraits)
-ttt2_launcher_program(ttt2-launcher NAME ttt2-launcher FILENAME ttt2-launcher.exe DESCRIPTION "Ultimate Launcher")
+ttt2_launcher_program(ttt2-launcher NAME ttt2-launcher FILENAME ttt2-launcher.exe DESCRIPTION "Golden Fist Launcher")
 if(NOT WIN32)
     if(NOT TTT2_KIT_DIR)
         set(TTT2_KIT_DIR ${CMAKE_BINARY_DIR}/launcher/kit)

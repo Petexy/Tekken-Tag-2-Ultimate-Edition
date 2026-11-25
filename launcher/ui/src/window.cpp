@@ -149,7 +149,7 @@ bool Window::open(const WindowOptions& o) {
     }
     if (!ok) {
         error_ = first.empty() ? why : first;
-        const std::string text = "Ultimate Launcher cannot open its window (" + error_ +
+        const std::string text = "Golden Fist Launcher cannot open its window (" + error_ +
                                  ").\n\nThe newest launcher is at " + o.releases_url +
                                  (o.no_window ? o.no_window() : std::string());
         std::fprintf(stderr, "%s\n", text.c_str());

@@ -1,6 +1,6 @@
 {
   "header": [
-    {"k": "label", "t": "Ultimate Launcher", "tone": "heading"},
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
     {"k": "button", "t": "", "icon": "yes", "tip": "Check again", "cls": "flat", "s": true}
   ],
   "notice": [
