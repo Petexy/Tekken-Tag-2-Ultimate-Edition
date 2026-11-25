@@ -160,8 +160,8 @@ Fighter read(uint8_t* base, uint32_t p) {
     return f;
 }
 
-// The panels' words in each language shown ({en, fr, de, it, es, ru}: the
-// game's own where its HUD has them).
+// The panels' words in each language shown ({en, fr, de, it, es, ru}: our
+// own, in the terms players of each language know from fighting games).
 namespace words {
 using language::Text;
 constexpr Text kTotalDamage = {"Total Damage", "D\xC3\xA9g\xC3\xA2ts totaux", "Gesamtschaden", "Danno totale",

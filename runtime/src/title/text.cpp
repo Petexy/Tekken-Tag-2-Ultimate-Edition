@@ -259,9 +259,11 @@ size_t align16(size_t v) { return (v + 15) & ~size_t{15}; }
 // A bank read through its index: the header's words, then (0x10) the
 // offsets of three tables and of the records' area. Table 1: a count, then
 // per record 16 bytes {its header, its English text, its key (offsets in
-// the records' area), its number << 16 | 0x12}, by number. Tables 2 (the
-// texts' hashes: the upper half a hash, the lower the text's length) and 3
-// (the keys'; none for a record without a key): a count, then 8 bytes per
+// the records' area), its number << 16 | a low word (mostly 0x12, also
+// 0x22 ... 0xF2: kept as it is)}, by number. Tables 2 (the English texts'
+// hashes: the upper half a hash, the lower the English text's length, the
+// same in every language's bank) and 3 (the keys'; none for a record
+// without a key): a count, then 8 bytes per
 // entry {the hash, where the record's entry is in table 1}, by hash. Each
 // table is padded with 0xFF to 16 bytes. The records' area: a word (where
 // its records end, + 4), then the records, each its header (a hash of the
@@ -270,7 +272,7 @@ size_t align16(size_t v) { return (v + 15) & ~size_t{15}; }
 // (0xFFFF: found by their key).
 struct Indexed {
     struct Record {
-        uint32_t word = 0;             // number << 16 | 0x12
+        uint32_t word = 0;             // number << 16 | its low word (mostly 0x12)
         std::vector<uint8_t> bytes;    // from its header to its key's end
         uint32_t english = 0, key = 0; // in `bytes`
         std::optional<uint32_t> hashes[2];
