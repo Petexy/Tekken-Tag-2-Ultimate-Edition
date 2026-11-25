@@ -8,13 +8,14 @@ import socket
 import struct
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, HERE)
 
-from ttt2char import importer                                        # noqa: E402
+from ttt2char import importer, source                                # noqa: E402
 from ttt2char.tekken7 import autodump, subtitles                     # noqa: E402
 
 spec = importlib.util.spec_from_file_location('import_character', os.path.join(HERE, 'import_character.py'))
@@ -173,6 +174,47 @@ class Saving(unittest.TestCase):
         self.assertEqual(failed, {26: 'Tekken 7 does not know the fighter',
                                   27: 'Tekken 7 calls the fighter qqq, not rst'})
 
+    class Answers:
+        """The game's answers: a record in every language, none in English (no file, not read, or not read in
+        time: the helper cannot tell which)."""
+        def __init__(self):
+            self.asked = []
+
+        def subtitles(self, language, fighters):
+            self.asked.append((language, list(fighters)))
+            return [('abc', None if language == 'us' else record('ab_s00', 'Line in ' + language))] * len(fighters)
+
+    def test_only_the_languages_not_saved_yet(self):
+        """An earlier version's English file (with records) and the game answering none in English: the other
+        languages are saved, English is not asked for again and keeps its records."""
+        english = record('ab_s00', 'Made-up line.')
+        h = self.Answers()
+        with tempfile.TemporaryDirectory() as d:
+            saved(d, 'abc', english)
+            src = source.Tekken7Source(types.SimpleNamespace(saved=d))
+            failed = autodump._save_subtitles(h, {20: ('abc', 'Abc')}, d, autodump.SUBTITLE_LANGUAGES)
+            with open(subtitles.saved_path('abc', 'us', d), 'rb') as f:
+                self.assertEqual(f.read(), english)
+            self.assertTrue(subtitles.all_saved('abc', d))
+            self.assertEqual(src.subtitles(types.SimpleNamespace(TEKKEN7_CODE='abc'), ['ab_s00'])['ab_s00']['en'],
+                             'Made-up line.')
+        self.assertEqual(failed, {})
+        self.assertEqual([language for language, _ in h.asked], list(autodump.SUBTITLE_LANGUAGES[1:]))
+
+    def test_never_an_empty_answer_over_saved_records(self):
+        """Asked again (as for a file not saved), an empty answer leaves a saved file with records as it is; it is
+        saved over an empty one (the game has none) and where none is saved."""
+        english = record('ab_s00', 'Made-up line.')
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(subtitles, 'saved', return_value=False):
+            saved(d, 'abc', english)
+            saved(d, 'abc', b'', 'fr')
+            self.assertEqual(autodump._save_subtitles(self.Answers(), {20: ('abc', 'Abc')}, d, ('us', 'fr', 'de')), {})
+            with open(subtitles.saved_path('abc', 'us', d), 'rb') as f:
+                self.assertEqual(f.read(), english)
+            for language in ('fr', 'de'):
+                with open(subtitles.saved_path('abc', language, d), 'rb') as f:
+                    self.assertEqual(f.read(), record('ab_s00', 'Line in ' + language))
+
 
 class TheImportAsks(unittest.TestCase):
     """import_character.tekken7_ready asks the game for the subtitles not saved yet, in the dump of the rest."""
@@ -204,7 +246,8 @@ class TheImportAsks(unittest.TestCase):
             self.ready(d).assert_not_called()                       # (nothing to ask the game for)
 
     def test_saved_in_english_only(self):
-        """Saved by an earlier version (English only): the game is asked for them, every language."""
+        """Saved by an earlier version (English only): the game is asked for them (the languages not saved yet:
+        Saving.test_only_the_languages_not_saved_yet)."""
         with tempfile.TemporaryDirectory() as d:
             saved(d, 'mry', b'')
             self.ready(d).assert_called_once()

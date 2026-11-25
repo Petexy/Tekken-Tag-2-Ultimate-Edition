@@ -813,11 +813,13 @@ def _save_files(h, paks, entries):
 def _save_subtitles(h, fighters, folder, languages):
     """Has the game read the fighters' ({roster id: (Tekken 7 code, name)}) battle subtitle files and saves them below
     `folder` (subtitles.saved_path); a fighter the game has no file of gets an empty one (nothing to ask for again).
-    -> {roster id: why} of the fighters whose files were not saved."""
+    Only the languages a fighter's file is not saved in yet are asked for (an earlier version saved English only), and
+    a saved file with records is never replaced by an empty answer (the game's helper answers none, too, when it could
+    not read the file or did not read it in time). -> {roster id: why} of the fighters whose files were not saved."""
     from . import subtitles
     failed = {}
-    ids = list(fighters)
     for language in languages:
+        ids = [fid for fid in fighters if not subtitles.saved(fighters[fid][0], language, folder)]
         for k in range(0, len(ids), SUBTITLE_BATCH):
             batch = ids[k:k + SUBTITLE_BATCH]
             for fid, (code, d) in zip(batch, h.subtitles(language, batch)):
@@ -826,6 +828,8 @@ def _save_subtitles(h, fighters, folder, languages):
                                    'Tekken 7 calls the fighter %s, not %s' % (code, fighters[fid][0]))
                     continue
                 path = subtitles.saved_path(fighters[fid][0], language, folder)
+                if not d and os.path.isfile(path) and os.path.getsize(path) > 0:
+                    continue                    # (kept: what was saved before over nothing)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path + '.part', 'wb') as f:
                     f.write(d or b'')
@@ -874,8 +878,8 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None, subtitles=
     there are any). files: {roster id: (name, [pak entries])}: also saves those encrypted files (from unsaved_files)
     of the fighters, as the game reads them, below paks.saved (the ones it does not read are logged, and kept in
     `unread`, and the movesets are dumped all the same). subtitles: {roster id: (Tekken 7 code, name)}: also saves
-    those fighters' battle subtitles (SUBTITLE_LANGUAGES) below `saved` (None: paks.saved, else FILES; a fighter's
-    not saved is logged). -> ({id: path} dumped, {id: reason} skipped)."""
+    those fighters' battle subtitles (SUBTITLE_LANGUAGES, those not saved yet: _save_subtitles) below `saved` (None:
+    paks.saved, else FILES; a fighter's not saved is logged). -> ({id: path} dumped, {id: reason} skipped)."""
     from . import memdump                   # (numpy: the rest of this module works without it)
     if not steam_running():
         raise DumpError('Steam is not running: start it, then try again (Tekken 7 needs it)')
