@@ -1,13 +1,15 @@
-// Settings: the section switcher (Display, Keyboard, Launcher, and Folders on Windows; Display and Keyboard once the
-// game is installed, Launcher always) and the open section's rows on the crimson side, their values changed in
-// place (every row, value box and arrow inside the plate, each row's end following the seam), the
-// focused setting on the blue side (right-aligned): what it does, its options, notes. Keyboard: the 19
+// Settings: the section switcher (Game, Display, Keyboard, Launcher, and Folders on Windows; Game, Display and
+// Keyboard once the game is installed, Launcher always) and the open section's rows on the crimson side, their values
+// changed in place (every row, value box and arrow inside the plate, each row's end following the seam), the
+// focused setting on the blue side (right-aligned): what it does, its options, notes. Game: the player's name, typed
+// on the blue side (drilled in: the keyboard types, a pad has an on-screen keyboard). Keyboard: the 19
 // inputs in three columns, a gamepad with the focused input lit, choosing a key with its 10 s countdown.
 
 #include "app.h"
 #include "utf8_path.h"
 
 #include "builders.h"
+#include "game_ini.h"
 #include "rules.h"
 
 #include <algorithm>
@@ -49,7 +51,20 @@ std::string value_of(const m::Action& a) {
     return a.label;
 }
 
-const char* kSectionLabels[] = {"Display", "Keyboard", "Launcher", "Folders"};
+// A section's name, as the switcher and the blue side say it.
+const char* section_name(const std::string& s) {
+    return s == "game"       ? "Game"
+           : s == "display"  ? "Display"
+           : s == "keyboard" ? "Keyboard"
+           : s == "launcher" ? "Launcher"
+                             : "Folders";
+}
+
+// SDL scancodes (USB HID usages) of the keys that edit a name being typed (the router hands them over).
+enum NameKeyCode : int {
+    kKeyV = 25, kKeyReturn = 40, kKeyEscape = 41, kKeyBackspace = 42, kKeyHome = 74, kKeyDelete = 76, kKeyEnd = 77,
+    kKeyRight = 79, kKeyLeft = 80, kKeyKeypadEnter = 88
+};
 
 // ---- the gamepad picture (an original, generic one: Settings > Keyboard)
 
@@ -158,6 +173,7 @@ std::vector<std::string> App::settings_sections() const {
     std::vector<std::string> out;
     if (!view_.settings) return {"launcher"};
     const m::SettingsView& s = *view_.settings;
+    if (!s.game.empty()) out.push_back("game");
     if (!s.display.empty()) out.push_back("display");
     if (!s.groups.empty()) out.push_back("keyboard");
     out.push_back("launcher");
@@ -196,10 +212,13 @@ void App::settings(const Box& crimson, const Box& blue) {
     int active = 0;
     for (const std::string& s : secs) {
         if (s == settings_section_) active = static_cast<int>(tabs.size());
-        const int i = s == "display" ? 0 : s == "keyboard" ? 1 : s == "launcher" ? 2 : 3;
-        tabs.push_back({"sec:" + s, kSectionLabels[i]});
+        tabs.push_back({"sec:" + s, section_name(s)});
     }
     // The rows' actions: their whys, kinds and values (prompts, refusals, Change).
+    for (const m::SettingRow& r : sv.game) screen_actions_[r.control.id] = r.control;
+    if (sv.name_edit)
+        for (const std::vector<m::NameKey>& line : sv.name_edit->keys)
+            for (const m::NameKey& k : line) screen_actions_[k.key.id] = k.key;
     for (const m::SettingRow& r : sv.display) screen_actions_[r.control.id] = r.control;
     for (const m::SettingRow& r : sv.launcher) screen_actions_[r.control.id] = r.control;
     for (const m::KeyGroup& g : sv.groups)
@@ -209,16 +228,30 @@ void App::settings(const Box& crimson, const Box& blue) {
     for (const m::FolderRow& f : sv.folders) screen_actions_[f.browse.id] = f.browse;
     {
         auto g = ui.open("st/crimson", crimson);
-        section_tabs(ui, "secs", tabs, active, fit(Box{.margin = {0, 0, 0, 14}}, SeamFit::CrimsonRect), -1);
+        // (Too narrow for every section on one line even shrunk - Windows' five at a large Text size: on two
+        // lines. The room: from the half's left to the seam at the row's foot, its scroll bar's room taken off.)
+        Box secs_box = fit(Box{.margin = {0, 0, 0, 14}}, SeamFit::CrimsonRect);
+        if (crimson.seam && tabs.size() > 1) {
+            const float x0 = crimson.margin.left + crimson.pad.left;
+            const float foot = crimson.margin.top + crimson.pad.top + theme::metric::kSectionHeight;
+            const float room = crimson.seam->x_at(foot) - theme::kSeamGap - theme::metric::kScrollRoom - x0;
+            secs_box.wrap = section_tabs_width(ui, tabs, true) > room;
+        }
+        section_tabs(ui, "secs", tabs, active, secs_box, -1);
         const std::string up = "sec:" + settings_section_;
-        if (settings_section_ == "display" || settings_section_ == "launcher") {
+        if (settings_section_ == "game" || settings_section_ == "display" || settings_section_ == "launcher") {
             int n = 0;
-            if (settings_section_ == "display")
-                for (const m::Line& l : sv.display_notes)
+            const std::vector<m::Line>* notes = settings_section_ == "game"      ? &sv.game_notes
+                                                : settings_section_ == "display" ? &sv.display_notes
+                                                                                 : nullptr;
+            if (notes)
+                for (const m::Line& l : *notes)
                     note(ui, "st/dnote" + std::to_string(n++), l.tone == m::Tone::kError ? Tone::Bad : Tone::Warn,
                          l.text, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect), "stroke:warn");
             auto rows = ui.open("st/rows", Box{.gap = 8});
-            const std::vector<m::SettingRow>& list = settings_section_ == "display" ? sv.display : sv.launcher;
+            const std::vector<m::SettingRow>& list = settings_section_ == "game"      ? sv.game
+                                                     : settings_section_ == "display" ? sv.display
+                                                                                      : sv.launcher;
             bool first = true;
             for (const m::SettingRow& r : list) {
                 SettingRowSpec s;
@@ -226,6 +259,10 @@ void App::settings(const Box& crimson, const Box& blue) {
                 s.disabled = !r.control.enabled;
                 if (r.control.kind == m::ActionKind::kButton) {
                     s.chevron = true;
+                } else if (r.control.kind == m::ActionKind::kEntry) {
+                    // (A name: what it is now, typed on the blue side.)
+                    s.chevron = true;
+                    s.value = r.control.label.empty() ? std::string(game_ini::kDefaultName) : r.control.label;
                 } else {
                     s.value = value_of(r.control);
                     s.value_on = r.control.kind == m::ActionKind::kSwitch && r.control.checked;
@@ -335,6 +372,8 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
     const std::string& fo = ui.focused();
     std::string key = settings_key_;
     if (drilled() && drill_->opener.starts_with("fold:")) key = drill_->opener;
+    // (The name being typed: its field and keys, whatever has the focus.)
+    else if (sv.name_edit) key = "name-edit";
     else if (screen_actions_.count(fo) && !fo.starts_with("restore-keys") && fo != "open-keyboard-file" &&
              fo != "save-folders" && !fo.starts_with("folder:"))
         key = fo;
@@ -343,6 +382,9 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
     // (A key of another section: its first row.)
     const auto in_section = [&](const std::string& k) {
         if (k.starts_with("sec:")) return true;
+        if (settings_section_ == "game")
+            return k == "name-edit" || std::any_of(sv.game.begin(), sv.game.end(),
+                                                   [&](const m::SettingRow& r) { return r.control.id == k; });
         if (settings_section_ == "display")
             return std::any_of(sv.display.begin(), sv.display.end(),
                                [&](const m::SettingRow& r) { return r.control.id == k; });
@@ -354,7 +396,8 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
     };
     if (key.empty() || !in_section(key)) {
         key.clear();
-        if (settings_section_ == "display" && !sv.display.empty()) key = sv.display[0].control.id;
+        if (settings_section_ == "game" && !sv.game.empty()) key = sv.game[0].control.id;
+        else if (settings_section_ == "display" && !sv.display.empty()) key = sv.display[0].control.id;
         else if (settings_section_ == "launcher" && !sv.launcher.empty()) key = sv.launcher[0].control.id;
         else if (settings_section_ == "keyboard" && !sv.groups.empty()) key = sv.groups[0].rows[0].keycap.id;
         else if (settings_section_ == "folders" && !sv.folders.empty()) key = "fold:" + sv.folders[0].key;
@@ -365,13 +408,14 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
         const std::string k = full.substr(full.find('|') + 1);
         if (k.starts_with("key:")) return key_view(sv, k);
         if (k.starts_with("fold:")) return folder_view(sv, k.substr(5));
+        if (k == "name-edit") return name_edit_view(sv, blue);
         if (k.starts_with("sec:")) {
             const std::string s = k.substr(4);
             section_label(ui, "sv/label", "Settings", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-            const int i = s == "display" ? 0 : s == "keyboard" ? 1 : s == "launcher" ? 2 : 3;
-            text(ui, "sv/title", TextSpec{.text = kSectionLabels[i], .style = tx::kBig, .chroma = 3, .autofit_min = 28},
+            text(ui, "sv/title", TextSpec{.text = section_name(s), .style = tx::kBig, .chroma = 3, .autofit_min = 28},
                  fit({}, SeamFit::BlueRect));
-            const std::string about = s == "display"    ? sv.display_about
+            const std::string about = s == "game"       ? sv.game_about
+                                      : s == "display"  ? sv.display_about
                                       : s == "keyboard" ? sv.keys_about
                                       : s == "launcher" ? std::string("The launcher's own settings: they apply at once.")
                                                         : sv.folders_about;
@@ -385,17 +429,17 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
 
 void App::setting_view(const m::SettingsView& sv, const std::string& id) {
     Ui& ui = *ui_;
-    const bool display = settings_section_ == "display";
-    const std::vector<m::SettingRow>& list = display ? sv.display : sv.launcher;
+    const bool game = settings_section_ == "game", display = settings_section_ == "display";
+    const std::vector<m::SettingRow>& list = game ? sv.game : display ? sv.display : sv.launcher;
     const m::SettingRow* row = nullptr;
     int index = 0;
     for (size_t i = 0; i < list.size(); ++i)
         if (list[i].control.id == id) row = &list[i], index = static_cast<int>(i) + 1;
     if (!row) return;
     const m::Action& a = row->control;
-    section_label(ui, "sv/label", display ? "Display" : "Launcher", Half::Blue,
+    section_label(ui, "sv/label", section_name(settings_section_), Half::Blue,
                   std::to_string(index) + "/" + std::to_string(list.size()), fit({}, SeamFit::BlueRect));
-    const std::string value = value_of(a);
+    const std::string value = a.kind == m::ActionKind::kEntry ? a.describe.state : value_of(a);
     if (a.kind != m::ActionKind::kButton) {
         auto r = ui.open("sv/now", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         pill(ui, "sv/now-pill", "Now: " + value,
@@ -418,17 +462,95 @@ void App::setting_view(const m::SettingsView& sv, const std::string& id) {
     } else if (a.kind == m::ActionKind::kChoice) {
         chips(ui, "sv/chips", a.choices, a.chosen, fit(Box{.margin = {0, 4, 0, 10}}, SeamFit::BlueRect));
     }
-    if (display) {
-        for (const m::Line& l : sv.display_notes)
+    if (game || display) {
+        for (const m::Line& l : game ? sv.game_notes : sv.display_notes)
             note(ui, "sv/dnote" + std::to_string(n++), l.tone == m::Tone::kError ? Tone::Bad : Tone::Warn, l.text,
                  fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::BlueRect), "stroke:warn");
     }
-    const std::string hint = a.kind == m::ActionKind::kButton
-                                 ? "Enter uses it."
-                                 : display ? "The game uses it when it starts. Left and right change it on the row."
-                                           : "It applies at once. Left and right change it on the row.";
+    const std::string hint = a.kind == m::ActionKind::kButton ? "Enter uses it."
+                             : a.kind == m::ActionKind::kEntry
+                                 ? "Enter, then type it on the keyboard, or with a pad on the keys that come up here. "
+                                   "The game uses it when it starts."
+                             : game || display ? "The game uses it when it starts. Left and right change it on the row."
+                                               : "It applies at once. Left and right change it on the row.";
     text(ui, "sv/hint", TextSpec{.text = hint, .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
          fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
+}
+
+// Typing the player's name (drilled in from its row): the field, the on-screen keyboard (the pad's way to type, and
+// the mouse's), what a name may be (a refusal in its place for a moment: the keys never move for it) and, with the
+// keyboard's prompts, what its keys do (a pad's are in the bottom band). The keys are as tall as the blue half
+// (`blue`) lets them be with all of it shown. When that would make them shorter than 26 points, the texts are left
+// out (the row's own page says what a name may be, the bottom band what the keys do): the keys as tall as the half
+// lets them be with room for a refusal under them.
+void App::name_edit_view(const m::SettingsView& sv, const Box& blue) {
+    Ui& ui = *ui_;
+    // (Typing over, the readout fading out: as it was last, its keys inert.)
+    if (sv.name_edit) name_edit_shown_ = *sv.name_edit;
+    if (!name_edit_shown_) return;
+    const m::NameEditView& e = *name_edit_shown_;
+    const bool live = sv.name_edit.has_value();
+    std::string how = router_.glyphs() == Glyphs::Keyboard
+                          ? "On the keyboard, Enter keeps the name and Esc leaves it as it was; Ctrl+V pastes."
+                          : std::string();
+    section_label(ui, "ne/label", "Player name", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    TextFieldSpec field;
+    field.text = e.draft;
+    field.placeholder = e.placeholder;
+    field.count = e.count;
+    field.caret = e.caret;
+    field.refused = !e.refusal.empty();
+    text_field(ui, "ne/field", field, fit(Box{.margin = {0, 2, 0, 12}}, SeamFit::BlueSkewed));
+    // (The label, the field and their margins: 98 points; the half's bottom padding: 8; five lines of keys; under
+    // them the texts, as many lines as they wrap to where the keys are their shortest: their highest, the half's
+    // narrowest there, its scroll bar's room taken off.)
+    TextEngine& te = ui.text();
+    const float gap = theme::metric::kScreenKeyGap;
+    const float room = (blue.h.mode == Size::Fixed ? blue.h.value : 0) - 98 - 8 - 4 * gap - 2;
+    const float refusal = 12 + std::max(18.f, te.line_height(tx::kWarn));
+    float words = 12 + te.line_height(tx::kParaSmall) * 3 + (how.empty() ? 0 : 10 + te.line_height(tx::kParaSmall) * 2);
+    if (blue.seam && blue.w.mode == Size::Fixed) {
+        const float left = blue.margin.left + blue.pad.left, right = blue.margin.left + blue.w.value - blue.pad.right;
+        const float y = blue.margin.top + 98 + 5 * 26 + 4 * gap + 12;
+        const float x = std::max(left, blue.seam->x_at(y) + theme::kSeamGap);
+        const float w = std::max(80.f, right - theme::metric::kScrollRoom - x);
+        words = std::max(refusal, 12 + te.wrapped_height(tx::kParaSmall, e.rule, w));
+        if (!how.empty()) words += 10 + te.wrapped_height(tx::kParaSmall, how, w);
+    }
+    const bool all = (room - words) / 5 >= 26;
+    if (!all) how.clear();
+    const float key_h = std::clamp(std::floor((room - (all ? words : refusal)) / 5), 26.f, 40.f);
+    {
+        // (Every line as wide as the others: ten key widths, a wide key spanning several.)
+        auto keys = ui.open("ne/keys", fit(Box{.gap = gap}, SeamFit::BlueRect));
+        int n = 0;
+        for (const std::vector<m::NameKey>& line : e.keys) {
+            auto row = ui.open("ne/line" + std::to_string(n++), Box{.layout = Layout::Row, .gap = gap});
+            for (const m::NameKey& k : line) {
+                ScreenKeySpec s;
+                if (k.key.id == "name:shift") {
+                    s.icon = "stroke:shift";
+                    s.on = e.shifted;
+                } else if (k.key.id == "name:backspace") {
+                    s.icon = "stroke:backspace";
+                } else {
+                    s.label = k.key.label;
+                }
+                s.primary = k.key.primary;
+                screen_key(ui, k.key.id, s, blue_focus(!live),
+                           Box{.w = Size::grow(static_cast<float>(k.span)), .h = Size::fixed(key_h)});
+            }
+        }
+    }
+    if (!e.refusal.empty())
+        note(ui, "ne/refusal", Tone::Warn, e.refusal, fit(Box{.margin = {0, 12, 0, 0}}, SeamFit::BlueRect),
+             "stroke:warn");
+    else if (all)
+        text(ui, "ne/rule", TextSpec{.text = e.rule, .style = tx::kParaSmall, .color = c::kBlueDim, .wrap = true},
+             fit(Box{.margin = {0, 12, 0, 0}}, SeamFit::BlueRect));
+    if (!how.empty())
+        text(ui, "ne/how", TextSpec{.text = how, .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
+             fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect));
 }
 
 void App::key_view(const m::SettingsView& sv, const std::string& id) {
@@ -593,6 +715,19 @@ bool App::settings_activate(const std::string& id, ttt2::ui::Device device) {
         }
         return true;
     }
+    if (id == "player-name") {
+        // (Typing on the blue side: the first letter has the focus, the keyboard types.)
+        handle(model_->activate(id, now()));
+        if (model_->name().editing()) {
+            drill_in(id, "name-key:q");
+            name_edit_sync(now());
+        }
+        return true;
+    }
+    if (id.starts_with("name-key:") || id.starts_with("name:")) {
+        name_press(id, true);
+        return true;
+    }
     if (id.starts_with("fold:")) {
         drill_in(id, "folder:" + id.substr(5));
         return true;
@@ -624,6 +759,7 @@ void App::key_capture_tick(double t) {
         case CaptureEvent::KeyUp: model_->key_up(e.scancode, t); break;
         case CaptureEvent::CancelByPad:
         case CaptureEvent::CancelByMouse: model_->cancel_key(); break;
+        case CaptureEvent::Text: break;
         }
     }
     // A key it refused (F11, Super, one that cannot be used): its note on the row, choosing goes on.
@@ -640,6 +776,95 @@ void App::key_capture_tick(double t) {
         const bool kept = taken.text.empty() || taken.text.starts_with("no key") ||
                           taken.text.starts_with("cancelled") || taken.text.starts_with("choosing");
         cue(taken.ok ? ttt2::app::Cue::Accept : kept ? ttt2::app::Cue::Back : ttt2::app::Cue::Refuse);
+    }
+}
+
+// A key of the name being typed: on the screen (`click`: its sound), the pad's X / Y / Start / B / LB / RB, the
+// keyboard's editing keys. Done or Cancel: typing ends, back on the row.
+void App::name_press(const std::string& id, bool click) {
+    const double t = now();
+    const double refusal = model_->name().next_tick();
+    handle(model_->activate(id, t));
+    if (model_->name().editing()) {
+        if (model_->name().next_tick() != refusal) cue(ttt2::app::Cue::Refuse);
+        else if (click) cue(ttt2::app::Cue::Toggle);
+        return;
+    }
+    name_edit_sync(t);
+}
+
+// What the keyboard gave while the name is typed: its text, and its editing keys (Enter keeps the name, Esc leaves
+// it as it was, Backspace, Delete, the arrows, Home, End, Ctrl+V pastes).
+void App::name_edit_tick(double t) {
+    if (!router_.texting()) return;
+    for (const CaptureEvent& e : router_.take_capture()) {
+        if (!model_->name().editing()) break;
+        if (e.kind == CaptureEvent::Text || (e.kind == CaptureEvent::Key && e.scancode == kKeyV)) {
+            std::string text = e.kind == CaptureEvent::Text ? e.text : pasted_text();
+            // (A line copied with its end.)
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+            if (text.empty()) continue;
+            const double refusal = model_->name().next_tick();
+            model_->type_name(text, t);
+            if (model_->name().next_tick() != refusal) cue(ttt2::app::Cue::Refuse);
+            continue;
+        }
+        if (e.kind != CaptureEvent::Key) continue;
+        const int k = e.scancode;
+        const char* id = k == kKeyReturn || k == kKeyKeypadEnter ? "name:done"
+                         : k == kKeyEscape                       ? "name:cancel"
+                         : k == kKeyBackspace                    ? "name:backspace"
+                         : k == kKeyDelete                       ? "name:delete"
+                         : k == kKeyLeft                         ? "name:left"
+                         : k == kKeyRight                        ? "name:right"
+                         : k == kKeyHome                         ? "name:home"
+                         : k == kKeyEnd                          ? "name:end"
+                                                                 : nullptr;
+        if (id) name_press(id, false);
+    }
+}
+
+// Typing the name lasts while Settings > Game shows it: the keyboard types (the router's text mode, the system's
+// text input) meanwhile. Leaving it (another tab, a dialog, the browser) leaves the name as it was; the end puts the
+// focus back on its row. Whether the model changed here.
+bool App::name_edit_sync(double t) {
+    bool editing = model_->name().editing(), changed = false;
+    if (editing && (screen_ != Screen::kSettings || settings_section_ != "game" || view_.dialog || picker_)) {
+        handle(model_->activate("name:cancel", t));
+        editing = false;
+        changed = true;
+    }
+    if (editing != router_.texting()) {
+        if (editing) router_.begin_text(t);
+        else router_.end_text();
+        window_.text_input(editing);
+        if (o_.trace_cues)
+            std::fprintf(stderr, "@name %s\n", editing ? "start" : ("end " + model_->said()).c_str());
+    }
+    if (!editing && drill_ && drill_->opener == "player-name") drill_out();
+    return changed;
+}
+
+// The pad's buttons while the name is typed: B leaves it as it was, X deletes, Y types a space, Start keeps it, LB and
+// RB move the caret; a click on the locked crimson half leaves it as it was. (The keyboard's keys are not actions
+// meanwhile: name_edit_tick has them.)
+bool App::name_edit_event(const Event& e) {
+    if (!router_.texting() || !model_->name().editing() || view_.dialog || picker_) return false;
+    switch (e.kind) {
+    case EventKind::Back: name_press("name:cancel", false); return true;
+    case EventKind::Context1: name_press("name:backspace", true); return true;
+    case EventKind::Context2: name_press("name:space", true); return true;
+    case EventKind::Menu: name_press("name:done", false); return true;
+    case EventKind::TabPrev: name_press("name:left", false); return true;
+    case EventKind::TabNext: name_press("name:right", false); return true;
+    case EventKind::SectionPrev:
+    case EventKind::SectionNext: return true;
+    case EventKind::Unlock:
+        handle(model_->activate("name:cancel", now()));
+        drill_out(e.delta ? e.id : std::string());
+        name_edit_sync(now());
+        return true;
+    default: return false;
     }
 }
 

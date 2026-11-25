@@ -317,7 +317,8 @@ Uninstall wait for it to end. What the game writes when Play starts it goes
 to `~/.cache/ttt2/game.log` (of its last start); when it stops with an error,
 its last lines are shown on Home: attach that file to a report.
 **Settings** has
-whether the game starts fullscreen, the resolution it draws at, its 120
+the name the game shows for you in place of Player (typed on the keyboard, or with a controller on keys the
+launcher shows), whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
 its keyboard keys ([Playing](#playing)), and the launcher's own sounds, motion, button prompts and text size.

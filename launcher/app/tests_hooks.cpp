@@ -9,6 +9,7 @@
 #include "utf8_path.h"
 
 #include "display.h"
+#include "game_ini.h"
 #include "keymap.h"
 #include "rules.h"
 #include "settings.h"
@@ -314,6 +315,16 @@ bool App::test_input(const std::string& name, const std::vector<std::string>& ar
         test_said(true, {});
         return true;
     }
+    if (name == "type") {
+        // (As the system's text input gives it: the name being typed takes it.)
+        RawEvent text;
+        text.kind = RawEvent::Text;
+        text.device = Device::Keyboard;
+        text.text = arg;
+        test_raw_.push_back({t, text});
+        test_said(true, {});
+        return true;
+    }
     if (name == "click" || name == "hover") {
         const Rect r = ui_->rect(arg);
         if (r.empty()) return test_said(false, "no " + arg + " on the screen"), true;
@@ -610,6 +621,22 @@ void App::test_tick(double t) {
         const display::Loaded back = display::load(display_file_);
         if (!back.error.empty()) test_said(false, back.error);
         else test_said(true, m::display_summary(back.settings));
+    } else if (n == "player-name") {
+        // (As typed on Settings > Game's row: the old name cleared, the new one typed, Done.)
+        if (model_->page() != m::Page::kSettings) go(Screen::kSettings);
+        handle(model_->activate("player-name", t));
+        if (!model_->name().editing()) return test_said(false, model_->said());
+        handle(model_->activate("name:clear", t));
+        model_->type_name(arg, t);
+        handle(model_->activate("name:done", t));
+        if (model_->name().editing()) {
+            const std::string why = model_->said();
+            handle(model_->activate("name:cancel", t));
+            return test_said(false, why);
+        }
+        const game_ini::Loaded back = game_ini::load(game_ini::beside(display_file_));
+        if (!back.error.empty()) test_said(false, back.error);
+        else test_said(true, m::game_summary(back.settings));
     } else if (test_input(n, args, t)) {
     } else if (n == "tab") {
         // (As the shoulder buttons: Q / E.)

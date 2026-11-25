@@ -547,6 +547,7 @@ void App::frame(double t) {
     handle(model_->take_effects());
     router_.tick(t);
     key_capture_tick(t);
+    name_edit_tick(t);
     // The install, an update, the uninstall and the launcher's update fill Home while they run, and their end stays
     // there until it is closed.
     const m::TaskRunner& runner = model_->task();
@@ -582,6 +583,7 @@ void App::frame(double t) {
     view_ = model_->view();
     update_portraits();
     if (drill_ && (drill_->screen != screen_ || picker_ || view_.dialog)) drill_.reset();
+    if (name_edit_sync(t)) view_ = model_->view();
 
     // The seam first: this frame is laid out for the split as it is DRAWN now (springing), never for a target or
     // an old split. It leans toward the half that had the focus.
@@ -878,6 +880,20 @@ std::vector<Hint> App::hints() const {
         h.push_back({Prompt::Tabs, "Tabs"});
         return h;
     }
+    if (router_.texting()) {
+        // The name being typed: the keyboard types (Enter keeps it, Esc leaves it); a pad presses the keys shown.
+        if (router_.glyphs() == Glyphs::Keyboard) {
+            h = {{Prompt::AnyKey, "Type"}, {Prompt::Accept, "Done"}, {Prompt::Back, "Cancel"}};
+            return h;
+        }
+        const m::Action* a = action(f);
+        accept(f.starts_with("name-key:") ? std::string("Type") : a ? a->label : std::string());
+        h.push_back({Prompt::Context1, "Delete"});
+        h.push_back({Prompt::Context2, "Space"});
+        h.push_back({Prompt::Menu, "Done"});
+        h.push_back({Prompt::Back, "Cancel"});
+        return h;
+    }
     if (drilled()) {
         if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? "Copy" : focused_label());
         h.push_back({Prompt::Back, "Back"});
@@ -899,6 +915,8 @@ std::vector<Hint> App::hints() const {
             }
         } else if (f.starts_with("key:")) {
             accept("Change Key");
+        } else if (a && a->kind == m::ActionKind::kEntry) {
+            if (a->enabled) accept("Change Name");
         } else if (f.starts_with("fold:")) {
             accept("Options");
         } else if (a && a->enabled) {
@@ -1268,6 +1286,7 @@ const m::Action* App::action(const std::string& id) const {
 
 void App::on_events(const std::vector<Event>& events) {
     for (const Event& e : events) {
+        if (name_edit_event(e)) continue;
         switch (e.kind) {
         case EventKind::TabNext:
         case EventKind::TabPrev:
@@ -1356,7 +1375,8 @@ void App::on_events(const std::vector<Event>& events) {
             } else if (!tab && !(e.id.starts_with("check:") && check_has_copy(e.id)) &&
                        !(a && (a->kind == m::ActionKind::kSwitch || a->kind == m::ActionKind::kChoice)) &&
                        !e.id.starts_with("sec:") && !e.id.starts_with("tile:") && !e.id.starts_with("fold:") &&
-                       e.id != "more") // (More drills in: its own sound, as a fighter tile's)
+                       e.id != "more" && e.id != "player-name" && // (they drill in: their own sound, as a tile's)
+                       !e.id.starts_with("name-key:") && !e.id.starts_with("name:")) // (the name's keys: their own)
                 cue(Cue::Accept);
             activate(e.id, e.device);
             if (e.id == "sound" || (a && (a->kind == m::ActionKind::kCheck || a->kind == m::ActionKind::kSwitch ||
