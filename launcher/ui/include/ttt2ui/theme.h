@@ -70,7 +70,9 @@ constexpr Color kXboxA = rgb(0x6fd77a), kXboxB = rgb(0xff6b6b), kXboxX = rgb(0x5
 constexpr Color kPsCross = rgb(0x8fb6ff), kPsCircle = rgb(0xff7488), kPsSquare = rgb(0xf59ad2),
                 kPsTriangle = rgb(0x4fe0c0);
 constexpr Color kScrim = rgba(3, 4, 8, .74f);
-constexpr Color kScrollBar = rgba(255, 255, 255, .22f), kScrollBarActive = rgba(255, 255, 255, .5f);
+// The scroll bar: a dark groove in the plate, the thumb in the half's colour (white while held or pointed at).
+constexpr Color kScrollTrack = rgba(4, 3, 10, .5f), kScrollTrackEdge = rgba(255, 255, 255, .14f);
+constexpr Color kScrollThumb = rgba(255, 255, 255, .55f), kScrollThumbHot = rgba(255, 255, 255, .92f);
 }  // namespace color
 
 // ---- fonts -------------------------------------------------------------------------------------------------------
@@ -180,7 +182,12 @@ constexpr float kPillHeight = 24, kChipHeight = 26, kLabelHeight = 20, kSectionH
 constexpr float kGlyphSize = 22;            // prompt glyphs (key caps, pad buttons)
 constexpr float kProgressHeight = 30, kMiniBarHeight = 6;
 constexpr float kFocusPad = 6;              // the focus highlight's distance around an item
-constexpr float kScrollBarWidth = 4, kScrollBarGrab = 12;
+// The scroll bar: its groove's width, the thumb's (inside it), how far its ends stay from the container's, the
+// shortest thumb, how wide a band takes the pointer, and an upright bar's centre from the container's right edge.
+// In a half of the stage it runs along the inside of its plate's edge (its centre kScrollRail from it), and while
+// it shows, that half's content keeps kScrollRoom more from that edge (a focused item's frame stays off it).
+constexpr float kScrollBarWidth = 8, kScrollThumbWidth = 6, kScrollBarEnd = 4, kScrollThumbMin = 32,
+                kScrollBarGrab = 16, kScrollBarInset = 5, kScrollRail = 11, kScrollRoom = 14;
 constexpr float kWindowDragStrip = 76;      // the top band is the drag strip
 constexpr float kResizeEdge = 6;
 // The window's own minimise / fullscreen / close buttons: flush in the top-right corner, as Windows draws its own.

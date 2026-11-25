@@ -736,7 +736,10 @@ void App::declare() {
     crimson.scroll = true;
     crimson.margin = {cr.x - 16, cr.y, 0, 0};
     crimson.w = Size::fixed(cr.w + 16 + 22);
+    // (While it scrolls, its ends are 14 points inside the plate, at the bottom as at the top: what scrolls is cut
+    // off there. While all of it fits, it may use those 14 points.)
     crimson.h = Size::fixed(std::max(60.f, cr.h + 14));
+    crimson.scroll_end_gap = 14;
     crimson.pad = {16, 0, 22, 8};
     Box blue;
     blue.seam = seam;
@@ -744,6 +747,7 @@ void App::declare() {
     blue.margin = {bl.x - 16, bl.y, 0, 0};
     blue.w = Size::fixed(bl.w + 16 + 16);
     blue.h = Size::fixed(std::max(60.f, bl.h + 14));
+    blue.scroll_end_gap = 14;
     blue.pad = {16, 0, 16, 8};
     blue.mirror = true;  // the blue half's straight edge is its right one
     crimson.locked = drilled();

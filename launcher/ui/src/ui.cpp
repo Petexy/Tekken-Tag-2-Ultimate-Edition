@@ -420,14 +420,35 @@ const Seam* Ui::seam_of(int n) const {
     return nullptr;
 }
 
+int Ui::seam_owner(int n) const {
+    for (int i = n; i >= 0; i = nodes_[static_cast<std::size_t>(i)].parent)
+        if (nodes_[static_cast<std::size_t>(i)].box.seam) return i;
+    return -1;
+}
+
 bool Ui::fit_pass() {
     bool changed = false;
+    // A half that scrolls gives its content room for its bar (the next pass lays it out so): the crimson one's
+    // rows keep more from the seam, the blue one's content more from its plate's outer edge; and it ends
+    // scroll_end_gap higher. (Less room and a shorter view only make it scroll more: this settles.)
+    for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+        Node& n = nodes_[static_cast<std::size_t>(i)];
+        if (!n.box.scroll || !n.box.seam) continue;
+        const bool shows = scroll_max(i) > 0;
+        if (shows == n.bar) continue;
+        n.bar = shows;
+        if (n.box.mirror) n.box.pad.right += (shows ? 1 : -1) * theme::metric::kScrollRoom;
+        if (n.box.h.mode == Size::Fixed) n.box.h.value += (shows ? -1 : 1) * n.box.scroll_end_gap;
+        changed = true;
+    }
     for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
         Node& n = nodes_[static_cast<std::size_t>(i)];
         if (n.box.fit == SeamFit::None) continue;
-        const Seam* seam = seam_of(i);
-        if (!seam) continue;
-        const float g = n.box.fit_gap;
+        const int owner = seam_owner(i);
+        if (owner < 0) continue;
+        const Seam* seam = &*nodes_[static_cast<std::size_t>(owner)].box.seam;
+        const bool room = nodes_[static_cast<std::size_t>(owner)].bar && !nodes_[static_cast<std::size_t>(owner)].box.mirror;
+        const float g = n.box.fit_gap + (room ? theme::metric::kScrollRoom : 0);
         switch (n.box.fit) {
         case SeamFit::CrimsonSkewed:
         case SeamFit::CrimsonRect: {
@@ -631,15 +652,32 @@ void Ui::resolve_focus() {
 
 // ---- input -------------------------------------------------------------------------------------------------------
 
-Rect Ui::bar_rect(int n, float& thumb_y, float& thumb_h) const {
+Ui::ScrollBar Ui::scroll_bar(int n) const {
+    namespace m = theme::metric;
     const Node& s = nodes_[static_cast<std::size_t>(n)];
-    const float max = scroll_max(n);
-    const Rect track{s.x + s.w - theme::metric::kScrollBarGrab, s.y, theme::metric::kScrollBarGrab, s.h};
-    thumb_h = std::max(24.f, s.h * s.h / std::max(s.h, s.content_h));
+    ScrollBar b;
+    b.y0 = s.y + m::kScrollBarEnd;
+    b.y1 = std::max(b.y0 + 1, s.y + s.h - m::kScrollBarEnd);
+    if (s.box.seam && !s.box.mirror) {
+        // (Along the inside of the plate's seam-facing edge, kGutter from the seam.)
+        b.tan = s.box.seam->tan;
+        b.x0 = s.box.seam->x_at(b.y0) - theme::kGutter - m::kScrollRail;
+    } else if (s.box.seam) {
+        // (Along the inside of the blue plate's outer edge, kPlateSide from the window's, as the stage draws it.)
+        b.x0 = frame_.size.x - theme::kPlateSide - m::kScrollRail;
+    } else {
+        b.x0 = s.x + s.w - m::kScrollBarInset;
+    }
+    const float track = b.y1 - b.y0, max = scroll_max(n);
+    b.thumb_h = std::min(track, std::max(m::kScrollThumbMin, track * s.h / std::max(s.h, s.content_h)));
     auto it = states_.find(s.id);
-    const float v = it == states_.end() ? 0 : it->second.scroll.value;
-    thumb_y = s.y + (max > 0 ? (s.h - thumb_h) * v / max : 0);
-    return track;
+    const float v = it == states_.end() || max <= 0 ? 0 : std::clamp(it->second.scroll.value / max, 0.f, 1.f);
+    b.thumb_y = b.y0 + (track - b.thumb_h) * v;
+    return b;
+}
+
+bool Ui::on_bar(const ScrollBar& b, Vec2 p) {
+    return p.y >= b.y0 && p.y <= b.y1 && std::fabs(p.x - b.x_at(p.y)) <= theme::metric::kScrollBarGrab / 2;
 }
 
 void Ui::handle_mouse() {
@@ -651,11 +689,10 @@ void Ui::handle_mouse() {
         } else {
             Node& s = nodes_[static_cast<std::size_t>(drag_scroller_)];
             NodeState& st = states_[s.id];
-            float ty, th;
-            bar_rect(drag_scroller_, ty, th);
+            const ScrollBar bar = scroll_bar(drag_scroller_);
             const float max = scroll_max(drag_scroller_);
-            const float travel = std::max(1.f, s.h - th);
-            st.scroll.target = std::clamp((m.pos.y - st.drag_grab - s.y) / travel * max, 0.f, max);
+            const float travel = std::max(1.f, bar.y1 - bar.y0 - bar.thumb_h);
+            st.scroll.target = std::clamp((m.pos.y - st.drag_grab - bar.y0) / travel * max, 0.f, max);
             st.scroll.snap();
             user_scrolled_ = true;
             return;
@@ -697,12 +734,12 @@ void Ui::handle_mouse() {
     if (m.pressed) {
         press_node_ = -1;
         if (scroller >= 0) {
-            float ty, th;
-            const Rect track = bar_rect(scroller, ty, th);
-            if (track.contains(m.pos)) {
+            const ScrollBar bar = scroll_bar(scroller);
+            if (on_bar(bar, m.pos)) {
                 drag_scroller_ = scroller;
                 NodeState& st = states_[nodes_[static_cast<std::size_t>(scroller)].id];
-                st.drag_grab = (m.pos.y >= ty && m.pos.y < ty + th) ? m.pos.y - ty : th / 2;
+                const bool on_thumb = m.pos.y >= bar.thumb_y && m.pos.y < bar.thumb_y + bar.thumb_h;
+                st.drag_grab = on_thumb ? m.pos.y - bar.thumb_y : bar.thumb_h / 2;
                 st.dragging_bar = true;
                 return;
             }
@@ -1081,12 +1118,20 @@ void Ui::paint_node(Canvas& canvas, int index) {
     if (clips) canvas.pop_clip();
     if (n.paint_after) n.paint_after(ctx);
     if (n.box.scroll && scroll_max(index) > 0) {
-        // A thin scroll bar (wider while dragged).
-        float ty, th;
-        bar_rect(index, ty, th);
-        const float w = s.dragging_bar ? theme::metric::kScrollBarWidth + 2 : theme::metric::kScrollBarWidth;
-        canvas.fill_rect({n.x + n.w - w - 2, ty, w, th},
-                         s.dragging_bar ? theme::color::kScrollBarActive : theme::color::kScrollBar);
+        // The scroll bar: a groove with the thumb in it, in the half's colour (white while held or pointed at).
+        const ScrollBar bar = scroll_bar(index);
+        const auto band = [&bar](float ya, float yb, float w) {
+            return Quad{{{bar.x_at(ya) - w / 2, ya}, {bar.x_at(ya) + w / 2, ya}, {bar.x_at(yb) + w / 2, yb},
+                         {bar.x_at(yb) - w / 2, yb}}};
+        };
+        const Quad groove = band(bar.y0, bar.y1, theme::metric::kScrollBarWidth);
+        canvas.fill(groove, theme::color::kScrollTrack);
+        canvas.stroke(groove, 1, theme::color::kScrollTrackEdge);
+        const bool hot = s.dragging_bar || (frame_.mouse.inside && drag_scroller_ < 0 && on_bar(bar, frame_.mouse.pos));
+        const Color thumb = hot ? theme::color::kScrollThumbHot
+                            : !n.box.seam ? theme::color::kScrollThumb
+                            : n.box.mirror ? theme::color::kBlue : theme::color::kRed;
+        canvas.fill(band(bar.thumb_y, bar.thumb_y + bar.thumb_h, theme::metric::kScrollThumbWidth), thumb);
     }
     if (layer) canvas.pop_layer();
 }
