@@ -354,6 +354,8 @@ void App::test_tick(double t) {
         ++frames_idle_;
     }
     if (capturing_) return test_capture(t);
+    // (An update going on from the launcher before runs ahead of the first action: its picture at half a part too.)
+    if (!test_start_shot_ && model_->in_update()) test_watch_task();
     if (!test_start_shot_) {
         if (!settled(t)) return;
         test_start_shot_ = true;
