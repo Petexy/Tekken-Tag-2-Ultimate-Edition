@@ -177,6 +177,7 @@ constexpr float kSlabHeight = 112, kMenuRowHeight = 58, kMenuRowGap = 10, kMenuI
 constexpr float kTileWidth = 70, kTileHeight = 92, kTileGap = 8;
 constexpr float kSettingRowHeight = 54, kSettingRowGap = 8, kValueBoxMin = 118, kValueBoxHeight = 32;
 constexpr float kKeyRowHeight = 36, kStepRowHeight = 50, kFileRowHeight = 42, kPlaceRowHeight = 38;
+constexpr float kTextFieldHeight = 52, kScreenKeyHeight = 36, kScreenKeyGap = 6;
 constexpr float kButtonHeight = 46, kButtonSmallHeight = 38, kButtonTinyHeight = 28;
 constexpr float kPillHeight = 24, kChipHeight = 26, kLabelHeight = 20, kSectionHeight = 44;
 constexpr float kGlyphSize = 22;            // prompt glyphs (key caps, pad buttons)

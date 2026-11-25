@@ -90,6 +90,10 @@ public:
     // Events: SDL event -> raw input for the router (false when it is not input). Window events update the state
     // here (focus, visibility, scale) and return false.
     bool translate(const SDL_Event& e, RawEvent& out, double now);
+    // The keyboard's text input (SDL_StartTextInput: text events, the input method) on or off; never the system's
+    // on-screen keyboard (the launcher draws its own).
+    void text_input(bool on);
+    bool text_input() const { return text_input_; }
     // Gamepads: start/stop with the focus (after kPadInitDelay), poll while focused. `game_running` keeps them off.
     void pads_tick(double now, bool game_running);
     double next_pad_poll() const;
@@ -114,7 +118,7 @@ private:
     Rect drag_{};
     std::vector<Rect> buttons_;
     bool gamescope_ = false, focused_ = true, visible_ = true, shown_ = false;
-    bool pads_on_ = false, game_running_ = false, pads_failed_ = false;
+    bool pads_on_ = false, game_running_ = false, pads_failed_ = false, text_input_ = false;
     double focus_since_ = 0, last_poll_ = 0;
     struct Pad {
         SDL_JoystickID id;

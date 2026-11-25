@@ -1749,6 +1749,101 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
         &focus);
 }
 
+// ---- text entry -----------------------------------------------------------------------------------------------------
+
+void text_field(Ui& ui, const std::string& id, const TextFieldSpec& spec, const Box& box) {
+    Box b = with_height(box, m::kTextFieldHeight);
+    TextEngine& te = ui.text();
+    static constexpr TextStyle kCount{theme::Font::DisplayBoldItalic, 13, .12f, false, 1};
+    ui.leaf(
+        id, b,
+        [&te, spec](float max_w) {
+            const float words = std::max(te.width(tx::kKeyCapBig, spec.text), te.width(tx::kKeyCapBig, spec.placeholder));
+            return Vec2{std::min(max_w, 28 + words + 14 + te.width(kCount, spec.count) + 22), m::kTextFieldHeight};
+        },
+        [spec](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const Color frame = spec.refused ? c::kWarn : rgba(140, 200, 255, .85f);
+            surface(cv, r, Gradient::linear({0, r.y}, {0, r.bottom()}, rgba(4, 8, 20, .92f), rgba(10, 22, 52, .92f)),
+                    frame);
+            const float cw = ctx.text.width(kCount, spec.count);
+            const float right = r.right() - 22 - cw;
+            ctx.text.draw(cv, kCount, spec.count, {right, centred_y(ctx.text, kCount, r)}, c::kBlueFaint);
+            // (Inside the slanted frame: the words start after its left edge at their height, end before the count.)
+            const float x = r.x + 20, ty = centred_y(ctx.text, tx::kKeyCapBig, r);
+            const Rect inside{x, r.y, std::max(0.f, right - 14 - x), r.h};
+            cv.push_clip(inside);
+            float shift = 0;
+            const std::size_t caret = std::min(spec.caret, spec.text.size());
+            const float before = ctx.text.width(tx::kKeyCapBig, std::string_view(spec.text).substr(0, caret));
+            // (A caret past the room: the words move left so that it shows.)
+            if (before > inside.w - 4) shift = before - (inside.w - 4);
+            if (spec.text.empty())
+                ctx.text.draw(cv, tx::kKeyCapBig, spec.placeholder, {x, ty}, rgba(200, 215, 240, .32f));
+            else
+                ctx.text.draw(cv, tx::kKeyCapBig, spec.text, {x - shift, ty}, rgb(0xffffff));
+            // The caret: blinking (steady while Reduce motion is on).
+            const bool shown = ctx.reduced || std::fmod(static_cast<float>(ctx.ambient), 1.1f) < .7f;
+            if (shown) {
+                const float lh = ctx.text.line_height(tx::kKeyCapBig);
+                cv.fill_rect({x - shift + before, ty + lh * .08f, 2.5f, lh * .84f}, c::kCyan);
+            }
+            if (!ctx.reduced) ctx.loop();
+            cv.pop_clip();
+        });
+}
+
+void screen_key(Ui& ui, const std::string& id, const ScreenKeySpec& spec, Focus focus, const Box& box) {
+    Box b = with_height(box, m::kScreenKeyHeight);
+    focus.disabled = focus.disabled || spec.disabled;
+    // (Blue, the mirror: the last of each line stands upright at the half's right edge.)
+    const bool upright_right = ui.mirrored();
+    if (upright_right) focus.straight_right_last = true;
+    TextEngine& te = ui.text();
+    const TextStyle st = spec.label.size() > 1 ? tx::kButtonTiny : tx::kKeyCap;
+    ui.leaf(
+        id, b,
+        [&te, spec, st](float) {
+            return Vec2{spec.icon.empty() ? std::max(24.f, te.width(st, spec.label) + 12) : 30.f, m::kScreenKeyHeight};
+        },
+        [spec, st, upright_right](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const float f = ctx.focus_t;
+            const Shape shape = upright_right && ctx.line_end ? Shape::StraightRight : Shape::Skewed;
+            if (spec.disabled) cv.push_layer({}, .42f);
+            const Quad q = shaped(r, shape, kSeamTan);
+            Color text_col = rgb(0xffffff);
+            if (f > .5f) {
+                cv.fill(q, Gradient::linear({0, r.y}, {0, r.bottom()}, rgb(0xffffff), rgb(0xd9dde8)));
+                cv.stroke(q, 1, rgb(0xffffff));
+                text_col = rgb(0x0a0c12);
+            } else if (spec.primary || spec.on) {
+                const Color a = spec.on ? rgb(0xffc843) : rgb(0x3b8cff), b2 = spec.on ? rgb(0xff9a2e) : rgb(0x1452d6);
+                cv.fill(q, Gradient::css(r, 100, {{0, a}, {1, b2}}));
+                cv.stroke(q, 1, spec.on ? rgb(0xffe9b0) : rgba(150, 195, 255, .8f));
+                if (spec.on) text_col = rgb(0x1a1000);
+            } else {
+                cv.fill(q, Gradient::linear({0, r.y}, {0, r.bottom()}, rgb(0x223152), rgb(0x131d36)));
+                cv.stroke(q, 1, rgba(150, 195, 255, .32f));
+            }
+            if (!spec.icon.empty()) {
+                const float s = std::min(20.f, r.h - 14);
+                icon(cv, ctx.icons, spec.icon, {r.center().x - s / 2, r.center().y - s / 2, s, s}, text_col);
+            } else {
+                // (A key narrower than its word: the word's letters closer, then smaller.)
+                TextStyle fitted = st;
+                while (fitted.tracking > 0 && ctx.text.width(fitted, spec.label) > r.w - 8) fitted.tracking -= .02f;
+                while (fitted.size > 9 && ctx.text.width(fitted, spec.label) > r.w - 8) fitted.size -= .5f;
+                const float tw = ctx.text.width(fitted, spec.label);
+                ctx.text.draw(cv, fitted, spec.label, {r.center().x - tw / 2, centred_y(ctx.text, fitted, r)}, text_col);
+            }
+            if (spec.disabled) cv.pop_layer();
+        },
+        &focus);
+}
+
 // ---- readout --------------------------------------------------------------------------------------------------------
 
 void Readout::show(const std::string& key, int dy, double now) {
@@ -2141,5 +2236,12 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
 }
 
 bool copy_text(const std::string& text) { return SDL_SetClipboardText(text.c_str()); }
+
+std::string pasted_text() {
+    char* text = SDL_GetClipboardText();
+    std::string out = text ? text : "";
+    SDL_free(text);
+    return out;
+}
 
 }  // namespace ttt2::ui

@@ -202,6 +202,23 @@ struct FileRowSpec {
 };
 void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focus = {}, const Box& box = {});
 
+// ---- text entry ----------------------------------------------------------------------------------------------------
+// A line of text being typed: its words, a caret blinking where the next character goes, the placeholder (dim) when
+// it is empty, a count at its end ("4/16"); `refused`: its frame in the warning colour (a character not taken).
+struct TextFieldSpec {
+    std::string text{}, placeholder{}, count{};
+    std::size_t caret = 0;  // a byte index into text
+    bool refused = false;
+};
+void text_field(Ui& ui, const std::string& id, const TextFieldSpec& spec, const Box& box = {});
+// A key of an on-screen keyboard: its label, or an icon ("stroke:shift"); `primary`: the key that ends it (Done);
+// `on`: a key that stays pressed (Shift). In a row it grows with its Box::w weight (its width in keys).
+struct ScreenKeySpec {
+    std::string label{}, icon{};
+    bool primary = false, on = false, disabled = false;
+};
+void screen_key(Ui& ui, const std::string& id, const ScreenKeySpec& spec, Focus focus = {}, const Box& box = {});
+
 // ---- blue readout ---------------------------------------------------------------------------------------------------
 // The progress bar: the fill eases toward `fraction` (< 0: unknown, a pulse runs).
 void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone = Tone::Blue, const Box& box = {});
@@ -269,6 +286,8 @@ struct WhatLine {
 void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, const Box& box = {});
 // Puts text on the clipboard (a log, a command to run); false when the system refused.
 bool copy_text(const std::string& text);
+// What the clipboard holds as text ("" for nothing).
+std::string pasted_text();
 
 // ---- dialog band ---------------------------------------------------------------------------------------------------
 // A split band across the dimmed screen (a modal): the crimson half (options) and the blue half (what happens),

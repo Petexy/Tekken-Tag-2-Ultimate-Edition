@@ -955,6 +955,86 @@ TEST(input_capture_rules) {
     CHECK(k.take_capture().empty());
 }
 
+TEST(input_text_entry_rules) {
+    constexpr int kBack = 42, kLeft = 80, kV = 25, kW = 26, kF11 = 68;
+    const auto text = [](const char* t, double at) {
+        RawEvent e;
+        e.kind = RawEvent::Text;
+        e.text = t;
+        e.time = at;
+        return e;
+    };
+    InputRouter r;
+    // Outside text entry, text is nothing.
+    r.feed(text("x", 0));
+    CHECK(r.take_capture().empty());
+    r.begin_text(1);
+    CHECK(r.texting() && !r.capturing());
+    // The keyboard types: its text, its editing keys; W is a letter, not Up.
+    r.feed(key(kW, 1.0));
+    r.feed(text("w", 1.0));
+    r.feed(key(kBack, 1.01));
+    RawEvent rep = key(kBack, 1.5);
+    rep.os_repeat = true;
+    r.feed(rep);
+    RawEvent paste = key(kV, 1.6);
+    paste.ctrl = true;
+    r.feed(paste);
+    r.tick(1.7);
+    CHECK(r.take_actions().empty());
+    auto c = r.take_capture();
+    CHECK(c.size() == 4);
+    if (c.size() == 4) {
+        CHECK(c[0].kind == CaptureEvent::Text && c[0].text == "w");
+        CHECK(c[1].kind == CaptureEvent::Key && c[1].scancode == kBack && !c[1].repeat);
+        CHECK(c[2].kind == CaptureEvent::Key && c[2].scancode == kBack && c[2].repeat);  // (a held Backspace)
+        CHECK(c[3].kind == CaptureEvent::Key && c[3].scancode == kV && c[3].ctrl);
+    }
+    // Enter waits a moment for a pad: alone, it comes then.
+    r.feed(key(kEnter, 2.0));
+    r.tick(2.0 + theme::input::kSamePress / 2);
+    CHECK(r.take_capture().empty());
+    CHECK(r.holding() && r.next_repeat_time() <= 2.0 + theme::input::kSamePress + 1e-9);
+    r.tick(2.0 + theme::input::kSamePress + .001);
+    c = r.take_capture();
+    CHECK(c.size() == 1 && c[0].scancode == kEnter);
+    CHECK(!r.holding());
+    // The pad goes on as ever (an on-screen keyboard), and the Enter Steam types for its A is dropped, the key first
+    // or the pad first.
+    r.feed(key(kEnter, 3.0));
+    r.feed(button(pad::South, 3.03));
+    r.tick(3.3);
+    auto a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Accept && a[0].device == Device::Gamepad);
+    CHECK(r.take_capture().empty());
+    r.feed(button(pad::South, 4.0));
+    r.feed(key(kEnter, 4.004));
+    r.tick(4.3);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].device == Device::Gamepad);
+    CHECK(r.take_capture().empty());
+    // (The arrows too: the D-pad's.)
+    r.feed(button(pad::DpadLeft, 5.0));
+    r.feed(key(kLeft, 5.01));
+    r.feed(button(pad::DpadLeft, 5.1, false));
+    r.tick(5.3);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Left);
+    CHECK(r.take_capture().empty());
+    // F11 stays the window's.
+    r.feed(key(kF11, 6));
+    r.tick(6.2);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Fullscreen);
+    r.end_text();
+    CHECK(!r.texting());
+    // After it, W moves again.
+    r.feed(key(kW, 7));
+    r.tick(7.01);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Up);
+}
+
 // ---- springs --------------------------------------------------------------------------------------------------------
 
 TEST(springs_settle_without_runaway) {
