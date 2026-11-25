@@ -5,6 +5,7 @@
 
 #include "files.h"
 #include "host/file_io.h"
+#include "host/game_settings.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -74,10 +75,70 @@ size_t characters(std::string_view s) {
     return count;
 }
 
-const char* const kHeader =
-    "# Tekken Tag Tournament 2's game settings, written by the launcher's Settings.\n"
-    "# The game reads them when it starts.\n"
-    "# player_name: the name the game shows for you (without it, its own: Player in English).\n";
+// A new file's first lines: what it is, and its keys (the languages' codes from the game's own list).
+std::string header() {
+    std::string codes;
+    const size_t count = std::size(cafe::host::game::kLanguages);
+    for (size_t i = 0; i < count; ++i)
+        codes += (i == 0 ? "" : i + 1 == count ? " or " : ", ") + std::string(cafe::host::game::kLanguages[i].code);
+    return "# Tekken Tag Tournament 2's game settings, written by the launcher's Settings.\n"
+           "# The game reads them when it starts.\n"
+           "# player_name: the name the game shows for you (without it, its own: Player in English).\n"
+           "# language: the language of its texts and menus: " + codes + " (without it, English).\n";
+}
+
+// `text` with `key` set to `value`: one line of it, where the first line of the key was (`at_last`: the last one,
+// the line that counts), the key's other lines left out, or added at the end; an empty `value` leaves the key out.
+// Every other line kept as it was. A new file (nothing in `text`) gets the header.
+std::string with_setting(std::string_view text, std::string_view key, std::string_view value, bool at_last) {
+    const std::string line = std::string(key) + " = " + std::string(value);
+    // (A file with nothing in it: a new one.)
+    std::string_view rest = text.starts_with("\xEF\xBB\xBF") ? text.substr(3) : text;
+    while (!rest.empty() && (space(rest.front()) || rest.front() == '\n')) rest.remove_prefix(1);
+    if (rest.empty()) return value.empty() ? header() : header() + line + "\n";
+    // Each line: whole (with its end), without its end, whether it gives the key.
+    struct Part {
+        std::string_view whole, body;
+        bool keyed;
+    };
+    std::vector<Part> parts;
+    size_t keyed = 0;
+    while (!text.empty()) {
+        const size_t end = text.find('\n');
+        const std::string_view whole = text.substr(0, end == std::string_view::npos ? text.size() : end + 1);
+        text.remove_prefix(whole.size());
+        std::string_view body = whole;
+        if (body.ends_with('\n')) body.remove_suffix(1);
+        const bool is_key = setting_of(body.starts_with("\xEF\xBB\xBF") ? body.substr(3) : body).first == key;
+        keyed += is_key;
+        parts.push_back({whole, body, is_key});
+    }
+    std::string out;
+    size_t seen = 0;
+    for (const Part& p : parts) {
+        if (!p.keyed) {
+            out += p.whole;
+            continue;
+        }
+        // (One line of the key takes the new value; another would win over it, or lose to it: left out.)
+        ++seen;
+        if (p.body.starts_with("\xEF\xBB\xBF")) out += "\xEF\xBB\xBF"; // (the file's byte order mark stays)
+        if (value.empty() || seen != (at_last ? keyed : 1)) continue;
+        out += line + (p.body.ends_with('\r') ? "\r\n" : "\n");
+    }
+    if (keyed == 0 && !value.empty()) {
+        if (!out.empty() && out.back() != '\n') out += '\n';
+        out += line + "\n";
+    }
+    return out;
+}
+
+// Saves `file` with `change` made to what it has (written anew when it cannot be read: what it had cannot be kept).
+template <typename Change>
+bool save_with(const fs::path& file, Change change, std::string* error) {
+    const Loaded now = load(file);
+    return replace_file(file, change(now.error.empty() ? std::string_view(now.text) : std::string_view()), error);
+}
 
 } // namespace
 
@@ -127,6 +188,7 @@ Settings parse(std::string_view text) {
         text.remove_prefix(std::min(end + 1, text.size()));
         // (The later line counts.)
         if (key == kNameKey) settings.player_name = std::string(value);
+        else if (key == kLanguageKey) settings.language = std::string(value);
     }
     return settings;
 }
@@ -168,51 +230,30 @@ Loaded load(const fs::path& file) {
     loaded.log.push_back("game settings: player name " +
                          (loaded.settings.player_name.empty() ? std::string("the game's own")
                                                               : "\"" + loaded.settings.player_name + "\"") +
+                         ", language " +
+                         (loaded.settings.language.empty() ? std::string("none")
+                                                           : "\"" + loaded.settings.language + "\"") +
                          " (from " + name + ")");
     return loaded;
 }
 
+// (The name: where its first line was, as the launcher has always written it.)
 std::string with_name(std::string_view text, std::string_view name) {
-    const std::string line = std::string(kNameKey) + " = " + std::string(name);
-    // (A file with nothing in it: a new one.)
-    std::string_view rest = text.starts_with("\xEF\xBB\xBF") ? text.substr(3) : text;
-    while (!rest.empty() && (space(rest.front()) || rest.front() == '\n')) rest.remove_prefix(1);
-    if (rest.empty())
-        return name.empty() ? std::string(kHeader) : kHeader + line + "\n";
-    std::string out;
-    bool written = false;
-    while (!text.empty()) {
-        const size_t end = text.find('\n');
-        const std::string_view whole = text.substr(0, end == std::string_view::npos ? text.size() : end + 1);
-        text.remove_prefix(whole.size());
-        std::string_view body = whole;
-        if (body.ends_with('\n')) body.remove_suffix(1);
-        const bool crlf = body.ends_with('\r');
-        const auto [key, value] = setting_of(body.starts_with("\xEF\xBB\xBF") ? body.substr(3) : body);
-        (void)value;
-        if (key != kNameKey) {
-            out += whole;
-            continue;
-        }
-        // (The first line of the key takes the new value; a later one would win over it: left out.)
-        if (written || name.empty()) continue;
-        written = true;
-        if (body.starts_with("\xEF\xBB\xBF")) out += "\xEF\xBB\xBF";
-        out += line + (crlf ? "\r\n" : "\n");
-    }
-    if (!written && !name.empty()) {
-        if (!out.empty() && out.back() != '\n') out += '\n';
-        out += line + "\n";
-    }
-    return out;
+    return with_setting(text, kNameKey, name, false);
 }
 
 bool save_name(const fs::path& file, std::string_view name, std::string* error) {
-    const Loaded now = load(file);
-    // (A file that cannot be read is written anew: what it had cannot be kept.)
-    return replace_file(file, with_name(now.error.empty() ? std::string_view(now.text) : std::string_view(),
-                                        tidy_name(name)),
-                        error);
+    const std::string tidy = tidy_name(name);
+    return save_with(file, [&](std::string_view text) { return with_name(text, tidy); }, error);
+}
+
+// (The language: where the line that counts was.)
+std::string with_language(std::string_view text, std::string_view code) {
+    return with_setting(text, kLanguageKey, code, true);
+}
+
+bool save_language(const fs::path& file, std::string_view code, std::string* error) {
+    return save_with(file, [&](std::string_view text) { return with_language(text, code); }, error);
 }
 
 } // namespace launcher::game_ini

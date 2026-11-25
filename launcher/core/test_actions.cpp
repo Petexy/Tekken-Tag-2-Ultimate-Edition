@@ -5,6 +5,8 @@
 #include "display.h"
 #include "keymap.h"
 
+#include "host/game_settings.h"
+
 #include <algorithm>
 #include <cstdlib>
 
@@ -94,6 +96,12 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
             // player-name:<name> (empty: none): Settings > Game's name set, which saves game.ini, then read back.
             a.args = {rest};
             ok = colon != std::string::npos;
+        } else if (a.name == "language") {
+            // language:<code> (a code of the game's languages, any case): Settings > Game's Language chosen, which
+            // saves game.ini, then read back.
+            const cafe::host::game::Language* language = cafe::host::game::find_language(rest);
+            ok = language != nullptr;
+            if (ok) a.args = {std::string(language->code)};
         } else if (a.name == "type") {
             // type:<text>: typed as the keyboard's text input gives it (the name being edited).
             a.args = {rest};

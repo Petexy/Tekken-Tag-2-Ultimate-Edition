@@ -640,6 +640,14 @@ void test_actions() {
     check(!parse_test_actions("player-name", &error) && !parse_test_actions("type:", &error) &&
               !parse_test_actions("type", &error),
           "actions: player-name needs its colon, type its text");
+    const auto language = parse_test_actions("language:fr;language:RU;language:en", &error);
+    check(language && language->size() == 3 && (*language)[0].args == std::vector<std::string>{"fr"} &&
+              (*language)[1].args == std::vector<std::string>{"ru"} && (*language)[1].label() == "language-ru" &&
+              (*language)[2].args == std::vector<std::string>{"en"},
+          "actions: language, by the game's codes in any case (" + error + ")");
+    check(!parse_test_actions("language:xx", &error) && !parse_test_actions("language:", &error) &&
+              !parse_test_actions("language", &error),
+          "actions: language needs a code the game has");
     check(!parse_test_actions("tab:sideways", &error) && !parse_test_actions("press", &error),
           "actions: input needs what to press");
     const auto rows = parse_test_actions("rows:pe::300;rows:pp::0.5", &error);
@@ -882,6 +890,59 @@ void test_game_ini(const fs::path& root) {
     check(game_ini::with_name("", "") == game_ini::with_name("\n \n", "") &&
               game_ini::parse(game_ini::with_name("", "")).player_name.empty(),
           "game.ini: a new file without a name");
+
+    // The language: its line set, every other line kept.
+    write(file, hand);
+    check(game_ini::load(file).settings.language.empty(), "game.ini: no language");
+    check(game_ini::save_language(file, "fr", &error), "game.ini: language saved (" + error + ")");
+    check(text_of(file) == hand + "\nlanguage = fr\n", "game.ini: language added at the end (" + text_of(file) + ")");
+    loaded = game_ini::load(file);
+    check(loaded.settings.language == "fr" && loaded.settings.player_name == "Older",
+          "game.ini: language read back, the name kept");
+    // English is written too (the choice, not the key left out).
+    check(game_ini::save_language(file, "en", &error) && text_of(file) == hand + "\nlanguage = en\n",
+          "game.ini: English written (" + text_of(file) + ")");
+    // Given twice: the later line (the one that counts) takes it, the earlier one goes; CRLF, comments and
+    // unknown keys kept.
+    const std::string twice = "# mine\r\nlanguage = de # first\r\nvolume = 7\r\nplayer_name = Mira\r\n"
+                              "language = XX\r\nfuture_thing = yes\r\n";
+    write(file, twice);
+    check(game_ini::load(file).settings.language == "XX", "game.ini: the later language line counts");
+    check(game_ini::save_language(file, "it", &error) &&
+              text_of(file) == "# mine\r\nvolume = 7\r\nplayer_name = Mira\r\nlanguage = it\r\nfuture_thing = yes\r\n",
+          "game.ini: the later language line replaced (" + text_of(file) + ")");
+    // The name saved after: the language line kept, and the other way round.
+    check(game_ini::save_name(file, "Zo", &error) &&
+              text_of(file) == "# mine\r\nvolume = 7\r\nplayer_name = Zo\r\nlanguage = it\r\nfuture_thing = yes\r\n",
+          "game.ini: a name saved keeps the language (" + text_of(file) + ")");
+    // A comment naming the key is no setting; a byte order mark before it.
+    check(game_ini::with_language("\xEF\xBB\xBFlanguage = de\n# language = fr\n", "es") ==
+              "\xEF\xBB\xBFlanguage = es\n# language = fr\n",
+          "game.ini: the language after a byte order mark");
+    check(game_ini::with_language("\xEF\xBB\xBFlanguage = de\nlanguage = fr\n", "es") == "\xEF\xBB\xBFlanguage = es\n",
+          "game.ini: the byte order mark of a line left out kept");
+    check(game_ini::with_language("last = 1", "ru") == "last = 1\nlanguage = ru\n" &&
+              game_ini::with_language("language = fr\n", "") == "",
+          "game.ini: language added at the end, or left out");
+    // A new file: the header (the game's codes), then the line.
+    std::error_code gone;
+    fs::remove(file, gone);
+    check(game_ini::save_language(file, "de", &error) && text_of(file).starts_with("# ") &&
+              text_of(file).find("en, fr, de, it, es") != std::string::npos &&
+              text_of(file).ends_with("\nlanguage = de\n") && game_ini::load(file).settings.language == "de",
+          "game.ini: a new file with a language (" + text_of(file) + ")");
+    // The launcher reads the language as the game does: the code it shows is the game's.
+    for (const std::string text :
+         {"language = fr\n", "language = FR\n", "language=de # mine\n", "language = xx\n", "language =\n",
+          "language = en\n", "language = it\nlanguage = es\n", "language = es\nlanguage = qq\n",
+          "\xEF\xBB\xBFlanguage = ru\r\n", "#language = fr\n", "language\n", "Language = fr\n", "language = f r\n",
+          "  language   =   It  \n", "language = de#x\n", "language = de #x\n", "player_name = A\nlanguage = es\n",
+          ""}) {
+        const cafe::host::game::Language* found = cafe::host::game::find_language(game_ini::parse(text).language);
+        const std::string mine = found && found != &cafe::host::game::kLanguages[0] ? std::string(found->code) : "",
+                          game = cafe::host::game::parse(text).settings.language;
+        check(mine == game, "game.ini: the language read as the game reads it (" + mine + " / " + game + ")");
+    }
 
     // Files that cannot be read: said, and written anew.
     std::error_code ec;
