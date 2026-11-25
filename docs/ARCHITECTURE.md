@@ -630,7 +630,8 @@ text can change in place. In every bank (data003's
 and data100's), names of the Wii U's buttons (English, French, Italian,
 German, Spanish: "the X Button", "bouton X", "X-Knopf", "+Control Pad", …;
 Russian, whose texts are the PlayStation 3's and Xbox 360's: "кнопку
-START", "кнопку SELECT", "кнопку BACK") become the buttons' icons, which
+START", "кнопку SELECT", "кнопку BACK"; and our Russian translations'
+"кнопку A", "кнопками A, B, X и Y", "крестовину") become the buttons' icons, which
 are always shorter, and the prompt "PRESS THE + BUTTON" and its
 translations show the Start icon (the Russian texts' "кнопку PS", the HOME
 Button elsewhere, stays). An icon in a text is
@@ -890,8 +891,7 @@ space, is set on the row itself whenever the pause menu's frame comes up
 entity's name); the pause menu's labels come from the movie's own data,
 not through the script (`MenuEntitySetTextID` is not called). The texts
 are in each language shown (see Language), each within that language's
-space; one that does not fit (Russian's in the English texts standing in
-for Russian's: see Language) is English's. SLOW MOTION's 1/2 and 1/4 take
+space; one that does not fit is English's. SLOW MOTION's 1/2 and 1/4 take
 the place of the ON word of the language shown (ON, OUI, EIN, SÌ, SÍ,
 ВКЛ).
 
@@ -1088,22 +1088,36 @@ none, and the menus', common and online ones lack their Wii U screens'
 (the main menu's SPECIAL GAME MODE row, Tekken Ball, paint ...), which
 showed blank. `text::fill_missing_texts` rebuilds each such Russian bank
 (served through the archive overlay, its language byte kept) with every
-record it has and English's of the numbers it lacks; where a Russian bank
-has the same English text under another number, the record gets that
-Russian text (SELECT, CONFIRM, BACK, ON, OFF, COMMAND LIST ...: about 430
-of the 1,471), the rest stay English. A bank is its header, three tables
-and its records: table 1 one entry per record by number (offsets of its
-header, English text and key, its number), tables 2 and 3 the texts' and
-keys' hashes, each pointing at a table 1 entry (4 + 16 per entry from
-table 1), then the records (a hash of the text and its length, the text,
-the English one, the key); the rebuilt bank keeps each record's hashes.
+record it has and, for the 1,471 numbers it lacks, English's records with
+our own Russian: `title/text_russian.inc`, the port's translation of each
+such text by key (`text::russian_texts`; UTF-8, the game's control codes
+as `\u` escapes; about 1,030 records, only keys and our Russian, none of
+the game's texts). A record the table has no entry for gets the Russian
+text the bank has for the same English text under another number (SELECT,
+CONFIRM, ON, OFF, COMMAND LIST ...), if any; the rest (song titles, a
+stage's name, texts of icons only) stay English. A text goes in only with
+its English record's markup (`text::markup`: after the button names become
+icons, the control codes with their arguments, the line breaks, the icons
+and the symbols ☆【】↑↓, in order); one that differs (the player's banks
+decide, and another version of the game may differ) leaves the record
+English, and the port logs `ttt2: Russian text <key> left in English: its
+markup is not the English text's`. A bank is its header, three tables and
+its records: table 1 one entry per record by number (offsets of its
+header, English text and key, its number), table 2 the English texts'
+hashes (and lengths), table 3 the keys', each pointing at a table 1 entry
+(4 + 16 per entry from table 1), then the records (the text's hash, its
+length in characters, the text, the English one, the key). A rebuilt
+record keeps its English record's index entries, with its own text's
+hash (`text::text_hash`: for each character c, h = T(h) ^ c, T a linear
+map of the 16 bits) and length.
 
 The port's own texts (ULTIMATE SETTINGS, SOLO GHOST BATTLE, the frame data
 panels and the position reset's hint, the customization's messages) are a
 `language::Text` each, in every language offered (English where one has
 none), chosen by `language::in_current`; non-ASCII characters are written
-as `\x` escapes. A text written over one of the title's fits that text's
-space in that language's bank.
+as `\x` escapes (the Russian table above as UTF-8). A text written over one
+of the title's fits that text's space in that language's bank (in Russian,
+for the texts the Wii U lacks, our translation's).
 
 Japanese (`cafe.language` 0) is not offered: the title's Japanese menus
 draw, but the port's own texts have no Japanese (the frame data panels'
