@@ -386,7 +386,8 @@ bool Window::translate(const SDL_Event& e, RawEvent& out, double now) {
     case SDL_EVENT_MOUSE_WHEEL:
         out.kind = RawEvent::Wheel;
         out.device = Device::Mouse;
-        out.value = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
+        // (As the system has it: SDL's value already follows natural scrolling, which `direction` only reports.)
+        out.value = e.wheel.y;
         return true;
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
         out.kind = RawEvent::MouseMove;
