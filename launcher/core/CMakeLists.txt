@@ -31,7 +31,8 @@ add_library(ttt2_launcher_core STATIC
     status.cpp
     subprocess.cpp
     test_actions.cpp
-    ${runtime_src}/host/display_settings.cpp)
+    ${runtime_src}/host/display_settings.cpp
+    ${runtime_src}/host/game_settings.cpp)
 if(WIN32)
     target_sources(ttt2_launcher_core PRIVATE linux_parts_windows.cpp single_instance_windows.cpp subprocess_windows.cpp
         win32.cpp)

@@ -262,6 +262,7 @@ void App::settings(const Box& crimson, const Box& blue) {
                 } else if (r.control.kind == m::ActionKind::kEntry) {
                     // (A name: what it is now, typed on the blue side.)
                     s.chevron = true;
+                    s.value_as_typed = !r.control.label.empty();  // (the name as the game shows it)
                     s.value = r.control.label.empty() ? std::string(game_ini::kDefaultName) : r.control.label;
                 } else {
                     s.value = value_of(r.control);
@@ -443,7 +444,8 @@ void App::setting_view(const m::SettingsView& sv, const std::string& id) {
     if (a.kind != m::ActionKind::kButton) {
         auto r = ui.open("sv/now", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         pill(ui, "sv/now-pill", "Now: " + value,
-             a.kind == m::ActionKind::kSwitch && a.checked ? Tone::Blue : Tone::Neutral);
+             a.kind == m::ActionKind::kSwitch && a.checked ? Tone::Blue : Tone::Neutral, false, {},
+             a.kind == m::ActionKind::kEntry && !a.label.empty());
     }
     text(ui, "sv/title", TextSpec{.text = row->name, .style = tx::kBig, .chroma = 3, .autofit_min = 26},
          fit({}, SeamFit::BlueRect));

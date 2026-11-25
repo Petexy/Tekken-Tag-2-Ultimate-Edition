@@ -165,6 +165,7 @@ struct SettingRowSpec {
     std::string title{}, value{}, detail{};  // detail: a mono line under the title (folders)
     bool value_on = false;             // value shown as "on" (blue)
     bool chevron = false;              // a chevron instead of the selector (opens something)
+    bool value_as_typed = false;       // the value in its own case (a name), not in capitals
     bool disabled = false;
     int slide = 1;
 };
@@ -227,8 +228,9 @@ void screen_key(Ui& ui, const std::string& id, const ScreenKeySpec& spec, Focus 
 // ---- blue readout ---------------------------------------------------------------------------------------------------
 // The progress bar: the fill eases toward `fraction` (< 0: unknown, a pulse runs).
 void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone = Tone::Blue, const Box& box = {});
+// `as_typed`: the label in its own case (a name), not in capitals.
 void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone = Tone::Neutral, bool dot = false,
-          const Box& box = {});
+          const Box& box = {}, bool as_typed = false);
 // Choices shown as chips, the current one lit (a picture of a setting's options, not focusable).
 void chips(Ui& ui, const std::string& id, std::span<const std::string> options, int current, const Box& box = {});
 // A described thing: a title in cyan and its text (.xpl).

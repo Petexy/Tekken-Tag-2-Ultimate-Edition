@@ -174,7 +174,7 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         game.push_back({"label", {{"t", "The name the game shows for you, in place of Player."}, {"tone", "dim"}}, {}});
         game.push_back({"label",
                         {{"t", "Up to 16 characters: the letters A to Z, digits, spaces and the punctuation of an "
-                               "English keyboard but #. Left empty, it is Player."},
+                               "English keyboard but #. Left empty, the game's own name (Player in English)."},
                          {"tone", "dim"}},
                         {}});
         game.push_back({"entry", {{"id", "player-name"}}, {{"s", true}}});
@@ -446,7 +446,8 @@ const TkDifference kTkDifferences[] = {
     // I9 Settings' Game section: the player's name; the display section called Display.
     {false, "settings",
      "Display|Player name|The name the game shows for you, in place of Player\\.|Up to 16 characters: the letters A "
-     "to Z, digits, spaces and the punctuation of an English keyboard but #\\. Left empty, it is Player\\.|Your "
+     "to Z, digits, spaces and the punctuation of an English keyboard but #\\. Left empty, the game's own name "
+     "\\(Player in English\\)\\.|Your "
      "name in the game, and how it takes your presses\\. The game uses these when it starts\\.",
      "I9"},
     // W8 Linux's sentence with Windows' action.

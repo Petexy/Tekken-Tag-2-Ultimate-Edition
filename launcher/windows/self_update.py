@@ -61,9 +61,10 @@ REPOSITORY = 'Petexy/Golden-Fist-Launcher'
 # from (a release or test build's own files, not a program the source ZIP's bridge builds from them). Its files'
 # update then leaves out changes to that program: they need a new .exe (program_file).
 PROGRAM_IN_EXE_VARIABLE = 'TTT2_LAUNCHER_PROGRAM_IN_EXE'
-# What the launcher's program is compiled from outside launcher/ and cmake/: its display.ini code (the game's) and
-# the SDL it has built in.
+# What the launcher's program is compiled from outside launcher/ and cmake/: its display.ini and game.ini code (the
+# game's) and the SDL it has built in.
 PROGRAM_FILES = ('runtime/src/host/display_settings.cpp', 'runtime/src/host/display_settings.h',
+                 'runtime/src/host/game_settings.cpp', 'runtime/src/host/game_settings.h',
                  'runtime/src/host/file_io.h', 'dependencies.launcher.lock.json')
 # The Python run from the files (no part of the program) and the build scripts of launcher/windows.
 BUILD_SCRIPTS = ('launcher/windows/build_launcher.py', 'launcher/windows/make_icon.py',

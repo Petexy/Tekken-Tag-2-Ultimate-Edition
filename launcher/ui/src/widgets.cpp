@@ -1231,9 +1231,10 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
                 right -= cw + 18;
                 if (!spec.value.empty()) {
                     const Color vc = spec.value_on ? c::kWarn : c::kRedFaint;
-                    const float w = ctx.text.width(tx::kMenuValue, spec.value);
-                    ctx.text.draw(cv, tx::kMenuValue, spec.value, {right - w, centred_y(ctx.text, tx::kMenuValue, r)},
-                                  vc);
+                    TextStyle vs = tx::kMenuValue;
+                    vs.upper = !spec.value_as_typed;
+                    const float w = ctx.text.width(vs, spec.value);
+                    ctx.text.draw(cv, vs, spec.value, {right - w, centred_y(ctx.text, vs, r)}, vc);
                     right -= w + 18;
                 }
             } else {
@@ -1561,14 +1562,16 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
     });
 }
 
-void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box) {
+void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box, bool as_typed) {
     Box b = with_height(box, m::kPillHeight);
     b.hug = true;  // (a tag: as wide as its word, also in a stretching column)
     TextEngine& te = ui.text();
+    TextStyle style = tx::kPill;
+    style.upper = !as_typed;
     ui.leaf(
         id, b,
-        [&te, label, dot](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(tx::kPill, label), m::kPillHeight}; },
-        [label, tone, dot](PaintContext& ctx) {
+        [&te, label, dot, style](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(style, label), m::kPillHeight}; },
+        [label, tone, dot, style](PaintContext& ctx) {
             const ToneColors tc = tone_colors(tone);
             surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
             float x = ctx.rect.x + 13;
@@ -1580,7 +1583,7 @@ void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bo
                 if (!ctx.reduced) ctx.loop();
                 x += 13;
             }
-            ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);
+            ctx.text.draw(ctx.canvas, style, label, {x, centred_y(ctx.text, style, ctx.rect)}, tc.text);
         });
 }
 

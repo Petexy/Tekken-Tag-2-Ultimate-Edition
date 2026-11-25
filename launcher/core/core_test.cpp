@@ -5,6 +5,7 @@
 
 #include "display.h"
 #include "game_ini.h"
+#include "host/game_settings.h"
 #include "json.h"
 #include "paths.h"
 #include "protocol.h"
@@ -832,6 +833,19 @@ void test_game_ini(const fs::path& root) {
               game_ini::first_refused("\xE2\x82") == "\xE2",
           "game.ini: the first character refused, whole");
     check(game_ini::tidy_name("  Mira Q  ") == "Mira Q" && game_ini::tidy_name(" \t ").empty(), "game.ini: tidied");
+    // An overlong UTF-8 sequence is no letter: refused whole (the game shows "?" for it).
+    check(game_ini::first_refused("\xC1\xA1" "bc") == "\xC1\xA1" && !game_ini::name_problem("\xC1\xA1" "bc").empty(),
+          "game.ini: an overlong sequence refused");
+    // The launcher reads a file's lines as the game does: its name, cleaned as the game cleans it, is the game's.
+    for (const std::string text :
+         {"player_name = Mira\n", "player_name = A #B\n", "player_name = A#B # c\n", "# c\nplayer_name=  Zo\xC3\xAB \n",
+          "\xEF\xBB\xBFplayer_name = X\r\nplayer_name = Y\r\n", "player_name =\n", "other = 1\nplayer_name = Q\n",
+          "player_name = ABCDEFGHIJKLMNOPQRST\n", "player_name\n", "player_name = \t tab\t\n", "#player_name = no\n",
+          "  player_name   =   Spaced Out  \n", "player_name = a\xFF" "b\n", "player_name = \xC1\xA1" "bc\n", ""}) {
+        const std::string mine = cafe::host::game::clean_name(game_ini::parse(text).player_name),
+                          game = cafe::host::game::parse(text).settings.player_name;
+        check(mine == game, "game.ini: read as the game reads it (" + mine + " / " + game + ")");
+    }
     check(game_ini::name_rule().find("16") != std::string::npos, "game.ini: the rule says the most");
 
     // A new file: a header, the name.

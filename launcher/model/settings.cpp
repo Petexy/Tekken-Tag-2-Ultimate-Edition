@@ -1,5 +1,7 @@
 #include "settings.h"
 
+#include "host/game_settings.h"
+
 #include <algorithm>
 #include <iterator>
 
@@ -36,14 +38,20 @@ void GameController::load() {
     const game_ini::Loaded loaded = game_ini::load(file_);
     log_ = loaded.log;
     settings_ = loaded.settings;
+    shown_.clear();
     error_.clear();
     note_.clear();
     if (!loaded.error.empty()) {
         note_ = "game.ini cannot be read (" + unreadable_reason(loaded.error, file_) +
-                "): the game shows its own name, Player. Saving a name here writes it anew.";
-    } else if (const std::string why = game_ini::name_problem(settings_.player_name); !why.empty()) {
-        note_ = "The player name in game.ini cannot be used. " + why + " Saving a name here replaces it.";
+                "): the game shows its own name (Player in English). Saving a name here writes it anew.";
+        return;
     }
+    // (What the game makes of the file: its own reader's, so what is shown here is what it shows.)
+    shown_ = cafe::host::game::parse(loaded.text).settings.player_name;
+    if (!settings_.player_name.empty() && shown_ != settings_.player_name)
+        note_ = "game.ini's player name “" + settings_.player_name + "” shows in the game as " +
+                (shown_.empty() ? std::string("its own name") : "“" + shown_ + "”") +
+                ". Saving a name here replaces it.";
 }
 
 bool GameController::set_name(std::string_view name) {
@@ -55,6 +63,7 @@ bool GameController::set_name(std::string_view name) {
         return false;
     }
     settings_.player_name = tidy;
+    shown_ = cafe::host::game::clean_name(tidy);
     error_.clear();
     note_.clear(); // (the file is what is shown now)
     return true;
@@ -439,12 +448,12 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         const GameController& g = *in.game;
         if (!g.error().empty()) v.game_notes.push_back(text_line(g.error(), Tone::kError));
         if (!g.note().empty()) v.game_notes.push_back(warning_note(g.note()));
-        const std::string& name = g.settings().player_name;
+        const std::string& name = g.shown();
         SettingRow player = setting("player-name", ActionKind::kEntry, "Player name",
                                     "The name the game shows for you, in place of Player.", false);
         player.control.label = name;
         player.control.describe.state = name.empty() ? std::string("Player (the game's own)") : name;
-        const std::string rule = game_ini::name_rule() + " Left empty, it is Player.";
+        const std::string rule = game_ini::name_rule() + " Left empty, the game's own name (Player in English).";
         player.notes.push_back(text_line(rule, Tone::kDim, true));
         player.control.describe.more.push_back(rule);
         v.game.push_back(player);

@@ -1273,7 +1273,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         if (row == v.game.end() || !row->control.enabled)
             said_ = row == v.game.end() ? "no player name to type" : row->control.why;
         else if (!name_.editing())
-            name_.begin(game_.settings().player_name, now);
+            name_.begin(game_.shown(), now);
     } else if (id.starts_with("name:") || id.starts_with("name-key:")) {
         name_key(id, now);
     } else if (id == "fullscreen" || id == "interpolation" || id == "input-delay" || id == "async-shaders" ||

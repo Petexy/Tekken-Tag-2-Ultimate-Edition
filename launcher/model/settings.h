@@ -27,22 +27,24 @@ public:
     void set_file(fs::path file) { file_ = std::move(file); }
     const fs::path& file() const { return file_; }
 
-    // Read game.ini (each time Settings opens): what it says, or no name with a note when it cannot be read or its
-    // name is not one the game can show.
+    // Read game.ini (each time Settings opens): what it says and what the game makes of it (shown()), with a note
+    // when it cannot be read or the game shows its name differently.
     void load();
     // A name chosen (tidied: the spaces at both ends left out; "" the game's own): saved at once; false (error())
     // when it cannot be, what is shown staying what the file has.
     bool set_name(std::string_view name);
 
     const game_ini::Settings& settings() const { return settings_; }
-    const std::string& note() const { return note_; }   // game.ini cannot be read (...) / its name cannot be used
+    // The name the game shows, as its own reader makes it of the file (cafe::host::game); "" for its own name.
+    const std::string& shown() const { return shown_; }
+    const std::string& note() const { return note_; }   // game.ini cannot be read (...) / the game shows its name as ...
     const std::string& error() const { return error_; } // The game settings cannot be saved: ...
     const std::vector<std::string>& log() const { return log_; }
 
 private:
     fs::path file_;
     game_ini::Settings settings_;
-    std::string note_, error_;
+    std::string shown_, note_, error_;
     std::vector<std::string> log_;
 };
 

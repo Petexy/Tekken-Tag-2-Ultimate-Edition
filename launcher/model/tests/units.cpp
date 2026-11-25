@@ -580,19 +580,32 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
     CHECK(g.set_name(""));
     CHECK_EQ(read(file), std::string("volume = 3\n# mine\n"));
     CHECK_EQ(game_summary(g.settings()), std::string("game.ini: no player name"));
-    // A name the game cannot show, written by hand: said.
+    CHECK(g.shown().empty());
+    // A name written by hand that the game shows differently: what it shows is shown, and said.
     std::ofstream(file) << "player_name = Jos\xC3\xA9\n";
     g.load();
-    CHECK_EQ(g.note(), std::string("The player name in game.ini cannot be used. It has \u201C\xC3\xA9\u201D, which a name "
-                                   "cannot have. Saving a name here replaces it."));
+    CHECK_EQ(g.shown(), std::string("Jos?"));
+    CHECK_EQ(g.note(), std::string("game.ini's player name \u201CJos\xC3\xA9\u201D shows in the game as \u201CJos?\u201D. "
+                                   "Saving a name here replaces it."));
+    std::ofstream(file) << "player_name = ABCDEFGHIJKLMNOPQRST\n";
+    g.load();
+    CHECK_EQ(g.shown(), std::string("ABCDEFGHIJKLMNOP"));
+    CHECK(!g.note().empty());
+    // One the launcher would not type but the game shows as it is: no note.
+    std::ofstream(file) << "player_name = A#B\n";
+    g.load();
+    CHECK_EQ(g.shown(), std::string("A#B"));
+    CHECK(g.note().empty());
     CHECK(g.set_name("Jose"));
+    CHECK_EQ(g.shown(), std::string("Jose"));
     CHECK(g.note().empty());
     // Cannot be read, cannot be saved (a folder): said, the name as the file has it.
     fs::remove(file, ec);
     fs::create_directories(file / "x", ec);
     g.load();
-    CHECK_EQ(g.note(), std::string("game.ini cannot be read (it is not a file): the game shows its own name, Player. "
-                                   "Saving a name here writes it anew."));
+    CHECK_EQ(g.note(), std::string("game.ini cannot be read (it is not a file): the game shows its own name (Player in "
+                                   "English). Saving a name here writes it anew."));
+    CHECK(g.shown().empty());
     CHECK(!g.set_name("Mira"));
     CHECK(g.error().starts_with("The player name cannot be saved: "));
     CHECK(g.settings().player_name.empty());

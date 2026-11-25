@@ -77,7 +77,7 @@ size_t characters(std::string_view s) {
 const char* const kHeader =
     "# Tekken Tag Tournament 2's game settings, written by the launcher's Settings.\n"
     "# The game reads them when it starts.\n"
-    "# player_name: the name the game shows for you (without it, Player).\n";
+    "# player_name: the name the game shows for you (without it, its own: Player in English).\n";
 
 } // namespace
 
@@ -96,7 +96,8 @@ std::string first_refused(std::string_view text) {
     for (size_t at = 0; at < text.size();) {
         char32_t c;
         const size_t n = decode(text, at, &c);
-        if (!name_character(c)) return std::string(text.substr(at, n));
+        // (Any byte past ASCII: a name is ASCII, and an overlong sequence must not pass as the letter it spells.)
+        if (static_cast<unsigned char>(text[at]) >= 0x80 || !name_character(c)) return std::string(text.substr(at, n));
         at += n;
     }
     return {};
