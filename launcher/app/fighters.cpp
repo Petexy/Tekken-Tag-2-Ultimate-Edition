@@ -546,9 +546,13 @@ void App::fighter_view(const std::string& name) {
     }
     // An added fighter: their portrait on a card at the seam, the rest of what is said of them right-aligned beside it.
     std::optional<Ui::Guard> card, info;
-    if (const TextureId pic = f->installed ? portrait_of(f->display) : 0) {
-        const Rect bl = stage_->blue_area(stage_->share_now());
-        const float w = std::clamp(std::round(bl.w * .34f), 112.f, 230.f);
+    // The card leaves the words at least kWords beside it (the seam's slant and the gap taken off too); when even its
+    // smallest size cannot, there is none (a small window: the tile shows the portrait).
+    constexpr float kWords = 220, kAround = 22 + 70;
+    const Rect bl = stage_->blue_area(stage_->share_now());
+    const float card_w = std::min(std::clamp(std::round(bl.w * .34f), 112.f, 230.f), std::floor(bl.w - kAround - kWords));
+    if (const TextureId pic = f->installed && card_w >= 112 ? portrait_of(f->display) : 0) {
+        const float w = card_w;
         const float h = std::min(std::round(w * 1.9f), std::max(160.f, bl.h - 120));
         // (The row fitted at its middle, like the card: the card's slanted edge keeps the seam's distance.)
         card.emplace(ui.open("fv/card", fit(Box{.layout = Layout::Row, .gap = 22, .align = Align::Start},
@@ -630,7 +634,8 @@ void App::fighter_view(const std::string& name) {
     // or comes as a note when Accept is pressed on them.
     const std::vector<m::Action> acts = fighter_actions(*r);
     auto b = ui.open("fv/btns",
-                     fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12, .wrap = true}, SeamFit::BlueRect));
+                     fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12, .line_gap = 12, .wrap = true},
+                         SeamFit::BlueRect));
     bool first_button = true;
     for (const m::Action& a : acts) {
         ButtonSpec bs;

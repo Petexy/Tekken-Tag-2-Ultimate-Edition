@@ -45,8 +45,10 @@ Quad skewed(const Rect& r, float tan);
 // The crimson lists' shape: the left edge upright (it lines up with the window's straight left edge), the right edge
 // slanted like skewed()'s (it follows the seam).
 Quad straight_left(const Rect& r, float tan);
-// A shape by kind: Rect (upright), Skewed (both sides slanted), StraightLeft (see straight_left).
-enum class Shape : std::uint8_t { Rect, Skewed, StraightLeft };
+// The blue half's mirror of it: the right edge upright (in line with the window's right edge), the left one slanted.
+Quad straight_right(const Rect& r, float tan);
+// A shape by kind: Rect (upright), Skewed (both sides slanted), StraightLeft / StraightRight (see above).
+enum class Shape : std::uint8_t { Rect, Skewed, StraightLeft, StraightRight };
 Quad shaped(const Rect& r, Shape shape, float tan);
 // A point of `box`'s upright coordinates moved onto its shape (parts drawn inside a shaped box: streaks, accents).
 Vec2 shaped_point(const Rect& box, Vec2 p, Shape shape, float tan);

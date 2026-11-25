@@ -114,11 +114,17 @@ Quad straight_left(const Rect& r, float tan) {
     return {{{r.x, r.y}, {r.x + r.w + d, r.y}, {r.x + r.w - d, r.y + r.h}, {r.x, r.y + r.h}}};
 }
 
+Quad straight_right(const Rect& r, float tan) {
+    const float d = r.h / 2 * tan;
+    return {{{r.x + d, r.y}, {r.x + r.w, r.y}, {r.x + r.w, r.y + r.h}, {r.x - d, r.y + r.h}}};
+}
+
 Quad shaped(const Rect& r, Shape shape, float tan) {
     switch (shape) {
         case Shape::Rect: return skewed(r, 0);
         case Shape::Skewed: return skewed(r, tan);
         case Shape::StraightLeft: return straight_left(r, tan);
+        case Shape::StraightRight: return straight_right(r, tan);
     }
     return skewed(r, tan);
 }
@@ -131,6 +137,9 @@ Vec2 shaped_point(const Rect& box, Vec2 p, Shape shape, float tan) {
         case Shape::StraightLeft:
             // Left edge fixed, right edge moved by dx, everything between in proportion.
             return {box.w > 0 ? p.x + (p.x - box.x) / box.w * dx : p.x, p.y};
+        case Shape::StraightRight:
+            // Right edge fixed, left edge moved by dx.
+            return {box.w > 0 ? p.x + (box.right() - p.x) / box.w * dx : p.x, p.y};
     }
     return p;
 }
