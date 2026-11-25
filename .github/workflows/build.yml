@@ -86,7 +86,9 @@ jobs:
           WINEDEBUG: -all
           WINEDLLOVERRIDES: winemenubuilder.exe=d
         run: |
-          export WINEPREFIX="$RUNNER_TEMP/wineprefix"
+          # (Wine wants its prefix's parent to be this user's: the runner's temporary folder is another's here.)
+          mkdir -p "$RUNNER_TEMP/wine"
+          export WINEPREFIX="$RUNNER_TEMP/wine/prefix"
           unset DISPLAY WAYLAND_DISPLAY
           wineboot --init && wineserver -w
           cmake -S . -B build-launcher-windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -99,7 +101,7 @@ jobs:
           WINEDEBUG: -all
           WINEDLLOVERRIDES: winemenubuilder.exe=d
         run: |
-          export WINEPREFIX="$RUNNER_TEMP/wineprefix"
+          export WINEPREFIX="$RUNNER_TEMP/wine/prefix"
           unset DISPLAY WAYLAND_DISPLAY
           python launcher/windows/make_launcher_exe.py build-release/Golden_Fist_Launcher-x86_64.exe
           version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
