@@ -448,7 +448,7 @@ void runs(Ui& ui, const std::string& id, const TextStyle& style, std::vector<Run
 }
 
 namespace {
-// A section label in `room` points (FEEDBACK / REVIEW2 #9: a large Text size or a narrow column): its letters closer
+// A section label in `room` points (a large Text size or a narrow column): its letters closer
 // together (down to a third of their spacing), then without its bar, then cut with an ellipsis; never over the
 // neighbour's. `lead`: where the label starts (32 with the bar, 0 without).
 struct FittedLabel {
@@ -1811,7 +1811,7 @@ BandLayout band_layout(Vec2 size, float top, float height, float share) {
     l.crimson.h = Size::fixed(y1 - y0 - 14);
     const float bx = std::round(seam.x_at(y1) + theme::kSeamGap);
     l.blue.seam = seam;
-    l.blue.mirror = true;  // (FEEDBACK F2: right-aligned)
+    l.blue.mirror = true;  // (right-aligned)
     l.blue.margin = {bx, y0, 0, 0};
     l.blue.w = Size::fixed(size.x - theme::kPlateSide - theme::kPlatePad - bx);
     l.blue.h = Size::fixed(y1 - y0 - 14);

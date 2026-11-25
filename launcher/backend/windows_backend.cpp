@@ -94,7 +94,7 @@ std::optional<WindowsStateAnswer> parse_windows_state(const std::string& output,
         const json::Value& env = play["env"];
         for (size_t i = 0; i < env.keys().size(); ++i) c.env[env.keys()[i]] = env.values()[i].string();
         c.log_file = path_of(play["log"]);
-        c.mode = model::Command::Mode::kDetached; // (the game outlives the launcher; never in a task's job, C7)
+        c.mode = model::Command::Mode::kDetached; // (the game outlives the launcher; never in a task's job)
         w.play = std::move(c);
     } else {
         w.play_problem = play["problem"].string("source");

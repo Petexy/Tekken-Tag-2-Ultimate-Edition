@@ -1,6 +1,6 @@
 #pragma once
 
-// The launcher's sound cues (FEEDBACK F7): the places in the interface where a sound belongs. The App calls its
+// The launcher's sound cues: the places in the interface where a sound belongs. The App calls its
 // hook (App::set_sound_hook) at each, only while Sound is on (the top band's Sound button); what is played (the
 // game's own menu sounds read at run time from the installed game, or original fallbacks before it is installed)
 // is the hook's business. No hook: no sound (the default).
@@ -12,7 +12,7 @@
 //   SectionSwitch  another section inside a screen (Settings' Display / Keyboard / Launcher)
 //   Toggle         a value changed (a selector's Left/Right, a check box, Sound on/off)
 //   Refuse         Accept on a disabled item (its why is shown)
-//   DrillIn        an item opened its actions on the other half, which got the focus (FEEDBACK F4)
+//   DrillIn        an item opened its actions on the other half, which got the focus
 //   DrillOut       ... and Back (or a click on the locked half) returned
 //   TaskDone       an install, update, uninstall or other task ended well
 //   TaskFailed     ... ended with an error (not when it was cancelled)

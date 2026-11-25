@@ -1,4 +1,4 @@
-"""The new launcher's questions to the Windows backend: `main.py --query NAME` (ARCHITECTURE C8, U1, U2).
+"""The new launcher's questions to the Windows backend: `main.py --query NAME`.
 
 Each prints ONE JSON object on its last line of standard output, and the program ends with 0 whenever it printed one
 (other lines may come before it; a reason for the log goes to standard error). The answers are facts only, never
@@ -36,7 +36,7 @@ def path_or_none(path):
 
 
 def play(settings):
-    """How the game starts (C8): its program and arguments, folder, the variables it gets beyond the launcher's
+    """How the game starts: its program and arguments, folder, the variables it gets beyond the launcher's
     own (Settings.environment(): the data, characters and saves folders, LOCALAPPDATA for a data folder elsewhere)
     and its log; else why it cannot: "exe" (the installed game's program is missing), "source" (a development build
     without its Wii U source)."""

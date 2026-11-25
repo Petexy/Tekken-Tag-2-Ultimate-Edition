@@ -257,7 +257,7 @@ void WindowsReady::tick(double now) {
         return;
     }
     if (error.code == "protocol") {
-        // (The .exe's own files put back once: the update's are lost, not the launcher, REVIEW2_compat #3.)
+        // (The .exe's own files put back once: the update's are lost, not the launcher.)
         std::string why;
         if (restore_files && restored_.empty()) {
             restored_ = error.text.empty() ? "?" : error.text;

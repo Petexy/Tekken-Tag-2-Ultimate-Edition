@@ -60,7 +60,7 @@ void test_browser(const std::filesystem::path& scratch) {
     check(std::any_of(ps.begin(), ps.end(), [](const Place& p) { return p.id == "drive:C"; }), "places: drive C:");
 #else
     check(ps.size() >= 2 && ps.front().id == "home" && ps.back().id == "root", "places: Home first, Computer last");
-    // REVIEW2_app #6: hidden names listed only when asked, counted the same way; counts left for later.
+    // Hidden names listed only when asked, counted the same way; counts left for later.
     const auto hidden = list_folder(scratch / "b", false, nullptr, true);
     check(hidden.size() == 6 && hidden[1].name == ".hidden", "hidden folders listed when asked");
     fs::create_directories(scratch / "b" / "alpha" / ".git", ec);

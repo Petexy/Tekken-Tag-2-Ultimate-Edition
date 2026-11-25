@@ -183,7 +183,7 @@ def archive(files, commit=HEAD, others=()):
     return data.getvalue()
 
 class OpenUpdated(unittest.TestCase):
-    """The new .exe waits for the launcher's window to end (C3): the new launcher names it (TTT2_LAUNCHER_UI_PID), as
+    """The new .exe waits for the launcher's window to end: the new launcher names it (TTT2_LAUNCHER_UI_PID), as
     its update runs in a worker program of its own; the Tk window updated in its own process."""
     def opened_after(self, **environment):
         exe = Path(tempfile.gettempdir()) / 'Golden_Fist_Launcher-x86_64.exe'
@@ -297,7 +297,7 @@ class Files(unittest.TestCase):
                          HEAD)
         self.assertEqual((self.root / 'launcher/windows/main.py').read_bytes(), b'new main')
     def test_program_in_exe_refuses_its_programs_changes(self):
-        # (REVIEW2_compat #3: the .exe's program stays the old one, so these need a new test build; nothing changes.)
+        # (The .exe's program stays the old one, so these need a new test build; nothing changes.)
         for project, why in [(self.program_files(app=b'void app() { new(); }\n'),
                               r'change the launcher program itself \(launcher/app/app\.cpp\), which is built into '
                               r'this test build.s \.exe: Update only replaces its files, so it needs a new test build '

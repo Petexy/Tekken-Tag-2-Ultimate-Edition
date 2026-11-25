@@ -357,8 +357,7 @@ void Wipe::begin_frame(Canvas& canvas, Vec2 size) {
 }
 
 void Wipe::start(double now, int dir, bool reduced) {
-    // Reduce motion: a cut. (A cross-fade showed both screens at once, the seam of each where it was: user
-    // 2026-11-24.)
+    // Reduce motion: a cut. (A cross-fade showed both screens at once, the seam of each where it was.)
     if (reduced) {
         start_ = -1;
         reduced_ = true;

@@ -37,7 +37,7 @@ std::string element_text(const Element& e);
 
 // The differences between a golden and the model's dump, as readable lines
 // (none: equal). Elements are compared in order; `ignore_ids` are ids the
-// model gives to items the old app named none (new: U14).
+// model gives to items the old app named none (new ones).
 std::vector<std::string> compare(const Dump& golden, const Dump& model,
                                  const std::vector<std::string>& ignore_ids = {});
 

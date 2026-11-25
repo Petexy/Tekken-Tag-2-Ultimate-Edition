@@ -19,11 +19,11 @@ struct Command {
     fs::path cwd;
     fs::path log_file;
     // Windows' workers: created to cancel one (it stops what it started itself, then ends; the backend's Job
-    // ends it for good once it has, C7). Empty: Cancel terminates the program.
+    // ends it for good once it has). Empty: Cancel terminates the program.
     fs::path cancel_file;
     // How it runs (core/subprocess.h): a task's program or a question (its lines read; Cancel stops it), on its
     // own (the game, the updated launcher: it outlives this one; log_file is its output), or one of Windows' own
-    // update workers (C3: in no job that ends with the launcher, never killed; Cancel only makes cancel_file).
+    // update workers (in no job that ends with the launcher, never killed; Cancel only makes cancel_file).
     enum class Mode { kTask, kDetached, kSelfUpdate };
     Mode mode = Mode::kTask;
     std::string input{}; // its standard input (Windows' save-settings JSON); empty: none

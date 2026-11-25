@@ -1,6 +1,6 @@
 #pragma once
 
-// One launcher per user (ARCHITECTURE section 4, C12): the first start
+// One launcher per user: the first start
 // claims a name; a second start hands its arguments and activation token to
 // it and exits, and the first one raises its window (and pre-selects the .wua
 // it was given).

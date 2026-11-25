@@ -6,16 +6,16 @@
 #
 # Every frame of every run is checked by the launcher itself ("@audit failed ...": everything painted keeps the
 # gutter from its half's seam, inside its plate; once settled the focus frame is on the focused item). On top:
-# - F1: frame sequences with no input after a tab or section change, at several sizes and scales;
-# - F5: Settings' sections and Fighters at 1280x800, 1920x1080, 2560x1440, each at scale 1, 1.25, 1.5 and 2 where
+# - frame sequences with no input after a tab or section change, at several sizes and scales;
+# - Settings' sections and Fighters at 1280x800, 1920x1080, 2560x1440, each at scale 1, 1.25, 1.5 and 2 where
 #   that leaves the window's minimum of 960x600 points;
-# - F4: a fighter tile's drill-in lock by keys, pad and pointer (the pointer crosses the locked tiles without
+# - a fighter tile's drill-in lock by keys, pad and pointer (the pointer crosses the locked tiles without
 #   taking the focus; a click on a tile unlocks onto it; the blue buttons take clicks);
-# - F3: the blue side shows the focused fighter only (no second fighter's name);
+# - the blue side shows the focused fighter only (no second fighter's name);
 # - the same walk with Text size 125 and 150 % at 1280x800 and 960x640;
 # - the Steam Controller's double reports (each button is the pad's AND a key Steam types, in either order) on a
 #   tile, Back in a drill-in and on a page, a dialog's opening: one action each;
-# - U4: choosing a key (a key, Esc, the 10 s countdown) and the Steam Controller's double report on a key row
+# - choosing a key (a key, Esc, the 10 s countdown) and the Steam Controller's double report on a key row
 #   (its A is the pad button AND an Enter typed by Steam, in either order: one press, the Enter is not taken as the
 #   key, the pad's report is not B);
 # - adding and removing a character with the stub importer, and Cancel while it runs.
@@ -77,7 +77,7 @@ clean() {
     fi
 }
 
-# F1: no input after a tab or section change: every frame laid out for the drawn seam, the focus frame on its item.
+# No input after a tab or section change: every frame laid out for the drawn seam, the focus frame on its item.
 for spec in "1280x800 1 tab:fighters" "2560x1440 1.5 tab:settings;press:c" "1920x1080 1.25 tab:settings;press:c;press:c" \
     "2560x1440 2 tab:fighters;tab:settings" "2560x1440 1.25 tab:settings;tab:fighters" \
     "1920x1080 1 tab:settings;press:z"; do
@@ -88,7 +88,7 @@ for spec in "1280x800 1 tab:fighters" "2560x1440 1.5 tab:settings;press:c" "1920
     clean "$h" 7
 done
 
-# F5 (and F1's audit on every frame): each Settings section, its rows walked, and Fighters, at every size and scale.
+# Each Settings section, its rows walked, and Fighters, at every size and scale (every frame audited).
 walk="tab:settings;press:Down;press:Down;press:Right;press:Left;press:c;press:Down;press:Right;press:c;press:Down"
 walk+=";press:Down;press:Right;press:Left;press:c;tab:fighters;press:Down;press:Right;press:Down;press:Down;quit"
 # (Only the windows a player can have: at least 960x600 points, the window's minimum.)
@@ -102,7 +102,7 @@ for size in 1280x800 1920x1080 2560x1440; do
         [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 20 ] || fail "f5-$size-$scale: the walk stopped early"
     done
 done
-# The same walk with a larger Text size (REVIEW2 #9) at the Steam Deck's 1280x800 and at 960x640: laid out for at
+# The same walk with a larger Text size at the Steam Deck's 1280x800 and at 960x640: laid out for at
 # least the Deck's 1280x800 at 150 % (853x533 points, ui_scale's tests), every frame audited.
 for size in 1280x800 960x640; do
     for text in 125 150; do
@@ -114,7 +114,7 @@ for size in 1280x800 960x640; do
     done
 done
 
-# F4: Accept on a tile gives the focus to its blue actions and locks the tiles until Back or a click on them.
+# Accept on a tile gives the focus to its blue actions and locks the tiles until Back or a click on them.
 h=$(home f4-keys)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;focus:tile:josie;press:Return" -- --frames "$h/frames" \
     --size 1920x1080 --scale 1.5
@@ -147,7 +147,7 @@ hasnt "$h" '@cue drill-out'
 
 # The Steam Controller's A and B, each a pad button AND a key Steam types, in either order (the key first: the pad's
 # report comes at the next poll, after the key's frame): one Accept or Back wherever it lands, never a second one on
-# what the first opened (REVIEW2 #2).
+# what the first opened.
 for how in steam steam-key; do
     h=$(home "$how-drill-in")
     run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;focus:tile:josie;$how:south;wait:0.5" -- --frames "$h/frames"
@@ -175,7 +175,7 @@ for how in steam steam-key; do
     has "$h" '@frames idle ok (focus uninstall-cancel,'
 done
 
-# U4: choosing a key.
+# Choosing a key.
 h=$(home keys-take)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:j;quit"
 clean "$h"
@@ -199,7 +199,7 @@ has "$h" '@capture start key:dpad_up'
 has "$h" '@capture end no key was taken yet'
 [ "$(grep -c '@capture start' "$h/out.txt")" = 1 ] || fail "keys-steam: one A started choosing more than once"
 hasnt "$h" 'is Return'
-# The other order (REVIEW2 #2): the Enter Steam types arrives first and starts choosing; the pad's report of the same
+# The other order: the Enter Steam types arrives first and starts choosing; the pad's report of the same
 # A, read at the next poll 30 ms later, is not the pad's B: choosing goes on, the next key is taken.
 h=$(home keys-steam-key)
 run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;steam-key:south;wait:0.5;press:j;quit"

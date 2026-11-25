@@ -345,7 +345,7 @@ bool App::picker_activate(const std::string& id) {
     return false;
 }
 
-// The folder's entries as rows: only those in or near the view are declared (REVIEW2_app #3/#6), each fitted to the
+// The folder's entries as rows: only those in or near the view are declared, each fitted to the
 // seam at its own height; spacers stand for the others, each exactly as tall as its rows and their gaps, so every
 // row is where it would be with all of them (the scroll bar, PgUp/PgDn and scroll anchoring see the whole list).
 // Declared: the rows in view and one view's worth around it (at the scroll offset and at its target), one view's
@@ -435,7 +435,7 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         here.compact = true;
         here.mono_title = true;
         menu_row(ui, "pk/here", here, crimson_focus(p.entries.empty()), fit({}, SeamFit::CrimsonSkewed));
-        // (Not fitted as a whole: a long list's bottom lies far left on the slanted seam, REVIEW2_app #3. The rows
+        // (Not fitted as a whole: a long list's bottom lies far left on the slanted seam. The rows
         // and lines in it are fitted each on its own.)
         auto cols = ui.open("pk/cols", Box{.layout = Layout::Row, .margin = {0, 12, 0, 0}, .gap = 18,
                                            .align = Align::Start});

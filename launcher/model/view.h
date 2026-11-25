@@ -2,9 +2,9 @@
 
 // What the player sees, as plain structures the view builders return
 // (builders.h) and the screens draw: texts verbatim, every focusable item
-// with a stable id (the old apps' element ids, spec/linux_app.md 6.3), whether
+// with a stable id (the old apps' element ids), whether
 // it can be used now and why not, and a describe block, which the blue half
-// of the screen shows for the focused item (U7): nothing lives only in a
+// of the screen shows for the focused item: nothing lives only in a
 // tooltip. A disabled item stays in the view with its why.
 
 #include <cstdint>

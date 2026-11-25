@@ -1,7 +1,7 @@
 #pragma once
 
 // A golden case (tests/golden/<case>/case.json) played through the model as
-// the old GTK app's test executor played it (spec linux 6.3): the same
+// the old GTK app's test executor played it: the same
 // fixture answers from FakeStarter, the same steps, a dump at the same
 // moments (00-start, each step, -running at half the progress, -stopping).
 

@@ -532,7 +532,7 @@ void test_system() {
 
     check(run_output({"sh", "-c", "echo hello"}) == std::optional<std::string>("hello\n"), "run: output");
     check(!run_output({"sh", "-c", "exit 3"}) && !run_output({"no-such-program-ttt2"}), "run: failures");
-    // REVIEW2_app #8: the preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
+    // The preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
     // (another thread's, a library's) is not the probe's, and the probe runs with no signal blocked.
     {
         const int leaky = ::open("/dev/null", O_RDONLY); // (no O_CLOEXEC on purpose)
@@ -1026,7 +1026,7 @@ std::string read_all(const fs::path& file) {
     return {std::istreambuf_iterator<char>(in), {}};
 }
 
-// C2's way back (compat review #4): the AppImage an update replaces kept until the new one drew its first frame.
+// The way back: the AppImage an update replaces kept until the new one drew its first frame.
 void test_way_back(const fs::path& root) {
     const fs::path folder = root / "way back";
     fs::create_directories(folder);

@@ -421,7 +421,7 @@ GameView game_view(const Facts& facts) {
         unfinished(facts, v);
     else
         not_installed(facts, v);
-    // Settings: always there (U17: the launcher's own settings with any state of the game; the game's when
+    // Settings: always there (the launcher's own settings with any state of the game; the game's when
     // installed, on Windows also before Set Up Game, for its folders).
     if (v.state != GameState::kInstalled && v.state != GameState::kChecking && v.state != GameState::kCannotInstall) {
         Action settings;

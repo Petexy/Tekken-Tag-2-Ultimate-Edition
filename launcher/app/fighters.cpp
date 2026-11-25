@@ -1,9 +1,9 @@
 // Fighters: Tekken 7's, Tekken 7's DLC and Tekken 8's characters as the model's characters view has them. Crimson:
 // the groups (a header with its counts and its actions, disabled ones too: they say why) and their tiles, then
-// Outfits for every character. Blue: ONLY the focused fighter (FEEDBACK F3: its game, its name, one state pill,
+// Outfits for every character. Blue: ONLY the focused fighter (its game, its name, one state pill,
 // its sentence, its outfits, its own progress while a task has it, its actions), or the focused group action's
 // group (what the games and Steam say, its warnings, what that action would do), or what outfits are. Accept on a
-// tile gives its actions on the blue side the focus and locks the crimson side until Back (FEEDBACK F4).
+// tile gives its actions on the blue side the focus and locks the crimson side until Back.
 
 #include "app.h"
 
@@ -181,7 +181,7 @@ const m::FighterRow* App::fighter_row(const std::string& name) const {
 
 // The actions of a fighter's blue side, in the order shown: Add / Update / Add Again (or Remove when that is
 // their only one), Outfits, Remove. A DLC character the account does not own gets a dimmed Add saying why
-// (FEEDBACK F3: a disabled action is a button with its own label, never a second state pill).
+// (a disabled action is a button with its own label, never a second state pill).
 std::vector<m::Action> App::fighter_actions(const m::FighterRow& r) const {
     std::vector<m::Action> out;
     const m::Action* main = nullptr;
@@ -587,7 +587,7 @@ void App::fighter_view(const std::string& name) {
                   .outline = 1.2f},
          fit(Box{.h = Size::fixed(30), .margin = {4, 4, 0, 14}}, SeamFit::BlueRect));
 
-    // ONE state pill, then its sentence (FEEDBACK F3).
+    // ONE state pill, then its sentence.
     const FighterTask task = fighter_task(name);
     std::string state, sentence;
     Tone tone = Tone::Neutral;
@@ -649,7 +649,7 @@ void App::fighter_view(const std::string& name) {
         if (task.state == 1 && !task.detail.empty()) line += " · " + task.detail;
         text(ui, "fv/progress", TextSpec{line, tx::kKick, c::kBlueDim}, fit({}, SeamFit::BlueRect));
     }
-    // Its actions: right-aligned in the blue half (FEEDBACK F2); disabled ones dimmed, their why is the sentence
+    // Its actions: right-aligned in the blue half; disabled ones dimmed, their why is the sentence
     // or comes as a note when Accept is pressed on them.
     const std::vector<m::Action> acts = fighter_actions(*r);
     auto b = ui.open("fv/btns",

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The launcher left alone (ARCHITECTURE sec 7, U9): started as a player starts it (no test actions; drawn offscreen),
+# The launcher left alone: started as a player starts it (no test actions; drawn offscreen),
 # against the stubs of tests/stub, each run in a scratch home of its own below WORK, every frame put on the screen
 # counted (TTT2_LAUNCHER_TEST_PRESENTS):
 #

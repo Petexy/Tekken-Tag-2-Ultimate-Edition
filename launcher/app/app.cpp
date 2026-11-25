@@ -154,7 +154,7 @@ bool App::open_window() {
     wo.quiet = !o_.smoke.empty();
     wo.forced_scale = o_.scale;
 #ifndef _WIN32
-    wo.no_window = appimage_no_window; // (C2: back to the version before an update)
+    wo.no_window = appimage_no_window; // (back to the version before an update)
 #endif
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
@@ -306,7 +306,7 @@ int App::run() {
     handle(model_->take_effects());
 #ifdef _WIN32
     if (!ready_->restored().empty()) {
-        // (A test build's Update got files of a newer program: they were put back, REVIEW2_compat #3.)
+        // (A test build's Update got files of a newer program: they were put back.)
         const std::string& branch = model_->facts().windows.branch;
         model_->tell("Update needs a new test build",
                      "The files Update got" + (branch.empty() ? std::string() : " from " + branch) +
@@ -320,7 +320,7 @@ int App::run() {
     }
 #endif
     if (!o_.rolled_back.empty()) {
-        // (C2: the version an update opened ended before its first frame, and this one was put back.)
+        // (The version an update opened ended before its first frame, and this one was put back.)
         model_->tell("Version " + o_.rolled_back + " did not start",
                      "Version " + o_.rolled_back + " of the launcher ended before it could open its window on this " +
                          "PC, so the launcher went back to this version (" + TTT2_LAUNCHER_VERSION +
@@ -337,7 +337,7 @@ int App::run() {
     test_idle_hooks(t0);
     while (!quit_) {
         const double t = now();
-        // Drawn only when something changed (ARCHITECTURE sec 7, U9): input or a program's or thread's news, the
+        // Drawn only when something changed: input or a program's or thread's news, the
         // model's timers, a real animation (vsync-paced), an ambient frame (<= kAmbientHz while ambient motion runs);
         // at most ~2 frames a second while the game runs and the window is elsewhere, or while it is hidden.
         const bool moving = animating(t);
@@ -395,7 +395,7 @@ bool App::model_changed(double t) {
     return !(model_->view() == view_);
 }
 
-// The ambient clock: the time decorative loops are drawn at. It runs while ambient motion runs (U9: focused,
+// The ambient clock: the time decorative loops are drawn at. It runs while ambient motion runs (focused,
 // visible, not reduced, the game not running, input in the last 20 s) and stands still otherwise, so a paused
 // loop is a still picture that goes on from there. Tests: the (held) clock itself.
 double App::ambient_clock(double t) {
@@ -517,7 +517,7 @@ bool App::pump_input(double t, double draw_at) {
         changed = true;
     }
     if (!o_.testing) test_idle_hooks(now());
-    // Ambient motion only while the window is seen and has the player: not while the game runs (U9).
+    // Ambient motion only while the window is seen and has the player: not while the game runs.
     stage_->set_ambient(window_.focused() && window_.visible() && !game_running);
     // Programs' lines and ends, posted work, later starts handed over.
     host_->pump();
@@ -574,7 +574,7 @@ void App::frame(double t) {
     }
     if (task_was_running_ && !running) ++portraits_generation_;
 #ifdef _WIN32
-    // (What a task changed: the install, the build, the logs. Asked again after each one, C8.)
+    // (What a task changed: the install, the build, the logs. Asked again after each one.)
     if (task_was_running_ && !running) windows_state_again();
 #endif
     task_was_running_ = running;
@@ -584,7 +584,7 @@ void App::frame(double t) {
     if (drill_ && (drill_->screen != screen_ || picker_ || view_.dialog)) drill_.reset();
 
     // The seam first: this frame is laid out for the split as it is DRAWN now (springing), never for a target or
-    // an old split (FEEDBACK F1). It leans toward the half that had the focus.
+    // an old split. It leans toward the half that had the focus.
     {
         const Rect fr = ui_->rect(ui_->focused());
         const int side = view_.dialog || fr.empty()                                   ? 0
@@ -651,7 +651,7 @@ void App::frame(double t) {
         if (first_) window_.show();
     }
 #ifndef _WIN32
-    if (first_) appimage_first_frame(); // (C2: the version before an update is not needed any more)
+    if (first_) appimage_first_frame(); // (the version before an update is not needed any more)
 #endif
     first_ = false;
     // (What the events do shows on the next frame.)
@@ -745,7 +745,7 @@ void App::declare() {
     blue.w = Size::fixed(bl.w + 16 + 16);
     blue.h = Size::fixed(std::max(60.f, bl.h + 14));
     blue.pad = {16, 0, 16, 8};
-    blue.mirror = true;  // FEEDBACK F2: the blue half's straight edge is its right one
+    blue.mirror = true;  // the blue half's straight edge is its right one
     crimson.locked = drilled();
     if (wipe_->active(ui.now())) {
         const Vec2 d = wipe_->new_offset(ui.now());
@@ -792,7 +792,7 @@ void App::top_band() {
     icon_button(ui, "sound",
                 {sounds_ ? "stroke:sound-on" : "stroke:sound-off", sounds_ ? "Sound on" : "Sound off", sounds_},
                 Box{.margin = {0, 0, 18, 0}});
-    // Quit is the window's close button (X) in the top-right corner, where Windows puts it (user 2026-11-24).
+    // Quit is the window's close button (X) in the top-right corner, where Windows puts it.
     caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), true,
                     Box{.h = Size::fixed(theme::kTopBand)});
 }
@@ -1397,7 +1397,7 @@ void App::activate(const std::string& id, ttt2::ui::Device device) {
     if (id == "strip/task") return handle(model_->activate("task", t));
     if (screen_ == Screen::kFighters && fighters_activate(id)) return;
     if (id.starts_with("check:")) {
-        // A check with commands to copy: they are on the blue side (FEEDBACK F4: drill in, crimson locked).
+        // A check with commands to copy: they are on the blue side (drilled in: the crimson side is locked).
         if (const std::string copy = check_copy(id); !copy.empty()) drill_in(id, copy);
         return;
     }
@@ -1485,7 +1485,7 @@ void App::handle(std::vector<m::Effect> effects) {
             break;
         case m::Effect::Kind::kQuit: quit_ = true; break;
         case m::Effect::Kind::kOpenMenu: {
-            // Windows' More: its entries on the blue side, drilled into from its row (F4).
+            // Windows' More: its entries on the blue side, drilled into from its row.
             for (const m::Action& a : model_->view().game.more) {
                 if (!a.enabled) continue;
                 drill_in("more", a.id);
@@ -1500,7 +1500,7 @@ void App::handle(std::vector<m::Effect> effects) {
             break;
         case m::Effect::Kind::kOpenUpdated: {
 #ifdef _WIN32
-            // The updated .exe, started on its own; it waits for this launcher to end (C3, TTT2_LAUNCHER_AFTER).
+            // The updated .exe, started on its own; it waits for this launcher to end (TTT2_LAUNCHER_AFTER).
             m::Command c;
             const fs::path exe = exe_;
             c.argv = {win32::narrow(exe.native())};

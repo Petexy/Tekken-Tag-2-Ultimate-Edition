@@ -15,7 +15,7 @@
 # The oldest distributions' versions.
 release_glibc=GLIBC_2.39
 release_glibcxx=GLIBCXX_3.4.33
-# What the launcher program itself may need (C10): everything else it uses is in it (SDL 3, built statically) or
+# What the launcher program itself may need: everything else it uses is in it (SDL 3, built statically) or
 # opened by it at run time (X11, Wayland, libdecor, PipeWire, PulseAudio, ALSA, udev, D-Bus, Vulkan, GL).
 release_launcher_libraries=(libc.so.6 libm.so.6 libstdc++.so.6 libgcc_s.so.1 ld-linux-x86-64.so.2)
 # The license texts the AppImage has in usr/share/licenses/ttt2-launcher (launcher/app/CMakeLists.txt installs them),

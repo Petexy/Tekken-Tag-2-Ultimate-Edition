@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The launcher's sounds as the player hears them (FEEDBACK F7), offscreen against the stubs of tests/stub, each run
+# The launcher's sounds as the player hears them, offscreen against the stubs of tests/stub, each run
 # in a scratch home of its own below WORK, through SDL's disk audio driver (a file, never a speaker):
 #
 #   sounds.sh LAUNCHER STUB WORK PYTHON [GAME_FOLDER]

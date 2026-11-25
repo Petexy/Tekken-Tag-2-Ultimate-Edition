@@ -1,5 +1,5 @@
 // Input: keyboard, mouse and gamepad events become ACTIONS (move, accept, back, tabs, sections, pages, ...), with
-// the arbitration the review asked for (U4, U5, U7, U8; REVIEW_ui F4/F15):
+// this arbitration:
 // - the same action from another device within theme::input::kSamePress counts once (Steam Controller in desktop
 //   mode types Enter/arrows while SDL also sees the pad; Steam's virtual pad beside the physical one);
 // - Accept and Back never repeat; held moves repeat after a delay at a rate (own timers, OS repeats ignored);

@@ -259,7 +259,7 @@ void test_payload() {
     check_eq(read_file(root / "sub/dir/b.txt"), std::string("two"), "payload: a file in a folder");
     check_eq(payload::unpacked_digest(root), p->digest(), "payload: the stamp names them");
     check(!payload::unpack(*p, root), "payload: the same files are not unpacked again");
-    // (A test build's Update: other files under the .exe's digest, REVIEW2_compat #3. Again: its own files back.)
+    // (A test build's Update: other files under the .exe's digest. Again: its own files back.)
     write_file(root / "a.txt", "updated");
     write_file(root / "update-only.txt", "new");
     write_file(root / "local/launcher-files.txt",
@@ -400,7 +400,7 @@ void test_release() {
     check_eq(read_file(unpacked / "a.txt"), std::string("one"), "release: and unpacks nothing");
     check(wait_until([&] { return first->code != -1; }, 30), "release: ended");
 
-    // Its own files again (a test build's Update got another program's files, REVIEW2_compat #3), into a folder
+    // Its own files again (a test build's Update got another program's files), into a folder
     // with a letter beyond ASCII.
     const fs::path again = g_root / launcher::utf8_path("Jos\xc3\xa9 again");
     write_file(again / "a.txt", "updated");
@@ -490,7 +490,7 @@ Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN).run([sy
     check(claim.result == InstanceClaim::Result::kFailed, "old launcher: one replacing it waits, then fails");
     check_eq(claim.error, std::string("The launcher this one replaces is still running."),
              "old launcher: why it failed");
-    // (Asked to show itself once while waited for, not every 100 ms: compat review #8.)
+    // (Asked to show itself once while waited for, not every 100 ms.)
     wait_until([&] { return activations() > before; }, 5);
     wait_until([] { return false; }, 0.5);
     check_eq(activations() - before, 1, "old launcher: activated once while waited for " + old->all());
@@ -500,7 +500,7 @@ Old(application_id=sys.argv[1], flags=Gio.ApplicationFlags.HANDLES_OPEN).run([sy
     claim = claim_instance(options);
     check(claim.result == InstanceClaim::Result::kPrimary, "old launcher: once it is gone this one is the launcher");
 
-    // The other way (C12): an old launcher started now finds this one under its bus name and hands over to it.
+    // The other way: an old launcher started now finds this one under its bus name and hands over to it.
     const fs::path remote = g_root / "old_remote.py";
     // (GtkApplication's platform data, as the old launcher sends it: the activation token, X11's id.)
     write_file(remote, R"(import os, sys
@@ -582,7 +582,7 @@ int main(int argc, char** argv) {
     const bool dbus = !args.empty() && args[0] == "--dbus";
     const std::vector<std::string> rest(args.begin() + (dbus ? 1 : 0), args.end());
     // (In the OS's own form: libc++ keeps an absolute C:/x as it is where libstdc++ makes it C:\x, and the children
-    // say GetModuleFileNameW's backslashes. UTF-8 to a path never through the ANSI code page: compat review #2.)
+    // say GetModuleFileNameW's backslashes. UTF-8 to a path never through the ANSI code page.)
     const fs::path base =
         fs::absolute(!rest.empty() ? launcher::utf8_path(rest[0]) : fs::temp_directory_path()).make_preferred();
     g_root = base / ("startup_test." + std::to_string(own_pid()));

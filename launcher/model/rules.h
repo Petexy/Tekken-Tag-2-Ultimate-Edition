@@ -3,7 +3,7 @@
 // The rules the views and actions share (launcher/app/characters.cpp and
 // game.cpp before): which characters can be added, updated, removed, what
 // their outfits do, whether the game is older than this launcher. Windows
-// gets the same rules (the Tk window's copy had drifted, spec windows 8.8).
+// gets the same rules (the Tk window's copy had drifted).
 
 #include "facts.h"
 

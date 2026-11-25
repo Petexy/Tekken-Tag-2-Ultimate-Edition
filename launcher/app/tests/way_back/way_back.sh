@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C2's way back (compat review #4), end to end, offscreen in a scratch home, against a stand-in of GitHub on
+# The update's way back, end to end, offscreen in a scratch home, against a stand-in of GitHub on
 # 127.0.0.1: this launcher, run as an AppImage (a script that sets APPIMAGE/APPDIR), updates itself to a new version
 # that passes the update's checks and then breaks (BROKEN: broken.cpp with an AppImage's header).
 #

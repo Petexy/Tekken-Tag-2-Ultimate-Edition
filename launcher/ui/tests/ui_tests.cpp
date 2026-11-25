@@ -262,7 +262,7 @@ TEST(layout_seam_staircase_fit) {
 }
 
 TEST(layout_mirror_right_aligned) {
-    // FEEDBACK F2: a mirrored (blue) half anchors everything to its right edge; fitted boxes keep the gap from the
+    // A mirrored (blue) half anchors everything to its right edge; fitted boxes keep the gap from the
     // seam on their left; rows go to the right end.
     Harness h;
     const Seam seam{640, 414, theme::kSeamTan};
@@ -311,7 +311,7 @@ TEST(layout_mirror_right_aligned) {
 }
 
 TEST(layout_audit_finds_seam_crossings) {
-    // Ui::audit (FEEDBACK F1 tests): a painted crimson box running into the gutter is reported, a fitted one not.
+    // Ui::audit: a painted crimson box running into the gutter is reported, a fitted one not.
     const Seam seam{640, 414, theme::kSeamTan};
     auto declare = [&](bool fitted) {
         return [&seam, fitted](Ui& ui) {
@@ -338,7 +338,7 @@ TEST(layout_audit_finds_seam_crossings) {
 }
 
 TEST(focus_highlight_follows_moving_item) {
-    // FEEDBACK F1: once the highlight reached its item it is drawn exactly on it while the layout moves (a
+    // Once the highlight reached its item it is drawn exactly on it while the layout moves (a
     // springing seam narrows the rows), and a new focus is on its item from the first frame (snap).
     Harness h;
     float width = 400;
@@ -358,7 +358,7 @@ TEST(focus_highlight_follows_moving_item) {
 }
 
 TEST(focus_drill_in_lock) {
-    // FEEDBACK F4: a locked half takes no focus (keys or hover) so the pointer can travel over it to the other
+    // A locked half takes no focus (keys or hover) so the pointer can travel over it to the other
     // half's actions; a left click anywhere on it is Unlock (naming the item clicked, else the half); it fades and
     // moves back while locked.
     Harness h;
