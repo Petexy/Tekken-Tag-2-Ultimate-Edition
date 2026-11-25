@@ -2,12 +2,21 @@
 // registry; drawn in their own colours or as a mask tinted with any colour (single-colour "symbolic" icons).
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "ttt2ui/canvas.h"
 
 namespace ttt2::ui {
+
+// The launcher's own icon (launcher/app, the program's icon too): the top bar's mark and the window's icon.
+inline constexpr const char* kLauncherIcon = "io.github.petexy.TekkenTag2UltimateEdition.svg";
+
+// An icon (a path as Icons::draw takes it) drawn into `pixels` x `pixels` RGBA bytes (R, G, B, A in memory order,
+// premultiplied as nanosvg leaves it: not); empty when there is no such icon.
+std::vector<std::uint8_t> rasterise_icon(const std::string& path, int pixels);
 
 enum class IconMode {
     Colour,  // as drawn

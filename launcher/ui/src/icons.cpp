@@ -76,6 +76,25 @@ bool icon_svg(const std::string& path, std::string& out) {
 }
 }  // namespace
 
+std::vector<std::uint8_t> rasterise_icon(const std::string& path, int pixels) {
+    std::vector<std::uint8_t> rgba;
+    std::string text;
+    if (pixels <= 0 || !icon_svg(path, text)) return rgba;
+    if (NSVGimage* image = nsvgParse(text.data(), "px", 96)) {  // (nsvgParse writes into the text)
+        if (image->width > 0 && image->height > 0) {
+            rgba.assign(static_cast<std::size_t>(pixels) * pixels * 4, 0);
+            const float s = static_cast<float>(pixels) / std::max(image->width, image->height);
+            const float tx = (static_cast<float>(pixels) - image->width * s) / 2,
+                        ty = (static_cast<float>(pixels) - image->height * s) / 2;
+            NSVGrasterizer* r = nsvgCreateRasterizer();
+            nsvgRasterize(r, image, tx, ty, s, rgba.data(), pixels, pixels, pixels * 4);
+            nsvgDeleteRasterizer(r);
+        }
+        nsvgDelete(image);
+    }
+    return rgba;
+}
+
 Icons::~Icons() {
     for (auto& [key, id] : cache_) textures_.destroy(id);
 }
@@ -89,22 +108,10 @@ TextureId Icons::texture(const std::string& path, int pixels, IconMode mode) {
     const std::string key = path + "@" + std::to_string(pixels) + (mode == IconMode::Mask ? "m" : "c");
     if (auto it = cache_.find(key); it != cache_.end()) return it->second;
     TextureId id = 0;
-    if (std::string text; icon_svg(path, text)) {  // (nsvgParse writes into the text)
-        if (NSVGimage* image = nsvgParse(text.data(), "px", 96)) {
-            if (image->width > 0 && image->height > 0) {
-                std::vector<std::uint8_t> rgba(static_cast<std::size_t>(pixels) * pixels * 4);
-                const float s = static_cast<float>(pixels) / std::max(image->width, image->height);
-                const float tx = (static_cast<float>(pixels) - image->width * s) / 2,
-                            ty = (static_cast<float>(pixels) - image->height * s) / 2;
-                NSVGrasterizer* r = nsvgCreateRasterizer();
-                nsvgRasterize(r, image, tx, ty, s, rgba.data(), pixels, pixels, pixels * 4);
-                nsvgDeleteRasterizer(r);
-                if (mode == IconMode::Mask)
-                    for (std::size_t i = 0; i < rgba.size(); i += 4) rgba[i] = rgba[i + 1] = rgba[i + 2] = 255;
-                id = textures_.create(pixels, pixels, std::move(rgba));
-            }
-            nsvgDelete(image);
-        }
+    if (std::vector<std::uint8_t> rgba = rasterise_icon(path, pixels); !rgba.empty()) {
+        if (mode == IconMode::Mask)
+            for (std::size_t i = 0; i < rgba.size(); i += 4) rgba[i] = rgba[i + 1] = rgba[i + 2] = 255;
+        id = textures_.create(pixels, pixels, std::move(rgba));
     }
     cache_[key] = id;
     return id;
