@@ -477,7 +477,9 @@ void App::test_tick(double t) {
         pending_choose_.clear();
         answer_game(arg);
         test_wait_ = TestWait::kPreflight;
-    } else if (n == "update-continued") {
+    } else if (n == "update-continued" || (n == "update-everything" && o_.go_on_update)) {
+        // (update-everything in a launcher opened to go on with an update (the same actions reach both the launcher
+        // that hands over and the one it opens): the update going on is the one waited for.)
         // (It starts by itself once the launcher has looked, maybe before this action: waited for, a minute at most.)
         test_task_seen_ = model_->in_update() || model_->update_shown();
         test_until_ = t + 60;
