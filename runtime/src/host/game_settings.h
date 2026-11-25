@@ -12,10 +12,14 @@
 //                          of its own ("Player", in the game's language):
 //                          up to 16 characters of printable ASCII. None, or
 //                          an empty value: the game's own.
+//   language = <code>      the language the game shows its texts in: a code
+//                          of kLanguages (en, fr, ...; any case). None, an
+//                          empty value or a code it does not have: English.
 //
 // No SDL here, as in display_settings.h.
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -34,10 +38,31 @@ inline constexpr size_t kMaxNameLength = 16;
 // space left at the end). Empty when nothing is left.
 std::string clean_name(std::string_view text);
 
+// The languages the game can be shown in: the European Wii U game has its
+// texts in these. `wiiu`: the console's language number for it (the
+// system setting cafe.language the title reads), `name`: in English, as
+// the launcher lists it. English first: the game's own.
+struct Language {
+    std::string_view code, name;
+    uint32_t wiiu;
+};
+inline constexpr Language kLanguages[] = {
+    {"en", "English", 1}, {"fr", "French", 2},  {"de", "German", 3},
+    {"it", "Italian", 4}, {"es", "Spanish", 5}, {"ru", "Russian", 10},
+};
+
+// The language of `code` (any case, no spaces); nullptr when the game has
+// none such.
+const Language* find_language(std::string_view code);
+
 struct Settings {
     std::string player_name; // clean_name()'s; empty: the game's own
+    std::string language;    // a code of kLanguages other than "en"; empty: English
     bool operator==(const Settings&) const = default;
 };
+
+// The language `settings` show the game in (English when none is set).
+const Language& language_of(const Settings& settings);
 
 // A line left out or changed, and why.
 struct Warning {

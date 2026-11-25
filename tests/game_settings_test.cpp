@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <random>
 #include <string>
 #include <vector>
@@ -151,6 +152,49 @@ void test_parse() {
           "a cleaned name is told on its line");
 }
 
+void test_language() {
+    check(std::size(game::kLanguages) > 1 && game::kLanguages[0].code == "en" && game::kLanguages[0].wiiu == 1,
+          "English first, the console's language 1");
+    for (const game::Language& l : game::kLanguages) {
+        const std::string code(l.code);
+        check(game::find_language(code) == &l, "found: " + code);
+        std::string upper = code;
+        for (char& c : upper) c = static_cast<char>(c - 'a' + 'A');
+        check(game::find_language(upper) == &l, "found in capitals: " + upper);
+        const game::Parsed parsed = game::parse("language = " + upper + "\n");
+        check(parsed.warnings.empty() && parsed.settings.language == (l.code == "en" ? "" : code) &&
+                  game::language_of(parsed.settings).code == l.code,
+              "language = " + upper + ": \"" + parsed.settings.language + "\"");
+        for (const game::Language& other : game::kLanguages) {
+            check(&other == &l || (other.code != l.code && other.wiiu != l.wiiu), "one of each: " + code);
+        }
+    }
+    for (const char* none : {"", " fr", "fra", "f", "french", "nl", "pt", "jp"}) {
+        check(game::find_language(none) == nullptr, std::string("no language \"") + none + "\"");
+    }
+
+    for (const char* empty : {"", "language =\n", "language = # none\n", "player_name = Zorbax\n"}) {
+        const game::Parsed parsed = game::parse(empty);
+        check(parsed.settings.language.empty() && parsed.warnings.empty() &&
+                  game::language_of(parsed.settings).code == "en",
+              std::string("English: \"") + empty + "\"");
+    }
+    const game::Parsed both = game::parse("player_name = Zorbax\r\nlanguage = fr # French\r\n");
+    check(both.settings.player_name == "Zorbax" && both.settings.language == "fr" && both.warnings.empty(),
+          "a name and a language");
+    const game::Parsed twice = game::parse("language = fr\nplayer_name = A\nlanguage = it\n");
+    check(twice.settings.language == "it" && twice.warnings.size() == 1 &&
+              has_warning(twice, 1, "language: given again on line 3, line ignored"),
+          "the later language counts");
+    const game::Parsed back = game::parse("language = fr\nlanguage =\n");
+    check(back.settings.language.empty(), "a later empty line: English");
+    const game::Parsed unknown = game::parse("\nlanguage = Klingon\n");
+    check(unknown.settings.language.empty() && unknown.warnings.size() == 1 &&
+              has_warning(unknown, 2, "language: the game has no language \"Klingon\" (en, fr, ") &&
+              has_warning(unknown, 2, "), English shown"),
+          "an unknown language: English, told on its line");
+}
+
 void test_path(const fs::path& scratch) {
     const char* old_home = std::getenv("HOME");
     const char* old_config = std::getenv("XDG_CONFIG_HOME");
@@ -184,13 +228,20 @@ void test_load(const fs::path& scratch) {
     check(loaded.settings.player_name == "Zorbax" && loaded.error.empty(),
           "file: \"" + loaded.settings.player_name + "\"");
     const std::vector<std::string> log{"game: " + name + ":3: unknown setting \"future_setting\", line ignored",
-                                       "game: player name \"Zorbax\" (from " + name + ")"};
+                                       "game: player name \"Zorbax\", language English (from " + name + ")"};
     check(loaded.log == log, "file: log " + joined(loaded.log));
+
+    write(file, "language = de\n");
+    const game::Loaded german = game::load(file);
+    check(german.settings.language == "de" &&
+              german.log == std::vector<std::string>{"game: player name the game's own, language German (from " +
+                                                     name + ")"},
+          "a language: " + joined(german.log));
 
     write(file, "");
     const game::Loaded empty = game::load(file);
     check(empty.settings == game::Settings{} && empty.error.empty() &&
-              empty.log == std::vector<std::string>{"game: player name the game's own (from " + name + ")"},
+              empty.log == std::vector<std::string>{"game: player name the game's own, language English (from " + name + ")"},
           "empty file: " + joined(empty.log));
 
     const auto refused = [](const game::Loaded& l, const std::string& why, const std::string& what) {
@@ -218,6 +269,7 @@ int main(int argc, char** argv) {
 
     test_clean_name();
     test_parse();
+    test_language();
     test_path(scratch);
     test_load(scratch);
 
