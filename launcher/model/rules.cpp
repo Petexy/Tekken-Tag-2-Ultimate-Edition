@@ -243,8 +243,11 @@ UpdatePlan update_plan(const Facts& facts) {
     if (p.game) after.game_built = after.this_build;
     for (const Fighter& f : facts.status->fighters) {
         if (!f.installed || !f.update) continue;
+        const std::optional<bool> owned = owns(facts, f);
+        if (owned == false) continue; // (as on their page: nothing to do about it)
         std::string why;
-        if (!addable(facts, f)) why = not_addable_why(facts, f);
+        if (!owned) why = unknown_owned_why(facts, f);
+        else if (!addable(facts, f)) why = not_addable_why(facts, f);
         else game_usable(after, f.of(kTekken8) ? kTekken8 : kTekken7, &why); // (why stays empty when it is)
         if (why.empty()) p.fighters.push_back(f.name);
         else p.later.emplace_back(f.display.empty() ? f.name : f.display, why);

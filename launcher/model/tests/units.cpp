@@ -1177,6 +1177,28 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
         for (Fighter& x : f.status->fighters)
             if (x.name == "josie") x.moveset_saved = false;
         CHECK(update_plan(f).empty() && update_plan(f).later.size() == 2);
+        // (Steam runs, but which DLC is owned is not known: that is why, not Steam. Not owned: not listed.)
+        f.status->steam_running = true;
+        for (Fighter& x : f.status->fighters)
+            if (x.name == "josie") x.update = false;
+        const std::string dlc = [&] {
+            for (const Fighter& x : f.status->fighters)
+                if (display_name(f, x.name) == p.later[0].first) return x.name;
+            return std::string();
+        }();
+        f.owned.answer.erase(dlc);
+        f.owned.errors.clear();
+        f.owned.state = OwnedState::kKnown;
+        CHECK(update_plan(f).fighters.empty() && update_plan(f).later.size() == 1 &&
+              update_plan(f).later[0].second == "Which Tekken 7 DLC you own is not known yet");
+        f.owned.errors["tekken7"] = "the helper failed";
+        CHECK(update_plan(f).later.size() == 1 &&
+              update_plan(f).later[0].second ==
+                  "Steam could not be asked through Tekken 7 (the helper failed): Refresh asks it again");
+        f.owned.answer[dlc] = false;
+        CHECK(update_plan(f).fighters.empty() && update_plan(f).later.empty());
+        f.owned.answer[dlc] = true;
+        CHECK(update_plan(f).fighters == std::vector<std::string>{dlc} && update_plan(f).later.empty());
     }});
     current = "update plan: nothing pending";
     replay(fixture(golden, "appimage-current"), Caps::linux_caps(), scratch / "p6", {0, [](Harness& h) {
