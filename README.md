@@ -184,36 +184,37 @@ dumps from the debugging options under `local/` too.
    in a folder of yours (not Program Files: it replaces itself when it updates).
 2. Double-click it. The first start unpacks the launcher's files into
    `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
-   in a console window; later starts open the launcher at once. (When that
+   in the launcher's window (**Getting the launcher ready**); later starts open
+   the launcher at once. (When that
    path has letters beyond plain ASCII, as a user name such as José gives it,
    the files go to `%PUBLIC%\TTT2Ultimate\launcher` instead: see below.)
-3. Continue with **Set Up Game** as in step 3 below. The tools, the build
+3. Continue with **Set Up** as in step 3 below. The tools, the build
    and the generated code stay in that folder too (plan its 30 GB on that drive).
 
-The release launcher updates itself. When it starts (and when its window is
-back in front after six hours) it asks GitHub for this repository's newest
-release; when that is newer, a notice at the top of the window says so, with
-**What's New** (the release's page) and **Update**, and the button at the
-top right says **Update to** its version (that button also looks for an update
-any time). Update downloads the new `.exe` beside the one you started, checks
-it (its size, GitHub's SHA-256, that it is a 64-bit Windows launcher and says
-it is that version), puts it in that one's place and opens it: it unpacks its
-files over the old ones, keeping everything else there. Anything failing, or
-Cancel, leaves the `.exe` as it was. A game an older version built gets
-**Update** beside Play, which builds it again on this PC with the new version's
-changes. Fighters `main` gives a newer pack show **Newer on main**, as in the
-Linux launcher (below).
+The release launcher updates itself. With a newer release known, a notice on
+**Home** says so, with **What's New** (the release's page), and Home's big
+button is **UPDATE**: it updates the launcher, which then goes on with the game
+program, built again on this PC with the new version's changes, and with your
+added fighters. (Before the game is set up, the notice's own **Update** updates
+the launcher alone.) The launcher's part downloads the new `.exe` beside the one
+you started, checks it (its size, GitHub's SHA-256, that it is a 64-bit Windows
+launcher and its files are of that version), puts it in that one's place and
+opens it: it unpacks its files over the old ones, keeping everything else there.
+Anything failing, or Cancel, leaves the `.exe` as it was. Fighters `main` gives
+a newer pack show **Newer on main**, as in the Linux launcher (below).
 
 A test build (an `.exe` made on a branch other than `main`, for testers) follows
 its branch instead: when the branch has newer commits, the notice says so with
 **Update**, which downloads the newest commit's files from GitHub, puts them in
 place of the ones the `.exe` unpacked and opens the launcher again: a fix pushed
-to the branch reaches testers without a new `.exe`. A game built from older
-files then gets **Update** beside Play. One stopped half-way is unpacked again
-from the `.exe` when it is next started.
+to the branch reaches testers without a new `.exe`. Changes to the launcher's
+own program need a new test build; Update then says so and changes nothing. A
+game built from older files then gets **UPDATE** on Home. One stopped half-way
+is unpacked again from the `.exe` when it is next started.
 
-When Set Up Game or Update fails, the task panel names the checks that failed or
-the build's first error; **Open Log** there opens the whole log.
+When Set Up Game or UPDATE fails, the launcher names the checks that failed or
+the build's first error; **More** on Home opens the whole log (**Open Latest
+Log**).
 
 **Starting from a downloaded project ZIP (Windows 10/11, x64):**
 
@@ -235,12 +236,14 @@ the build's first error; **Open Log** there opens the whole log.
    (`local\launcher-build.log`) and **Try again**; the release's
    `Golden_Fist_Launcher-x86_64.exe` needs no build. No Python installation,
    Git installation, terminal commands or second project download are needed.
-3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
-   update v16, and choose an installation folder.
+3. Choose **Set Up** on Home, then your own European Wii U TTT2 `.wua` containing
+   update v16 and an installation folder in the launcher's file browser (Windows'
+   own pickers are one button away there), and confirm with **Set Up Game**.
 4. Leave setup running while it downloads missing tools, prepares libraries,
    checks your game executable, builds and installs the Windows game.
-5. Click **Play** when setup completes. To add fighters, open Steam, close T7/T8,
-   select fighters and use **Import / Update selected**. Reina requires Tekken 8.
+5. Choose **Play** when setup completes. To add fighters, open Steam, close T7/T8,
+   open **Fighters**, and choose a fighter and **Add**, or **Add All**. Tekken 8's
+   fighters require Tekken 8.
 
 The first setup needs internet, a Vulkan-capable graphics driver, an x86-64-v3
 CPU and substantial free disk space for the tools, generated build and game.
@@ -262,57 +265,66 @@ installed Python 3 (`python launcher/windows/main.py` builds and starts the
 launcher as the ZIP's first start does). Setup obtains numpy and Pillow. Set
 `TTT2_PYTHON` to a Python executable to override automatic discovery.
 
-The Windows interface looks and behaves as the Linux launcher: one page with the
-game (Play, Settings, Update when the launcher's version is newer than the game's)
-and its characters as the shared importer finds them (Tekken 7, Tekken 8 and Steam;
-Add, Update and Remove per fighter, Add All, the DLC with what Steam says you own),
-a Settings page (fullscreen, resolution, 120 fps, input delay, and the keyboard's
-keys chosen by pressing them, as the Linux launcher writes keyboard.ini), and the
-task panel below with its progress, Cancel and Details. Windows' own parts stay:
-Set Up Game, the More menu (Build / Rebuild, Install from Wii U Source, Update
-Installed Game, the logs) and the Folders in Settings. It calls the existing Windows
+The Windows launcher is the same program as the Linux one (below), with the same
+three screens: **Home** (Play, or UPDATE while the launcher, the game program or
+an added fighter can be updated), **Fighters** (the characters as the shared
+importer finds them: Tekken 7, Tekken 8 and Steam; Add, Update and Remove per
+fighter, Add All, the DLC with what Steam says you own) and **Settings**
+(fullscreen, resolution, 120 fps, input delay, shaders, and the keyboard's keys
+chosen by pressing them, as the Linux launcher writes keyboard.ini). A task shows
+its progress and Cancel at the bottom of the window, an update on Home. Windows'
+own parts stay: Set Up, **More** on Home (Build / Rebuild, Install from Wii U
+Source, Update Installed Game, Set Up Again…, the logs) and **Folders** in
+Settings. It calls the existing Windows
 build scripts, native installer, and shared character importer, and needs nothing
-beyond the Python with Tk it gets itself. Set Up Game prepares the build tools automatically from the extracted project.
+beyond the private Python it gets itself. Set Up Game prepares the build tools automatically from the extracted project.
 Keep the project folder for rebuilds. The compiled launcher executable can also
 be opened from its build folder after setup.
 
 It detects the existing development archive, extracted title, fighter packs,
-saves, and CMake toolchain. Use **Paths**, then **Save paths**, to change them.
+saves, and CMake toolchain. To change them, use **Settings** > **Folders**
+(**Browse…** or **Default** for each), then **Save Folders**.
 Development configuration is saved in ignored `local/windows-launcher.json`;
 other layouts use `%LOCALAPPDATA%/TTT2Ultimate/launcher.json`. The data folder must
 end in `TTT2Ultimate` so runtime settings and launcher settings use the same place.
 Explicit fighter/save paths are passed to both the game and importer. Packs
-marked **Update available** still load: this compares revisions from the shared
+marked **Update ready** still load: this compares revisions from the shared
 importer and never automatically rebuilds anything.
 
 Task/game logs are saved under the selected data folder's `logs/` directory;
-startup errors are saved beside the executable in `launcher.log` (the release
-`.exe`'s in `local/launcher.log` of its folder in `%LOCALAPPDATA%`). Build/install
-tasks finish before the window closes. Import cancellation requests cleanup and
+the launcher's own messages are in `local/launcher.log` of its files' folder (the
+release's in `%LOCALAPPDATA%`, the project ZIP's), or beside the executable when
+it was not started with one. The window does not close while a task runs.
+Import cancellation requests cleanup and
 keeps completed extraction data. Only the release `.exe` updates itself (a
 project ZIP is updated as a whole); the Linux uninstall is not part of the
 Windows launcher.
 
 
 `ttt2-launcher` (**Golden Fist Launcher**) does the installing and
-the adding of fighters in a window, without a terminal. **Install…** asks for
-your `.wua` and a folder, checks the PC, builds the game program for it from
+the adding of fighters in a window, without a terminal, with the keyboard, the
+mouse or a controller, on three screens: **Home**, **Fighters** and **Settings**.
+**Install** on Home takes your `.wua` and a folder (chosen in the launcher's own
+file browser, or the system's picker), checks the PC, builds the game program for it from
 the archive and installs the game with its menu entry, as `ttt2 --install`
-does; then **Play**, **Update** (when the launcher's version differs from
-the program's) and **Uninstall…** (saves and added characters are kept unless you
+does; then Home has **Play** and **Uninstall** (saves and added characters are kept unless you
 tick them; of a save folder you chose with `TTT2_SAVE_DIR`, only the game's
-own saves go). While the game runs, however it was started, Play, Update and
+own saves go). While anything can be updated, the big button is **UPDATE** in Play's
+place: it brings the launcher (the AppImage), the game program (when the launcher's version differs from
+the program's) and the added fighters up to date, one after another; Play stays below it, unless
+the game is of an older version than the launcher. While the game runs, however it was started, Play, UPDATE and
 Uninstall wait for it to end. What the game writes when Play starts it goes
 to `~/.cache/ttt2/game.log` (of its last start); when it stops with an error,
-its last lines are shown under Play: attach that file to a report. The gear
-next to Play opens its **Settings**:
+its last lines are shown on Home: attach that file to a report.
+**Settings** has
 whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
-before acting on a button, and its keyboard keys ([Playing](#playing)). Its
-Characters section shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a part for each game's
+before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
+its keyboard keys ([Playing](#playing)), and the launcher's own sounds, motion, button prompts and text size.
+**Fighters** shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a group for each game's
 fighters (the installed game's first), with **Add** per fighter: Tekken 7's with **Add All** and its DLC
-fighters in a list that opens, with those your Steam account owns and **Add
-All Owned**; Tekken 8's (Reina, Azucena) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
+fighters in a group of their own, with those your Steam account owns and **Add
+All Owned**; Tekken 8's with **Add All**, without Tekken 7 or any of its fighters. **Remove** takes one out again. A
 Tekken 8 fighter whose moves could not be saved from Tekken 8 (a game update its helper does not know yet, or
 nothing to run it hidden) is added with Heihachi's moves, says so and why, and is offered as an update once
 their own can be saved. What all added fighters share is made from each one's own game, so while one game is
@@ -357,22 +369,25 @@ it opens the display's and sound's libraries when it starts. The
 game program it builds needs SDL 3.2 or newer from the system, which
 Ubuntu 24.04 does not have yet.
 
-The AppImage updates itself. When it starts it asks GitHub for this
-repository's newest release; when that is newer, a notice at the top of the
-window says so, with **What's New** (the release's page) and **Update**,
-and the button left of Check Again is highlighted (that button also looks
-for an update any time). Update downloads the new AppImage (with curl or
-wget), checks it, puts it in place of the AppImage you started and opens it. A release is tagged `v<version>` (`v0.1.1`) with
+The AppImage updates itself. When it starts, and when its window is back in
+front after six hours, it asks GitHub for this repository's newest release; when
+that is newer, a notice on Home says so, with **What's New** (the release's
+page), and Home's **UPDATE** gets it before the game program and the fighters
+(before the game is installed, the notice's own **Update** does). It downloads
+the new AppImage (with curl or wget), checks it, puts it in place of the
+AppImage you started and opens it; a new one that ends before it shows its
+window is replaced by the old one again. A release is tagged `v<version>` (`v0.1.1`) with
 the AppImage and the Windows launcher attached, both built with that version as `TTT2_LAUNCHER_VERSION` in
 `launcher/builder/CMakeLists.txt`: before it replaces anything each launcher
-checks that the new one says it is that version (`ttt2-launcher --version`).
+checks that the new one is that version (the AppImage by its `--version`, the
+`.exe` by the files in it).
 
 Both launchers also know what `main` has that their build lacks, before a
 release brings it: each knows the commit it was built from (Git's, when it is
-built; the Windows `.exe` keeps it in its files) and asks GitHub, with the release,
+built; the Windows `.exe` keeps it in its files) and asks GitHub
 what `main` has beyond it (`tools/characters/launcher.py main`). Fighters `main`
-gives a newer pack show **Newer on main**, and fighters only `main` has are named;
-all of it comes with the next release. (No notice counts `main`'s changes: a
+gives a newer pack show **Newer on main**; it
+comes with the next release. (No notice counts `main`'s changes: a
 release's own pull request is merged after its build.) A build of commits never
 pushed shows nothing.
 
@@ -443,8 +458,8 @@ I / J K L on the keyboard make the same diamond as the pad's buttons, so
 with the game's own button setup J is left punch, I right punch, K left
 kick and L right kick. Keys go by position, as on a US QWERTY keyboard.
 
-These are the defaults: the launcher's **Settings** (the gear next to Play)
-change them, at once, also while the game runs, and **Restore Defaults**
+These are the defaults: the launcher's **Settings** > **Keyboard**
+changes them, at once, also while the game runs, and **Restore Defaults**
 there brings them back. They are kept in `~/.config/ttt2/keyboard.ini`
 (`$XDG_CONFIG_HOME/ttt2/`), one `input = key` per line, which can be edited
 by hand too ([its format](docs/ARCHITECTURE.md#running-the-port)); F11,

@@ -2,9 +2,10 @@ GOLDEN FIST LAUNCHER - WINDOWS SETUP
 
 1. Extract the whole project ZIP into a writable folder (a short path is best).
 2. Double-click "Start Golden Fist Launcher.cmd".
-3. In the launcher, click "Set Up Game".
-4. Select your own European Wii U TTT2 .wua with update v16, then an install folder.
-5. Leave setup running. When it finishes, click "Play".
+3. In the launcher, choose "Set Up" on Home.
+4. Choose your own European Wii U TTT2 .wua with update v16, then an install folder,
+   and confirm with "Set Up Game".
+5. Leave setup running. When it finishes, choose "Play".
 
 First setup downloads the missing tools and builds the game on your PC. You do
 not need to install Python, Git or a compiler, or download this project twice.
@@ -12,10 +13,11 @@ Internet, an x64 Windows 10/11 PC with an x86-64-v3 CPU, Vulkan graphics drivers
 and at least 30 GB free space are recommended for setup. First setup takes time.
 Keep the extracted project for future updates. Your game archive is kept.
 
-For extra fighters: open Steam, close Tekken 7/8, select fighters in the launcher
-and click "Import / Update selected". You need your own installed source games;
-Reina comes from Tekken 8. An old pack can still work when an update is offered.
+For extra fighters: open Steam, close Tekken 7/8, open "Fighters" in the launcher,
+and choose a fighter and "Add", or "Add All". You need your own installed source
+games. An old pack can still work when an update is offered.
 
 On later starts use the same "Start Golden Fist Launcher.cmd". Ready tools are reused.
 The game files, saves and fighter packs are never included in the project ZIP.
-Use the launcher's "Open logs folder" button if setup reports an error.
+If setup reports an error, use "Open Latest Log" or "Open Logs Folder" under "More"
+on the launcher's Home.
