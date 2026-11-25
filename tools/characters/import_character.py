@@ -390,7 +390,7 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         entries = autodump.unsaved_files(paks, d.TEKKEN7_CODE)     # (one the game did not read before: again)
         if entries:
             files[d.TEKKEN7_ID] = (d.NAME, entries)
-        if not all(subtitles.saved(d.TEKKEN7_CODE, language, files_folder) for language in autodump.SUBTITLE_LANGUAGES):
+        if not subtitles.all_saved(d.TEKKEN7_CODE, files_folder):
             subs[d.TEKKEN7_ID] = (d.TEKKEN7_CODE, d.NAME)
     if importer.HEIHACHI not in have:                       # (every import needs his)
         needed[importer.HEIHACHI] = ('hei', 'Heihachi')
@@ -407,9 +407,9 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
             if needed or files:
                 progress.fail(str(error))
             # (only the subtitles were wanted, Steam not running say: the fighters are made without them, their intro
-            # and win poses showing no subtitle; the next import asks again)
+            # and win poses showing no subtitle, and their packs say so: launcher.py status offers to update them)
             print('WARNING: the Tekken 7 subtitles of %s were not saved (%s): their intro and win poses show no '
-                  'subtitle' % (', '.join(name for _, name in subs.values()), error))
+                  'subtitle until they are updated with Steam running' % (', '.join(name for _, name in subs.values()), error))
             skipped = {}
         who = {fid: name for fid, (_, name) in needed.items()}
         who.update((fid, name) for fid, (name, _) in files.items())

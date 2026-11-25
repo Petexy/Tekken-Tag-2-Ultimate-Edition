@@ -97,8 +97,11 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
     } else if (f.update && !(f.stand_in && !addable(facts, f))) {
         r.pill = Pill{"Update ready", PillKind::kWarn,
                       f.stand_in ? "They fight with Heihachi's moves: updating them gives them their own."
-                                 : "Made by an older version: they are in the game, and updating them gives them what "
-                                   "this version adds."};
+                      : f.without_subtitles
+                          ? "Their intro and win subtitles could not be saved from Tekken 7 when they were added (Steam "
+                            "was not running): updating them adds them."
+                          : "Made by an older version: they are in the game, and updating them gives them what "
+                            "this version adds."};
     } else if (outfits_changed(facts, f)) {
         r.pill = f.outfits_added ? Pill{"Outfits to remove", PillKind::kWarn, "Update them to remove their outfits."}
                                  : Pill{"Outfits to add", PillKind::kWarn, "Update them to add their outfits."};

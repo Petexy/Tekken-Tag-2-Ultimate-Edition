@@ -1403,6 +1403,51 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
     }});
 }
 
+// A Tekken 7 fighter whose subtitles are not saved waits for Steam (Tekken 7 reads them), as one whose moves are
+// not; a pack made without them is offered to update, and says why.
+void subtitles_later(const fs::path& golden, const fs::path& scratch) {
+    current = "subtitles not saved";
+    replay(fixture(golden, "installed"), Caps::linux_caps(), scratch, {0, [](Harness& h) {
+        Facts f = h.model.facts();
+        CHECK(f.status.has_value());
+        if (!f.status) return;
+        f.task.reset();
+        f.status->steam_running = false;
+        f.status->heihachi_saved = true;
+        Fighter* x = nullptr;
+        for (Fighter& y : f.status->fighters)
+            if (y.name == "josie") x = &y;
+        CHECK(x != nullptr);
+        if (!x) return;
+        x->moveset_saved = true;
+        x->installed = x->update = x->without_subtitles = true;
+        x->outdated = x->newer = false;
+        CHECK(addable(f, *x));
+        x->subtitles_saved = false;
+        CHECK(!addable(f, *x));
+        CHECK_EQ(not_addable_why(f, *x), std::string("Start Steam: Tekken 7 needs it to save their subtitles"));
+        UpdatePlan p = update_plan(f);
+        CHECK(std::find(p.fighters.begin(), p.fighters.end(), "josie") == p.fighters.end());
+        CHECK(std::any_of(p.later.begin(), p.later.end(), [](const auto& l) {
+            return l.second == "Start Steam: Tekken 7 needs it to save their subtitles";
+        }));
+        bool said = false;
+        for (const GameGroup& g : characters_view(f).games)
+            for (const FighterRow& r : g.rows)
+                if (r.name == "josie" && r.pill)
+                    said = r.pill->text == "Update ready" && r.pill->explain.starts_with("Their intro and win subtitles");
+        CHECK(said);
+        f.status->steam_running = true;
+        CHECK(addable(f, *x));
+        p = update_plan(f);
+        CHECK(std::find(p.fighters.begin(), p.fighters.end(), "josie") != p.fighters.end());
+        // (Moves not saved either: those are named.)
+        f.status->steam_running = false;
+        x->moveset_saved = false;
+        CHECK_EQ(not_addable_why(f, *x), std::string("Start Steam: Tekken 7 needs it to save their moves"));
+    }});
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -1415,6 +1460,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     every_id(golden, scratch / "ids", Caps::windows_caps());
     windows_before(scratch / "windows-before");
     update_all(golden, scratch / "update-all");
+    subtitles_later(golden, scratch / "subtitles-later");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

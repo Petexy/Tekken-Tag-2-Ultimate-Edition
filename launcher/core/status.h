@@ -42,6 +42,12 @@ struct Fighter {
     // own could not be saved when they were added. `update` tells whether
     // their own can be had now. (Only with `added()`.)
     bool stand_in = false;
+    // (Tekken 7) Their intro and win subtitles are saved: adding them needs
+    // no Steam for those. An older importer says nothing: saved.
+    bool subtitles_saved = true;
+    // Their pack was made without those subtitles (not saved then): `update`
+    // is true for it. (Only with `added()`.)
+    bool without_subtitles = false;
     // How many outfits adding them can make (import_character.py
     // --outfits), 0 for none.
     int outfits = 0;

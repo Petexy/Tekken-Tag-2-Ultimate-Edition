@@ -67,6 +67,14 @@ class Records(unittest.TestCase):
 
 
 class Lines(unittest.TestCase):
+    def test_all_saved(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(autodump, 'SUBTITLE_LANGUAGES', ('us', 'fr')):
+            self.assertFalse(subtitles.all_saved('abc', d))
+            saved(d, 'abc', b'')                                                    # (an empty one: the game has none)
+            self.assertFalse(subtitles.all_saved('abc', d))                         # (not in French)
+            saved(d, 'abc', b'', 'fr')
+            self.assertTrue(subtitles.all_saved('abc', d))
+
     def test_lines_of_a_saved_file(self):
         data = (record('ab_s00', 'Ready?') + record('ab_s01', 'One...', 15, 100) +
                 record('ab_s01', " two and\nthree.", 104, 269) + record('ab_w00', '\nOver  and out. '))
