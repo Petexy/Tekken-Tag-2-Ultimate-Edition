@@ -661,7 +661,7 @@ void Ui::handle_mouse() {
             return;
         }
     }
-    // A locked box under the pointer: nothing there is hovered; a click there unlocks (FEEDBACK F4).
+    // A locked box under the pointer: nothing there is hovered; a click there unlocks.
     int over_locked = -1;
     if (m.inside)
         for (int l : locked_) {
@@ -985,7 +985,7 @@ void Ui::step_animations() {
     }
     // Once it reached its item, it stays on it exactly while that item's layout moves (a springing seam resizes
     // the rows): the spring only carries it from one item to the next - within a half: into the other half it
-    // jumps (it never flies across the seam, FEEDBACK F1/F4).
+    // jumps (it never flies across the seam).
     const Seam* seam = seam_of(fi);
     const int side = !seam ? 0 : n.x + n.w / 2 > seam->x_at(n.y + n.h / 2) ? 1 : -1;
     if (side != highlight_side_) snap_next_ = true;

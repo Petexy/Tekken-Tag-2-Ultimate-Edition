@@ -97,7 +97,7 @@ class LauncherBackend(unittest.TestCase):
         with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'test build'):
             worker(self.settings, 'files', [])
     def test_files_worker_says_when_the_program_is_the_exes(self):
-        # (compat review #3: the new launcher's env says its program is built into the .exe; update_files refuses
+        # (The new launcher's env says its program is built into the .exe; update_files refuses
         # changes to it then.)
         from backend import worker
         import self_update

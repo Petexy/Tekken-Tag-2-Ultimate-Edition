@@ -147,7 +147,7 @@ private:
     bool running_ = false, shown_ = false, cancelled_ = false, failed_ = false, details_ = false;
     std::string title_, detail_;
     bool started_ = false; // a line moved the progress: the detail is no more "Starting…"
-    // Windows' own update (C3): the worker said "@step update Putting ... in place": from then on it is replacing
+    // Windows' own update: the worker said "@step update Putting ... in place": from then on it is replacing
     // the .exe or its files, and Cancel is gone (the worker no longer looks at its cancel file).
     bool replacing_ = false;
     double hide_at_ = -1;

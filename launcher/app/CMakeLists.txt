@@ -2,8 +2,8 @@
 # over the model of ../model (what the window shows and does) and core's processes (../backend). This folder has
 # the program: its loop, its screens, and what it asks of the OS (backend_sdl.cpp through SDL; backend_linux.cpp
 # Linux's install, kit and AppImage; backend_windows.cpp + windows_app.cpp Windows' files, first start and
-# --query answers, ARCHITECTURE 6). On Windows it is the CMake target ttt2-launcher of a player's Set Up Game
-# (TOOLS_ONLY, on the pinned SDL3 DLL, C1) and of the release .exe (TTT2_LAUNCHER_ONLY, SDL built in).
+# --query answers). On Windows it is the CMake target ttt2-launcher of a player's Set Up Game
+# (TOOLS_ONLY, on the pinned SDL3 DLL) and of the release .exe (TTT2_LAUNCHER_ONLY, SDL built in).
 
 if(NOT WIN32)
     # The importer, as the launcher runs it installed: read-only, without its tests and caches.
@@ -103,7 +103,7 @@ if(WIN32)
     set_tests_properties(launcher_app_version PROPERTIES PASS_REGULAR_EXPRESSION "^ttt2-launcher ${TTT2_LAUNCHER_VERSION}")
     set_tests_properties(launcher_app_test launcher_app_version PROPERTIES LABELS launcher)
     if(TTT2_TOOLS_ONLY)
-        # (The players' Set Up Game build, C1: this program made a release .exe says its version and unpacks its files,
+        # (The players' Set Up Game build: this program made a release .exe says its version and unpacks its files,
         # as old launchers' updates check it. A launcher-only build has launcher_release_exe_test instead.)
         find_package(Python3 COMPONENTS Interpreter)
         if(Python3_Interpreter_FOUND)
@@ -142,6 +142,14 @@ endif()
 install(TARGETS ttt2-launcher RUNTIME DESTINATION bin)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.desktop DESTINATION share/applications)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.svg DESTINATION share/icons/hicolor/scalable/apps)
+# The license texts, at the paths THIRD_PARTY_NOTICES.md names (the AppImage must have them: release_license_files in
+# ../appimage/release_checks.sh).
+set(licenses_source ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+set(licenses_folder share/licenses/ttt2-launcher)
+install(FILES ${licenses_source}/LICENSE ${licenses_source}/THIRD_PARTY_NOTICES.md DESTINATION ${licenses_folder})
+install(DIRECTORY ${licenses_source}/licenses DESTINATION ${licenses_folder})
+install(DIRECTORY ${licenses_source}/launcher/ui/fonts DESTINATION ${licenses_folder}/launcher/ui
+    FILES_MATCHING PATTERN OFL.txt)
 
 # Tests: the parts (no window), and the program itself offscreen against stub programs (tests/stub: an importer
 # answering from a fixture, a builder printing the protocol, a game writing a marker), in a scratch home.
@@ -160,26 +168,26 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/e2e ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_e2e)
     set_tests_properties(launcher_app_e2e PROPERTIES TIMEOUT 240)
-    # Frame sequences and the screens' rules (FEEDBACK F1/F4/F6): tests/frames.sh.
+    # Frame sequences and the screens' rules: tests/frames.sh.
     add_test(NAME launcher_app_frames
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frames.sh $<TARGET_FILE:ttt2-launcher>
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/frames ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_frames)
     # (About 3.5 minutes on 4 cores: large windows drawn by the software renderer.)
     set_tests_properties(launcher_app_frames PROPERTIES TIMEOUT 900)
-    # Fighters and Settings (FEEDBACK F1/F3/F4/F5, U4 key capture, Add/Remove/Cancel): tests/screens.sh.
+    # Fighters and Settings (choosing a key, Add/Remove/Cancel): tests/screens.sh.
     add_test(NAME launcher_app_screens
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/screens.sh $<TARGET_FILE:ttt2-launcher>
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/screens ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_screens)
     set_tests_properties(launcher_app_screens PROPERTIES TIMEOUT 1200)
-    # The sounds as heard (FEEDBACK F7): SDL's disk audio driver into files, Sound on / off / its button / Play.
+    # The sounds as heard: SDL's disk audio driver into files, Sound on / off / its button / Play.
     add_test(NAME launcher_app_sounds
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/sounds.sh $<TARGET_FILE:ttt2-launcher>
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/stub ${CMAKE_CURRENT_BINARY_DIR}/sounds ${Python3_EXECUTABLE})
     list(APPEND _app_tests launcher_app_sounds)
     set_tests_properties(launcher_app_sounds PROPERTIES TIMEOUT 300)
-    # C2's way back (compat review #4): an update to a version that breaks before its first frame (tests/way_back).
+    # The update's way back: an update to a version that breaks before its first frame (tests/way_back).
     find_program(TTT2_CURL curl)
     if(TTT2_CURL)
         add_executable(launcher_way_back_broken tests/way_back/broken.cpp)
@@ -189,13 +197,13 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
         list(APPEND _app_tests launcher_app_way_back)
         set_tests_properties(launcher_app_way_back PROPERTIES TIMEOUT 300)
     endif()
-    # C2's other video driver when the one the player named fails (compat review #5): a headless cage, else skipped.
+    # The other video driver when the one the player named fails: a headless cage, else skipped.
     add_test(NAME launcher_app_video_fallback
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/video_fallback.sh $<TARGET_FILE:ttt2-launcher>
                 ${CMAKE_CURRENT_BINARY_DIR}/video-fallback)
     list(APPEND _app_tests launcher_app_video_fallback)
     set_tests_properties(launcher_app_video_fallback PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77)
-    # The in-app browser (REVIEW2_app #3/#6): long lists at two sizes, Show hidden, and a folder slow to open
+    # The in-app browser: long lists at two sizes, Show hidden, and a folder slow to open
     # (tests/slow_folders.c, an LD_PRELOAD: the window never waits for it).
     add_library(launcher_slow_folders MODULE tests/slow_folders.c)
     target_link_libraries(launcher_slow_folders PRIVATE ${CMAKE_DL_LIBS})
@@ -205,7 +213,7 @@ if(TTT2_BASH AND Python3_Interpreter_FOUND)
                 $<TARGET_FILE:launcher_slow_folders>)
     list(APPEND _app_tests launcher_app_picker)
     set_tests_properties(launcher_app_picker PROPERTIES TIMEOUT 600)
-    # Left alone, as a player starts it (ARCHITECTURE sec 7, U9): frames only when something changed, ambient motion
+    # Left alone, as a player starts it: frames only when something changed, ambient motion
     # at most 30 a second and paused after 20 s, none with Reduce motion or while the game runs: tests/idle.sh.
     add_test(NAME launcher_app_idle
         COMMAND ${TTT2_BASH} ${CMAKE_CURRENT_SOURCE_DIR}/tests/idle.sh $<TARGET_FILE:ttt2-launcher>

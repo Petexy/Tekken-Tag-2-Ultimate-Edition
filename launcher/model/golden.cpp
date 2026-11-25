@@ -187,6 +187,7 @@ Dump flatten_into(const View& v, std::vector<Action>* all) {
                 for (const Line& l : f.lines) o.line(l);
             }
             for (const Line& l : c.news) o.line(l);
+            if (c.add_all_owned) o.action(*c.add_all_owned);
             if (c.outfits_all) o.action(*c.outfits_all);
             for (const Line& l : c.outfits_notes) o.line(l);
             for (const GameGroup& g : c.games) {

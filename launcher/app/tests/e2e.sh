@@ -111,7 +111,7 @@ has "$h" '@test update-continued ok Updated: launcher [0-9.]*, the game program 
 [ -s "$h/builder-env.txt" ] || fail "continued: the builder did not run"
 grep -q '^TTT2_LAUNCHER_CONTINUE=' "$h/builder-env.txt" 2>/dev/null && fail "continued: the builder got the variable"
 
-# A start put back after the new version failed (C2) never goes on, and nothing it starts gets the variable.
+# A start put back after the new version failed never goes on, and nothing it starts gets the variable.
 for start in continue rolled-back; do
     h=$(home "smoke-$start" older)
     vars=(TTT2_LAUNCHER_CONTINUE=update TTT2_LAUNCHER_TEST_SMOKE="$h/smoke.json")

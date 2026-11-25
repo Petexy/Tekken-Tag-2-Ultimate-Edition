@@ -3,7 +3,8 @@
 // Turns what an old launcher dumped in one golden case's run into the
 // golden files model_test reads (see golden/README.md):
 //   RUN_DIR/dumps/NN-<step>.json  ->  OUT_DIR/<os>/NN-<step>.json
-//   RUN_DIR/log.txt's "@test" lines  ->  OUT_DIR/<os>/tests.txt
+//   RUN_DIR/log.txt's "@test" lines  ->  OUT_DIR/linux/tests.txt (the Tk
+//   window has no test steps: none for windows)
 // ROOT, the folder the case ran in (its HOME), becomes /home/player, so the
 // goldens name no real folder; each dump is read and written again in the one
 // shape golden.cpp writes (keys in order, one element a line), so a dump that
@@ -45,7 +46,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string root = fs::path(argv[1]).lexically_normal().string();
-    const fs::path run = argv[2], out = fs::path(argv[3]) / (argc > 4 ? argv[4] : "linux");
+    const std::string os = argc > 4 ? argv[4] : "linux";
+    const fs::path run = argv[2], out = fs::path(argv[3]) / os;
     std::error_code ec;
     fs::remove_all(out, ec);
     fs::create_directories(out, ec);
@@ -71,10 +73,12 @@ int main(int argc, char** argv) {
         }
         std::ofstream(out / f.filename(), std::ios::binary) << dump_json(*dump);
     }
-    std::istringstream log(replaced(read(run / "log.txt"), root, kHome));
-    std::ofstream said(out / "tests.txt", std::ios::binary);
-    for (std::string line; std::getline(log, line);) {
-        if (line.starts_with("@test")) said << line << "\n";
+    if (os == "linux") {
+        std::istringstream log(replaced(read(run / "log.txt"), root, kHome));
+        std::ofstream said(out / "tests.txt", std::ios::binary);
+        for (std::string line; std::getline(log, line);) {
+            if (line.starts_with("@test")) said << line << "\n";
+        }
     }
     std::printf("%zu dumps\n", dumps.size());
     return 0;

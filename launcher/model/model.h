@@ -2,7 +2,7 @@
 
 // The launcher without its window: the facts, the controllers (the status and
 // Steam's answer, GitHub's, the task, the keys, display.ini, the AppImage's
-// update) and activate(id) for every element id (U14), as launcher/app's
+// update) and activate(id) for every element id, as launcher/app's
 // Launcher did inside its GTK code. The app draws view() and does the
 // Effects that need the OS (file pickers, opening a page, a folder, the
 // uninstall's deleting, the preflight's disk reads); everything a program
@@ -32,6 +32,9 @@ struct Commands {
     virtual std::optional<Command> status(const Facts& facts) = 0;
     virtual std::optional<Command> owned(const Facts& facts) = 0;
     virtual std::optional<Command> main_news(const Facts& facts) = 0; // none without a known build commit
+    // Whether a newer release is out, asked by the launcher's files (Windows' release .exe). None: the AppImage
+    // asks GitHub itself (SelfUpdate), the rest never update themselves.
+    virtual std::optional<Command> release(const Facts&) { return std::nullopt; }
     virtual Command import(const Facts& facts, const std::vector<std::string>& names, const std::string& outfits) = 0;
     virtual Command remove(const Facts& facts, const std::vector<std::string>& names) = 0;
     virtual Command packages(const Facts& facts) = 0;
@@ -49,7 +52,7 @@ struct Commands {
     }
 };
 
-// Linux (spec/linux_app.md 2.x): the importer's scripts with Python, the kit's ttt2-build, the game's program.
+// Linux: the importer's scripts with Python, the kit's ttt2-build, the game's program.
 struct LinuxCommands : Commands {
     // The importer's environment: PYTHONUNBUFFERED, PYTHONDONTWRITEBYTECODE and the kit's helpers that are there.
     std::map<std::string, std::string> importer_env;
@@ -67,11 +70,11 @@ struct LinuxCommands : Commands {
     std::optional<Command> play(const Facts& facts) override;
     std::optional<Command> worker(const Facts&, TaskKind) override { return std::nullopt; }
 };
-// Windows: what the Tk window ran (spec windows 2.1 and 3.2): `<python> -u <root>/launcher/windows/main.py
+// Windows: what the Tk window ran: `<python> -u <root>/launcher/windows/main.py
 // --build-dir <build> --config <config>` with --query <name> (status, owned, main: one JSON object on the last
 // line) or --worker <action> --cancel-file <logs>/<action>-<stamp>.cancel --outfits <names|none> [names] (its
 // log beside it as .log); Python is facts.python, the folders facts.windows (from --query state), in the
-// launcher's files folder. Play is what --query state answered (C8).
+// launcher's files folder. Play is what --query state answered.
 struct WindowsCommands : Commands {
     // A task's files' stamp: the app's clock ("20261124-140501-123456", as the Tk window named them).
     std::function<std::string()> stamp;
@@ -80,7 +83,7 @@ struct WindowsCommands : Commands {
     Command worker_command(const Facts& facts, const std::string& action, const std::vector<std::string>& names,
                            const std::string& outfits) const;
     // `--query release`: GitHub's newest release, for the release .exe (none from a project ZIP or a build).
-    std::optional<Command> release(const Facts& facts) const;
+    std::optional<Command> release(const Facts& facts) override;
     // `--query check --action ACTION [names]`: what refuses a task before it starts (SetupProblem).
     Command check(const Facts& facts, const std::string& action, const std::vector<std::string>& names) const;
     // `--query save-settings`: Settings > Folders checked and saved; the folders go as a JSON object on its input.
@@ -100,7 +103,7 @@ struct WindowsCommands : Commands {
     std::optional<Command> presave(const Facts& facts, TaskKind kind) override;
     std::optional<Command> precheck(const Facts& facts, TaskKind kind, const std::vector<std::string>& names) override;
 };
-// Whether an element id is one this OS's window has (U1): Windows' More, Set Up Game, Folders, Performance,
+// Whether an element id is one this OS's window has: Windows' More, Set Up Game, Folders, Performance,
 // keyboard.ini and log; Linux's install flow, uninstall, numpy/Pillow download and commands to copy.
 bool of_this_os(const Caps& caps, const std::string& id);
 
@@ -210,7 +213,7 @@ public:
     std::vector<Effect> preflight_done(const std::vector<Check>& checks, double now, uint64_t generation);
     void uninstall_done(const UninstallReport& report, double now);
     void opened_updated(const std::string& error, double now); // Windows: "" when the new launcher opened
-    // Keys while Settings is open (U4): true when used.
+    // Keys while Settings is open: true when used.
     bool key_down(int usage, bool repeat, double now);
     void key_up(int usage, double now);
     void pick_key(int input, Device device, double now);

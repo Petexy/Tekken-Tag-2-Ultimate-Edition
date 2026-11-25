@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# C2's other video driver (compat review #5): the launcher in a headless cage (WLR_BACKENDS=headless: Wayland and
+# The other video driver: the launcher in a headless cage (WLR_BACKENDS=headless: Wayland and
 # Xwayland of its own, nothing on this PC's screen) on a private bus, a start as a player's (TTT2_LAUNCHER_TEST_SMOKE)
 # whose first frame says the driver. The player's SDL_VIDEODRIVER / SDL_VIDEO_DRIVER naming a driver that fails must
 # not keep the other one from being tried.
@@ -46,7 +46,7 @@ IN
 
 smoke plain-wayland wayland SDL_VIDEO_DRIVER=wayland
 smoke plain-x11 x11 SDL_VIDEO_DRIVER=x11
-# (The review's cases: the driver named fails, the other is there.)
+# (The cases: the driver named fails, the other is there.)
 smoke named-wayland-gone x11 WAYLAND_DISPLAY=nonexistent SDL_VIDEODRIVER=wayland
 smoke named-x11-gone wayland DISPLAY=:99 SDL_VIDEODRIVER=x11
 smoke new-name-x11-gone wayland DISPLAY=:99 SDL_VIDEO_DRIVER=x11

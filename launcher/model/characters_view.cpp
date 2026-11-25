@@ -421,6 +421,25 @@ void outfits_line(const Facts& facts, CharactersView& v) {
     v.outfits_notes.push_back(line);
 }
 
+// One button for every game's characters: each game's own and the owned DLC ones, from the games that can be used.
+void add_all_owned(const Facts& facts, CharactersView& v) {
+    const auto names = all_owned_to_add(facts);
+    std::string why;
+    if (facts.task) {
+        why = task_why("add characters");
+    } else if (!can_import(facts, &why)) {
+    } else if (names.empty()) {
+        why = game_usable(facts, kTekken7) || game_usable(facts, kTekken8)
+                  ? "Every character you own that can be added now is added."
+                  : "Neither Tekken 7 nor Tekken 8 can be used to add characters now.";
+    }
+    Action a = button("add-all-owned:all", "Add All Owned", why.empty(), why);
+    a.describe.title = "Add All Owned: every game's characters";
+    a.describe.explain = "Adds every character that can be added now from the games on this PC: Tekken 7's and "
+                         "Tekken 8's own, and the DLC characters your Steam account owns.";
+    v.add_all_owned = a;
+}
+
 } // namespace
 
 CharactersView characters_view(const Facts& facts) {
@@ -596,6 +615,7 @@ CharactersView characters_view(const Facts& facts) {
                                    false));
     }
 
+    add_all_owned(facts, v);
     outfits_line(facts, v);
 
     if (!s.tekken7_found && s.tekken8_found) {

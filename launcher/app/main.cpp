@@ -141,7 +141,7 @@ void log_to_file(const std::filesystem::path& file) {
         fs::rename(file, file.parent_path() / "launcher.old.log", ec);
 #ifdef _WIN32
     // (An old test build's starter, 0.4 to 0.8.0, holds launcher.log for its Python, the bridge, sharing it only for
-    // reading: then launcher-ui.log beside it, compat review #7. Only a file that opens is reopened as standard error:
+    // reading: then launcher-ui.log beside it. Only a file that opens is reopened as standard error:
     // _wfreopen closes it first and would leave none when the file cannot be opened.)
     fs::path chosen;
     for (const fs::path& f : {file, file.parent_path() / L"launcher-ui.log"}) {
@@ -188,8 +188,8 @@ static int launcher_main(int argc, char** argv) {
     program.instance_name = environment("TTT2_LAUNCHER_TEST_INSTANCE");
     program.wake = wake;
 #ifndef _WIN32
-    // (Before any window: the player is told in a message box too, as C2's failures are, not only on standard error,
-    // which a start from the desktop's menu shows nowhere; compat review #8. Tests' starts only write it.)
+    // (Before any window: the player is told in a message box too, as when no window can open, not only on standard
+    // error, which a start from the desktop's menu shows nowhere. Tests' starts only write it.)
     program.tell = [quiet = !environment("TTT2_LAUNCHER_TEST_SMOKE").empty()](const std::string& text) {
         std::fprintf(stderr, "ttt2-launcher: %s\n", text.c_str());
         if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Golden Fist Launcher", text.c_str(), nullptr);
@@ -202,7 +202,7 @@ static int launcher_main(int argc, char** argv) {
     o.instance = std::move(start.instance);
     o.files = start.files;
 #ifndef _WIN32
-    // (C2: set when an update's new version never drew and this one was put back; not for the programs it starts.)
+    // (Set when an update's new version never drew and this one was put back; not for the programs it starts.)
     o.rolled_back = environment(launcher::kRolledBackVariable);
     unsetenv(launcher::kRolledBackVariable);
 #endif

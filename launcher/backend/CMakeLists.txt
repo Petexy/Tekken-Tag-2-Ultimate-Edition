@@ -1,4 +1,4 @@
-# What the new launcher's model is given on each OS (ARCHITECTURE section 6): its programs run through core's
+# What the new launcher's model is given on each OS: its programs run through core's
 # processes (starter), and on Windows the answers of `main.py --query` (windows_backend). No SDL: tested on its own,
 # Windows' answers from recorded JSON (tests/windows), on Linux too.
 add_library(launcher_backend STATIC

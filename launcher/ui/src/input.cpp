@@ -147,7 +147,7 @@ void InputRouter::feed(const RawEvent& e) {
         last_device_ = Device::Gamepad;
         last_glyphs_ = e.pad_kind;
         if (capturing_) {
-            // The other order of the same press (U4): a Steam Controller's A is an Enter Steam types AND its pad's
+            // The other order of the same press: a Steam Controller's A is an Enter Steam types AND its pad's
             // A; the Enter, arriving first, started choosing a key; the pad's report of that same press (pads are
             // read at the poll: it arrives later) is not B, it changes nothing. By arrival time, as press() does.
             if (same_press(pad_action(e.code, e.pad_kind), Device::Gamepad, e.device_id, e.time)) return;

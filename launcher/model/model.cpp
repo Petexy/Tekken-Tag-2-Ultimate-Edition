@@ -101,14 +101,14 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
               outfits.empty() ? "none" : outfits};
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.cwd = w.root;
-    // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
+    // (The launcher's own update replaces the .exe or its files: never ended half-way.)
     if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
     // (A test build's files: the .exe's program stays as it is, so changes to it are refused, self_update.py.)
     if (action == "files" && facts.program_in_exe) c.env["TTT2_LAUNCHER_PROGRAM_IN_EXE"] = "1";
     return c;
 }
 
-std::optional<Command> WindowsCommands::release(const Facts& facts) const {
+std::optional<Command> WindowsCommands::release(const Facts& facts) {
     if (facts.python.empty() || facts.windows.root.empty() || !facts.self_update) return std::nullopt;
     return query(facts, "release");
 }
@@ -458,7 +458,7 @@ void LauncherModel::deactivated() {
 
 void LauncherModel::refresh(double now) {
     parts_.environment.look(facts_);
-    // (Settings stays open when the game is gone: its launcher section is always there, U17.)
+    // (Settings stays open when the game is gone: its launcher section is always there.)
     load_status(now);
 }
 
@@ -567,8 +567,10 @@ void LauncherModel::check_ownership(double now) {
 }
 
 void LauncherModel::check_release(double now) {
-    if (!self_update_ || release_checking_) return;
-    const auto command = self_update_->check_command();
+    if (release_checking_) return;
+    // (The AppImage asks GitHub itself; the release .exe asks its files, which answer whether it is newer.)
+    const bool files = !self_update_;
+    const auto command = self_update_ ? self_update_->check_command() : parts_.commands.release(facts_);
     if (!command) return;
     release_checking_ = true;
     release_time_ = now;
@@ -578,10 +580,18 @@ void LauncherModel::check_release(double now) {
     release_job_ = parts_.starter.start(
         *command,
         {[this](const std::string& line, bool is_error) { (is_error ? release_err_ : release_out_) += line + "\n"; },
-         [this](int code) {
+         [this, files](int code) {
              release_checking_ = false;
              // (Quietly: no notice when GitHub cannot be asked now.)
-             if (code == 0 || json::parse(release_out_)) {
+             if (files) {
+                 const auto value = json::parse(answer_of(release_out_));
+                 if (const auto answer = value ? release_query_answer(*value) : std::nullopt) {
+                     if (answer->release)
+                         facts_.newer = answer->release;
+                     else if (answer->none || answer->error.empty())
+                         facts_.newer.reset(); // (none published, or none newer than this one)
+                 }
+             } else if (code == 0 || json::parse(release_out_)) {
                  const ReleaseAnswer answer = parse_release(answer_of(release_out_));
                  if (self_update_->on_release) self_update_->on_release(answer);
              }
@@ -1097,7 +1107,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         return effects;
     }
 
-    // (Another OS's item: not there to activate, U1.)
+    // (Another OS's item: not there to activate.)
     if (!of_this_os(facts_.caps, id)) {
         said_ = "no " + id + " to activate";
         return effects;
@@ -1108,7 +1118,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         keys_.close();
         page_ = Page::kMain;
     } else if (id == "settings") {
-        // U17: always there (the game's part when it is installed; Windows' folders always).
+        // Always there (the game's part when it is installed; Windows' folders always).
         display_.load();
         keys_.load();
         page_ = Page::kSettings;
@@ -1228,6 +1238,8 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         start_import(to_update(facts_, *game), now);
     else if (id == "add-all-owned")
         start_import(owned_to_add(facts_, kTekken7), now);
+    else if (id == "add-all-owned:all")
+        start_import(all_owned_to_add(facts_), now);
     else if (const auto game = rest("add-all-owned:"))
         start_import(owned_to_add(facts_, *game), now);
     else if (id == "dlc" || id == "dlc:tekken8") // (both games' open together)

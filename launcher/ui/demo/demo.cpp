@@ -194,7 +194,7 @@ public:
         blue.w = Size::fixed(bl.w + 16 + 16);
         blue.h = Size::fixed(std::max(60.f, bl.h + 14));
         blue.pad = {16, 0, 16, 8};
-        blue.mirror = true;  // (FEEDBACK F2: the blue half is right-aligned)
+        blue.mirror = true;  // (the blue half is right-aligned)
         if (screen == 0) home(ui, crimson, blue);
         else if (screen == 1) fighters(ui, crimson, blue);
         else if (screen == 2) settings(ui, crimson, blue);
@@ -472,7 +472,7 @@ private:
                           .color = rgba(255, 255, 255, .78f),
                           .outline = 1.2f},
                  fit(Box{.h = Size::fixed(30), .margin = {4, 4, 0, 14}}, SeamFit::BlueRect));
-            // (No "P1 TAG P2" preview: the blue side shows only the focused fighter, FEEDBACK F3.)
+            // (No "P1 TAG P2" preview: the blue side shows only the focused fighter.)
             (void)p;
             {
                 auto r =
@@ -1078,7 +1078,7 @@ int run(const std::vector<std::string>& args) {
         for (const ActionEvent& a : in.actions)
             if (a.action == Action::Up || a.action == Action::Down) demo.note_move(a.action == Action::Up ? -1 : 1);
         // The seam first (leaning toward the half the focus was on: blue items are in focus group 1), then the
-        // screen laid out for the split as it is drawn now (FEEDBACK F1: never for an old or target split).
+        // screen laid out for the split as it is drawn now (never for an old or target split).
         {
             const Rect fr = ui.rect(ui.focused());
             const int side = fr.empty() ? 0 : fr.center().x > stage.seam_now().x_at(fr.center().y) ? 1 : -1;

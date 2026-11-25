@@ -68,7 +68,7 @@ Window::~Window() {
 
 bool Window::try_open(const WindowOptions& o, const char* video, const char* render, std::string& why) {
     // (A driver of its own overrides the player's SDL_VIDEO_DRIVER / SDL_VIDEODRIVER, which a hint of normal priority
-    // does not: C2's other driver is tried also when they named one that fails. None: as they asked.)
+    // does not: the other driver is tried also when they named one that fails. None: as they asked.)
     if (video) SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, video, SDL_HINT_OVERRIDE);
     else SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
@@ -127,7 +127,7 @@ bool Window::open(const WindowOptions& o) {
         ok = try_open(o, "offscreen", "software", why);
         first = why;
     } else {
-        // C2: the default driver (or the one the player named) and renderer; the other video driver; the software
+        // The default driver (or the one the player named) and renderer; the other video driver; the software
         // renderer with each.
         ok = try_open(o, nullptr, nullptr, why);
         first = why;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The in-app .wua browser (REVIEW2_app #3/#6), offscreen against the stubs of tests/stub, each run in a scratch home
+# The in-app .wua browser, offscreen against the stubs of tests/stub, each run in a scratch home
 # of its own below WORK (no bus, SDL's dummy audio):
 #
 #   picker.sh LAUNCHER STUB WORK PYTHON [SLOW_FOLDERS_SO]

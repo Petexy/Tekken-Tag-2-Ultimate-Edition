@@ -128,7 +128,7 @@ class Inputs(Project):
 
 class ProgramsPlace(unittest.TestCase):
     def test_set_up_game_and_the_texts_name_the_programs_place(self):
-        # (compat review #6: CMake puts the program in <build>/launcher; the one of 0.8.0 at the top is removed.)
+        # (CMake puts the program in <build>/launcher; the one of 0.8.0 at the top is removed.)
         self.assertIn('RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher"',
                       (REPO / 'launcher/ui/CMakeLists.txt').read_text(encoding='utf-8'))
         self.assertIn('`build-windows-tools/launcher/ttt2-launcher.exe`', (REPO / 'README.md').read_text(encoding='utf-8'))

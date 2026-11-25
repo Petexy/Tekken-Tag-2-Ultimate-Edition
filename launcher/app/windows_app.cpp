@@ -1,4 +1,4 @@
-// Windows' own parts of the window (ARCHITECTURE 6, C6, C8, C9): getting ready before the launcher shows (the
+// Windows' own parts of the window: getting ready before the launcher shows (the
 // first start's Python, then --query state with its protocol checked), the state asked again after each task, and
 // Settings > Folders saved through --query save-settings.
 
@@ -46,7 +46,7 @@ std::string u8(const fs::path& p) { return win32::narrow(p.native()); }
 
 } // namespace
 
-// Until the model can be made: the first start's Python (C9), the state. False: the window was closed.
+// Until the model can be made: the first start's Python, the state. False: the window was closed.
 bool App::windows_ready() {
     host_ = std::make_unique<ProcessHost>(wake_loop);
     starter_ = std::make_unique<backend::ProcessStarter>(*host_);
@@ -57,7 +57,7 @@ bool App::windows_ready() {
     ready_ = std::make_unique<WindowsReady>(*win_files_, *starter_);
     if (win_files_->release) {
         // (Its own files again when the state's protocol is another one: a test build's Update got a newer
-        // program's files, REVIEW2_compat #3.)
+        // program's files.)
         ready_->restore_files = [root = win_files_->root] {
             try {
                 payload::unpack_own_again(program_file(), root);

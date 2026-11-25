@@ -94,7 +94,7 @@ std::optional<WindowsStateAnswer> parse_windows_state(const std::string& output,
         const json::Value& env = play["env"];
         for (size_t i = 0; i < env.keys().size(); ++i) c.env[env.keys()[i]] = env.values()[i].string();
         c.log_file = path_of(play["log"]);
-        c.mode = model::Command::Mode::kDetached; // (the game outlives the launcher; never in a task's job, C7)
+        c.mode = model::Command::Mode::kDetached; // (the game outlives the launcher; never in a task's job)
         w.play = std::move(c);
     } else {
         w.play_problem = play["problem"].string("source");
@@ -152,24 +152,8 @@ std::optional<ReleaseAnswer> parse_release_query(const std::string& output, Quer
     const auto value = parse_object(output, error);
     if (!value) return std::nullopt;
     const json::Value& v = *value;
-    if (v["none"].type() != json::Value::Type::kBool) {
-        if (error) *error = {v["error"].is_string() ? "error" : "answer", v["error"].string()};
-        return std::nullopt;
-    }
-    ReleaseAnswer answer;
-    answer.none = v["none"].boolean();
-    answer.error = v["error"].string();
-    if (const json::Value& n = v["newer"]; n.is_object()) {
-        Release r;
-        r.version = n["version"].string();
-        r.tag = n["tag"].string();
-        r.page = n["page"].string();
-        r.asset = n["asset"].string();
-        r.url = n["url"].string();
-        r.size = static_cast<uint64_t>(n["size"].number());
-        r.sha256 = n["sha256"].string();
-        answer.release = r;
-    }
+    std::optional<ReleaseAnswer> answer = release_query_answer(v);
+    if (!answer && error) *error = {v["error"].is_string() ? "error" : "answer", v["error"].string()};
     return answer;
 }
 

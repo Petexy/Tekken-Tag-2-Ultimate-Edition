@@ -11,7 +11,7 @@ The name: the recorded texts said Ultimate Launcher (INTENDED.md, "The name").
 In `linux/`:
 
 - `00-start.json`: once the window had settled after opening;
-- `NN-<step>.json`: after each test step (spec linux 6.3's actions:
+- `NN-<step>.json`: after each test step (the old app's test actions:
   `expand-dlc`, `add:kazumi`, `settings`, `bind:face_bottom:46`, ...);
 - `NN-<step>-running.json`: while that step's task ran (at half its progress);
 - `NN-<step>-stopping.json`: right after Cancel was pressed;
@@ -43,7 +43,7 @@ activates every id of every first view, and runs the controllers' unit tests.
 
 ## How they were made
 
-Not from the specs: from the old app itself (ARCHITECTURE U3). A scratch
+They were made from the old app itself. A scratch
 copy of the repository, never committed, had a dump hook added to
 `launcher/app`'s test executor (where it saves a picture, it also wrote the
 widget tree as above), and was run headless (`cage` with the headless wlroots

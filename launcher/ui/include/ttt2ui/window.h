@@ -2,14 +2,14 @@
 // - a borderless, resizable, high-DPI window, shown after its first frame; the interface draws its own frame: a drag
 //   strip and resize edges through SDL_SetWindowHitTest, minimise / fullscreen / close buttons (the app draws them
 //   and gives their rectangles), F11; under gamescope / Steam Deck it starts fullscreen and has no minimise, drag,
-//   resize or fullscreen toggle (C16);
-// - scale (U6): display scale x clamp(stage factor, 1, 2), so text never shrinks below its design size; smaller
+//   resize or fullscreen toggle;
+// - scale: display scale x clamp(stage factor, 1, 2), so text never shrinks below its design size; smaller
 //   windows get a smaller layout (reflow/scroll), DISPLAY_SCALE_CHANGED handled;
-// - SDL_HINT_VIDEO_ALLOW_SCREENSAVER=1, SDL_HINT_AUTO_UPDATE_JOYSTICKS=0 (U5);
+// - SDL_HINT_VIDEO_ALLOW_SCREENSAVER=1, SDL_HINT_AUTO_UPDATE_JOYSTICKS=0;
 // - when the video driver, window or renderer cannot be made: the other video driver, then the software renderer,
-//   then a message box with the releases link (C2);
+//   then a message box with the releases link;
 // - gamepads: the subsystem is started when the window gets the focus and stopped when it loses it, is minimised,
-//   or the game runs; polled at theme::input::kPadPollInterval only while focused (U5, F3, F11);
+//   or the game runs; polled at theme::input::kPadPollInterval only while focused;
 // - SDL events -> RawEvent for the InputRouter (Valve keyboards ignored where SDL names them);
 // - screenshots (SDL_RenderReadPixels + stb_image_write).
 #pragma once
@@ -36,12 +36,12 @@ struct WindowOptions {
     float forced_scale = 0;          // > 0: this UI scale (tests: --scale)
     bool start_fullscreen = false;
     bool quiet = false;              // no message box when no window opens (a smoke test answers why itself)
-    std::function<std::string()> no_window; // when none opens: more to tell (C2: the version before put back)
+    std::function<std::string()> no_window; // when none opens: more to tell (the version before put back)
 };
 
 // SteamDeck=1, SteamOS=1, XDG_CURRENT_DESKTOP=gamescope or GAMESCOPE_WAYLAND_DISPLAY set.
 bool running_under_gamescope();
-// U6: the interface's scale for a window of `pixels` with display scale `display`.
+// The interface's scale for a window of `pixels` with display scale `display`.
 float ui_scale(Vec2 pixels, float display, float user_text_scale = 1);
 
 class Window {
@@ -51,7 +51,7 @@ public:
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
 
-    // SDL_Init + window + renderer with the fallbacks of C2; false (and error()) when none worked, after showing the
+    // SDL_Init + window + renderer with the fallbacks above; false (and error()) when none worked, after showing the
     // message box (not in offscreen mode).
     bool open(const WindowOptions& options);
     const std::string& error() const { return error_; }
@@ -76,7 +76,7 @@ public:
         buttons_ = std::move(buttons);
     }
     bool gamescope() const { return gamescope_; }
-    // What the frame may offer (C16).
+    // What the frame may offer.
     bool can_minimise() const { return !gamescope_; }
     bool can_toggle_fullscreen() const { return !gamescope_; }
     bool fullscreen() const;

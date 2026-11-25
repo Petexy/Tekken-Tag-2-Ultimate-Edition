@@ -205,9 +205,9 @@ constexpr float kSpringStep = 1.f / 240;     // integration sub-step
 constexpr float kBrightRate = 6;             // field brightness easing per second
 constexpr float kBrightBlue = 1.3f, kBrightRed = 1.12f;
 // The blue readout: the new content comes in from the right (the half's straight edge) and along the seam, the old
-// one leaves to the right; neither ever moves toward the seam (FEEDBACK F1).
+// one leaves to the right; neither ever moves toward the seam.
 constexpr float kReadoutIn = .26f, kReadoutOut = .2f, kReadoutDx = 22, kReadoutDy = 12, kReadoutOutDx = 18;
-// A drill-in lock (FEEDBACK F4): the locked half's content fades to this much and moves this far away from the
+// A drill-in lock: the locked half's content fades to this much and moves this far away from the
 // seam, at this rate per second (eased); its plate darkens by kLockVeil.
 constexpr float kLockOpacity = .42f, kLockPush = 10, kLockRate = 12, kLockVeil = .42f;
 constexpr float kWipe = .4f;  // (Reduce motion: a cut)

@@ -5,6 +5,7 @@
 // curl or wget, and the AppImage the launcher runs from, which an update
 // replaces with the newer one.
 
+#include "json.h"
 #include "paths.h"
 
 #include <cstdint>
@@ -65,6 +66,10 @@ struct ReleaseAnswer {
     std::string error;
 };
 ReleaseAnswer parse_release(std::string_view json);
+// The release .exe's files' answer (`main.py --query release`, launcher/windows/query.py): {"newer": {...} | null,
+// "none": bool, "error": raw}, the release only when it is newer than those files (a test build's own version's
+// release too); none when it is not such an answer (no "none": a failure's {"error": reason}).
+std::optional<ReleaseAnswer> release_query_answer(const json::Value& answer);
 
 // The AppImage this launcher runs from: $APPIMAGE, as the AppImage's runtime
 // sets it, when the program (/proc/self/exe) is inside $APPDIR, where that
@@ -105,7 +110,7 @@ std::string make_executable(const fs::path& update, const fs::path& appimage);
 // `update` renamed over `appimage`. Why not, or empty.
 std::string replace_appimage(const fs::path& update, const fs::path& appimage);
 
-// C2's way back: the AppImage an update replaces is kept beside it, hidden, until the new one drew its first frame.
+// The way back: the AppImage an update replaces is kept beside it, hidden, until the new one drew its first frame.
 fs::path previous_file(const fs::path& appimage); // ".<name>.previous"
 // `appimage` kept as previous_file() (a hard link, else a copy). Why not, or empty.
 std::string keep_previous(const fs::path& appimage);

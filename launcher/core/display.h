@@ -35,7 +35,7 @@ struct Monitor {
 
 // The game goes by its primary display (Automatic covers that one; it
 // shows 120 frames a second when that display or its window's refreshes at
-// kInterpolationHz or more, exactly), which GTK cannot name on Wayland. So
+// kInterpolationHz or more, exactly), which Wayland does not name. So
 // the notes say only what is sure: with one monitor, that one's figures;
 // with more, no size, and the 60 fps note only when every monitor is below
 // kInterpolationHz.

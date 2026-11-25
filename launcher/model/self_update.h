@@ -1,6 +1,6 @@
 #pragma once
 
-// The AppImage's own update (Linux; launcher/app/self_update.cpp): the
+// The AppImage's own update (Linux): the
 // newest release asked from GitHub, its AppImage downloaded beside this one
 // (progress from the file's size), checked (size, SHA-256, an AppImage, made
 // executable, its --version within 60 s), put in this one's place and opened.
@@ -25,11 +25,11 @@ struct UpdateFiles {
     virtual std::string replace(const fs::path& file, const fs::path& appimage) = 0;
     virtual void remove(const fs::path& file) = 0;
     virtual Distro distro() = 0;
-    // C2: `appimage` kept as previous_file() until the new one drew its first frame. Why not, or empty.
+    // `appimage` kept as previous_file() until the new one drew its first frame. Why not, or empty.
     virtual std::string keep_previous(const fs::path& appimage) = 0;
 };
 
-// The core's (sha256 is the app's: GLib/ZArchive's).
+// The core's (sha256 is the app's: LinuxUpdateFiles, with the core's sha256.h).
 struct RealUpdateFiles : UpdateFiles {
     std::string cannot_replace(const fs::path& appimage) override { return launcher::cannot_replace(appimage); }
     std::optional<Downloader> find_downloader() override { return launcher::find_downloader(); }

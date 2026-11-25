@@ -1,4 +1,4 @@
-"""The new launcher from these files: what main.py does without --worker or --query (ARCHITECTURE 3, C4).
+"""The new launcher from these files: what main.py does without --worker or --query.
 
 The project ZIP's first start (Start Golden Fist Launcher.cmd) and the .exe of old test builds (entry.cpp, 0.4.0 to
 0.8.0, after their files were updated from their branch) start `python main.py --build-dir <folder> [GAME.wua]`, which

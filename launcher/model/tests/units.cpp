@@ -1,6 +1,6 @@
-// model_test's unit tests of the controllers (no goldens): keys (U4),
+// model_test's unit tests of the controllers (no goldens): keys,
 // display.ini, the task runner, the refresh rules, closing while a task runs,
-// the AppImage's update, activate(id) (U14).
+// the AppImage's update, activate(id).
 
 #include "units.h"
 
@@ -32,7 +32,7 @@ std::string read(const fs::path& file) {
     return s.str();
 }
 
-// ---------------------------------------------------------------- keys (spec linux 3.3, U4)
+// ---------------------------------------------------------------- keys
 
 void keys() {
     current = "keys";
@@ -376,7 +376,7 @@ void self_update() {
         CHECK(rig.update.opened());
         CHECK(rig.opened.size() == 1 && rig.opened[0].env.at(kReplacesVariable) == "42");
         CHECK(rig.opened.size() == 1 && rig.opened[0].mode == Command::Mode::kDetached); // (it outlives this one)
-        // (C2: this version kept before the new one is put in its place; the new one opened through the way back.)
+        // (This version kept before the new one is put in its place; the new one opened through the way back.)
         CHECK((rig.files.steps == std::vector<std::string>{"keep", "replace"}));
         CHECK(rig.opened.size() == 1 &&
               rig.opened[0].argv == open_with_rollback("/home/player/Golden_Fist_Launcher-x86_64.AppImage", "0.9.0"));
@@ -469,7 +469,7 @@ void self_update() {
         CHECK(rig.opened.empty());
     }
     {
-        // A test build's newer changes: Update gets its files, never its .exe's program (compat review #3).
+        // A test build's newer changes: Update gets its files, never its .exe's program.
         Facts f;
         f.caps = Caps::windows_caps();
         f.self_update = true;
@@ -734,7 +734,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                 CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
             }});
 
-    // REVIEW2_app #7: an answer goes with its request only.
+    // An answer goes with its request only.
     current = "a preflight's answer for another folder is dropped";
     replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
            {0, [](Harness& h) {
@@ -788,7 +788,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                 CHECK(h.model.facts().preflight && !h.model.facts().preflight->running);
             }});
 
-    // REVIEW2_app #5: a game started elsewhere is watched until it ends (every kGameWatchSeconds, cheaply).
+    // A game started elsewhere is watched until it ends (every kGameWatchSeconds, cheaply).
     current = "a game started elsewhere is watched";
     replay(installed, Caps::linux_caps(), scratch / "a",
            {0, [](Harness& h) {
@@ -883,13 +883,13 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK_EQ(save.argv.back(), std::string("save-settings"));
         CHECK_EQ(save.input, std::string("{\"data\": \"C:\\\\Users\\\\Jos\\u00e9\\\\TTT2Ultimate\", \"packs\": \"a\\\"b\"}"));
         CHECK_EQ(json::quote("\xf0\x9f\x8e\xae\x01\xff"), std::string("\"\\ud83c\\udfae\\u0001\\ufffd\""));
-        // How each runs (core/subprocess.h): the update workers never in a job nor killed (C3), the rest tasks.
+        // How each runs (core/subprocess.h): the update workers never in a job nor killed, the rest tasks.
         CHECK(import.mode == Command::Mode::kTask && status->mode == Command::Mode::kTask);
         CHECK(w.worker(f, TaskKind::kLauncherUpdate)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kLauncherFiles)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kSetup)->mode == Command::Mode::kTask);
-        // (A test build's files update: told when the program is the .exe's, which only opens newer files, compat
-        // review #3: self_update.py then refuses changes to the program.)
+        // (A test build's files update: told when the program is the .exe's, which only opens newer files:
+        // self_update.py then refuses changes to the program.)
         CHECK(!w.worker(f, TaskKind::kLauncherFiles)->env.count("TTT2_LAUNCHER_PROGRAM_IN_EXE"));
         f.program_in_exe = true;
         CHECK_EQ(w.worker(f, TaskKind::kLauncherFiles)->env.at("TTT2_LAUNCHER_PROGRAM_IN_EXE"), std::string("1"));
@@ -925,7 +925,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
 
 int activated = 0;
 
-// Every focusable item of every case's first view does something (U14): activated in a fresh replay, it is
+// Every focusable item of every case's first view does something: activated in a fresh replay, it is
 // never "no <id> to activate".
 void every_id(const fs::path& golden, const fs::path& scratch, const Caps& caps) {
     for (const auto& entry : fs::directory_iterator(golden)) {
@@ -1542,6 +1542,141 @@ void subtitles_later(const fs::path& golden, const fs::path& scratch) {
     }});
 }
 
+// The release .exe asks its files whether a newer release is out (`main.py --query release`): when it opens, and
+// again after hours away, as the AppImage asks GitHub.
+void windows_release(const fs::path& golden, const fs::path& scratch) {
+    const auto with = [&](const std::string& release) {
+        std::string text = read(golden / "installed" / "case.json");
+        const std::string after = "\"name\": \"installed\",";
+        const size_t at = text.find(after);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) text.insert(at + after.size(), "\"release_exe\": true, \"release\": " + release + ",");
+        const auto c = json::parse(text);
+        CHECK(c.has_value());
+        return c.value_or(json::Value());
+    };
+    current = "the release .exe: a newer release";
+    replay(with(R"({"newer": {"version": "0.9.0", "tag": "v0.9.0", "page": "https://example.com/v0.9.0",
+                    "asset": "Golden_Fist_Launcher-x86_64.exe", "url": "https://example.com/a.exe", "size": 1000,
+                    "sha256": ""}, "none": false, "error": "", "protocol": 1})"),
+           Caps::windows_caps(), scratch / "a", {0, [](Harness& h) {
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 1);
+               CHECK(h.model.facts().newer && h.model.facts().newer->version == "0.9.0");
+               const View v = h.model.view();
+               CHECK(v.notice.shown && v.notice.title == "Version 0.9.0 of the launcher is out");
+               const UpdatePlan p = update_plan(h.model.facts());
+               CHECK(p.launcher && p.launcher_to == "0.9.0");
+               // (Its Update is the launcher's worker, not the test build's files.)
+               h.model.activate("update-launcher", h.now);
+               h.settle();
+               const bool worker = std::any_of(h.starter.started.begin(), h.starter.started.end(), [](const Command& c) {
+                   const auto at = std::find(c.argv.begin(), c.argv.end(), "--worker");
+                   return at != c.argv.end() && at + 1 != c.argv.end() && at[1] == "launcher";
+               });
+               CHECK(worker);
+           }});
+    current = "the release .exe: none newer, asked again after hours";
+    replay(with(R"({"newer": null, "none": false, "error": "", "protocol": 1})"), Caps::windows_caps(),
+           scratch / "b", {0, [](Harness& h) {
+               h.settle();
+               CHECK(!h.model.facts().newer);
+               CHECK(!h.model.view().notice.shown);
+               h.now += 1;
+               h.model.activated(h.now);
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 1);
+               h.now += LauncherModel::kReleaseSeconds + 1;
+               h.model.activated(h.now);
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 2);
+           }});
+    current = "the release .exe: GitHub not asked (quietly)";
+    replay(with(R"({"error": "timed out", "protocol": 1})"), Caps::windows_caps(), scratch / "c",
+           {0, [](Harness& h) {
+               h.settle();
+               CHECK(!h.model.facts().newer);
+               CHECK(!h.model.view().notice.shown);
+           }});
+    current = "a project ZIP's launcher: never asked";
+    replay(fixture(golden, "installed"), Caps::windows_caps(), scratch / "d", {0, [](Harness& h) {
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 0);
+           }});
+}
+
+// Fighters' Add All Owned for every game: each usable game's own and owned DLC characters, in one import.
+void add_all_everything(const fs::path& golden, const fs::path& scratch) {
+    current = "add all owned, every game";
+    std::string text = read(golden / "installed" / "case.json");
+    const auto insert = [&](const std::string& after, const std::string& what) {
+        const size_t at = text.find(after);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) text.insert(at + after.size(), what);
+    };
+    insert("\"fighters\": [",
+           R"({"name": "clive", "display": "Clive Rosfield", "game": "tekken8", "dlc": 3145880, "installed": false,
+               "outdated": false, "newer": false, "update": false, "moveset_saved": true, "stand_in": false,
+               "outfits": 0, "outfits_added": false, "needs_game": true},)");
+    insert("\"owned\": {\n  \"owned\": {", "\"clive\": true,");
+    const auto with_clive = json::parse(text);
+    CHECK(with_clive.has_value());
+    replay(with_clive.value_or(json::Value()), Caps::linux_caps(), scratch, {0, [](Harness& h) {
+        h.settle();
+        const Facts& f = h.model.facts();
+        std::vector<std::string> expected;
+        for (const char* game : {kTekken7, kTekken8})
+            for (const auto& some : {base_to_add(f, game), owned_to_add(f, game)})
+                expected.insert(expected.end(), some.begin(), some.end());
+        const std::vector<std::string> all = all_owned_to_add(f);
+        CHECK(all == expected);
+        // (Both games' own and owned DLC; a DLC the account does not own, never.)
+        CHECK(std::find(all.begin(), all.end(), "clive") != all.end());
+        bool tekken7_dlc = false, tekken7_own = false, unowned = false;
+        for (const std::string& name : all) {
+            const Fighter* x = fighter(f, name);
+            CHECK(x != nullptr);
+            if (!x) continue;
+            tekken7_dlc = tekken7_dlc || (x->of(kTekken7) && x->dlc != 0);
+            tekken7_own = tekken7_own || (x->of(kTekken7) && x->dlc == 0);
+            unowned = unowned || owns(f, *x) != true;
+        }
+        CHECK(tekken7_dlc && tekken7_own && !unowned);
+        const CharactersView v = characters_view(f);
+        CHECK(v.add_all_owned && v.add_all_owned->enabled && v.add_all_owned->id == "add-all-owned:all");
+        // One import of them all.
+        const size_t before = h.starter.started.size();
+        h.model.activate("add-all-owned:all", h.now);
+        CHECK(h.model.facts().task.has_value());
+        CHECK(h.starter.started.size() > before);
+        if (h.starter.started.size() > before) {
+            const std::vector<std::string>& argv = h.starter.started[before].argv;
+            for (const std::string& name : all) CHECK(std::find(argv.begin(), argv.end(), name) != argv.end());
+        }
+        // (A task running: it says why.)
+        const CharactersView busy = characters_view(h.model.facts());
+        CHECK(busy.add_all_owned && !busy.add_all_owned->enabled && !busy.add_all_owned->describe.why.empty());
+    }});
+    // Tekken 8 cannot be used: Tekken 7's only. Neither: none, and why.
+    replay(with_clive.value_or(json::Value()), Caps::linux_caps(), scratch / "t7", {0, [](Harness& h) {
+        h.settle();
+        Facts f = h.model.facts();
+        f.status->tekken8_found = false;
+        f.status->tekken8_error = "Tekken 8 is not installed in any Steam library";
+        // (Reina's pack keeps a copy of what the packs share of her: Tekken 7's can be added without Tekken 8.)
+        for (Fighter& x : f.status->fighters)
+            if (x.of(kTekken8)) x.needs_game = false;
+        for (const std::string& name : all_owned_to_add(f)) CHECK(fighter(f, name)->of(kTekken7));
+        CHECK(!all_owned_to_add(f).empty());
+        f.status->tekken7_found = false;
+        f.status->tekken7_error = "Tekken 7 is not installed in any Steam library";
+        CHECK(all_owned_to_add(f).empty());
+        const CharactersView v = characters_view(f);
+        CHECK(v.add_all_owned && !v.add_all_owned->enabled);
+        CHECK_EQ(v.add_all_owned->why, std::string("Neither Tekken 7 nor Tekken 8 can be used to add characters now."));
+    }});
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -1556,6 +1691,8 @@ void units(const fs::path& golden, const fs::path& scratch) {
     update_all(golden, scratch / "update-all");
     dlc_groups(golden, scratch / "dlc-groups");
     subtitles_later(golden, scratch / "subtitles-later");
+    add_all_everything(golden, scratch / "add-all-everything");
+    windows_release(golden, scratch / "windows-release");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

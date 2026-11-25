@@ -1977,10 +1977,12 @@ later.
 ## The launcher
 
 `launcher/` is what players start: `ttt2-launcher`, shown as "Golden Fist
-Launcher" ("Ultimate Launcher" up to 0.8.0; to be shipped as an AppImage).
-Nothing derived from the game may be shipped, so the game program is built on
-the player's PC from their own `.wua`, by the tools this build uses and the
-system's C++ compiler.
+Launcher" ("Ultimate Launcher" up to 0.8.0), released as an AppImage and a
+Windows `.exe`. Nothing derived from the game may be shipped, so the game
+program is built on the player's PC from their own `.wua`, by the tools this
+build uses and the system's C++ compiler (the kit, below; on Windows Set Up
+Game builds the project itself with a pinned LLVM-MinGW,
+`launcher/windows/setup_game.py`).
 
 - **The kit** (`launcher/builder`, target `ttt2_kit`: `<build>/launcher/kit`,
   installed as `<prefix>/lib/ttt2/kit`): `bin/ttt2-build`, `bin/cafe-recomp`,
@@ -2065,8 +2067,61 @@ system's C++ compiler.
   between its two renames is put back before anything is placed.
   `--no-shared` still remakes `shared/` for a fighter that was not in it. Steam from Flatpak or Snap is reported
   (`steam.sandbox`) with Tekken 7's folder, as not supported yet.
-- **The window** (`launcher/app`, plain GTK 4.10, no libadwaita; its logic
-  without GTK in `launcher/core`, tested by `launcher_core_test`) finds the
+- **The program** (C++20 on SDL 3, the same on Linux and Windows; the GTK
+  and the Tk window of 0.8.0 are gone) is made of layers:
+  - `launcher/core`, without any toolkit: where things are (`paths`), the
+    importer's status and the tasks' lines (`status`, `protocol`), processes
+    (`subprocess`), the start (`startup`, `single_instance`, `payload`),
+    releases and the AppImage (`release`, `appimage`), the PC's checks before
+    an install (`system`, `distro`), `uninstall`, the game's own
+    settings (`keymap`, `display`), and what is read from the player's own
+    files as it runs: the game's menu sounds from the install's sound banks
+    (`game_sounds`) and the added fighters' portraits from their packs
+    (`game_art`).
+  - `launcher/model`, without drawing, processes or a clock of its own: the
+    facts (`facts.h`: all the launcher knows, as plain data), the rules on
+    them (`rules.cpp`), the views made of both (`game_view.cpp`,
+    `characters_view.cpp`, `settings.cpp`, `task.cpp`: every text, id and
+    reason the player sees) and the controllers, which turn an element's id
+    into a program to run or an effect for the app (`model.cpp`,
+    `self_update.cpp`). What an OS has is in `Caps`; the rules are the same
+    on both. `tests/golden` has what the GTK and the Tk launcher showed, case
+    by case: `launcher_model_test` plays each case and compares, after the
+    intended differences in its `INTENDED.md`.
+  - `launcher/backend`: the model's programs run through core's processes,
+    and Windows' answers read (`main.py --query`, below).
+  - `launcher/ui`, the toolkit (it knows no screen of the launcher): boxes
+    with stable ids laid out each frame, spatial focus, actions from the
+    keyboard, the mouse and gamepads (the same press from two devices, as
+    Steam's keyboard and pad report it, counts once), text (stb_truetype; the
+    fonts are built in, the system's stand in for missing characters), SVG
+    icons, the split stage, sounds and the borderless window. Every constant
+    of the look is in `theme.h`.
+  - `launcher/app`: the loop (`app.cpp`), the screens (`home.cpp`,
+    `fighters.cpp`, `settings_screen.cpp`, the file browser `picker.cpp` and
+    `browser.cpp`), what any OS is asked through SDL (`backend_sdl.cpp`) and
+    each OS's side (`backend_linux.cpp`; `backend_windows.cpp` and
+    `windows_app.cpp`). The crimson half lists what can be chosen, the blue
+    half is about the focused item. A frame is drawn only when something
+    changed or moves; the background's motion is at most 30 frames a second
+    and stops after 20 s without input, without the window's focus, while
+    the game runs and under Reduce motion. The checks before an install, the
+    uninstall, the file browser's folders and the portraits run off the
+    window's thread. `launcher.ini`, beside display.ini, has the
+    launcher's own settings (sounds, reduce motion, button prompts, text
+    size).
+- **Its start** (`core/startup`, before SDL): `--version` and `--help` answer
+  and end. `TTT2_LAUNCHER_AFTER=<pid>` names the launcher this one replaces,
+  which is waited for (10 s; Windows 60 s). One launcher runs per user: a
+  second start hands over its `.wua` and activation token and ends. Linux
+  claims an abstract socket named after the app id and the user, asks an old
+  GTK launcher on the session bus to show itself, and answers under that bus
+  name for one started later (libdbus opened at run time); Windows has a
+  mutex and a named pipe. The release `.exe` then unpacks its files (the
+  project's, resource 100) into `%LOCALAPPDATA%\TTT2Ultimate\launcher`
+  (`%PUBLIC%` or the system drive when that path is not ASCII), with their
+  digest and paths in `local/launcher-files.txt`.
+- **The pieces and the tasks** (Linux): the program finds the
   kit, the importer and Python beside it (`../lib/ttt2/kit`,
   `../share/ttt2/characters`, `../lib/ttt2/python/bin/python3`), else in
   the build and source trees it was built from (unless built with
@@ -2084,7 +2139,7 @@ system's C++ compiler.
   checks the processor, the compiler and free space before an install, to
   name what is missing with the distribution's install command (on an
   image-based system, by the builder's rule and words, where it must come
-  from instead), and runs one task at a time through GSubprocess, reading
+  from instead), and runs one task at a time (`core/subprocess`), reading
   its lines as they come, each in a process group of its own that gets
   SIGTERM if the launcher dies. Cancel sends SIGTERM to the program alone
   (it stops what it started in order: the importer closes the hidden
@@ -2108,18 +2163,62 @@ system's C++ compiler.
   through file descriptors, never following a link or crossing into
   another file system and never while the game runs, then the folder if it
   is empty (and the link to it, when it is reached through one), the menu
-  entry and the record when they are that folder's, the shader caches and the game's log;
+  entry and the records when they are that folder's, the shader caches, the
+  builder's work folder, Steam's DLC answer and the game's log;
   when asked, the saves the game wrote (`common/` and the 8-digit user
   folders, nothing else of a `TTT2_SAVE_DIR` folder) and the character
   packs (with the importer's hidden `.<code>.part` and `.<code>.old`
-  folders). The game's settings, `keyboard.ini` and `display.ini`, are
+  folders and what was saved from Tekken 7 and Tekken 8 for them). The game's settings, `keyboard.ini` and `display.ini`, are
   kept (`~/.config/ttt2` goes only when it is left empty). A character
   whose pack is outdated shows "Older version", Remove
-  and Add Again (Add All and Add All Owned add them again too, and a line
-  above the list counts them); a newer version's shows "Newer version" and
+  and Add Again (Add All and Add All Owned add them again too, and their
+  group's notes count them); a newer version's shows "Newer version" and
   Remove only; one to update shows "Update ready", Remove and Update (a
-  line above the list counts them, with Update All; Add All leaves them,
+  note in its group counts them, with Update All; Add All leaves them,
   and an import of only such characters is called an update).
+- **UPDATE** (`rules.cpp`'s `update_plan`, `model.cpp`'s chain): Home's one
+  button for the launcher (a newer release), the game program (built again
+  when another version of the launcher built it, and always after a new
+  launcher) and the fighters to update that can be updated now; those that
+  cannot are named with the reason. The parts run one after another; the
+  new launcher goes on with the rest (`TTT2_LAUNCHER_CONTINUE=update`), Try
+  Again goes on from the part that stopped. Play stays beside it, except
+  for a game built by an older launcher, which this one's fighters need
+  newer.
+- **The AppImage's update** (`model/self_update.cpp`, `core/release`): the
+  newest release asked of GitHub with curl or wget at the start and, once six
+  hours old, when the window is focused; its AppImage downloaded beside this
+  one, checked (size, GitHub's SHA-256, that it is an AppImage and that its
+  `--version`, within 60 s, names the release) and renamed over it. The old
+  one is kept as `.<name>.previous` until the new one drew its first frame,
+  and put back when that one crashes or cannot open its window before.
+- **Windows' side** (`launcher/windows`): Python run by the launcher, hidden,
+  from the files folder's private Python. `main.py --worker
+  setup|build|install|update|upgrade|import|remove|launcher|files|shaders` is
+  one task, its lines the protocol above, its log in the data folder's
+  `logs`; `--query state|status|owned|main|release|check|save-settings`
+  (`query.py`) answers one JSON line of facts with its `protocol`, which the
+  model words (another protocol: the `.exe` puts its own files back, once). A
+  task runs in a job that ends with the launcher; Cancel makes the worker's
+  cancel file, and the job is ended after 45 s. The update workers are in no
+  job and never killed. `launcher` (`self_update.py`) puts the newest
+  release's `.exe` in place (the old one renamed to `<name>.old.exe`, which
+  the new one deletes); `files` replaces a test build's files with its
+  branch's newest commit's, refused when that changes the program built into
+  the `.exe` or the answers' protocol. Without `--worker` or `--query` (the project ZIP's `Start Golden
+  Fist Launcher.cmd`, old test builds) `main.py` builds the launcher with the
+  compiler Set Up Game uses, into `%LOCALAPPDATA%\TTT2Ultimate\launcher-build`
+  when its inputs changed, and starts it (`build_launcher.py`).
+- **What launchers up to 0.8.0 rely on** when they update to a newer one, so
+  it stays: a release tagged `v<version>` with one `x86_64` `.AppImage` and one
+  `x86_64` `.exe`; `--version` printing exactly `ttt2-launcher <version>`
+  without a display; `TTT2_LAUNCHER_AFTER`; the `.exe` a 64-bit program with
+  its files in the `TTT2PAY1` format (`core/payload.h`: the paths and bytes,
+  then their size, count and SHA-256), `launcher/builder/CMakeLists.txt` among
+  them naming `TTT2_LAUNCHER_VERSION`; for the test builds of then also
+  `Start Ultimate Launcher.cmd` and `main.py` started without a worker; and
+  the app id `io.github.petexy.TekkenTag2UltimateEdition` (the bus name, the
+  menu entry, the icon).
 
 **The AppImage**: `launcher/appimage/make_appimage.sh OUTPUT BUILD_DIR`
 configures BUILD_DIR afresh (a folder of its own: it refuses another build
@@ -2129,8 +2228,9 @@ folder) for Release with Clang and Ninja, with
 runtime's messages name are relative; it builds `ttt2-launcher` and
 `ttt2_kit`, installs them with `cmake --install --prefix AppDir/usr --strip`,
 refuses an AppDir holding anything but the launcher, the kit, the importer's
-scripts and C sources (and checks that what a Tekken 8 import needs is there), the desktop entry and the icon (nothing of the game, no tests, no
-Python caches), adds `AppRun` (it only starts `usr/bin/ttt2-launcher`: no
+scripts and C sources (and checks that what a Tekken 8 import needs is there), the desktop entry, the icon and
+the license texts of what is built in, `usr/share/licenses/ttt2-launcher` (nothing of the game, no tests, no
+Python caches; each text `release_checks.sh` lists must be there), adds `AppRun` (it only starts `usr/bin/ttt2-launcher`: no
 `LD_LIBRARY_PATH`, as the compiler, Python, gamescope, Proton and the game
 it starts must not load anything of the AppImage), the desktop entry, the
 icon and `.DirIcon` at the AppDir's root, and packs it as zstd squashfs
@@ -2149,27 +2249,34 @@ x86-64-v4 `libstdc++.a` and `libgcc_eh.a`, and a Steam Deck stopped them at
 start-up with SIGILL, "exit code 132"), so the kit's programs use the
 system's libstdc++, like the launcher. cafe-recomp is C++23: GCC 16's
 libstdc++ declares `std::format`'s code an extern template only in C++20,
-which made C++20 programs need GCC 16's libstdc++. The launcher is held to
-the API of GTK 4.10 and the GLib it needs (2.76), and the script refuses
+which made C++20 programs need GCC 16's libstdc++. The launcher has SDL 3
+built in (`TTT2_LAUNCHER_SDL=static`: `third_party/SDL` at its pinned
+revision, `cmake/LauncherSDL.cmake`; its display and sound libraries are
+opened at run time) and may need no library but the C and C++ runtimes'; a
+header made from this system's glibc (`cmake/GlibcFloor.cmake`) binds its
+calls to versions up to 2.39. The script refuses (`release_checks.sh`)
 any of the programs, and the game program as the kit links it
 (`kit_check`), that needs a newer glibc or libstdc++ than Ubuntu 24.04 has
-(2.39, GCC 14's). Now the launcher needs glibc 2.38 and GCC 13's libstdc++,
-and the game program glibc 2.38 and GCC 13.2's (`kit.ini`'s `needs`); the
+(2.39, GCC 14's), or a library the launcher must not need, and a launcher
+whose `--version`, without a display, is not `ttt2-launcher <version>`. The game
+program needs glibc 2.38 and GCC 13.2's (`kit.ini`'s `needs`); the
 kit's programs need libstdc++ (as the launcher), libcrypto 3, zstd and zlib,
 which such distributions all have. (GCC 16's libstdc++ exports std::string's C++20 members, so a
 call to one that is not inlined makes a program need it: `install.cpp`
-calls string_view's.) It is about 4 MB.
+calls string_view's.) It is about 6.5 MB.
 
 Still to do for an AppImage for any distribution: ship SDL 3 (Ubuntu 24.04
 has none; any 3.2 or newer will do) and shaderc in the kit for the game
 program (link those, copy them to `<install>/lib/` with a mark that
 uninstall then deletes it by, as it leaves any `lib/` alone now, and add an
-`$ORIGIN/lib` rpath); bundle GTK 4 and GLib, and once AppRun sets
-`LD_LIBRARY_PATH` or GTK and GIO variables for them, restore those for the
-programs the launcher starts, as the compiler, Python and the game must not
-load the AppImage's libraries (and ttt2-build would give the game a run path into
-the AppImage for a library it found through `LD_LIBRARY_PATH`). The
-player's compiler cannot be bundled.
+`$ORIGIN/lib` rpath). The player's compiler cannot be bundled.
+
+**The Windows `.exe`**: `launcher/windows/make_launcher_exe.py OUTPUT`
+cross-builds the same program with MinGW-w64 (`TTT2_LAUNCHER_ONLY`, SDL 3
+built in, no time stamp) with Git's tracked files (it refuses uncommitted
+changes), its branch and commit named among them, as resource 100: the same
+commit makes the same bytes. One made on a branch other than main is a test
+build, whose files update from that branch.
 
 ## Running the port
 
@@ -2238,13 +2345,13 @@ Steam controller's keyboard device are ignored (Steam types Enter for its A,
 which would be +), and F11 held toggles fullscreen once. The launcher reads
 the file as the game does (it knows all of SDL's key names, and shows a key
 it cannot take from the keyboard by SDL's name or its number); where the
-file gives one key to two inputs, which it cannot show, its Settings page
-says so, gives each input a key of its own and saves that when a key is
+file gives one key to two inputs, which it cannot show, its Settings'
+Keyboard section says so, gives each input a key of its own and saves that when a key is
 chosen or Restore Defaults pressed. There a key is taken when pressed, but
 Ctrl, Shift and Alt alone only once let go (with another key they are a
-shortcut, which stops choosing), and the keys' labels follow the keyboard's
-layout (GTK 4.18's, else that of the last key pressed that every layout
-defines). Saving writes through a link to where it leads, keeping that
+shortcut, which stops choosing), Escape, a pad's button, a click or ten
+seconds leave it as it was, and the keys' labels follow the keyboard's layout
+(`SDL_GetKeyFromScancode`). Saving writes through a link to where it leads, keeping that
 file's mode.
 
 **Players** (`host/window.cpp`, `os/input.cpp`, `title/controllers.cpp`).
@@ -2299,7 +2406,7 @@ a button in the frame the game reads it; yes: two frames later, as the Wii
 U game does; see [Input delay](#input-delay)), `async_shaders = yes` or
 `no` (default no; yes: shaders compile in the background and what is seen
 for the first time may appear a few frames late) and `precompile_shaders =
-yes` or `no` (default no; yes: the launcher runs `ttt2 --precompile`
+yes` or `no` (default yes: the launcher runs `ttt2 --precompile`
 before it starts the game).
 Booleans also take `true`/`false`, `on`/`off` and `1`/`0`, and values (not
 names) may be in any case; an unknown name or a bad value is left out with
@@ -2316,22 +2423,19 @@ multiple of 640x360 that does (at least 640x360; Automatic always so). The
 game logs `ttt2: display: fullscreen no, resolution auto, interpolation yes,
 input delay no (from <file>)` (or `display: defaults (no <file>)`), a line
 per variable set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU:
-rendering at <w>x<h> (scale <s>)`. The launcher's Settings show the four
-above the keys, in a Game section: Fullscreen and 120 fps switches, a
-Resolution list (Automatic, 1280 × 720 ... 5120 × 2880, as wide as its
-widest item whichever is chosen) and an Input delay switch. Under them it
-says what the game will do only as far as it can be sure, since GTK cannot name the primary
-display on Wayland (`automatic_note` and `refresh_note` in
+rendering at <w>x<h> (scale <s>)`. The launcher's Settings show
+them in their Display section, a switch each and a list for the resolution
+(Automatic, 1280 × 720 ... 5120 × 2880). Resolution and 120 fps, focused,
+say what the game will do only as far as it can be sure, as the game goes by
+its primary display, which the launcher does not look for (`automatic_note` and `refresh_note` in
 `launcher/core/display.h`). With one monitor: the size Automatic gives on
-it (its height in pixels from GTK 4.14's fractional scale; before 4.14
-only a whole scale factor of 1 counts, as fractional scaling rounds the
-factor up, otherwise no size is named) and, when it reports a refresh rate
+it (its height in pixels from SDL's desktop mode) and, when it reports a refresh rate
 below 100 Hz by the game's exact rule, that the game stays at 60 fps (a
 rate just below is shown with decimals, "99.98 Hz", never as 100). With
 several: "enough to cover the main display" without a size, and the 60 fps
 note only when every monitor reports a rate below 100 Hz (it gives the
-highest). The monitors are read again each time the page opens and when
-one is added or removed. The page reads the file each time it opens and
+highest). The monitors are read again when one is added, removed or
+changed. The launcher reads the file each time Settings opens and
 writes it whole whenever a control changes, as keyboard.ini (a temporary
 file renamed over it, through a link, keeping its mode); when that fails
 it shows why and puts the control back, and a file that is there but

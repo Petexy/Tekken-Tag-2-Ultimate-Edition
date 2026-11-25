@@ -535,7 +535,7 @@ void test_system() {
 
     check(run_output({"sh", "-c", "echo hello"}) == std::optional<std::string>("hello\n"), "run: output");
     check(!run_output({"sh", "-c", "exit 3"}) && !run_output({"no-such-program-ttt2"}), "run: failures");
-    // REVIEW2_app #8: the preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
+    // The preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
     // (another thread's, a library's) is not the probe's, and the probe runs with no signal blocked.
     {
         const int leaky = ::open("/dev/null", O_RDONLY); // (no O_CLOEXEC on purpose)
@@ -611,7 +611,8 @@ void test_actions() {
     const auto all = parse_test_actions("add-all:tekken8;remove-all:tekken7;add-all-owned:tekken8", &error);
     check(all && all->size() == 3 && (*all)[0].args == std::vector<std::string>{"tekken8"} &&
               (*all)[0].label() == "add-all-tekken8" && (*all)[1].label() == "remove-all-tekken7" &&
-              (*all)[2].label() == "add-all-owned-tekken8" && !parse_test_actions("add-all-owned:tekken6", nullptr),
+              (*all)[2].label() == "add-all-owned-tekken8" && !parse_test_actions("add-all-owned:tekken6", nullptr) &&
+              parse_test_actions("add-all-owned:all", nullptr),
           "actions: a game's Add All and Remove All (" + error + ")");
     const auto settings =
         parse_test_actions("settings; bind:face_bottom:38 ;bind:plus:9;reset-keys;back;bind:zl:64+23", &error);
@@ -1028,7 +1029,7 @@ std::string read_all(const fs::path& file) {
     return {std::istreambuf_iterator<char>(in), {}};
 }
 
-// C2's way back (compat review #4): the AppImage an update replaces kept until the new one drew its first frame.
+// The way back: the AppImage an update replaces kept until the new one drew its first frame.
 void test_way_back(const fs::path& root) {
     const fs::path folder = root / "way back";
     fs::create_directories(folder);

@@ -48,14 +48,14 @@ enum class TaskKind {
 };
 const char* task_kind_name(TaskKind kind); // "install", ... (the Windows worker's name where there is one)
 
-// What closing the window does while a task runs (spec linux 2.12, windows 1.4).
+// What closing the window does while a task runs.
 enum class ClosePolicy {
     kAskStopAndQuit, // Linux: "Stop and quit?" (an uninstall or a stopping task: the window closes once it ends)
     kRefuse,         // Windows: "Task running" (cleaning up and logging must finish), except while the new
                      // launcher opens after an update
 };
 
-// What exists on this OS (U1): the views show only what the caps allow; the
+// What exists on this OS: the views show only what the caps allow; the
 // rules are the same on both.
 struct Caps {
     bool windows = false;
@@ -120,7 +120,7 @@ struct TaskFacts {
 };
 
 // Windows only: what `main.py --query state` answers (facts, never
-// sentences: U2). The backend turns its JSON into this; everything the
+// sentences). The backend turns its JSON into this; everything the
 // player reads is worded by the model.
 //   {"protocol": 1, "version": "0.8.0", "files_id": "0.8.0 <40 hex>", "exe": path|null, "commit": hex|null,
 //    "branch": name|null, "root", "build", "config": paths,
@@ -133,7 +133,7 @@ struct TaskFacts {
 // ("0.8.0-<sha>"), so that the Linux rules (built_older, update ready) apply unchanged.
 struct WindowsState {
     fs::path root, build, config; // the launcher's files, the build folder, launcher.json (main.py's arguments)
-    std::optional<Command> play;  // how the game starts (C8: built by Python), none when it cannot
+    std::optional<Command> play;  // how the game starts (built by Python), none when it cannot
     std::string branch;           // a test build's branch (not main), empty otherwise
     std::string commit;           // this build's commit (40 hex), empty when not known (project ZIP)
     std::map<std::string, std::string> folders; // Settings > Folders: source, title, install, data, packs, saves, tools
@@ -160,9 +160,9 @@ struct SetupProblem {
 
 // The launcher's own settings (launcher.ini beside display.ini): new.
 struct LauncherSettings {
-    bool sounds = true;         // U17: on by default
-    bool reduce_motion = false; // U9 (the app sets it from the OS where readable, until chosen)
-    int text_size = 100;        // U6: percent (kTextSizes)
+    bool sounds = true;         // on by default
+    bool reduce_motion = false; // (the app sets it from the OS where readable, until chosen)
+    int text_size = 100;        // percent (kTextSizes)
     int prompts = 0;            // the button prompts shown: an index into kPrompts (0: from the last device used)
     bool operator==(const LauncherSettings&) const = default;
 };

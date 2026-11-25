@@ -3,7 +3,7 @@
 // The rules the views and actions share (launcher/app/characters.cpp and
 // game.cpp before): which characters can be added, updated, removed, what
 // their outfits do, whether the game is older than this launcher. Windows
-// gets the same rules (the Tk window's copy had drifted, spec windows 8.8).
+// gets the same rules (the Tk window's copy had drifted).
 
 #include "facts.h"
 
@@ -63,6 +63,9 @@ std::string unknown_owned_why(const Facts& facts, const Fighter& fighter);
 std::string removable(const Facts& facts, const Fighter& fighter);
 std::vector<std::string> base_to_add(const Facts& facts, const std::string& game);
 std::vector<std::string> owned_to_add(const Facts& facts, const std::string& game);
+// Every character that can be added now from every game that can be used: each game's own and the DLC ones the
+// Steam account owns (Fighters' Add All Owned for all of them, add-all-owned:all).
+std::vector<std::string> all_owned_to_add(const Facts& facts);
 std::vector<std::string> to_update(const Facts& facts, const std::string& game, bool stand_ins = false);
 std::vector<std::string> to_remove_all(const Facts& facts, const std::string& game);
 bool wants_outfits(const Facts& facts, const Fighter& fighter);

@@ -233,7 +233,7 @@ struct Reader {
                 stopping = true;
                 if (task) {
                     // With a cancel file (made by terminate()) the worker stops what it started and ends; without
-                    // one, it is ended now. The update workers are never ended (C3).
+                    // one, it is ended now. The update workers are never ended.
                     if (state->cancel_file.empty()) stop_all();
                     kill_at = Clock::now() + std::chrono::duration_cast<Clock::duration>(
                                                  std::chrono::duration<double>(host.stop_seconds.load()));

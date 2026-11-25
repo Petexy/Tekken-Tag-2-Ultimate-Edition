@@ -1,7 +1,7 @@
 # Intended differences from the old launchers
 
 What `launcher::model` shows differently from the old GTK app on purpose.
-`model_test` applies I1-I7 to a GTK golden before comparing it (model_test.cpp,
+`model_test` applies I1-I8 to a GTK golden before comparing it (model_test.cpp,
 `intended()`) and accepts W0-W8 between the Tk goldens' texts and the model's
 Windows views (`kTkDifferences`); anything else that differs fails.
 
@@ -13,11 +13,11 @@ they differ in just that.
 
 ## Linux (compared with the GTK goldens)
 
-- **I1 Settings is always reachable** (ARCHITECTURE U17). The old app had the
+- **I1 Settings is always reachable**. The old app had the
   settings button only once the game was installed; the model puts it beside
   Install and Resume too, because Settings now also has the launcher's own
   section.
-- **I2 The launcher's own settings** (U6, U9, U17): a section "Golden Fist
+- **I2 The launcher's own settings**: a section "Golden Fist
   Launcher" after Keyboard with Sounds (on by default), Reduce motion and
   Text size (100 %, 125 %, 150 %).
 - **I3 Play reads display.ini when it is pressed.** The old app used what
@@ -28,7 +28,7 @@ they differ in just that.
 - **I4 A cancelled removal says calmly what is left**: "Removing cancelled" /
   "The characters removed before stay removed, the others are kept." instead
   of the signal ("It was stopped: Terminated (code 143, see Details)").
-- **I5 New ids** (U14: everything that can be activated has one): the header's
+- **I5 New ids** (everything that can be activated has one): the header's
   `refresh`, the task panel's `details`, and the uninstall dialog's
   `uninstall-saves`, `uninstall-characters`, `uninstall-cancel` and
   `uninstall-confirm`. The old app's elements had no id there; the comparison
@@ -48,9 +48,15 @@ they differ in just that.
   and opens it." Its Update (`notice-update`) still updates only the launcher;
   Home draws it no button while UPDATE includes it. The comparison takes the
   model's UPDATE element as it is (units.cpp `update_all` checks its parts).
+- **I8 Add All Owned for every game** (one button that adds them all): Fighters
+  has `add-all-owned:all`, which adds every character that can be added now
+  from the games that can be used: each game's own and the DLC characters the
+  Steam account owns, in one import. The old apps had an Add All per game and
+  one Add All Owned for Tekken 7's DLC only. The comparison takes the model's
+  element as it is (units.cpp `add_all_everything` checks what it adds).
 
 Not seen in the goldens but also changed on purpose: every item that cannot
-be used now keeps a reason (`describe.why`, U7) instead of only being
+be used now keeps a reason (`describe.why`) instead of only being
 greyed out, and nothing is said only in a tooltip (the blue side shows the
 focused item's `describe` block).
 
@@ -70,9 +76,9 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
   Mishima failed" where Tk said "Could not add Kazumi Mishima"; Windows-only
   tasks (Set Up Game, Build, Install, Update installed, the launcher's files)
   keep Tk's texts.
-- **W4 Folders are chosen, not typed** (U11): each folder row has Browse
+- **W4 Folders are chosen, not typed**: each folder row has Browse
   (`folder:<key>`) and shows the folder, no text entry.
-- **W5 Every sentence is the model's** (U2): `main.py --query` answers facts
+- **W5 Every sentence is the model's**: `main.py --query` answers facts
   and codes only; only a worker's `@error` lines carry Python's words.
 - **W6 Linux's words where Tk's had drifted, or Tk said nothing**: the
   resolution's Automatic note, the notes on a keyboard.ini or display.ini
@@ -87,6 +93,7 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
   stand-in moves, packs made by another version (Remove, Remove All).
 - **I7** as above: Home's UPDATE, and the notice's sentence ("Update
   replaces this launcher with it and opens it." on Windows).
+- **I8** as above: Add All Owned for every game.
 - **W8 Linux's sentence with Windows' action**: "Set up the game first: the
   characters are made from it and from your Tekken 7 or Tekken 8." (Tk: "Set
   up the game first: characters are made from it.").
