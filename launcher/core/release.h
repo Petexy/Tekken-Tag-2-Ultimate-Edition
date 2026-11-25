@@ -25,6 +25,9 @@ inline constexpr const char* kLatestRelease =
 // new one waits for it to end before it opens its window (one window per
 // user: the old one's would be shown instead).
 inline constexpr const char* kReplacesVariable = "TTT2_LAUNCHER_AFTER";
+// Set ("update") on the launcher an update opens when Home's UPDATE has more to do (the game program, the
+// characters): it goes on with them once it has looked. Never passed on to the programs it starts.
+inline constexpr const char* kContinueVariable = "TTT2_LAUNCHER_CONTINUE";
 
 // A version's numbers ("0.1.0", "v0.2", "V1.10.3"); none when it is not one.
 std::optional<std::vector<unsigned>> version_numbers(std::string_view text);

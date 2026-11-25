@@ -89,6 +89,44 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         task[0].text.at("t") == "Shaders are ready") {
         golden["task"] = task;
     }
+    // I7 Home's UPDATE: where something is to bring up to date (the launcher, the game program, characters), one
+    // Update does all of it and takes Play's place as the suggested item; Play stays as an ordinary one, and the
+    // game program's own Update goes (UPDATE does it). The model's element as it is: units.cpp checks its parts.
+    if (const auto m = model.find("game"); m != model.end()) {
+        const auto id_is = [](const Element& e, const char* id) {
+            const auto it = e.text.find("id");
+            return it != e.text.end() && it->second == id;
+        };
+        const auto all = std::find_if(m->second.begin(), m->second.end(),
+                                      [&](const Element& e) { return id_is(e, "update-everything"); });
+        Section& g = golden["game"];
+        if (all != m->second.end()) {
+            size_t place = SIZE_MAX;
+            for (size_t i = 0; i < g.size();) {
+                if (id_is(g[i], "update")) {
+                    if (g[i].text.count("cls") && g[i].text.at("cls") == "primary") place = i;
+                    g.erase(g.begin() + static_cast<long>(i));
+                    continue;
+                }
+                if (id_is(g[i], "play")) {
+                    if (place == SIZE_MAX) place = i;
+                    g[i].text.erase("cls");
+                }
+                ++i;
+            }
+            if (place != SIZE_MAX) g.insert(g.begin() + static_cast<long>(std::min(place, g.size())), *all);
+            // (The launcher's notice says that UPDATE gets the new version first.)
+            static const std::regex notice("You have (.*)\\. Update replaces this AppImage with it and opens it\\.");
+            for (Element& e : golden["notice"]) {
+                std::smatch have;
+                if (e.text.count("t") && std::regex_match(e.text.at("t"), have, notice)) {
+                    e.text["t"] = "You have " + have[1].str() +
+                                  ". Update on Home gets it first, then brings the game program and the fighters up "
+                                  "to date.";
+                }
+            }
+        }
+    }
     // I1 Settings is always reachable (U17): a gear beside Install/Resume when the game is not installed.
     Section& game = golden["game"];
     for (size_t i = 0; i < game.size(); ++i) {
@@ -355,6 +393,11 @@ const TkDifference kTkDifferences[] = {
      "Their moves cannot be saved from Tekken 8 now: .*|Tekken 8 was updated to a version that "
      "Ultimate Launcher cannot save moves from yet: .*",
      "W7"},
+    // I7 Home's UPDATE (the launcher, the game program and the characters in one) where Play was the suggested item.
+    {false, "game", "Update", "I7"},
+    {false, "notice", "You have .*\\. Update on Home gets it first, then brings the game program and the fighters up to "
+     "date\\.", "I7"},
+    {true, "notice", "You have .*\\. Update replaces this launcher with it and opens it\\.", "I7"},
     // W8 Linux's sentence with Windows' action.
     {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},
     {false, "characters",

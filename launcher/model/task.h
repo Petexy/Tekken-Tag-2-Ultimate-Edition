@@ -121,6 +121,8 @@ public:
     const Progress& progress_state() const { return progress_; }
     const TaskResult& last() const { return last_; }
     bool shown() const { return shown_; }
+    // Changes when a task starts and when it ends (a result shown is the task's whose end gave this number).
+    int serial() const { return serial_; }
     // The job that runs (the self-update replaces it with each step's).
     void set_job(std::unique_ptr<Job> job) {
         if (job_) ended_job_ = std::move(job_); // (it may be ending from its own callback)

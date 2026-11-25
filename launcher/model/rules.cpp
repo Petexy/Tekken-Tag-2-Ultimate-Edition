@@ -223,6 +223,34 @@ std::vector<std::string> base_to_add(const Facts& facts, const std::string& game
     return names;
 }
 
+UpdatePlan update_plan(const Facts& facts) {
+    UpdatePlan p;
+    const bool installed = facts.install.state == InstallState::kInstalled;
+    if (facts.self_update && facts.newer) {
+        p.launcher = true;
+        p.launcher_from = facts.launcher_version;
+        p.launcher_to = facts.newer->version;
+    }
+    // (A new launcher brings its own build of the game: built again after it, always.)
+    if (installed && facts.builder && (p.launcher || update_ready(facts))) {
+        p.game = true;
+        p.game_for = p.launcher ? p.launcher_to : std::string(launcher_version(facts.this_build));
+    }
+    if (!installed || !facts.status) return p;
+    // (What the game piece changes: the characters wait for an older game no more.)
+    Facts after = facts;
+    if (p.game) after.game_built = after.this_build;
+    for (const Fighter& f : facts.status->fighters) {
+        if (!f.installed || !f.update) continue;
+        std::string why;
+        if (!addable(facts, f)) why = not_addable_why(facts, f);
+        else game_usable(after, f.of(kTekken8) ? kTekken8 : kTekken7, &why); // (why stays empty when it is)
+        if (why.empty()) p.fighters.push_back(f.name);
+        else p.later.emplace_back(f.display.empty() ? f.name : f.display, why);
+    }
+    return p;
+}
+
 std::vector<std::string> owned_to_add(const Facts& facts) {
     std::vector<std::string> names;
     if (facts.status) {

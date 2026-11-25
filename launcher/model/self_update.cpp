@@ -34,7 +34,7 @@ std::optional<Command> SelfUpdate::check_command() {
     return Command{download_command(*downloader, config_.releases, true, {}, config_.user_agent), {}, {}, {}, {}};
 }
 
-std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
+std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now, bool go_on) {
     now_ = now;
     if (!config_.appimage) {
         return Refusal{"Cannot update the launcher",
@@ -55,6 +55,7 @@ std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now) {
     }
     downloader_ = *downloader;
     opened_ = false;
+    go_on_ = go_on;
     TaskSpec spec;
     spec.kind = TaskKind::kLauncherUpdate;
     spec.title = "Updating the launcher";
@@ -186,6 +187,7 @@ void SelfUpdate::started(int code, const std::string& out) {
     std::string error;
     Command open{open_with_rollback(*config_.appimage, version), {{kReplacesVariable, std::to_string(config_.pid)}},
                  {}, {}, {}, Command::Mode::kDetached}; // (it outlives this one)
+    if (go_on_) open.env[kContinueVariable] = "update";
     auto job = starter_.start(open, {}, &error);
     if (!job) {
         runner_.finish(false, "Updated to " + version + ", but it cannot be opened",

@@ -1,7 +1,7 @@
 # Intended differences from the old launchers
 
 What `launcher::model` shows differently from the old GTK app on purpose.
-`model_test` applies I1-I5 to a GTK golden before comparing it (model_test.cpp,
+`model_test` applies I1-I7 to a GTK golden before comparing it (model_test.cpp,
 `intended()`) and accepts W0-W8 between the Tk goldens' texts and the model's
 Windows views (`kTkDifferences`); anything else that differs fails.
 
@@ -27,6 +27,21 @@ Windows views (`kTkDifferences`); anything else that differs fails.
   `uninstall-saves`, `uninstall-characters`, `uninstall-cancel` and
   `uninstall-confirm`. The old app's elements had no id there; the comparison
   ignores these ids where the golden has none.
+
+- **I6 "Prepare shaders before playing" is on by default**: where the case's
+  display.ini does not say, the golden's switch is on.
+- **I7 Home's UPDATE** (players found the separate updates confusing): when
+  anything can be brought up to date (a newer launcher that updates itself,
+  the game program, characters made by an older importer), one Update
+  (`update-everything`, the suggested item) does all of it in order: the
+  launcher, then the game program, then the characters. Play stays as an
+  ordinary item (none while the game is older than this launcher can run),
+  and the game program's own Update is not offered beside it. The launcher's
+  notice says "Update on Home gets it first, then brings the game program and
+  the fighters up to date." in place of "Update replaces this AppImage with it
+  and opens it." Its Update (`notice-update`) still updates only the launcher;
+  Home draws it no button while UPDATE includes it. The comparison takes the
+  model's UPDATE element as it is (units.cpp `update_all` checks its parts).
 
 Not seen in the goldens but also changed on purpose: every item that cannot
 be used now keeps a reason (`describe.why`, U7) instead of only being
@@ -64,6 +79,8 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
   and "2 of 3 owned"; the update offer for characters made by an older
   version also while they cannot be updated now (it says why); Tekken 8's
   stand-in moves, packs made by another version (Remove, Remove All).
+- **I7** as above: Home's UPDATE, and the notice's sentence ("Update
+  replaces this launcher with it and opens it." on Windows).
 - **W8 Linux's sentence with Windows' action**: "Set up the game first: the
   characters are made from it and from your Tekken 7 or Tekken 8." (Tk: "Set
   up the game first: characters are made from it.").

@@ -1073,6 +1073,312 @@ void windows_before(const fs::path& scratch) {
     CHECK(t.view().button.label.empty());
 }
 
+// ---------------------------------------------------------------- Home's UPDATE (the launcher, the game, the fighters)
+
+const Action* action_in(const View& v, const std::string& id) {
+    for (const Action& a : v.game.actions)
+        if (a.id == id) return &a;
+    return nullptr;
+}
+
+bool has_arg(const Command& c, const std::string& a) {
+    return std::find(c.argv.begin(), c.argv.end(), a) != c.argv.end();
+}
+bool is_build(const Command& c) { return !c.argv.empty() && fs::path(c.argv[0]).filename() == "ttt2-build"; }
+bool is_import(const Command& c) {
+    return std::any_of(c.argv.begin(), c.argv.end(),
+                       [](const std::string& a) { return fs::path(a).filename() == "import_character.py"; });
+}
+int count_runs(const FakeStarter& s, const std::function<bool(const Command&)>& which) {
+    return static_cast<int>(std::count_if(s.started.begin(), s.started.end(), which));
+}
+
+void update_all(const fs::path& golden, const fs::path& scratch) {
+    // -- the plan, each combination
+    current = "update plan: the fighters alone";
+    const json::Value installed = fixture(golden, "installed");
+    replay(installed, Caps::linux_caps(), scratch / "p1", {0, [](Harness& h) {
+        const UpdatePlan p = update_plan(h.model.facts());
+        CHECK(!p.launcher && !p.game && p.fighters == std::vector<std::string>{"josie"} && p.later.empty());
+        const View v = h.model.view();
+        const Action* all = action_in(v, "update-everything");
+        const Action* play = action_in(v, "play");
+        CHECK(all && all->primary && all->enabled && all->label == "Update");
+        CHECK(play && !play->primary && play->enabled); // (an ordinary entry)
+        CHECK(!action_in(v, "update"));                  // (nothing of the game's own to update)
+        CHECK(v.game.update.size() == 1 && v.game.update[0].kind == "fighters");
+        CHECK_EQ(v.game.update[0].text,
+                 display_name(h.model.facts(), "josie") + " gets the newest pack, made again from your own Tekken 7.");
+        CHECK_EQ(all->describe.explain, std::string("One part to bring up to date:"));
+    }});
+    current = "update plan: the game program and the fighters";
+    replay(fixture(golden, "update-ready"), Caps::linux_caps(), scratch / "p2", {0, [](Harness& h) {
+        const UpdatePlan p = update_plan(h.model.facts());
+        CHECK(!p.launcher && p.game && p.game_for == "0.8.0" && p.fighters.size() == 1);
+        const View v = h.model.view();
+        CHECK(!action_in(v, "update")); // (UPDATE does the game's: no second Update competes)
+        CHECK(action_in(v, "play") && !action_in(v, "play")->primary);
+        CHECK(v.game.update.size() == 2 && v.game.update[0].kind == "game" && v.game.update[1].kind == "fighters");
+        CHECK(v.game.update.size() == 2 && v.game.update[0].text.starts_with("Built again for 0.8.0, from the game in "
+                                                                             "its folder: a few minutes."));
+        CHECK_EQ(action_in(v, "update-everything")->describe.explain,
+                 std::string("2 parts, brought up to date one after another:"));
+    }});
+    current = "update plan: the launcher, the game program and the fighters";
+    replay(fixture(golden, "newer-release"), Caps::linux_caps(), scratch / "p3", {0, [](Harness& h) {
+        const UpdatePlan p = update_plan(h.model.facts());
+        CHECK(p.launcher && p.launcher_from == "0.8.0" && p.launcher_to == "0.9.0");
+        CHECK(p.game && p.game_for == "0.9.0"); // (the new launcher builds it again for itself)
+        const View v = h.model.view();
+        CHECK(v.game.update.size() == 3 && v.game.update[0].title == "Ultimate Launcher 0.8.0 → 0.9.0");
+        CHECK(v.game.update.size() == 3 &&
+              v.game.update[0].text.ends_with("The launcher then restarts by itself and goes on with the rest."));
+        CHECK(v.game.update.size() == 3 && v.game.update[1].text.starts_with("The new launcher builds it again for "
+                                                                             "0.9.0"));
+        // (The notice's Update is the launcher's alone: Home's says it does all, and the app shows only that one.)
+        CHECK(v.notice.shown && v.notice.whole);
+        CHECK(v.notice.detail.ends_with("Update on Home gets it first, then brings the game program and the fighters "
+                                        "up to date."));
+    }});
+    current = "update plan: an older game (no Play)";
+    replay(fixture(golden, "older-game"), Caps::linux_caps(), scratch / "p4", {0, [](Harness& h) {
+        const UpdatePlan p = update_plan(h.model.facts());
+        // (Its fighters wait for the game no more: the game's part comes first.)
+        CHECK(p.game && p.fighters.size() == 1 && p.later.empty());
+        const View v = h.model.view();
+        CHECK(!action_in(v, "play") && !action_in(v, "update"));
+        CHECK(action_in(v, "update-everything") && action_in(v, "update-everything")->primary);
+    }});
+    current = "update plan: fighters partly left for later";
+    replay(installed, Caps::linux_caps(), scratch / "p5", {0, [](Harness& h) {
+        Facts f = h.model.facts();
+        f.status->steam_running = false;
+        f.status->heihachi_saved = true;
+        std::string dlc_name;
+        for (Fighter& x : f.status->fighters) {
+            if (x.name == "josie") x.moveset_saved = true; // (saved before: no Steam needed)
+            if (x.dlc != 0 && !x.of(kTekken8) && dlc_name.empty() && owns(f, x) == true) {
+                x.installed = x.update = true;
+                x.outdated = x.newer = false;
+                dlc_name = x.name;
+            }
+        }
+        CHECK(!dlc_name.empty());
+        const UpdatePlan p = update_plan(f);
+        CHECK(p.fighters == std::vector<std::string>{"josie"});
+        CHECK(p.later.size() == 1 && p.later[0].first == display_name(f, dlc_name) &&
+              p.later[0].second == "Start Steam: it checks that you own their DLC");
+        const auto parts = update_parts(f, p);
+        CHECK(parts.size() == 2 && parts[1].kind == "later" && parts[1].title == "Left for later" &&
+              parts[1].text == display_name(f, dlc_name) + ": Start Steam: it checks that you own their DLC.");
+        // (Only fighters that cannot be done: nothing for UPDATE, Play is suggested again.)
+        for (Fighter& x : f.status->fighters)
+            if (x.name == "josie") x.moveset_saved = false;
+        CHECK(update_plan(f).empty() && update_plan(f).later.size() == 2);
+    }});
+    current = "update plan: nothing pending";
+    replay(fixture(golden, "appimage-current"), Caps::linux_caps(), scratch / "p6", {0, [](Harness& h) {
+        Facts f = h.model.facts();
+        for (Fighter& x : f.status->fighters) x.update = false;
+        CHECK(update_plan(f).empty());
+    }});
+
+    // -- the chain
+    const json::Value ready = fixture(golden, "update-ready");
+    current = "update chain: the game program, then the fighters";
+    replay(ready, Caps::linux_caps(), scratch / "c1", {0, [&](Harness& h) {
+        bool hold = true;
+        h.starter.set_script([&](Run& r) {
+            fixture_answer(ready, r);
+            if (is_build(r.command) && hold) r.held = true;
+        });
+        h.model.activate("update-everything", h.now);
+        CHECK(h.model.task().running() && h.model.task().spec().kind == TaskKind::kUpdate);
+        CHECK(h.model.in_update() && h.model.update_goes_on());
+        TaskView::Chain ch = h.model.view().task.chain;
+        CHECK(ch.at == 1 && ch.count == 2 && ch.part == "The game program" && ch.next.size() == 1 &&
+              ch.next[0].kind == "fighters" && !ch.done && !ch.waiting);
+        hold = false;
+        h.starter.set_script([&](Run& r) { fixture_answer(ready, r); });
+        // (The held build ends.)
+        h.model.task().cancel();
+        h.settle();
+        CHECK(!h.model.task().running());
+        ch = h.model.view().task.chain;
+        CHECK(ch.stopped && ch.at == 1 && !ch.done);
+        CHECK_EQ(count_runs(h.starter, is_import), 0); // (a stopped part: the next never starts)
+        // Try Again: from the part that stopped.
+        h.model.activate("task", h.now); // (Close, as the app does first)
+        h.model.activate("update-resume", h.now);
+        h.settle();
+        ch = h.model.view().task.chain;
+        CHECK(ch.done && ch.count == 2 && !h.model.update_goes_on());
+        CHECK_EQ(ch.summary, "Updated: the game program and " + display_name(h.model.facts(), "josie"));
+        CHECK_EQ(count_runs(h.starter, is_build), 2);
+        CHECK_EQ(count_runs(h.starter, is_import), 1);
+        CHECK_EQ(h.model.updates_done(), 1); // (one sound for the whole update)
+        CHECK(h.model.task().last().ok);
+    }});
+    current = "update chain: a failed part, Try Again goes on from it";
+    replay(ready, Caps::linux_caps(), scratch / "c2", {0, [&](Harness& h) {
+        int imports = 0;
+        h.starter.set_script([&](Run& r) {
+            fixture_answer(ready, r);
+            if (is_import(r.command) && imports++ == 0) {
+                r.lines = {{"@error Tekken 7 did not answer", false}};
+                r.code = 1;
+            }
+        });
+        h.model.activate("update-everything", h.now);
+        h.settle();
+        TaskView::Chain ch = h.model.view().task.chain;
+        CHECK(ch.stopped && ch.at == 2 && ch.count == 2 && ch.part == "Fighters" && !ch.done);
+        CHECK(!h.model.task().last().ok && !h.model.update_goes_on());
+        CHECK_EQ(h.model.updates_done(), 0);
+        h.model.activate("task", h.now);
+        h.model.activate("update-resume", h.now);
+        h.settle();
+        ch = h.model.view().task.chain;
+        CHECK(ch.done && ch.at == 2 && ch.count == 2);
+        CHECK_EQ(count_runs(h.starter, is_build), 1); // (the game's part done stays done)
+        CHECK_EQ(count_runs(h.starter, is_import), 2);
+        CHECK_EQ(h.model.updates_done(), 1);
+    }});
+    current = "update chain: Cancel between two parts";
+    replay(ready, Caps::linux_caps(), scratch / "c3", {0, [&](Harness& h) {
+        h.model.activate("update-everything", h.now);
+        // (The build's lines and end, without the tick that starts the next part.)
+        h.starter.pump();
+        CHECK(!h.model.task().running());
+        CHECK(h.model.view().task.chain.waiting && h.model.in_update());
+        h.model.activate("task", h.now);
+        h.settle();
+        const TaskView::Chain ch = h.model.view().task.chain;
+        CHECK(ch.stopped && ch.at == 2 && !ch.waiting);
+        CHECK_EQ(count_runs(h.starter, is_import), 0);
+        // A new UPDATE starts from its first part again.
+        h.model.activate("task", h.now);
+        h.model.activate("update-everything", h.now);
+        CHECK(h.model.view().task.chain.at == 1);
+    }});
+    current = "update chain: another task between, the result is not the update's";
+    replay(installed, Caps::linux_caps(), scratch / "c4", {0, [&](Harness& h) {
+        h.model.activate("update-everything", h.now);
+        h.settle();
+        CHECK(h.model.view().task.chain.done && h.model.view().task.chain.count == 1);
+        h.model.activate("task", h.now);
+        h.model.activate("get-packages", h.now);
+        h.settle();
+        CHECK_EQ(h.model.view().task.chain.count, 0);
+    }});
+
+    // -- the launcher's part (Linux: the AppImage) and the hand-over
+    const json::Value newer = fixture(golden, "newer-release");
+    const auto appimage_script = [&](std::vector<Command>& opened) {
+        return [&](Run& r) {
+            if (has_arg(r.command, "--version")) {
+                r.lines = {{"Ultimate Launcher 0.9.0", false}};
+            } else if (r.command.argv.size() > 4 && r.command.argv[0] == "/bin/sh") {
+                opened.push_back(r.command);
+                r.held = true;
+            } else {
+                fixture_answer(newer, r);
+            }
+        };
+    };
+    current = "update chain: the launcher's part hands over to the new launcher";
+    replay(newer, Caps::linux_caps(), scratch / "c5", {0, [&](Harness& h) {
+        std::vector<Command> opened;
+        h.starter.set_script(appimage_script(opened));
+        h.model.activate("update-everything", h.now);
+        CHECK(h.model.task().spec().kind == TaskKind::kLauncherUpdate);
+        CHECK(h.model.view().task.chain.at == 1 && h.model.view().task.chain.count == 3);
+        h.settle();
+        CHECK(opened.size() == 1 && opened[0].env.count(kContinueVariable) &&
+              opened[0].env.at(kContinueVariable) == "update");
+        CHECK(opened.size() == 1 && opened[0].env.count(kReplacesVariable));
+        CHECK(h.model.view().task.chain.handed_over && h.model.update_goes_on());
+        CHECK_EQ(h.model.updates_done(), 0); // (the sound is the new launcher's, at its end)
+        CHECK(std::any_of(h.effects.begin(), h.effects.end(),
+                          [](const Effect& e) { return e.kind == Effect::Kind::kQuit; }));
+        CHECK_EQ(count_runs(h.starter, is_build), 0); // (the new one builds it for itself)
+    }});
+    current = "update chain: the header's Update alone opens the new launcher without going on";
+    replay(newer, Caps::linux_caps(), scratch / "c6", {0, [&](Harness& h) {
+        std::vector<Command> opened;
+        h.starter.set_script(appimage_script(opened));
+        h.model.activate("notice-update", h.now);
+        h.settle();
+        CHECK(opened.size() == 1 && !opened[0].env.count(kContinueVariable));
+        CHECK_EQ(h.model.view().task.chain.count, 0);
+    }});
+    current = "update chain: Windows' launcher part opens the new .exe to go on";
+    replay(newer, Caps::windows_caps(), scratch / "c7", {0, [&](Harness& h) {
+        Facts& f = h.model.mutable_facts();
+        f.self_update = true;
+        if (!f.newer) f.newer = Release{"0.9.0", "v0.9.0", "https://example.com/v0.9.0", "a.exe", "", 1000, ""};
+        h.starter.set_script([&](Run& r) {
+            fixture_answer(newer, r);
+            if (has_arg(r.command, "launcher")) r.lines = {{"@launcher-updated 0.9.0", false}};
+        });
+        CHECK(update_plan(h.model.facts()).launcher);
+        h.model.activate("update-everything", h.now);
+        h.settle();
+        const auto open = std::find_if(h.effects.begin(), h.effects.end(),
+                                       [](const Effect& e) { return e.kind == Effect::Kind::kOpenUpdated; });
+        CHECK(open != h.effects.end() && open->go_on && open->text == "0.9.0");
+        CHECK(h.model.view().task.chain.handed_over);
+        // (It could not be opened: the update stops here.)
+        h.model.opened_updated("The file is in use", h.now);
+        CHECK(h.model.view().task.chain.stopped && !h.model.view().task.chain.handed_over);
+    }});
+
+    // -- the new launcher goes on (kContinueVariable)
+    current = "update continued: the rest starts by itself once the launcher has looked";
+    replay(ready, Caps::linux_caps(), scratch / "k1", {0, [&](Harness& h) {
+        h.starter.set_script([&](Run& r) {
+            fixture_answer(ready, r);
+            if (is_build(r.command)) r.held = true;
+        });
+        h.model.continue_update(h.now);
+        h.model.tick(h.now);
+        CHECK(h.model.task().running() && h.model.task().spec().kind == TaskKind::kUpdate);
+        const TaskView::Chain ch = h.model.view().task.chain;
+        CHECK(ch.at == 2 && ch.count == 3 && ch.part == "The game program");
+        CHECK(ch.next.size() == 1 && ch.next[0].kind == "fighters");
+    }});
+    current = "update continued: not without the variable";
+    replay(ready, Caps::linux_caps(), scratch / "k2", {0, [&](Harness& h) {
+        h.now += 10;
+        h.model.tick(h.now);
+        CHECK(!h.model.task().running() && !h.model.in_update());
+    }});
+    current = "update continued: never the launcher's part again (a newer release listed)";
+    replay(newer, Caps::linux_caps(), scratch / "k3", {0, [&](Harness& h) {
+        std::vector<Command> opened;
+        h.starter.set_script(appimage_script(opened));
+        h.model.continue_update(h.now);
+        h.settle();
+        CHECK(opened.empty() && h.model.task().last().kind == TaskKind::kImport);
+        const TaskView::Chain ch = h.model.view().task.chain;
+        CHECK(ch.done && ch.count == 2);
+        CHECK_EQ(ch.summary, "Updated: launcher 0.8.0 and " + display_name(h.model.facts(), "josie"));
+        CHECK_EQ(h.model.updates_done(), 1);
+    }});
+    current = "update continued: waits while something is asked, gives up in time";
+    replay(ready, Caps::linux_caps(), scratch / "k4", {0, [&](Harness& h) {
+        h.model.activate("uninstall", h.now); // (a dialog open: not settled)
+        h.model.continue_update(h.now);
+        h.model.tick(h.now);
+        CHECK(!h.model.task().running());
+        h.now += LauncherModel::kContinueSeconds + 1;
+        h.model.tick(h.now);
+        h.model.activate("uninstall-cancel", h.now);
+        h.model.tick(h.now);
+        CHECK(!h.model.task().running() && !h.model.in_update());
+    }});
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -1084,6 +1390,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     every_id(golden, scratch / "ids", Caps::linux_caps());
     every_id(golden, scratch / "ids", Caps::windows_caps());
     windows_before(scratch / "windows-before");
+    update_all(golden, scratch / "update-all");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

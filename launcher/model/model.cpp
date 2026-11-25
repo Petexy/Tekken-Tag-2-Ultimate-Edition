@@ -303,12 +303,141 @@ void LauncherModel::tick(double now) {
     }
     done_job_.reset();
     if (before_ && before_done_) before_answered(now);
+    // Home's UPDATE: its next part once the launcher has looked again after the last one (or, continued from the
+    // launcher that updated this one, its rest once this one has looked).
+    if (chain_ && chain_->next && settled()) start_part(now);
+    if (continue_ && settled()) {
+        continue_ = false;
+        Facts without = facts_;
+        without.newer.reset(); // (the launcher's part is done: the one that opened this one did it)
+        const UpdatePlan plan = update_plan(without);
+        if (plan.empty()) {
+            said_ = "The update has nothing more to do";
+        } else {
+            Chain c;
+            c.parts.push_back({"launcher", "Ultimate Launcher " + facts_.launcher_version, "Done."});
+            for (UpdatePart& p : update_parts(without, plan))
+                if (p.kind != "later") c.parts.push_back(std::move(p));
+            c.at = 1;
+            c.launcher_to = facts_.launcher_version;
+            c.results.push_back("launcher " + facts_.launcher_version);
+            c.later = plan.later;
+            chain_ = std::move(c);
+            start_part(now);
+        }
+    } else if (continue_ && now >= continue_until_) {
+        continue_ = false;
+        said_ = "The update did not go on: the launcher took too long to look";
+    }
     sync();
 }
 
 double LauncherModel::next_tick(double now) const {
-    (void)now;
+    // (Home's UPDATE waiting for its next part: looked at often, the loop sleeps otherwise.)
+    if ((chain_ && chain_->next) || continue_) return now + 0.25;
     return facts_.game_running && !facts_.game_started_here ? game_look_ : 1e18;
+}
+
+void LauncherModel::continue_update(double now) {
+    continue_ = true;
+    continue_until_ = now + kContinueSeconds;
+}
+
+bool LauncherModel::settled() const {
+    return !runner_.running() && !before_ && !facts_.status_loading && !status_job_ && !dialog_ &&
+           !(facts_.preflight && facts_.preflight->running) && !facts_.game_running &&
+           !(self_update_ && self_update_->running());
+}
+
+void LauncherModel::start_update_all(double now) {
+    if (runner_.running() || before_) return refuse("Another task is running", "Wait for it to end, then update.", now);
+    if (facts_.game_running) return refuse("The game is running", "Quit it, then update.", now);
+    const UpdatePlan plan = update_plan(facts_);
+    if (plan.empty()) {
+        said_ = "Everything is up to date";
+        return;
+    }
+    Chain c;
+    for (UpdatePart& p : update_parts(facts_, plan))
+        if (p.kind != "later") c.parts.push_back(std::move(p));
+    c.launcher_to = plan.launcher_to;
+    c.later = plan.later;
+    chain_ = std::move(c);
+    start_part(now);
+}
+
+// The part at chain_->at, as its own task (each refusal ends it as a failed one: part_ended).
+void LauncherModel::start_part(double now) {
+    Chain& c = *chain_;
+    c.next = c.stopped = false;
+    c.running = true;
+    const std::string kind = c.parts[c.at].kind;
+    if (kind == "launcher") {
+        if (facts_.caps.windows) {
+            start_worker(TaskKind::kLauncherUpdate, "Updating the launcher", now);
+        } else if (!self_update_) {
+            refuse("Cannot update the launcher",
+                   "Only the launcher's AppImage updates itself, and this launcher does not run from one.", now);
+        } else if (const auto refusal = self_update_->start(now, c.at + 1 < c.parts.size())) {
+            refuse(refusal->title, refusal->why, now);
+        }
+    } else if (kind == "game") {
+        start_update(now);
+    } else {
+        // (Those it can update now, the game new: the facts are newer than the plan.)
+        Facts after = facts_;
+        after.newer.reset();
+        const UpdatePlan plan = update_plan(after);
+        c.later = plan.later;
+        if (plan.fighters.empty()) {
+            // (None left to do now: the part is done without a task.)
+            c.running = false;
+            c.results.push_back("no fighters");
+            part_done();
+            return;
+        }
+        start_import(plan.fighters, now);
+    }
+}
+
+void LauncherModel::part_done() {
+    Chain& c = *chain_;
+    if (++c.at >= c.parts.size()) {
+        c.at = c.parts.size() - 1;
+        c.done = true;
+        ++updates_done_;
+    } else {
+        c.next = true;
+    }
+}
+
+void LauncherModel::part_ended(const TaskResult& r) {
+    Chain& c = *chain_;
+    c.running = false;
+    c.end_serial = runner_.serial();
+    if (r.kind == TaskKind::kRefusal || !r.ok) {
+        c.stopped = true;
+        return;
+    }
+    const std::string kind = c.parts[c.at].kind;
+    if (kind == "launcher") {
+        const std::string version = !r.updated.empty() ? r.updated : c.launcher_to;
+        c.results.push_back("launcher " + version);
+        // (Opened: it goes on with the rest, this one quits.)
+        if ((self_update_ && self_update_->opened()) || !r.updated.empty()) {
+            c.handed_over = true;
+            return;
+        }
+    } else if (kind == "game") {
+        c.results.push_back("the game program");
+        // (Built: the game is this launcher's now, also before Windows' state says so.)
+        facts_.game_built = facts_.this_build;
+    } else {
+        const size_t n = runner_.spec().names.size();
+        c.results.push_back(n == 1 ? display_name(facts_, runner_.spec().names[0])
+                                   : std::to_string(n) + " fighters");
+    }
+    part_done();
 }
 
 void LauncherModel::activated(double now) {
@@ -712,6 +841,7 @@ void LauncherModel::launch_game(double now) {
 
 void LauncherModel::task_ended(const TaskResult& r) {
     sync();
+    if (chain_ && chain_->running) part_ended(r);
     if (r.kind == TaskKind::kRefusal) return;
     said_ = r.ok ? r.title : r.title + (r.detail.empty() ? "" : ": " + r.detail);
     if (r.kind == TaskKind::kInstall) {
@@ -719,7 +849,11 @@ void LauncherModel::task_ended(const TaskResult& r) {
         if (r.ok || !parts_.environment.started(facts_.installing)) parts_.environment.forget_started_record();
         facts_.installing.clear();
     }
-    if (r.ok && !r.updated.empty()) pending_.push_back({Effect::Kind::kOpenUpdated, r.updated, {}, {}, {}});
+    if (r.ok && !r.updated.empty()) {
+        Effect open{Effect::Kind::kOpenUpdated, r.updated, {}, {}, {}};
+        open.go_on = chain_ && chain_->handed_over && chain_->at + 1 < chain_->parts.size();
+        pending_.push_back(open);
+    }
     if (self_update_ && self_update_->opened()) quit_after_task_ = true;
     if (quit_after_task_) {
         pending_.push_back({Effect::Kind::kQuit, {}, {}, {}, {}});
@@ -783,8 +917,15 @@ void LauncherModel::uninstall_done(const UninstallReport& r, double now) {
 
 void LauncherModel::opened_updated(const std::string& error, double now) {
     if (error.empty()) return;
+    const bool handed = chain_ && chain_->handed_over;
     runner_.finish(false, "Updated to " + runner_.last().updated + ", but it cannot be opened",
                    full_sentence(error) + " Start the launcher again.", false, now);
+    if (handed) {
+        // (Nothing goes on with the rest: it stops here, the new launcher's UPDATE does it.)
+        chain_->handed_over = false;
+        chain_->stopped = true;
+        chain_->end_serial = runner_.serial();
+    }
 }
 
 void LauncherModel::set_windows_state(WindowsState state) { facts_.windows = std::move(state); }
@@ -1022,6 +1163,15 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         }
     } else if (id == "update")
         start_update(now);
+    else if (id == "update-everything")
+        start_update_all(now);
+    else if (id == "update-resume") {
+        // (Try Again: from the part that stopped, the parts done stay done.)
+        if (chain_ && chain_->stopped && !task && !before_)
+            start_part(now);
+        else
+            start_update_all(now);
+    }
     else if (id == "play") {
         auto e = play(now);
         effects.insert(effects.end(), e.begin(), e.end());
@@ -1083,7 +1233,11 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     else if (id == "task") {
         if (task)
             runner_.cancel();
-        else
+        else if (chain_ && chain_->next) {
+            // (Cancel between two parts of Home's UPDATE: the next one never starts.)
+            chain_->next = false;
+            chain_->stopped = true;
+        } else
             runner_.close();
     } else if (id == "details")
         runner_.set_details(!runner_.view().details.checked);
@@ -1186,6 +1340,31 @@ View LauncherModel::view() const {
         v.settings = settings_view(facts_, in);
     }
     v.task = runner_.view();
+    if (chain_ && (chain_->running || chain_->next || chain_->end_serial == runner_.serial())) {
+        const Chain& c = *chain_;
+        TaskView::Chain& ch = v.task.chain;
+        ch.count = static_cast<int>(c.parts.size());
+        ch.at = static_cast<int>(c.at) + 1;
+        const std::string& kind = c.parts[c.at].kind;
+        ch.part = kind == "launcher" ? "Ultimate Launcher" : kind == "game" ? "The game program" : "Fighters";
+        for (size_t i = c.at + (c.next ? 0 : 1); i < c.parts.size() && !c.done; ++i) ch.next.push_back(c.parts[i]);
+        ch.waiting = c.next;
+        ch.handed_over = c.handed_over;
+        ch.stopped = c.stopped;
+        ch.done = c.done;
+        if (c.done) {
+            std::vector<std::string> brought;
+            for (const std::string& r : c.results)
+                if (r != "no fighters") brought.push_back(r);
+            ch.summary = brought.empty() ? std::string("Everything is up to date") : "Updated: " + joined(brought);
+        }
+        for (const auto& [name, why] : c.later) {
+            std::string w = why;
+            while (!w.empty() && (w.back() == '.' || w.back() == ' ')) w.pop_back();
+            ch.later += (ch.later.empty() ? "Left for later: " : "; ") + name + " (" + w + ")";
+        }
+        if (!ch.later.empty()) ch.later += ".";
+    }
     v.dialog = dialog_;
     if (dialog_ && dialog_->id == "uninstall")
         v.dialog = uninstall_view(facts_, facts_.saves, facts_.saves_custom, uninstall_);

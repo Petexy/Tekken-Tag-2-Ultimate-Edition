@@ -72,6 +72,21 @@ bool outfits_changed(const Facts& facts, const Fighter& fighter);
 std::vector<std::string> outfits_to_change(const Facts& facts);
 bool newer_on_main(const Facts& facts, const std::string& fighter);
 
+// Everything Home's UPDATE brings up to date, in its order: the launcher (a newer release, when this one updates
+// itself), the game program (built again: for this launcher, or for the new one after it), the added characters
+// whose packs are older than the importer's (those it can make now; the others are left for later, with why).
+struct UpdatePlan {
+    bool launcher = false;
+    std::string launcher_from, launcher_to; // "0.8.0", "0.9.0"
+    bool game = false;
+    std::string game_for;                   // the launcher version the game is built for ("0.9.0")
+    std::vector<std::string> fighters;      // names, in the status's order
+    std::vector<std::pair<std::string, std::string>> later; // display name, why not now
+    int parts() const { return (launcher ? 1 : 0) + (game ? 1 : 0) + (fighters.empty() ? 0 : 1); }
+    bool empty() const { return parts() == 0; }
+};
+UpdatePlan update_plan(const Facts& facts);
+
 // Whether anything runs in the background (a task, the status, Steam's
 // answer, the preflight, GitHub): tests and screenshots wait for none.
 bool busy(const Facts& facts, bool release_checking, bool main_checking);
