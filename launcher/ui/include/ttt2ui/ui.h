@@ -55,6 +55,8 @@ struct Box {
     Align justify = Align::Start; // children along the main axis
     bool wrap = false;            // rows: wrap onto more lines
     bool scroll = false;          // vertical scroll container (clips, scroll bar, keeps the focus in view)
+    float scroll_end_gap = 0;     // a fixed-height scroll container: while it scrolls, it ends this much higher (what
+                                  // scrolls is cut off there, clear of what is drawn below it)
     bool clip = false;
     bool hug = false;             // Fit width: its content's width even in a stretching column (inline blocks)
     // A row too narrow for its Fit children shrinks them toward min_w, the highest shrink_order first (all of it),
@@ -293,6 +295,7 @@ private:
         float scroll_used = 0;  // scroll containers: the (pixel-rounded) offset their children were placed with
         Rect clip;      // visible part (ancestors' clips and scroll viewports)
         int scroller = -1;  // nearest scroll container above
+        bool bar = false;   // a half's scroll bar shows: its content was given room for it (fit_pass)
     };
     int add(std::string id, const Box& box);
     void layout();
@@ -313,9 +316,19 @@ private:
     int node_index(const std::string& id) const;
     int scroll_container_of(int n) const;
     float scroll_max(int n) const;
-    Rect bar_rect(int n, float& thumb_y, float& thumb_h) const;
+    // A scroll container's bar: its centre line x(y) = x0 - (y - y0) * tan from y0 to y1, and its thumb. In a half
+    // of the stage (a box with its own seam) inside the plate: the crimson one's along the plate's seam-facing edge
+    // (slanted as the seam), the blue one's (mirror) upright by its outer edge; elsewhere upright at the right.
+    struct ScrollBar {
+        float x0 = 0, y0 = 0, y1 = 0, tan = 0;
+        float thumb_y = 0, thumb_h = 0;
+        float x_at(float y) const { return x0 - (y - y0) * tan; }
+    };
+    ScrollBar scroll_bar(int n) const;
+    static bool on_bar(const ScrollBar& bar, Vec2 point);
     void paint_node(Canvas& canvas, int n);
     const Seam* seam_of(int n) const;
+    int seam_owner(int n) const;  // the box that holds the seam n fits to (a half of the stage), -1 none
 
     TextEngine& text_;
     Icons& icons_;
