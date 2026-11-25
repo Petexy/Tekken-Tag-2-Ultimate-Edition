@@ -153,8 +153,40 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         }
         break;
     }
-    // I2 Settings has the launcher's own section after Keyboard.
+    // I9 Settings has a Game section first: the player's name (game.ini) and the input delay, which leaves the
+    // display section (now called Display); display.ini's notes go with it too. (No case has a game.ini: no name.)
     Section& settings = golden["settings"];
+    const auto is_label = [](const Element& e, const char* t, const char* tone = nullptr) {
+        return e.kind == "label" && e.text.count("t") && e.text.at("t") == t &&
+               (!tone || (e.text.count("tone") && e.text.at("tone") == tone));
+    };
+    if (!settings.empty() && is_label(settings[0], "Game", "heading")) {
+        settings[0].text["t"] = "Display";
+        Section game = {
+            {"label", {{"t", "Game"}, {"tone", "heading"}}, {}},
+            {"label",
+             {{"t", "Your name in the game, and how it takes your presses. The game uses these when it starts."},
+              {"tone", "dim"}},
+             {}}};
+        // (display.ini's notes: between its section's words and its first setting.)
+        for (size_t i = 2; i < settings.size() && !is_label(settings[i], "Fullscreen"); ++i) game.push_back(settings[i]);
+        game.push_back({"label", {{"t", "Player name"}}, {}});
+        game.push_back({"label", {{"t", "The name the game shows for you, in place of Player."}, {"tone", "dim"}}, {}});
+        game.push_back({"label",
+                        {{"t", "Up to 16 characters: the letters A to Z, digits, spaces and the punctuation of an "
+                               "English keyboard but #. Left empty, the game's own name (Player in English)."},
+                         {"tone", "dim"}},
+                        {}});
+        game.push_back({"entry", {{"id", "player-name"}}, {{"s", true}}});
+        for (size_t i = 0; i + 2 < settings.size(); ++i) {
+            if (!is_label(settings[i], "Input delay")) continue;
+            game.insert(game.end(), settings.begin() + static_cast<long>(i), settings.begin() + static_cast<long>(i) + 3);
+            settings.erase(settings.begin() + static_cast<long>(i), settings.begin() + static_cast<long>(i) + 3);
+            break;
+        }
+        settings.insert(settings.begin(), game.begin(), game.end());
+    }
+    // I2 Settings has the launcher's own section after Keyboard.
     if (!settings.empty()) {
         const auto add = [&](Element e) { settings.push_back(std::move(e)); };
         add({"label", {{"t", "Golden Fist Launcher"}, {"tone", "heading"}}, {}});
@@ -411,6 +443,13 @@ const TkDifference kTkDifferences[] = {
     {true, "notice", "You have .*\\. Update replaces this launcher with it and opens it\\.", "I7"},
     // I8 Add All Owned for every game's characters.
     {false, "characters", "Add All Owned", "I8"},
+    // I9 Settings' Game section: the player's name; the display section called Display.
+    {false, "settings",
+     "Display|Player name|The name the game shows for you, in place of Player\\.|Up to 16 characters: the letters A "
+     "to Z, digits, spaces and the punctuation of an English keyboard but #\\. Left empty, the game's own name "
+     "\\(Player in English\\)\\.|Your "
+     "name in the game, and how it takes your presses\\. The game uses these when it starts\\.",
+     "I9"},
     // W8 Linux's sentence with Windows' action.
     {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},
     {false, "characters",

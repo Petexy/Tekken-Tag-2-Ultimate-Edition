@@ -1008,6 +1008,44 @@ delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
 
+## Player name
+
+Offline, the Wii U game calls the player "Player" (in its language:
+Joueur, Giocatore, Spieler, Jugador, ...) on the main menu's player panel,
+the select and versus screens and under the fight's health bar. That is
+the text common 1599 of the language's text bank (in a bank a text's key
+follows its record; table 1 numbers the records), which the local player's
+name (`sub_021ECCFC`) returns when the player is not online (online it is
+the network account's name), through the thunk `sub_020044AC` to the text
+getter `sub_04D49F5C`. The title asks for it every frame: the menus' name
+objects (`sub_05816540` by the player's id, then `sub_0581677C`) and the
+records filled at start-up (`sub_02262AE8`, `sub_058168E8`) copy it with
+`strncpy` into 20-byte fields (a 16-bit kind follows at +20), and a mode's
+records copy those fields whole (`sub_0380470C`: 62-byte blocks). Other
+uses of the text (the tuning data dialog, `sub_025043DC`) are not the
+player's name, and the bank's PLAYER 1 and PLAYER 2 are other texts.
+
+`game.ini`, beside display.ini (`runtime/src/host/game_settings.cpp`,
+`host::game::file_path()`: display.ini's folder on both systems, read once
+when the game starts), may give another: `player_name = <name>`, one
+`key = value` per line, `#` starting a comment as in display.ini, the later
+of two lines counting and other keys left out with a warning (the
+launcher's Settings write the file and keep what they do not know). The
+name loses the spaces and tabs at both ends, each character outside
+printable ASCII (a UTF-8 sequence, or a byte that is not one) becomes `?`,
+and it is cut to 16 characters (`host::game::kMaxNameLength`: with at most
+19 bytes a 20-byte field keeps its terminating zero, and every Latin font
+of the title has all of printable ASCII, not all of Latin-1); empty, it is
+the game's own. `title/player_name.cpp` puts it in guest memory as a text
+of a bank (its length in characters, big-endian, in the two bytes before
+it) and answers `sub_020044AC` with it when called from `sub_021ECCFC`
+(lr `0x021ECDD4`) for text 1599, so every place above shows it and the
+records keep it; nothing else changes (a save written meanwhile loads as
+before without the file). The game logs
+`ttt2: game: player name "<name>" (from <file>)`, `game: player name the
+game's own (from <file>)` or `game: defaults (no <file>)`, and a line for
+each line of the file it leaves out or changes.
+
 ## Paint without a GamePad
 
 CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
@@ -2424,7 +2462,8 @@ game logs `ttt2: display: fullscreen no, resolution auto, interpolation yes,
 input delay no (from <file>)` (or `display: defaults (no <file>)`), a line
 per variable set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU:
 rendering at <w>x<h> (scale <s>)`. The launcher's Settings show
-them in their Display section, a switch each and a list for the resolution
+them in their Display section (but the input delay, which is in their Game
+section with the player's name from game.ini), a switch each and a list for the resolution
 (Automatic, 1280 × 720 ... 5120 × 2880). Resolution and 120 fps, focused,
 say what the game will do only as far as it can be sure, as the game goes by
 its primary display, which the launcher does not look for (`automatic_note` and `refresh_note` in
@@ -2533,7 +2572,7 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Game section `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display and Game sections `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved), `player-name:<name>` (Game's Player name typed as a player does: the old one cleared, `<name>` typed, Done, which saves game.ini, then read back; empty: none) and `type:<text>` (`<text>` as the system's text input gives it, into the name being typed); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |

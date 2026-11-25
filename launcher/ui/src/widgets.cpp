@@ -1231,9 +1231,10 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
                 right -= cw + 18;
                 if (!spec.value.empty()) {
                     const Color vc = spec.value_on ? c::kWarn : c::kRedFaint;
-                    const float w = ctx.text.width(tx::kMenuValue, spec.value);
-                    ctx.text.draw(cv, tx::kMenuValue, spec.value, {right - w, centred_y(ctx.text, tx::kMenuValue, r)},
-                                  vc);
+                    TextStyle vs = tx::kMenuValue;
+                    vs.upper = !spec.value_as_typed;
+                    const float w = ctx.text.width(vs, spec.value);
+                    ctx.text.draw(cv, vs, spec.value, {right - w, centred_y(ctx.text, vs, r)}, vc);
                     right -= w + 18;
                 }
             } else {
@@ -1277,12 +1278,30 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
         &focus);
 }
 
+namespace {
+// A section's narrowest: its name at 60 % of its width (closed up and smaller) inside the slanted ends.
+float section_least(float word) { return 28 + word * .6f; }
+} // namespace
+
+float section_tabs_width(Ui& ui, std::span<const Section> sections, bool least) {
+    TextEngine& te = ui.text();
+    float w = 0;
+    for (const Section& s : sections) {
+        const float word = te.width(tx::kSection, s.label);
+        w += least ? section_least(word) : 40 + word;
+    }
+    if (sections.size() < 2) return w;
+    w += prompt_width(te, ui.glyphs(), Prompt::SectionPrev) + prompt_width(te, ui.glyphs(), Prompt::SectionNext);
+    return w + 8 * static_cast<float>(sections.size() + 1);
+}
+
 void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box,
                   int focus_group) {
     Box b = box;
     b.layout = Layout::Row;
     b.align = Align::Center;
     b.gap = 8;
+    if (b.wrap) b.line_gap = 8;
     if (zero(b.margin)) b.margin.bottom = 16;
     auto g = ui.open(id, b);
     const bool one = sections.size() < 2;
@@ -1294,9 +1313,12 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
         Focus f;
         f.disabled = s.disabled;
         f.group = focus_group;
+        // (A row too narrow for every section - many of them, a large Text size: the sections give up width before
+        // the Z / C prompts do, down to their names closed up and smaller.)
+        const float word = te.width(tx::kSection, s.label);
         ui.leaf(
-            s.id, Box{.h = Size::fixed(m::kSectionHeight)},
-            [&te, s](float) { return Vec2{40 + te.width(tx::kSection, s.label), m::kSectionHeight}; },
+            s.id, Box{.h = Size::fixed(m::kSectionHeight), .min_w = section_least(word), .shrink_order = 1},
+            [word](float) { return Vec2{40 + word, m::kSectionHeight}; },
             [s, on](PaintContext& ctx) {
                 const Rect r = ctx.rect;
                 const float fo = ctx.focus_t;
@@ -1309,8 +1331,20 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
                     surface(ctx.canvas, r, rgba(255, 255, 255, .04f),
                             mix(rgba(255, 120, 150, .22f), rgb(0xffffff), fo));
                 }
-                ctx.text.draw(ctx.canvas, tx::kSection, s.label, {r.x + 20, centred_y(ctx.text, tx::kSection, r)},
-                              on ? rgb(0xffffff) : rgb(0xd8b9c1));
+                const Color col = on ? rgb(0xffffff) : rgb(0xd8b9c1);
+                if (ctx.text.width(tx::kSection, s.label) <= r.w - 40) {
+                    ctx.text.draw(ctx.canvas, tx::kSection, s.label, {r.x + 20, centred_y(ctx.text, tx::kSection, r)},
+                                  col);
+                } else {
+                    // (Narrowed: the name's letters closer, then smaller, centred inside the slanted ends.)
+                    TextStyle st = tx::kSection;
+                    while (st.tracking > 0 && ctx.text.width(st, s.label) > r.w - 28) st.tracking -= .02f;
+                    while (st.size > tx::kSection.size * .6f && ctx.text.width(st, s.label) > r.w - 28) st.size -= .5f;
+                    const float w = ctx.text.width(st, s.label);
+                    ctx.canvas.push_clip(r);
+                    ctx.text.draw(ctx.canvas, st, s.label, {r.center().x - w / 2, centred_y(ctx.text, st, r)}, col);
+                    ctx.canvas.pop_clip();
+                }
                 if (s.disabled) ctx.canvas.pop_layer();
             },
             &f);
@@ -1528,14 +1562,16 @@ void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone, cons
     });
 }
 
-void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box) {
+void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bool dot, const Box& box, bool as_typed) {
     Box b = with_height(box, m::kPillHeight);
     b.hug = true;  // (a tag: as wide as its word, also in a stretching column)
     TextEngine& te = ui.text();
+    TextStyle style = tx::kPill;
+    style.upper = !as_typed;
     ui.leaf(
         id, b,
-        [&te, label, dot](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(tx::kPill, label), m::kPillHeight}; },
-        [label, tone, dot](PaintContext& ctx) {
+        [&te, label, dot, style](float) { return Vec2{26 + (dot ? 13 : 0) + te.width(style, label), m::kPillHeight}; },
+        [label, tone, dot, style](PaintContext& ctx) {
             const ToneColors tc = tone_colors(tone);
             surface(ctx.canvas, ctx.rect, tc.fill, tc.border);
             float x = ctx.rect.x + 13;
@@ -1547,7 +1583,7 @@ void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone, bo
                 if (!ctx.reduced) ctx.loop();
                 x += 13;
             }
-            ctx.text.draw(ctx.canvas, tx::kPill, label, {x, centred_y(ctx.text, tx::kPill, ctx.rect)}, tc.text);
+            ctx.text.draw(ctx.canvas, style, label, {x, centred_y(ctx.text, style, ctx.rect)}, tc.text);
         });
 }
 
@@ -1744,6 +1780,109 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
             if (spec.prompt) x += draw_prompt(cv, ctx.text, ctx.icons, ctx.glyphs, *spec.prompt, x, cy) + gap;
             ctx.text.draw(cv, st, spec.label, {x, centred_y(ctx.text, st, r)}, text_col);
             (void)pad;
+            if (spec.disabled) cv.pop_layer();
+        },
+        &focus);
+}
+
+// ---- text entry -----------------------------------------------------------------------------------------------------
+
+void text_field(Ui& ui, const std::string& id, const TextFieldSpec& spec, const Box& box) {
+    Box b = with_height(box, m::kTextFieldHeight);
+    TextEngine& te = ui.text();
+    static constexpr TextStyle kCount{theme::Font::DisplayBoldItalic, 13, .12f, false, 1};
+    ui.leaf(
+        id, b,
+        [&te, spec](float max_w) {
+            const float words = std::max(te.width(tx::kKeyCapBig, spec.text), te.width(tx::kKeyCapBig, spec.placeholder));
+            return Vec2{std::min(max_w, 28 + words + 14 + te.width(kCount, spec.count) + 22), m::kTextFieldHeight};
+        },
+        [spec](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const Color frame = spec.refused ? c::kWarn : rgba(140, 200, 255, .85f);
+            surface(cv, r, Gradient::linear({0, r.y}, {0, r.bottom()}, rgba(4, 8, 20, .92f), rgba(10, 22, 52, .92f)),
+                    frame);
+            const float cw = ctx.text.width(kCount, spec.count);
+            const float right = r.right() - 22 - cw;
+            ctx.text.draw(cv, kCount, spec.count, {right, centred_y(ctx.text, kCount, r)}, c::kBlueFaint);
+            // (Inside the slanted frame: the words start after its left edge at their height, end before the count.)
+            const float x = r.x + 20, ty = centred_y(ctx.text, tx::kKeyCapBig, r);
+            const Rect inside{x, r.y, std::max(0.f, right - 14 - x), r.h};
+            cv.push_clip(inside);
+            float shift = 0;
+            const std::size_t caret = std::min(spec.caret, spec.text.size());
+            const float before = ctx.text.width(tx::kKeyCapBig, std::string_view(spec.text).substr(0, caret));
+            // (A caret past the room: the words move left so that it shows.)
+            if (before > inside.w - 4) shift = before - (inside.w - 4);
+            if (spec.text.empty())
+                ctx.text.draw(cv, tx::kKeyCapBig, spec.placeholder, {x, ty}, rgba(200, 215, 240, .32f));
+            else
+                ctx.text.draw(cv, tx::kKeyCapBig, spec.text, {x - shift, ty}, rgb(0xffffff));
+            // The caret: blinking (steady while Reduce motion is on), shown at once after each change.
+            NodeState& s = ctx.state;
+            const float h = hash01(spec.text + '\x01' + std::to_string(caret));
+            if (!s.user_set || s.user[0] != h) {
+                s.user[0] = h;
+                s.user[1] = static_cast<float>(ctx.ambient);
+                s.user_set = true;
+            }
+            const bool shown =
+                ctx.reduced || std::fmod(std::max(0.f, static_cast<float>(ctx.ambient) - s.user[1]), 1.1f) < .7f;
+            if (shown) {
+                const float lh = ctx.text.line_height(tx::kKeyCapBig);
+                cv.fill_rect({x - shift + before, ty + lh * .08f, 2.5f, lh * .84f}, c::kCyan);
+            }
+            if (!ctx.reduced) ctx.loop();
+            cv.pop_clip();
+        });
+}
+
+void screen_key(Ui& ui, const std::string& id, const ScreenKeySpec& spec, Focus focus, const Box& box) {
+    Box b = with_height(box, m::kScreenKeyHeight);
+    focus.disabled = focus.disabled || spec.disabled;
+    // (Blue, the mirror: the last of each line stands upright at the half's right edge.)
+    const bool upright_right = ui.mirrored();
+    if (upright_right) focus.straight_right_last = true;
+    TextEngine& te = ui.text();
+    const TextStyle st = spec.label.size() > 1 ? tx::kButtonTiny : tx::kKeyCap;
+    ui.leaf(
+        id, b,
+        [&te, spec, st](float) {
+            return Vec2{spec.icon.empty() ? std::max(24.f, te.width(st, spec.label) + 12) : 30.f, m::kScreenKeyHeight};
+        },
+        [spec, st, upright_right](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const float f = ctx.focus_t;
+            const Shape shape = upright_right && ctx.line_end ? Shape::StraightRight : Shape::Skewed;
+            if (spec.disabled) cv.push_layer({}, .42f);
+            const Quad q = shaped(r, shape, kSeamTan);
+            Color text_col = rgb(0xffffff);
+            if (f > .5f) {
+                cv.fill(q, Gradient::linear({0, r.y}, {0, r.bottom()}, rgb(0xffffff), rgb(0xd9dde8)));
+                cv.stroke(q, 1, rgb(0xffffff));
+                text_col = rgb(0x0a0c12);
+            } else if (spec.primary || spec.on) {
+                const Color a = spec.on ? rgb(0xffc843) : rgb(0x3b8cff), b2 = spec.on ? rgb(0xff9a2e) : rgb(0x1452d6);
+                cv.fill(q, Gradient::css(r, 100, {{0, a}, {1, b2}}));
+                cv.stroke(q, 1, spec.on ? rgb(0xffe9b0) : rgba(150, 195, 255, .8f));
+                if (spec.on) text_col = rgb(0x1a1000);
+            } else {
+                cv.fill(q, Gradient::linear({0, r.y}, {0, r.bottom()}, rgb(0x223152), rgb(0x131d36)));
+                cv.stroke(q, 1, rgba(150, 195, 255, .32f));
+            }
+            if (!spec.icon.empty()) {
+                const float s = std::min(20.f, r.h - 14);
+                icon(cv, ctx.icons, spec.icon, {r.center().x - s / 2, r.center().y - s / 2, s, s}, text_col);
+            } else {
+                // (A key narrower than its word: the word's letters closer, then smaller.)
+                TextStyle fitted = st;
+                while (fitted.tracking > 0 && ctx.text.width(fitted, spec.label) > r.w - 8) fitted.tracking -= .02f;
+                while (fitted.size > 9 && ctx.text.width(fitted, spec.label) > r.w - 8) fitted.size -= .5f;
+                const float tw = ctx.text.width(fitted, spec.label);
+                ctx.text.draw(cv, fitted, spec.label, {r.center().x - tw / 2, centred_y(ctx.text, fitted, r)}, text_col);
+            }
             if (spec.disabled) cv.pop_layer();
         },
         &focus);
@@ -2141,5 +2280,12 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
 }
 
 bool copy_text(const std::string& text) { return SDL_SetClipboardText(text.c_str()); }
+
+std::string pasted_text() {
+    char* text = SDL_GetClipboardText();
+    std::string out = text ? text : "";
+    SDL_free(text);
+    return out;
+}
 
 }  // namespace ttt2::ui

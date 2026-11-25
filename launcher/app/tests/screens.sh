@@ -18,6 +18,9 @@
 # - choosing a key (a key, Esc, the 10 s countdown) and the Steam Controller's double report on a key row
 #   (its A is the pad button AND an Enter typed by Steam, in either order: one press, the Enter is not taken as the
 #   key, the pad's report is not B);
+# - typing the player's name (Settings > Game): the keyboard's text and keys (Enter keeps it, Esc does not, a
+#   character it refuses), the on-screen keys with a pad (B, X, Y, Start), the Steam Controller's A on the row and on
+#   a key (one press: never Done), a tab change while typing (the name as it was), game.ini as written;
 # - adding and removing a character with the stub importer, and Cancel while it runs.
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4
@@ -89,8 +92,10 @@ for spec in "1280x800 1 tab:fighters" "2560x1440 1.5 tab:settings;press:c" "1920
 done
 
 # Each Settings section, its rows walked, and Fighters, at every size and scale (every frame audited).
-walk="tab:settings;press:Down;press:Down;press:Right;press:Left;press:c;press:Down;press:Right;press:c;press:Down"
-walk+=";press:Down;press:Right;press:Left;press:c;tab:fighters;press:Down;press:Right;press:Down;press:Down;quit"
+# (Game first: its name typed on the keyboard and with a pad down to the last keys, then left as it was.)
+walk="tab:settings;press:Down;press:Right;press:Left;press:Up;press:Return;type:Zorbax;pad:down;pad:down;pad:down"
+walk+=";pad:down;pad:east;press:c;press:Down;press:Down;press:Right;press:Left;press:c;press:Down;press:Right;press:c"
+walk+=";press:Down;press:Down;press:Right;press:Left;press:c;tab:fighters;press:Down;press:Right;press:Down;press:Down;quit"
 # (Only the windows a player can have: at least 960x600 points, the window's minimum.)
 for size in 1280x800 1920x1080 2560x1440; do
     for scale in 1 1.25 1.5 2; do
@@ -99,7 +104,7 @@ for size in 1280x800 1920x1080 2560x1440; do
         h=$(home "f5-$size-$scale")
         run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$walk" -- --size "$size" --scale "$scale"
         clean "$h"
-        [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 20 ] || fail "f5-$size-$scale: the walk stopped early"
+        [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 32 ] || fail "f5-$size-$scale: the walk stopped early"
     done
 done
 # The same walk with a larger Text size at the Steam Deck's 1280x800 and at 960x640: laid out for at
@@ -110,7 +115,7 @@ for size in 1280x800 960x640; do
         printf 'text_size=%s\n' "$text" > "$h/.config/ttt2/launcher.ini"
         run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=$walk" -- --size "$size"
         clean "$h"
-        [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 20 ] || fail "text-$size-$text: the walk stopped early"
+        [ "$(grep -c '@test .* ok' "$h/out.txt")" -ge 32 ] || fail "text-$size-$text: the walk stopped early"
     done
 done
 
@@ -177,23 +182,23 @@ done
 
 # Choosing a key.
 h=$(home keys-take)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:j;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;press:Return;press:j;quit"
 clean "$h"
 has "$h" '@capture start key:dpad_up'
 has "$h" '@capture end D-pad Up is J'
 grep -q '^dpad_up *= *13' "$h/.config/ttt2/keyboard.ini" || fail "keys-take: keyboard.ini has $(grep dpad_up "$h/.config/ttt2/keyboard.ini")"
 h=$(home keys-esc)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:Escape;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;press:Return;press:Escape;quit"
 clean "$h"
 has "$h" '@capture end cancelled with Esc'
 h=$(home keys-timeout)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;wait:10.6;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;press:Return;wait:10.6;quit"
 clean "$h"
 has "$h" '@capture end no key was taken yet'
 # The Steam Controller's A on a key row: the pad's press starts choosing; the Enter Steam types for it 4 ms later is
 # not taken as the key (and starts nothing else); B then stops choosing with D-pad Up still W.
 h=$(home keys-steam)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;steam:south;wait:0.5;pad:east;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;steam:south;wait:0.5;pad:east;quit"
 clean "$h"
 has "$h" '@capture start key:dpad_up'
 has "$h" '@capture end no key was taken yet'
@@ -202,7 +207,7 @@ hasnt "$h" 'is Return'
 # The other order: the Enter Steam types arrives first and starts choosing; the pad's report of the same
 # A, read at the next poll 30 ms later, is not the pad's B: choosing goes on, the next key is taken.
 h=$(home keys-steam-key)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;steam-key:south;wait:0.5;press:j;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;steam-key:south;wait:0.5;press:j;quit"
 clean "$h"
 has "$h" '@capture start key:dpad_up'
 has "$h" '@capture end D-pad Up is J'
@@ -210,10 +215,48 @@ has "$h" '@capture end D-pad Up is J'
 hasnt "$h" '@cue back'
 # A key it refuses (F11 stays with the game): its note, a refusal cue, choosing goes on until a key it takes.
 h=$(home keys-refuse)
-run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:Return;press:F11;press:j;quit"
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:c;press:c;press:Return;press:F11;press:j;quit"
 clean "$h"
 has "$h" '@cue refuse'
 has "$h" '@capture end D-pad Up is J'
+
+# Typing the player's name (Settings > Game, its row first). The keyboard: its text, Backspace, a character it
+# refuses (said, a refusal cue, typing goes on), Enter keeps the name in game.ini.
+name_is() {
+    grep -q "^player_name = $2\$" "$1/.config/ttt2/game.ini" ||
+        fail "$1: game.ini has $(grep player_name "$1/.config/ttt2/game.ini" 2>/dev/null || echo 'no name')"
+}
+h=$(home name-keys)
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:Return;type:Zorbax;press:BackSpace;type:é;type:Q;press:Return;quit"
+clean "$h"
+has "$h" '@name start'
+has "$h" '@cue refuse'
+has "$h" '@name end game.ini: player name ZorbaQ'
+name_is "$h" ZorbaQ
+# Esc, and a tab changed while typing: the name as it was.
+h=$(home name-esc)
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=player-name:Kept;press:Return;type:Other;press:Escape;press:Return;type:Gone;tab:home;wait:0.3;quit"
+clean "$h"
+# (Esc says the name kept; Home leaves Settings, typing ends with it.)
+has "$h" '@name end kept: game.ini: player name Kept'
+[ "$(grep -c '@name end' "$h/out.txt")" = 2 ] ||
+    fail "name-esc: $(grep '@name' "$h/out.txt" | tr '\n' '|')"
+name_is "$h" Kept
+# A pad on the on-screen keys: A types (a capital first), X deletes, Y types a space, Start keeps the name.
+h=$(home name-pad)
+run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;pad:south;pad:south;pad:west;pad:right;pad:south;pad:north;pad:south;pad:start;quit"
+clean "$h"
+has "$h" '@name end game.ini: player name W w'
+name_is "$h" "W w"
+# The Steam Controller's A (its pad's A AND an Enter Steam types, in either order), on the row and on a key: one
+# press each, the Enter never taken as Done (the name goes on being typed).
+for how in steam steam-key; do
+    h=$(home "name-$how")
+    run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;$how:south;wait:0.5;$how:south;wait:0.5;type:x;pad:start;quit"
+    clean "$h"
+    [ "$(grep -c '@name start' "$h/out.txt")" = 1 ] || fail "name-$how: $(grep '@name' "$h/out.txt" | tr '\n' '|')"
+    name_is "$h" Qx
+done
 
 # Adding and removing with the stub importer: the fighter's own progress, the task strip; Cancel.
 h=$(home add)

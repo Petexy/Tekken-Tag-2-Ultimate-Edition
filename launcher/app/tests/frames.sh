@@ -141,7 +141,7 @@ clean "$h" 7
 [ "$(grep -c '@cue tab' "$h/out.txt")" = 1 ] || fail "steam-key: $(grep -c '@cue tab' "$h/out.txt") tab switches for one A"
 [ "$(sed -n '/@cue tab/,$p' "$h/out.txt" | grep -v '@cue move' | grep -c '@cue')" = 1 ] ||
     fail "steam-key: the pad's report of the A acted on the Settings page"
-grep -q '@frames idle ok (focus fullscreen,' "$h/out.txt" || fail "steam-key: $(grep -m 1 '@frames idle' "$h/out.txt")"
+grep -q '@frames idle ok (focus player-name,' "$h/out.txt" || fail "steam-key: $(grep -m 1 '@frames idle' "$h/out.txt")"
 
 # Home after every combination of the Display settings (changed in Settings, one at a time: a Gray code walk).
 settings=(fullscreen interpolation input-delay async-shaders precompile-shaders)

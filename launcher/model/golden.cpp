@@ -105,6 +105,7 @@ struct Out {
             add("expander", {{"id", a.id}, {"t", expander_text ? a.label : ""}}, {{"on", a.checked}});
             break;
         case ActionKind::kMenuItem: break; // (in a menu: not drawn)
+        case ActionKind::kEntry: add("entry", {{"id", a.id}, {"t", a.label}}, {{"s", a.enabled}}); break;
         default: {
             std::string cls = a.primary ? "primary" : a.destructive ? "destructive" : a.flat ? "flat" : "";
             add("button", {{"id", a.id}, {"t", a.label}, {"icon", icon_name(a.icon)}, {"tip", a.tooltip}, {"cls", cls}},
@@ -212,6 +213,17 @@ Dump flatten_into(const View& v, std::vector<Action>* all) {
     } else if (v.settings) {
         Out o{d["settings"], true, all};
         const SettingsView& s = *v.settings;
+        if (!s.game.empty()) {
+            o.label(s.game_title, Tone::kHeading);
+            o.label(s.game_about, Tone::kDim);
+            for (const Line& l : s.game_notes) o.line(l);
+            for (const SettingRow& r : s.game) {
+                o.label(r.name);
+                o.label(r.about, Tone::kDim);
+                for (const Line& l : r.notes) o.line(l);
+                o.action(r.control);
+            }
+        }
         if (!s.display.empty()) {
             o.label(s.display_title, Tone::kHeading);
             o.label(s.display_about, Tone::kDim);

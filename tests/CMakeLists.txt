@@ -150,6 +150,17 @@ target_compile_options(display_settings_test PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME display_settings_test
     COMMAND display_settings_test ${CMAKE_CURRENT_BINARY_DIR}/display_settings_test.d)
 
+# The game settings from game.ini: the player's name and its limits (files in
+# a scratch folder of the build tree; no SDL).
+add_executable(game_settings_test game_settings_test.cpp
+    ${CMAKE_SOURCE_DIR}/runtime/src/host/game_settings.cpp
+    ${CMAKE_SOURCE_DIR}/runtime/src/host/display_settings.cpp)
+target_include_directories(game_settings_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(game_settings_test PRIVATE cxx_std_20)
+target_compile_options(game_settings_test PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME game_settings_test
+    COMMAND game_settings_test ${CMAKE_CURRENT_BINARY_DIR}/game_settings_test.d)
+
 # Guest polling loops must see other threads' stores (no Dolphin needed).
 add_executable(memory_model_test memory_model_test.cpp)
 target_include_directories(memory_model_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/include)

@@ -11,13 +11,20 @@ namespace ttt2::ui {
 namespace {
 // SDL scancodes (= USB HID usages) the router knows.
 enum Key : int {
-    kA = 4, kC = 6, kD = 7, kE = 8, kF = 9, kQ = 20, kR = 21, kS = 22, kW = 26, kZ = 29, kReturn = 40, kEscape = 41,
-    kBackspace = 42, kTab = 43, kSpace = 44, kF11 = 68, kHome = 74, kPageUp = 75, kEnd = 77, kPageDown = 78,
-    kRight = 79, kLeft = 80, kDown = 81, kUp = 82, kKeypadEnter = 88
+    kA = 4, kC = 6, kD = 7, kE = 8, kF = 9, kQ = 20, kR = 21, kS = 22, kV = 25, kW = 26, kZ = 29, kReturn = 40,
+    kEscape = 41, kBackspace = 42, kTab = 43, kSpace = 44, kF11 = 68, kHome = 74, kPageUp = 75, kDelete = 76,
+    kEnd = 77, kPageDown = 78, kRight = 79, kLeft = 80, kDown = 81, kUp = 82, kKeypadEnter = 88
 };
 constexpr int kStickBase = 200;  // stick directions as pseudo buttons 200..203 (beside the real D-pad)
 
 bool is_move(Action a) { return a == Action::Up || a == Action::Down || a == Action::Left || a == Action::Right; }
+// Text entry: the keys that edit (the rest of the keyboard types text).
+bool editing_key(int code, bool ctrl) {
+    return code == kReturn || code == kKeypadEnter || code == kEscape || code == kBackspace || code == kDelete ||
+           code == kLeft || code == kRight || code == kHome || code == kEnd || (ctrl && code == kV);
+}
+// ... and those a held key repeats.
+bool repeating_key(int code) { return code == kBackspace || code == kDelete || code == kLeft || code == kRight; }
 bool repeats(Action a) { return is_move(a) || a == Action::PageUp || a == Action::PageDown; }
 }  // namespace
 
@@ -113,10 +120,36 @@ void InputRouter::feed(const RawEvent& e) {
     if (e.filtered) return;
     switch (e.kind) {
     case RawEvent::KeyDown: {
+        if (texting_ && e.os_repeat) {
+            // (A held Backspace deletes on: the system's repeat.)
+            if (repeating_key(e.code) && !e.alt && !e.gui)
+                capture_.push_back({CaptureEvent::Key, e.code, e.shift, e.ctrl, e.alt, e.gui, e.time, true, {}});
+            return;
+        }
         if (e.os_repeat) return;
         if (std::find(keys_down_.begin(), keys_down_.end(), e.code) == keys_down_.end()) keys_down_.push_back(e.code);
         last_device_ = Device::Keyboard;
         last_glyphs_ = Glyphs::Keyboard;
+        if (texting_) {
+            if (e.code == kF11 && !e.ctrl && !e.alt && !e.gui) {
+                press(Action::Fullscreen, Device::Keyboard, e.device_id, e.code, e.time);
+                return;
+            }
+            if (!editing_key(e.code, e.ctrl) || e.alt || e.gui) return;  // (the text comes as Text)
+            const CaptureEvent key{CaptureEvent::Key, e.code, e.shift, e.ctrl, e.alt, e.gui, e.time, false, {}};
+            // (Only the keys Steam types for a pad's buttons: Enter, Esc, the arrows.)
+            const bool echo = !e.ctrl && (e.code == kReturn || e.code == kKeypadEnter || e.code == kEscape ||
+                                          e.code == kLeft || e.code == kRight);
+            const Action a = echo ? key_action(e) : Action::None;
+            if (a == Action::None) {
+                capture_.push_back(key);
+                return;
+            }
+            // The key Steam types for a pad's button that came first: that press, already taken.
+            if (same_press(a, Device::Keyboard, e.device_id, e.time)) return;
+            pending_keys_.push_back({key, a, e.device_id});
+            return;
+        }
         if (capturing_) {
             if (capture_device_ == Device::Gamepad && e.time - capture_start_ < theme::input::kCaptureKeyboardIgnore) {
                 // (Ignored: its key-up is not a capture either.)
@@ -131,6 +164,7 @@ void InputRouter::feed(const RawEvent& e) {
     }
     case RawEvent::KeyUp: {
         keys_down_.erase(std::remove(keys_down_.begin(), keys_down_.end(), e.code), keys_down_.end());
+        if (texting_) return;
         if (capturing_) {
             auto it = std::find(keys_down_before_capture_.begin(), keys_down_before_capture_.end(), e.code);
             if (it != keys_down_before_capture_.end()) {
@@ -146,6 +180,16 @@ void InputRouter::feed(const RawEvent& e) {
     case RawEvent::ButtonDown:
         last_device_ = Device::Gamepad;
         last_glyphs_ = e.pad_kind;
+        if (texting_) {
+            // The key Steam typed for this press, held back: it was this press.
+            const Action a = pad_action(e.code, e.pad_kind);
+            pending_keys_.erase(std::remove_if(pending_keys_.begin(), pending_keys_.end(),
+                                               [&](const Pending& p) {
+                                                   return p.action == a &&
+                                                          e.time - p.event.time < theme::input::kSamePress;
+                                               }),
+                                pending_keys_.end());
+        }
         if (capturing_) {
             // The other order of the same press: a Steam Controller's A is an Enter Steam types AND its pad's
             // A; the Enter, arriving first, started choosing a key; the pad's report of that same press (pads are
@@ -237,10 +281,23 @@ void InputRouter::feed(const RawEvent& e) {
     case RawEvent::Wheel:
         mouse_.wheel += e.value;
         return;
+    case RawEvent::Text:
+        if (texting_ && !e.text.empty())
+            capture_.push_back({CaptureEvent::Text, 0, false, false, false, false, e.time, false, e.text});
+        return;
     }
 }
 
 void InputRouter::tick(double now) {
+    // Text entry: editing keys no pad's press claimed in time.
+    for (auto it = pending_keys_.begin(); it != pending_keys_.end();) {
+        if (now - it->event.time < theme::input::kSamePress) {
+            ++it;
+            continue;
+        }
+        capture_.push_back(it->event);
+        it = pending_keys_.erase(it);
+    }
     for (Held& h : held_) {
         while (h.next <= now) {
             // One device repeats an action at a time (the one pressed first): two devices holding the same
@@ -281,6 +338,21 @@ void InputRouter::end_capture() {
     capture_.clear();
 }
 
+void InputRouter::begin_text(double) {
+    texting_ = true;
+    // (Keyboard moves held from before stop repeating: their keys type now.)
+    held_.erase(std::remove_if(held_.begin(), held_.end(), [](const Held& h) { return h.device == Device::Keyboard; }),
+                held_.end());
+    capture_.clear();
+    pending_keys_.clear();
+}
+
+void InputRouter::end_text() {
+    texting_ = false;
+    capture_.clear();
+    pending_keys_.clear();
+}
+
 void InputRouter::release_all() {
     held_.clear();
     keys_down_.clear();
@@ -288,11 +360,12 @@ void InputRouter::release_all() {
     mouse_.down = false;
 }
 
-bool InputRouter::holding() const { return !held_.empty(); }
+bool InputRouter::holding() const { return !held_.empty() || !pending_keys_.empty(); }
 
 double InputRouter::next_repeat_time() const {
     double t = 1e18;
     for (const Held& h : held_) t = std::min(t, h.next);
+    for (const Pending& p : pending_keys_) t = std::min(t, p.event.time + theme::input::kSamePress);
     return t;
 }
 

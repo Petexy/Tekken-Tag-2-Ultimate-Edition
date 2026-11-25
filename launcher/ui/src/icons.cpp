@@ -49,6 +49,8 @@ constexpr StrokeIcon kStrokeIcons[] = {
     {"windowed", R"(<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/>)"},
     {"close", R"(<path d="M6 6l12 12M18 6L6 18"/>)"},
     {"copy", R"(<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>)"},
+    {"shift", R"(<path d="M12 4l8 8.5h-4.5V20h-7v-7.5H4z"/>)"},
+    {"backspace", R"(<path d="M9 5.5h12v13H9l-6.5-6.5z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/>)"},
 };
 
 // The SVG text of an icon: an embedded file, or a line icon.

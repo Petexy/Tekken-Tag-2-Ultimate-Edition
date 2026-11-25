@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace launcher::model::testing {
@@ -551,6 +552,254 @@ int count_started(const FakeStarter& s, const std::string& what) {
     return static_cast<int>(std::count_if(s.started.begin(), s.started.end(), [&](const Command& c) {
         return std::find(c.argv.begin(), c.argv.end(), what) != c.argv.end();
     }));
+}
+
+// ---------------------------------------------------------------- game.ini: the player's name
+
+void game_settings(const fs::path& golden, const fs::path& scratch) {
+    current = "game.ini";
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+    fs::create_directories(scratch, ec);
+    const fs::path file = scratch / "game.ini";
+    GameController g(file);
+    g.load();
+    // (No file: no name, no note.)
+    CHECK(g.note().empty());
+    CHECK(g.settings().player_name.empty());
+    CHECK(g.set_name("  Mira  "));
+    CHECK_EQ(g.settings().player_name, std::string("Mira"));
+    CHECK(read(file).ends_with("\nplayer_name = Mira\n"));
+    CHECK_EQ(game_summary(g.settings()), std::string("game.ini: player name Mira"));
+    // Other lines kept.
+    std::ofstream(file) << "volume = 3\nplayer_name = X\n# mine\n";
+    g.load();
+    CHECK_EQ(g.settings().player_name, std::string("X"));
+    CHECK(g.set_name("Y"));
+    CHECK_EQ(read(file), std::string("volume = 3\nplayer_name = Y\n# mine\n"));
+    CHECK(g.set_name(""));
+    CHECK_EQ(read(file), std::string("volume = 3\n# mine\n"));
+    CHECK_EQ(game_summary(g.settings()), std::string("game.ini: no player name"));
+    CHECK(g.shown().empty());
+    // A name written by hand that the game shows differently: what it shows is shown, and said.
+    std::ofstream(file) << "player_name = Jos\xC3\xA9\n";
+    g.load();
+    CHECK_EQ(g.shown(), std::string("Jos?"));
+    CHECK_EQ(g.note(), std::string("game.ini's player name \u201CJos\xC3\xA9\u201D shows in the game as \u201CJos?\u201D. "
+                                   "Saving a name here replaces it."));
+    std::ofstream(file) << "player_name = ABCDEFGHIJKLMNOPQRST\n";
+    g.load();
+    CHECK_EQ(g.shown(), std::string("ABCDEFGHIJKLMNOP"));
+    CHECK(!g.note().empty());
+    // One the launcher would not type but the game shows as it is: no note.
+    std::ofstream(file) << "player_name = A#B\n";
+    g.load();
+    CHECK_EQ(g.shown(), std::string("A#B"));
+    CHECK(g.note().empty());
+    CHECK(g.set_name("Jose"));
+    CHECK_EQ(g.shown(), std::string("Jose"));
+    CHECK(g.note().empty());
+    // Cannot be read, cannot be saved (a folder): said, the name as the file has it.
+    fs::remove(file, ec);
+    fs::create_directories(file / "x", ec);
+    g.load();
+    CHECK_EQ(g.note(), std::string("game.ini cannot be read (it is not a file): the game shows its own name (Player in "
+                                   "English). Saving a name here writes it anew."));
+    CHECK(g.shown().empty());
+    CHECK(!g.set_name("Mira"));
+    CHECK(g.error().starts_with("The player name cannot be saved: "));
+    CHECK(g.settings().player_name.empty());
+    fs::remove_all(file, ec);
+
+    current = "typing a name";
+    NameEditor e;
+    CHECK(!e.editing());
+    e.begin("", 0);
+    CHECK(e.editing());
+    CHECK(e.shifted()); // (an empty name starts with a capital)
+    e.key('m', 0);
+    CHECK_EQ(e.draft(), std::string("M"));
+    CHECK(!e.shifted());
+    e.key('i', 0);
+    e.type("ra", 0);
+    CHECK_EQ(e.draft(), std::string("Mira"));
+    CHECK_EQ(e.caret(), size_t{4});
+    e.left();
+    e.left();
+    e.type("x", 0);
+    CHECK_EQ(e.draft(), std::string("Mixra"));
+    e.backspace();
+    CHECK_EQ(e.draft(), std::string("Mira"));
+    CHECK_EQ(e.caret(), size_t{2});
+    e.erase_next();
+    CHECK_EQ(e.draft(), std::string("Mia"));
+    e.home();
+    CHECK_EQ(e.caret(), size_t{0});
+    e.backspace(); // (nothing before the caret)
+    CHECK_EQ(e.draft(), std::string("Mia"));
+    e.end();
+    e.erase_next(); // (nothing after it)
+    CHECK_EQ(e.draft(), std::string("Mia"));
+    e.shift();
+    e.key('q', 0);
+    e.key('q', 0); // (Shift for one letter)
+    CHECK_EQ(e.draft(), std::string("MiaQq"));
+    e.key('-', 0);
+    CHECK_EQ(e.draft(), std::string("MiaQq-"));
+    // What a name cannot have is not taken, and said for a moment.
+    e.type("\xC3\xA9#\n", 10);
+    CHECK_EQ(e.draft(), std::string("MiaQq-"));
+    CHECK_EQ(e.refusal(), std::string("A control character cannot be in a name."));
+    e.type("#", 10);
+    CHECK_EQ(e.refusal(), std::string("\u201C#\u201D cannot be in a name."));
+    e.tick(10 + NameEditor::kRefusalSeconds - .1);
+    CHECK(!e.refusal().empty());
+    CHECK(e.next_tick() < 1e17);
+    e.tick(10 + NameEditor::kRefusalSeconds);
+    CHECK(e.refusal().empty());
+    CHECK(e.next_tick() > 1e17);
+    // 16 characters at most (a paste cut there).
+    e.type("abcdefghijklmnopqrst", 20);
+    CHECK_EQ(e.draft(), std::string("MiaQq-abcdefghij"));
+    CHECK_EQ(e.refusal(), std::string("A name has 16 characters at most."));
+    e.clear();
+    CHECK(e.draft().empty());
+    CHECK(e.shifted());
+    // A name from the file the game cannot show: deleted whole characters at a time.
+    e.begin("Jos\xC3\xA9", 30);
+    CHECK(e.refusal().empty());
+    e.backspace();
+    CHECK_EQ(e.draft(), std::string("Jos"));
+    e.stop();
+    CHECK(!e.editing());
+
+    current = "Settings > Game";
+    const json::Value installed = fixture(golden, "installed");
+    replay(installed, Caps::linux_caps(), scratch / "m", {0, [&](Harness& h) {
+        const fs::path game_ini = scratch / "m/game.ini";
+        h.model.activate("settings", h.now);
+        View v = h.model.view();
+        CHECK(v.settings.has_value());
+        if (!v.settings) return;
+        CHECK_EQ(v.settings->game_title, std::string("Game"));
+        CHECK_EQ(v.settings->display_title, std::string("Display"));
+        std::vector<std::string> game, display;
+        for (const SettingRow& r : v.settings->game) game.push_back(r.control.id);
+        for (const SettingRow& r : v.settings->display) display.push_back(r.control.id);
+        CHECK((game == std::vector<std::string>{"player-name", "input-delay"}));
+        CHECK(std::find(display.begin(), display.end(), "input-delay") == display.end());
+        CHECK(std::find(display.begin(), display.end(), "fullscreen") != display.end());
+        CHECK(v.settings->game[0].control.kind == ActionKind::kEntry);
+        CHECK(v.settings->game[0].control.label.empty());
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Player (the game's own)"));
+        CHECK(!v.settings->name_edit);
+        // Input delay, now in Game: still display.ini's.
+        h.model.activate("input-delay", h.now);
+        CHECK(read(scratch / "m/display.ini").find("input_delay = yes") != std::string::npos);
+        // The name's keys do nothing while no name is typed.
+        h.model.activate("name:done", h.now);
+        CHECK_EQ(h.model.said(), std::string("no name is being typed"));
+        // Typed and kept.
+        h.model.activate("player-name", h.now);
+        v = h.model.view();
+        CHECK(v.settings->name_edit.has_value());
+        if (!v.settings->name_edit) return;
+        const NameEditView& ed = *v.settings->name_edit;
+        CHECK_EQ(ed.placeholder, std::string("Player"));
+        CHECK_EQ(ed.count, std::string("0/16"));
+        CHECK(ed.shifted);
+        CHECK_EQ(ed.keys.size(), size_t{5});
+        std::set<std::string> ids;
+        for (const auto& row : ed.keys) {
+            int spans = 0;
+            for (const NameKey& k : row) {
+                spans += k.span;
+                CHECK(ids.insert(k.key.id).second);
+                CHECK(!k.key.describe.title.empty());
+            }
+            CHECK_EQ(spans, 10);
+        }
+        CHECK(ids.count("name-key:q") && ids.count("name:shift") && ids.count("name:backspace") &&
+              ids.count("name:space") && ids.count("name:cancel") && ids.count("name:done"));
+        CHECK_EQ(ed.keys[1][0].key.label, std::string("Q")); // (shifted)
+        h.model.activate("name-key:m", h.now);
+        h.model.type_name("ira", h.now);
+        h.model.activate("name:space", h.now);
+        h.model.activate("name-key:q", h.now);
+        v = h.model.view();
+        CHECK_EQ(v.settings->name_edit->draft, std::string("Mira q"));
+        CHECK_EQ(v.settings->name_edit->count, std::string("6/16"));
+        CHECK_EQ(v.settings->name_edit->keys[1][0].key.label, std::string("q"));
+        h.model.activate("name:backspace", h.now);
+        h.model.activate("name:shift", h.now);
+        h.model.activate("name-key:q", h.now);
+        h.model.activate("name:done", h.now);
+        CHECK_EQ(h.model.said(), std::string("game.ini: player name Mira Q"));
+        CHECK(read(game_ini).ends_with("player_name = Mira Q\n"));
+        v = h.model.view();
+        CHECK(!v.settings->name_edit);
+        CHECK_EQ(v.settings->game[0].control.label, std::string("Mira Q"));
+        // Cancelled: the file as it was.
+        h.model.activate("player-name", h.now);
+        h.model.activate("name:clear", h.now);
+        h.model.type_name("Zed", h.now);
+        h.model.activate("name:cancel", h.now);
+        CHECK_EQ(h.model.said(), std::string("kept: game.ini: player name Mira Q"));
+        CHECK(read(game_ini).ends_with("player_name = Mira Q\n"));
+        // A name that cannot be kept stays typed, with why.
+        h.model.activate("player-name", h.now);
+        CHECK_EQ(h.model.view().settings->name_edit->draft, std::string("Mira Q"));
+        h.model.activate("name:home", h.now);
+        h.model.activate("name:delete", h.now);
+        h.model.activate("name:end", h.now);
+        h.model.activate("name:left", h.now);
+        h.model.activate("name:right", h.now);
+        h.model.type_name("!", h.now);
+        CHECK_EQ(h.model.view().settings->name_edit->draft, std::string("ira Q!"));
+        // Empty (spaces only): the game's own name, the key left out.
+        h.model.activate("name:clear", h.now);
+        h.model.type_name("   ", h.now);
+        h.model.activate("name:done", h.now);
+        CHECK_EQ(h.model.said(), std::string("game.ini: no player name"));
+        CHECK(read(game_ini).find("player_name =") == std::string::npos);
+        CHECK(game_ini::parse(read(game_ini)).player_name.empty());
+        // Back leaves it; Settings opened again reads the file again.
+        h.model.activate("player-name", h.now);
+        h.model.activate("back", h.now);
+        CHECK(!h.model.name().editing());
+        std::ofstream(game_ini) << "player_name = Hand Made\n";
+        h.model.activate("settings", h.now);
+        CHECK_EQ(h.model.view().settings->game[0].control.label, std::string("Hand Made"));
+        // A refusal goes after a moment.
+        h.model.activate("player-name", h.now);
+        h.model.type_name("\xC3\xA9", h.now);
+        CHECK(!h.model.view().settings->name_edit->refusal.empty());
+        h.now += NameEditor::kRefusalSeconds + .1;
+        h.model.tick(h.now);
+        CHECK(h.model.view().settings->name_edit->refusal.empty());
+    }});
+
+    current = "Settings > Game before the install (Linux: none)";
+    replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "n", {0, [&](Harness& h) {
+        h.model.activate("settings", h.now);
+        CHECK(h.model.view().settings->game.empty());
+        h.model.activate("player-name", h.now);
+        CHECK_EQ(h.model.said(), std::string("no player name to type"));
+        CHECK(!h.model.name().editing());
+    }});
+
+    current = "Settings > Game, Windows' data folder misnamed";
+    replay(installed, Caps::windows_caps(), scratch / "w", {0, [&](Harness& h) {
+        h.model.mutable_facts().windows.data_problem = "name";
+        h.model.activate("settings", h.now);
+        const View v = h.model.view();
+        CHECK(!v.settings->game.empty());
+        for (const SettingRow& r : v.settings->game) CHECK(!r.control.enabled && !r.control.describe.why.empty());
+        CHECK(!v.settings->game_notes.empty() && v.settings->game_notes[0].tone == Tone::kError);
+        h.model.activate("player-name", h.now);
+        CHECK(h.model.said().starts_with("The data folder must end in TTT2Ultimate"));
+        CHECK(!h.model.name().editing());
+    }});
 }
 
 void model_rules(const fs::path& golden, const fs::path& scratch) {
@@ -1681,6 +1930,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
     display(scratch / "display");
+    game_settings(golden, scratch / "game");
     task_runner();
     self_update();
     preflight();

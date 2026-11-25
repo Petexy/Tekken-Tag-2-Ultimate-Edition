@@ -12,6 +12,7 @@
 #include "ttt2ui/input.h"
 #include "ttt2ui/text.h"
 #include "ttt2ui/ui.h"
+#include "ttt2ui/widgets.h"
 #include "ttt2ui/window.h"
 
 using namespace ttt2::ui;
@@ -294,6 +295,51 @@ TEST(layout_row_counts_its_fitted_children) {
     CHECK_NEAR(words.x, card.right() + 22, .51f);
     CHECK_NEAR(words.right(), 1200, .51f);
     CHECK_NEAR(h.ui.rect("tall").right(), 1200, .51f);
+}
+
+TEST(widgets_section_tabs_shrink_then_wrap) {
+    // Settings' section switcher in a row too narrow for it: its sections shrink, the Z / C prompts kept, nothing past
+    // the row's end; narrower than the sections shrink to, it goes on two lines (Box::wrap, as Settings asks for it
+    // then), each section as wide as it likes, nothing past the row's end either.
+    const Section secs[] = {{"s0", "Game"}, {"s1", "Display"}, {"s2", "Keyboard"}, {"s3", "Launcher"}, {"s4", "Folders"}};
+    const char* ids[] = {"secs/prev", "s0", "s1", "s2", "s3", "s4", "secs/next"};
+    Harness h;
+    float natural = 0, least = 0;
+    h.run([&](Ui& ui) {
+        natural = section_tabs_width(ui, secs, false);
+        least = section_tabs_width(ui, secs, true);
+    });
+    CHECK(least < natural - 100);
+    const auto lay = [&](float w, bool wrap) {
+        h.run([&](Ui& ui) {
+            auto root = ui.open("root", Box{});
+            Box b;
+            b.w = Size::fixed(w);
+            b.wrap = wrap;
+            section_tabs(ui, "secs", secs, 0, b);
+        });
+    };
+    // As it likes: one line, every section wider than shrunk.
+    lay(natural + 20, false);
+    const float wide = h.ui.rect("s2").w;
+    // Shrunk onto one line just wide enough.
+    lay(least + 2, false);
+    float x = -8;
+    for (const char* id : ids) {
+        const Rect r = h.ui.rect(id);
+        CHECK(r.w > 10);
+        CHECK(r.x >= x + 7.5f);  // (in order, the row's gap between them)
+        CHECK(r.right() <= least + 2.5f);
+        CHECK_NEAR(r.y + r.h / 2, h.ui.rect("s0").y + h.ui.rect("s0").h / 2, .51f);
+        x = r.right();
+    }
+    CHECK(h.ui.rect("s2").w < wide - 20);
+    // Narrower still, on two lines: the sections as they like, inside the row.
+    lay(least - 60, true);
+    CHECK(h.ui.rect("s4").y > h.ui.rect("s0").y + 30);
+    CHECK_NEAR(h.ui.rect("s2").w, wide, .51f);
+    for (const char* id : ids) CHECK(h.ui.rect(id).right() <= least - 59.5f);
+    CHECK(h.ui.rect("secs/prev").w > 10 && h.ui.rect("secs/next").w > 10);
 }
 
 TEST(layout_mirror_right_aligned) {
@@ -953,6 +999,86 @@ TEST(input_capture_rules) {
     k.begin_capture(Device::Keyboard, .01);
     k.feed(key(kEnter, .2, false));
     CHECK(k.take_capture().empty());
+}
+
+TEST(input_text_entry_rules) {
+    constexpr int kBack = 42, kLeft = 80, kV = 25, kW = 26, kF11 = 68;
+    const auto text = [](const char* t, double at) {
+        RawEvent e;
+        e.kind = RawEvent::Text;
+        e.text = t;
+        e.time = at;
+        return e;
+    };
+    InputRouter r;
+    // Outside text entry, text is nothing.
+    r.feed(text("x", 0));
+    CHECK(r.take_capture().empty());
+    r.begin_text(1);
+    CHECK(r.texting() && !r.capturing());
+    // The keyboard types: its text, its editing keys; W is a letter, not Up.
+    r.feed(key(kW, 1.0));
+    r.feed(text("w", 1.0));
+    r.feed(key(kBack, 1.01));
+    RawEvent rep = key(kBack, 1.5);
+    rep.os_repeat = true;
+    r.feed(rep);
+    RawEvent paste = key(kV, 1.6);
+    paste.ctrl = true;
+    r.feed(paste);
+    r.tick(1.7);
+    CHECK(r.take_actions().empty());
+    auto c = r.take_capture();
+    CHECK(c.size() == 4);
+    if (c.size() == 4) {
+        CHECK(c[0].kind == CaptureEvent::Text && c[0].text == "w");
+        CHECK(c[1].kind == CaptureEvent::Key && c[1].scancode == kBack && !c[1].repeat);
+        CHECK(c[2].kind == CaptureEvent::Key && c[2].scancode == kBack && c[2].repeat);  // (a held Backspace)
+        CHECK(c[3].kind == CaptureEvent::Key && c[3].scancode == kV && c[3].ctrl);
+    }
+    // Enter waits a moment for a pad: alone, it comes then.
+    r.feed(key(kEnter, 2.0));
+    r.tick(2.0 + theme::input::kSamePress / 2);
+    CHECK(r.take_capture().empty());
+    CHECK(r.holding() && r.next_repeat_time() <= 2.0 + theme::input::kSamePress + 1e-9);
+    r.tick(2.0 + theme::input::kSamePress + .001);
+    c = r.take_capture();
+    CHECK(c.size() == 1 && c[0].scancode == kEnter);
+    CHECK(!r.holding());
+    // The pad goes on as ever (an on-screen keyboard), and the Enter Steam types for its A is dropped, the key first
+    // or the pad first.
+    r.feed(key(kEnter, 3.0));
+    r.feed(button(pad::South, 3.03));
+    r.tick(3.3);
+    auto a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Accept && a[0].device == Device::Gamepad);
+    CHECK(r.take_capture().empty());
+    r.feed(button(pad::South, 4.0));
+    r.feed(key(kEnter, 4.004));
+    r.tick(4.3);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].device == Device::Gamepad);
+    CHECK(r.take_capture().empty());
+    // (The arrows too: the D-pad's.)
+    r.feed(button(pad::DpadLeft, 5.0));
+    r.feed(key(kLeft, 5.01));
+    r.feed(button(pad::DpadLeft, 5.1, false));
+    r.tick(5.3);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Left);
+    CHECK(r.take_capture().empty());
+    // F11 stays the window's.
+    r.feed(key(kF11, 6));
+    r.tick(6.2);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Fullscreen);
+    r.end_text();
+    CHECK(!r.texting());
+    // After it, W moves again.
+    r.feed(key(kW, 7));
+    r.tick(7.01);
+    a = r.take_actions();
+    CHECK(a.size() == 1 && a[0].action == Action::Up);
 }
 
 // ---- springs --------------------------------------------------------------------------------------------------------
