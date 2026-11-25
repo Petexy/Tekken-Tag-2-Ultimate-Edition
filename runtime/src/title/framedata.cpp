@@ -73,6 +73,7 @@
 #include "title/draw.h"
 #include "title/font.h"
 #include "title/image.h"
+#include "title/language.h"
 #include "title/presentation.h"
 
 #include "cafe/ppc_ops.h"
@@ -84,8 +85,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace cafe::title::framedata {
@@ -157,24 +160,87 @@ Fighter read(uint8_t* base, uint32_t p) {
     return f;
 }
 
+// The panels' words in each language shown ({en, fr, de, it, es, ru}: the
+// game's own where its HUD has them).
+namespace words {
+using language::Text;
+constexpr Text kTotalDamage = {"Total Damage", "D\xC3\xA9g\xC3\xA2ts totaux", "Gesamtschaden", "Danno totale",
+    "Da\xC3\xB1o total", "\xD0\x9E\xD0\xB1\xD1\x89\xD0\xB8\xD0\xB9 \xD1\x83\xD1\x80\xD0\xBE\xD0\xBD"};
+constexpr Text kMaxComboDamage = {"Max Combo Damage", "D\xC3\xA9g\xC3\xA2ts combo max", "Max. Comboschaden",
+    "Danno combo max", "Da\xC3\xB1o m\xC3\xA1x. de combo",
+    "\xD0\x9C\xD0\xB0\xD0\xBA\xD1\x81. \xD1\x83\xD1\x80\xD0\xBE\xD0\xBD \xD0\xBA\xD0\xBE\xD0\xBC\xD0\xB1\xD0\xBE"};
+constexpr Text kHitProperties = {"Hit Properties", "Niveau du coup", "Trefferh\xC3\xB6he", "Livello del colpo",
+    "Nivel del golpe",
+    "\xD0\xA3\xD1\x80\xD0\xBE\xD0\xB2\xD0\xB5\xD0\xBD\xD1\x8C \xD1\x83\xD0\xB4\xD0\xB0\xD1\x80\xD0\xB0"};
+constexpr Text kDamage = {"Damage", "D\xC3\xA9g\xC3\xA2ts", "Schaden", "Danno", "Da\xC3\xB1o",
+    "\xD0\xA3\xD1\x80\xD0\xBE\xD0\xBD"};
+constexpr Text kRecoverableDamage = {"Recoverable Damage", "D\xC3\xA9g\xC3\xA2ts r\xC3\xA9" "cup\xC3\xA9rables",
+    "Regenerierbarer Schaden", "Danno recuperabile", "Da\xC3\xB1o recuperable",
+    "\xD0\x92\xD0\xBE\xD1\x81\xD1\x81\xD1\x82\xD0\xB0\xD0\xBD\xD0\xBE\xD0\xB2\xD0\xB8\xD0\xBC\xD1\x8B\xD0\xB9 "
+    "\xD1\x83\xD1\x80\xD0\xBE\xD0\xBD"};
+constexpr Text kClean = {"Clean", "Direct", "Ideal", "Pulito", "Limpio",
+    "\xD0\xA7\xD0\xB8\xD1\x81\xD1\x82\xD1\x8B\xD0\xB9"};
+constexpr Text kCounter = {"Counter", "Contre", "Gegenangriff", "Contrattacco", "Contraataque",
+    "\xD0\x9A\xD0\xBE\xD0\xBD\xD1\x82\xD1\x80\xD1\x83\xD0\xB4\xD0\xB0\xD1\x80"};
+constexpr Text kPunish = {"Punish", "Riposte", "Konter", "Reazione", "Castigo",
+    "\xD0\x92\xD0\xBE\xD0\xB7\xD0\xBC\xD0\xB5\xD0\xB7\xD0\xB4\xD0\xB8\xD0\xB5"};
+constexpr Text kWall = {"Wall", "Mur", "Wand", "Muro", "Muro", "\xD0\xA1\xD1\x82\xD0\xB5\xD0\xBD\xD0\xB0"};
+constexpr Text kStartup = {"Attack Startup Frames", "Frames de d\xC3\xA9marrage", "Start-Frames", "Frame di avvio",
+    "Frames de inicio", "\xD0\xA1\xD1\x82\xD0\xB0\xD1\x80\xD1\x82\xD0\xBE\xD0\xB2\xD1\x8B\xD0\xB5 "
+    "\xD0\xBA\xD0\xB0\xD0\xB4\xD1\x80\xD1\x8B"};
+constexpr Text kAdvantage = {"Frame Advantage", "Avantage de frames", "Frame-Vorteil", "Vantaggio frame",
+    "Ventaja de frames",
+    "\xD0\x9F\xD1\x80\xD0\xB5\xD0\xB8\xD0\xBC\xD1\x83\xD1\x89\xD0\xB5\xD1\x81\xD1\x82\xD0\xB2\xD0\xBE"};
+constexpr Text kStatus = {"Status", "\xC3\x89tat", "Status", "Stato", "Estado",
+    "\xD0\xA1\xD0\xBE\xD1\x81\xD1\x82\xD0\xBE\xD1\x8F\xD0\xBD\xD0\xB8\xD0\xB5"};
+constexpr Text kDistance = {"Distance from Opponent", "Distance \xC3\xA0 l'adversaire", "Abstand zum Gegner",
+    "Distanza dall'avversario", "Distancia al rival",
+    "\xD0\x94\xD0\xB8\xD1\x81\xD1\x82\xD0\xB0\xD0\xBD\xD1\x86\xD0\xB8\xD1\x8F \xD0\xB4\xD0\xBE "
+    "\xD1\x81\xD0\xBE\xD0\xBF\xD0\xB5\xD1\x80\xD0\xBD\xD0\xB8\xD0\xBA\xD0\xB0"};
+constexpr Text kLow = {"Low", "Bas", "Niedrig", "Basso", "Bajo", "\xD0\x9D\xD0\xB8\xD0\xB6\xD0\xBD\xD0\xB8\xD0\xB9"};
+constexpr Text kMid = {"Mid", "Moyen", "Mittel", "Medio", "Medio",
+    "\xD0\xA1\xD1\x80\xD0\xB5\xD0\xB4\xD0\xBD\xD0\xB8\xD0\xB9"};
+constexpr Text kSpecialLow = {"S.Low", "Bas sp\xC3\xA9" "cial", "Sp. niedrig", "Basso sp.", "Bajo esp.",
+    "\xD0\xA1\xD0\xBF\xD0\xB5\xD1\x86. \xD0\xBD\xD0\xB8\xD0\xB6\xD0\xBD\xD0\xB8\xD0\xB9"};
+constexpr Text kHigh = {"High", "Haut", "Hoch", "Alto", "Alto",
+    "\xD0\x92\xD0\xB5\xD1\x80\xD1\x85\xD0\xBD\xD0\xB8\xD0\xB9"};
+constexpr Text kStanding = {"Standing", "Debout", "Stand", "In piedi", "De pie", "\xD0\xA1\xD1\x82\xD0\xBE\xD1\x8F"};
+constexpr Text kCrouching = {"Crouching", "Accroupi", "Hocke", "Abbassato", "Agachado",
+    "\xD0\x9F\xD1\x80\xD0\xB8\xD1\x81\xD0\xB5\xD0\xB4"};
+constexpr Text kDown = {"Down", "Au sol", "Am Boden", "A terra", "En el suelo",
+    "\xD0\x9D\xD0\xB0 \xD0\xB7\xD0\xB5\xD0\xBC\xD0\xBB\xD0\xB5"};
+constexpr Text kAirborne = {"Airborne", "En l'air", "In der Luft", "In aria", "En el aire",
+    "\xD0\x92 \xD0\xB2\xD0\xBE\xD0\xB7\xD0\xB4\xD1\x83\xD1\x85\xD0\xB5"};
+constexpr Text kBlock = {"Block", "Garde", "Abwehr", "Guardia", "Guardia", "\xD0\x91\xD0\xBB\xD0\xBE\xD0\xBA"};
+constexpr Text kHit = {"Hit", "Touch\xC3\xA9", "Treffer", "Colpito", "Golpe", "\xD0\xA3\xD0\xB4\xD0\xB0\xD1\x80"};
+constexpr Text kKnockdown = {"KND"};
+constexpr Text kResetPosition = {"Reset Position", "R\xC3\xA9initialiser la position",
+    "Position zur\xC3\xBC" "cksetzen", "Ripristina posizione", "Reiniciar posici\xC3\xB3n",
+    "\xD0\xA1\xD0\xB1\xD1\x80\xD0\xBE\xD1\x81 \xD0\xBF\xD0\xBE\xD0\xB7\xD0\xB8\xD1\x86\xD0\xB8\xD0\xB8"};
+constexpr Text kTopView = {"Top View", "Vue de dessus", "Draufsicht", "Vista dall'alto", "Vista cenital",
+                           "\xD0\x92\xD0\xB8\xD0\xB4 \xD1\x81\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83"};
+} // namespace words
+
+std::string_view word(const language::Text& text) { return language::in_current(text); }
+
 // The hit levels Jun's moveset has (the fourth: her crouching jabs).
-const char* level_name(uint32_t level) {
+std::string_view level_name(uint32_t level) {
     switch (level) {
     case 0: return "";
-    case 1: return "Low";
-    case 2: return "Mid";
-    case 4: return "S.Low";
-    case 5: return "High";
+    case 1: return word(words::kLow);
+    case 2: return word(words::kMid);
+    case 4: return word(words::kSpecialLow);
+    case 5: return word(words::kHigh);
     default: return "---";
     }
 }
 
-const char* posture_name(uint32_t posture) {
+std::string_view posture_name(uint32_t posture) {
     switch (posture) {
-    case 5: case 6: case 7: case 11: return "Crouching";
-    case 8: case 9: case 12: case 13: case 15: return "Down";
-    case 14: case 24: case 25: case 26: case 27: return "Airborne";
-    default: return "Standing";
+    case 5: case 6: case 7: case 11: return word(words::kCrouching);
+    case 8: case 9: case 12: case 13: case 15: return word(words::kDown);
+    case 14: case 24: case 25: case 26: case 27: return word(words::kAirborne);
+    default: return word(words::kStanding);
     }
 }
 
@@ -193,7 +259,7 @@ struct Side {
     bool in_combo = false; // its hit put the other in a reaction it has not left
     bool advantage_known = false;
     int advantage = 0;
-    const char* note = "";
+    const language::Text* note = nullptr;
 };
 
 // After a hit or block: the frames until each fighter is free again.
@@ -203,7 +269,7 @@ struct Measure {
     int attacker = 0;
     int free_at[2] = {-1, -1};
     bool down = false;
-    const char* note = "";
+    const language::Text* note = nullptr;
 };
 
 // An input held, and for how many frames.
@@ -311,13 +377,13 @@ void connected(int s, const Fighter& attacker, const Fighter& defender, const Fi
     g.measure = Measure{};
     g.measure.on = true;
     g.measure.attacker = s;
-    g.measure.note = !hit ? "Block" : counter ? "Counter" : "Hit";
+    g.measure.note = !hit ? &words::kBlock : counter ? &words::kCounter : &words::kHit;
     const int advantage = busy_frames(defender) - busy_frames(attacker);
     Side& d = g.sides[1 - s];
     a.advantage_known = d.advantage_known = true;
     a.advantage = advantage;
     d.advantage = -advantage;
-    a.note = d.note = grounded_or_juggled(defender.posture) ? "KND" : g.measure.note;
+    a.note = d.note = grounded_or_juggled(defender.posture) ? &words::kKnockdown : g.measure.note;
 }
 
 void measure(const Fighter now[2]) {
@@ -330,7 +396,7 @@ void measure(const Fighter now[2]) {
     m.down |= grounded_or_juggled(now[d].posture);
     if (m.free_at[0] >= 0 && m.free_at[1] >= 0) {
         const int advantage = m.free_at[d] - m.free_at[a];
-        const char* note = m.down ? "KND" : m.note;
+        const language::Text* note = m.down ? &words::kKnockdown : m.note;
         g.sides[a].advantage_known = g.sides[d].advantage_known = true;
         g.sides[a].advantage = advantage;
         g.sides[d].advantage = -advantage;
@@ -379,8 +445,39 @@ struct GlyphUv {
 };
 struct Face {
     uint32_t size = 0;
-    std::vector<GlyphUv> glyphs = std::vector<GlyphUv>(128); // ASCII; zero size: missing
+    std::map<char32_t, GlyphUv> glyphs; // by code point; none or zero size: missing
+    const GlyphUv& operator[](char32_t c) const {
+        static const GlyphUv kNone;
+        const auto it = glyphs.find(c);
+        return it == glyphs.end() ? kNone : it->second;
+    }
 };
+
+// The code points a face has: ASCII, and the letters of the languages the
+// texts are shown in (Latin-1's and Latin Extended-A's, Cyrillic's).
+constexpr std::pair<char32_t, char32_t> kFaceRanges[] = {{0x20, 0x7E}, {0xA0, 0x17F}, {0x400, 0x45F}};
+
+// The code points of a UTF-8 text (a malformed byte: none).
+std::u32string code_points(std::string_view text) {
+    std::u32string out;
+    for (size_t i = 0; i < text.size();) {
+        const auto b = static_cast<unsigned char>(text[i]);
+        const size_t length = b < 0x80             ? 1
+                              : (b & 0xE0) == 0xC0 ? 2
+                              : (b & 0xF0) == 0xE0 ? 3
+                              : (b & 0xF8) == 0xF0 ? 4
+                                                   : 0;
+        if (length == 0 || i + length > text.size()) {
+            ++i;
+            continue;
+        }
+        char32_t c = length == 1 ? b : b & (0x7F >> length);
+        for (size_t k = 1; k < length; ++k) c = c << 6 | (static_cast<unsigned char>(text[i + k]) & 0x3F);
+        out += c;
+        i += length;
+    }
+    return out;
+}
 
 // The title's icons in the main font: the directions (bold), by numpad
 // direction (none for 5), and the Tekken button pictures, by buttons held.
@@ -625,15 +722,17 @@ bool add_font(Packer& packer, const FontFiles& files, Face& face, std::vector<st
     const auto texture = textures && !textures->empty() ? ntp3::decode(textures->front()) : std::nullopt;
     if (!metrics || !texture || metrics->size == 0) return false;
     face.size = metrics->size;
-    for (uint16_t c = 0x20; c < 0x7F; ++c) {
-        const auto it = metrics->glyphs.find(c);
-        if (it == metrics->glyphs.end()) continue;
-        const font::Glyph& b = it->second.box;
-        if (b.x + b.width > texture->width || b.y + b.height > texture->height) continue;
-        face.glyphs[c].glyph = it->second;
-        if (b.width == 0 || b.height == 0) continue;
-        packer.add(crop(*texture, b.x, b.y, b.width, b.height));
-        at.push_back({static_cast<uint32_t>(packer.placed.size() - 1), c});
+    for (const auto& [first, last] : kFaceRanges) {
+        for (char32_t c = first; c <= last; ++c) {
+            const auto it = metrics->glyphs.find(static_cast<uint16_t>(c));
+            if (it == metrics->glyphs.end()) continue;
+            const font::Glyph& b = it->second.box;
+            if (b.x + b.width > texture->width || b.y + b.height > texture->height) continue;
+            face.glyphs[c].glyph = it->second;
+            if (b.width == 0 || b.height == 0) continue;
+            packer.add(crop(*texture, b.x, b.y, b.width, b.height));
+            at.push_back({static_cast<uint32_t>(packer.placed.size() - 1), static_cast<uint16_t>(c)});
+        }
     }
     // No space glyph (the title spaces words itself): a third of the size.
     font::Placement& space = face.glyphs[' '].glyph.placement;
@@ -728,6 +827,7 @@ constexpr float kWidth = 270, kMargin = 226, kRow = 15, kGap = 5; // (kMargin: f
 // Room inside a panel, clear of the box's top left step and bottom right notch.
 constexpr float kPadTop = 10, kPadBottom = 14, kPadSide = 14;
 constexpr float kLabelPx = 12.5f, kValuePx = 13.5f; // text heights (the font's size scaled to)
+constexpr float kLabelGap = 8;                       // at least, between a label and its value
 // The hint line: the title's hints' height and size (Defensive Training's at
 // x 138, y 643 to 666), the panels above it.
 constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138; // (kPanelsBottom: framedata.h)
@@ -773,10 +873,10 @@ public:
 
     // As the title draws its hints: a dark outline round each glyph, set a
     // little tighter than the font's advances.
-    static float hint_width(const Face& face, float px, const std::string& text) {
-        return width(face, px, text) + kTipSpacing * static_cast<float>(text.size());
+    static float hint_width(const Face& face, float px, std::string_view text) {
+        return width(face, px, text) + kTipSpacing * static_cast<float>(code_points(text).size());
     }
-    void hint_text(const Face& face, float px, float x, float y, const std::string& text, uint32_t colour) {
+    void hint_text(const Face& face, float px, float x, float y, std::string_view text, uint32_t colour) {
         // The outline (and a shadow down and right), then the text.
         static constexpr float kAround[][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0},  {-1, 1},
                                                {0, 1},   {1, 1},  {1.5f, 1.5f}, {0, 0}};
@@ -785,9 +885,8 @@ public:
             const bool fill = d[0] == 0 && d[1] == 0;
             const uint32_t c = fill ? colour : kTipOutline;
             float pen = x + d[0];
-            for (unsigned char ch : text) {
-                if (ch >= 128) continue;
-                const GlyphUv& g = face.glyphs[ch];
+            for (const char32_t ch : code_points(text)) {
+                const GlyphUv& g = face[ch];
                 const font::PlacedGlyph& pg = g.glyph;
                 if (pg.box.width > 0 && pg.box.height > 0) {
                     const float gx = pen + static_cast<float>(pg.placement.left) * s;
@@ -799,25 +898,24 @@ public:
         }
     }
 
-    static float width(const Face& face, float px, const std::string& text) {
+    static float width(const Face& face, float px, std::string_view text) {
         const float s = px / static_cast<float>(face.size);
         float w = 0;
-        for (unsigned char c : text) {
-            if (c < 128) w += static_cast<float>(face.glyphs[c].glyph.placement.advance) * s;
-        }
+        for (const char32_t c : code_points(text)) w += static_cast<float>(face[c].glyph.placement.advance) * s;
         return w;
     }
 
     // `text` with its baseline at y, from x (or ending there, right-aligned),
     // over a soft shadow.
-    void text(const Face& face, float px, float x, float y, const std::string& text, uint32_t colour, bool right = false) {
+    void text(const Face& face, float px, float x, float y, std::string_view text, uint32_t colour,
+              bool right = false) {
         if (right) x -= width(face, px, text);
+        const std::u32string points = code_points(text);
         for (const auto& [dx, dy, c] : {std::tuple{1.0f, 1.0f, kShadow}, std::tuple{0.0f, 0.0f, colour}}) {
             const float s = px / static_cast<float>(face.size);
             float pen = x + dx;
-            for (unsigned char ch : text) {
-                if (ch >= 128) continue;
-                const GlyphUv& g = face.glyphs[ch];
+            for (const char32_t ch : points) {
+                const GlyphUv& g = face[ch];
                 const font::PlacedGlyph& pg = g.glyph;
                 if (pg.box.width > 0 && pg.box.height > 0) {
                     const float gx = pen + static_cast<float>(pg.placement.left) * s;
@@ -846,41 +944,54 @@ void lay_out_side(Layout& l, int s, const Fighter now[2], float bottom) {
     l.panel(s, x0, upper_top, x1, lower_top - kGap);
     l.panel(s, x0, lower_top, x1, bottom);
     const float lx = x0 + kPadSide, rx = x1 - kPadSide;
-    auto row = [&](float top, int i, const char* label, const std::string& value, uint32_t colour) {
+    // (a label as long as leaves no room for its value is made smaller)
+    auto row = [&](float top, int i, const language::Text& label, const std::string& value, uint32_t colour) {
         const float base = top + kPadTop + kRow * static_cast<float>(i) + kRow * 0.78f;
-        l.text(a.labels, kLabelPx, lx, base, label, kLabel);
+        const std::string_view text = word(label);
+        const float room = rx - lx - (value.empty() ? 0 : Layout::width(a.values, kValuePx, value) + kLabelGap);
+        const float w = Layout::width(a.labels, kLabelPx, text);
+        l.text(a.labels, w > room && w > 0 ? kLabelPx * room / w : kLabelPx, lx, base, text, kLabel);
         if (!value.empty()) l.text(a.values, kValuePx, rx, base, value, colour, true);
     };
-    row(upper_top, 0, "Total Damage", number(side.total), kValue);
-    row(upper_top, 1, "Max Combo Damage", number(side.max_combo), kValue);
-    row(upper_top, 2, "Hit Properties", level_name(side.level), kValue);
+    row(upper_top, 0, words::kTotalDamage, number(side.total), kValue);
+    row(upper_top, 1, words::kMaxComboDamage, number(side.max_combo), kValue);
+    row(upper_top, 2, words::kHitProperties, std::string(level_name(side.level)), kValue);
     const auto with_share = [](int v, int share) { return std::to_string(v) + " (" + std::to_string(share) + "%)"; };
-    row(upper_top, 3, "Damage", side.damage < 0 ? "0 (0%)" : with_share(side.damage, side.multiplier), kValue);
-    row(upper_top, 4, "Recoverable Damage", with_share(side.recoverable, side.recoverable_share), kValue);
-    // The hit's properties, lit when it had them.
+    row(upper_top, 3, words::kDamage, side.damage < 0 ? "0 (0%)" : with_share(side.damage, side.multiplier), kValue);
+    row(upper_top, 4, words::kRecoverableDamage, with_share(side.recoverable, side.recoverable_share), kValue);
+    // The hit's properties, lit when it had them (closer, then smaller, where
+    // a language's words are too long for the row).
     const float flags = upper_top + kPadTop + kRow * 5 + kRow * 0.78f;
+    const std::tuple<std::string_view, bool, uint32_t> flag_list[] = {
+        {word(words::kClean), side.clean, kFlagOn}, {word(words::kCounter), side.counter, kCounterOn},
+        {word(words::kPunish), side.punish, kFlagOn}, {word(words::kWall), side.wall, kFlagOn}};
+    float words_w = 0;
+    for (const auto& [name, lit, on] : flag_list) words_w += Layout::width(a.labels, kLabelPx, name);
+    const float flags_room = rx - lx - 4;
+    const float gap = std::clamp((flags_room - words_w) / 3, 8.0f, 16.0f);
+    const float flag_px = words_w + 3 * gap > flags_room ? kLabelPx * (flags_room - 3 * gap) / words_w : kLabelPx;
     float fx = lx;
-    for (const auto& [name, lit, on] : {std::tuple{"Clean", side.clean, kFlagOn}, std::tuple{"Counter", side.counter, kCounterOn},
-                                        std::tuple{"Punish", side.punish, kFlagOn}, std::tuple{"Wall", side.wall, kFlagOn}}) {
-        const float w = Layout::width(a.labels, kLabelPx, name);
+    for (const auto& [name, lit, on] : flag_list) {
+        const float w = Layout::width(a.labels, flag_px, name);
         if (lit) l.rect(fx - 4, flags - kRow * 0.78f, fx + w + 4, flags + kRow * 0.22f, (on & 0xFFFFFF00) | 0x40, (on & 0xFFFFFF00) | 0x18);
-        l.text(a.labels, kLabelPx, fx, flags, name, lit ? on : kFlagOff);
-        fx += w + 16;
+        l.text(a.labels, flag_px, fx, flags, name, lit ? on : kFlagOff);
+        fx += w + gap;
     }
     std::string startup = "---";
     if (side.startup) startup = number(static_cast<int>(side.startup));
-    row(lower_top, 0, "Attack Startup Frames",
+    row(lower_top, 0, words::kStartup,
         startup + " (" + number(static_cast<int>(side.first)) + " - " + number(static_cast<int>(side.last)) + ")", kValue);
     const uint32_t advantage_colour = !side.advantage_known || side.advantage == 0 ? kValue
                                       : side.advantage > 0                         ? kPositive
                                                                                    : kNegative;
-    row(lower_top, 1, "Frame Advantage",
-        side.advantage_known ? signed_number(side.advantage) + " (" + side.note + ")" : "--- (---)", advantage_colour);
-    row(lower_top, 2, "Status", posture_name(now[s].posture), kValue);
+    const std::string note(side.note ? word(*side.note) : std::string_view());
+    row(lower_top, 1, words::kAdvantage,
+        side.advantage_known ? signed_number(side.advantage) + " (" + note + ")" : "--- (---)", advantage_colour);
+    row(lower_top, 2, words::kStatus, std::string(posture_name(now[s].posture)), kValue);
     char distance[16];
     std::snprintf(distance, sizeof(distance), "%.2f",
                   std::hypot(now[0].x - now[1].x, now[0].z - now[1].z) / 1000.0);
-    row(lower_top, 3, "Distance from Opponent", distance, kValue);
+    row(lower_top, 3, words::kDistance, distance, kValue);
 }
 
 // The input history: rows from the top down, newest first, along the left
@@ -1109,7 +1220,7 @@ void lay_out_tooltip(Layout& l) {
     const Atlas& a = g_atlas;
     const Icon &select = a.tip_select[v], &button = a.tip_button[v];
     const auto icon_width = [](const Icon& i, float h) { return i.height ? h * i.width / i.height : 0.0f; };
-    const char* text = "Reset Position";
+    const std::string_view text = word(words::kResetPosition);
     const float plus_w = Layout::hint_width(a.labels, kTipPx, "+"), text_w = Layout::hint_width(a.labels, kTipPx, text);
     const float w = icon_width(select, kTipIcon) + 2 + plus_w + 2 + icon_width(button, kTipButton) + 6 + text_w;
     float x = gpu::overlay::kWidth - kTipSide - w;
@@ -1160,7 +1271,7 @@ void publish(uint8_t* base, const Fighter now[2]) {
         // Its frame, under the picture; a label above it.
         const float* r = window->rect;
         l.panel(0, r[0] - 7, r[1] - 26, r[2] + 8, r[3] + 14);
-        l.text(g_atlas.labels, kLabelPx, r[0] + 12, r[1] - 7, "Top View", kLabel);
+        l.text(g_atlas.labels, kLabelPx, r[0] + 12, r[1] - 7, word(words::kTopView), kLabel);
     }
     lay_out_tooltip(l);
     gpu::overlay::show(std::move(l.quads), 0.25, std::move(scene), std::move(window));
