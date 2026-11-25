@@ -14,6 +14,8 @@
 #include "settings.h"
 #include "status.h"
 
+#include "host/game_settings.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
@@ -604,12 +606,65 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
     fs::create_directories(file / "x", ec);
     g.load();
     CHECK_EQ(g.note(), std::string("game.ini cannot be read (it is not a file): the game shows its own name (Player in "
-                                   "English). Saving a name here writes it anew."));
+                                   "English) and its texts in English. Saving a name or choosing a language here "
+                                   "writes it anew."));
     CHECK(g.shown().empty());
+    CHECK_EQ(g.language(), std::string("en"));
     CHECK(!g.set_name("Mira"));
     CHECK(g.error().starts_with("The player name cannot be saved: "));
     CHECK(g.settings().player_name.empty());
+    CHECK(!g.set_language("fr"));
+    CHECK(g.error().starts_with("The language cannot be saved: "));
+    CHECK_EQ(g.language(), std::string("en"));
     fs::remove_all(file, ec);
+
+    current = "game.ini: the language";
+    g.load();
+    // (No file: English, no note.)
+    CHECK_EQ(g.language(), std::string("en"));
+    CHECK(g.language_note().empty());
+    CHECK_EQ(language_summary(g.settings()), std::string("game.ini: no language"));
+    CHECK(g.set_language("fr"));
+    CHECK_EQ(g.language(), std::string("fr"));
+    CHECK(read(file).ends_with("\nlanguage = fr\n"));
+    CHECK_EQ(language_summary(g.settings()), std::string("game.ini: language fr"));
+    // English is written as it is chosen.
+    CHECK(g.set_language("en"));
+    CHECK(read(file).ends_with("\nlanguage = en\n"));
+    CHECK_EQ(g.language(), std::string("en"));
+    // A code the game does not have is not written.
+    CHECK(!g.set_language("xx"));
+    CHECK_EQ(g.error(), std::string("The language cannot be saved: the game has no language \u201Cxx\u201D."));
+    CHECK(read(file).ends_with("\nlanguage = en\n"));
+    // Any case, as the game reads it; the name's lines kept.
+    std::ofstream(file) << "player_name = Mira\nlanguage = DE # mine\n";
+    g.load();
+    CHECK_EQ(g.language(), std::string("de"));
+    CHECK(g.language_note().empty());
+    CHECK(g.set_language("it"));
+    CHECK_EQ(read(file), std::string("player_name = Mira\nlanguage = it\n"));
+    CHECK_EQ(g.shown(), std::string("Mira"));
+    // One the game does not have: English shown, and said until one is chosen.
+    std::ofstream(file) << "language = xx\nplayer_name = A\n";
+    g.load();
+    CHECK_EQ(g.language(), std::string("en"));
+    CHECK_EQ(g.language_note(), std::string("game.ini's language \u201Cxx\u201D is not one the game has: the game "
+                                            "shows English. Choosing one here replaces it."));
+    CHECK(g.note().empty());
+    CHECK(g.set_name("B")); // (the language line stays: so does its note)
+    CHECK(!g.language_note().empty());
+    CHECK(g.set_language("es"));
+    CHECK(g.language_note().empty());
+    CHECK_EQ(read(file), std::string("language = es\nplayer_name = B\n"));
+    // A file that cannot be read (too large) is written anew with the language: its note goes.
+    std::ofstream(file) << std::string(70 * 1024, '#');
+    g.load();
+    CHECK(g.note().starts_with("game.ini cannot be read ("));
+    CHECK(g.set_language("ru"));
+    CHECK(g.note().empty());
+    CHECK_EQ(g.language(), std::string("ru"));
+    CHECK(game_ini::load(file).settings.language == "ru");
+    fs::remove(file, ec);
 
     current = "typing a name";
     NameEditor e;
@@ -686,13 +741,60 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         std::vector<std::string> game, display;
         for (const SettingRow& r : v.settings->game) game.push_back(r.control.id);
         for (const SettingRow& r : v.settings->display) display.push_back(r.control.id);
-        CHECK((game == std::vector<std::string>{"player-name", "input-delay"}));
+        CHECK((game == std::vector<std::string>{"player-name", "language", "input-delay"}));
         CHECK(std::find(display.begin(), display.end(), "input-delay") == display.end());
         CHECK(std::find(display.begin(), display.end(), "fullscreen") != display.end());
         CHECK(v.settings->game[0].control.kind == ActionKind::kEntry);
         CHECK(v.settings->game[0].control.label.empty());
         CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Player (the game's own)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Player"));
         CHECK(!v.settings->name_edit);
+        // The language: the game's, by their English names, English chosen while game.ini has none.
+        const Action& lang = v.settings->game[1].control;
+        CHECK(lang.kind == ActionKind::kChoice);
+        CHECK_EQ(lang.choices.size(), std::size(cafe::host::game::kLanguages));
+        for (size_t i = 0; i < lang.choices.size() && i < std::size(cafe::host::game::kLanguages); ++i)
+            CHECK_EQ(lang.choices[i], std::string(cafe::host::game::kLanguages[i].name));
+        CHECK_EQ(lang.choices[0], std::string("English"));
+        CHECK_EQ(lang.chosen, 0);
+        CHECK_EQ(lang.describe.state, std::string("English"));
+        CHECK(!lang.describe.explain.empty());
+        // Activated: the next one; chosen: that one; written each time.
+        h.model.activate("language", h.now);
+        CHECK(read(game_ini).ends_with("\nlanguage = fr\n"));
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[1].control.chosen, 1);
+        CHECK_EQ(v.settings->game[1].control.describe.state, std::string("French"));
+        // (The empty name: the game's own in that language.)
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Joueur (the game's own)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Joueur"));
+        h.model.choose("language", 5, h.now);
+        CHECK(read(game_ini).ends_with("\nlanguage = ru\n"));
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[1].control.describe.state, std::string("Russian"));
+        // (Russian's word is Cyrillic, which the launcher's font has not.)
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("The game's own (Player in English)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Game's own"));
+        h.model.choose("language", 99, h.now);
+        CHECK_EQ(h.model.said(), std::string("no language 99"));
+        CHECK(read(game_ini).ends_with("\nlanguage = ru\n"));
+        h.model.choose("language", 0, h.now);
+        CHECK(read(game_ini).ends_with("\nlanguage = en\n"));
+        CHECK(read(game_ini).find("language = fr") == std::string::npos); // (one line of it)
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Player (the game's own)"));
+        // One the game does not have, by hand: English shown, said on the page.
+        std::ofstream(game_ini) << "language = Klingon\n";
+        h.model.activate("settings", h.now);
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[1].control.chosen, 0);
+        CHECK(!v.settings->game_notes.empty() &&
+              v.settings->game_notes[0].text.starts_with("game.ini's language \u201CKlingon\u201D is not one"));
+        h.model.activate("language", h.now);
+        CHECK_EQ(read(game_ini), std::string("language = fr\n"));
+        CHECK(h.model.view().settings->game_notes.empty());
+        std::ofstream(game_ini) << "";
+        h.model.activate("settings", h.now);
         // Input delay, now in Game: still display.ini's.
         h.model.activate("input-delay", h.now);
         CHECK(read(scratch / "m/display.ini").find("input_delay = yes") != std::string::npos);
@@ -786,6 +888,9 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         h.model.activate("player-name", h.now);
         CHECK_EQ(h.model.said(), std::string("no player name to type"));
         CHECK(!h.model.name().editing());
+        h.model.activate("language", h.now);
+        CHECK_EQ(h.model.said(), std::string("no language to choose"));
+        CHECK(!fs::exists(scratch / "n/game.ini"));
     }});
 
     current = "Settings > Game, Windows' data folder misnamed";
@@ -799,6 +904,8 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         h.model.activate("player-name", h.now);
         CHECK(h.model.said().starts_with("The data folder must end in TTT2Ultimate"));
         CHECK(!h.model.name().editing());
+        h.model.choose("language", 2, h.now);
+        CHECK(h.model.said().starts_with("The data folder must end in TTT2Ultimate"));
     }});
 }
 

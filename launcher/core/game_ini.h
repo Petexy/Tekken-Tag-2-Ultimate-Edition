@@ -15,6 +15,9 @@
 // player_name: the name the game shows for the player instead of its own
 // default ("Player"). A missing file, a missing key or an empty value: the
 // default.
+// language: the language the game shows its texts and menus in, by its code
+// (cafe::host::game::kLanguages: en, fr, ...). A missing file, a missing key,
+// an empty value or a code the game does not have: English.
 
 #include "paths.h"
 
@@ -29,8 +32,12 @@ namespace launcher::game_ini {
 fs::path beside(const fs::path& display_file);
 
 inline constexpr std::string_view kNameKey = "player_name";
-// What the game calls the player without a name of their own.
+inline constexpr std::string_view kLanguageKey = "language";
+// What the game calls the player without a name of their own (in English).
 inline constexpr const char* kDefaultName = "Player";
+// That word in the game's language (`language`: a code of cafe::host::game::kLanguages, "" or one it does not have:
+// English), as the launcher's font can draw it: "" for a language whose word it cannot (Russian's is Cyrillic).
+std::string_view own_name(std::string_view language);
 
 // ---- what a name may be (the one place to change when the game's limits are known better)
 
@@ -54,6 +61,7 @@ std::string first_refused(std::string_view text);
 
 struct Settings {
     std::string player_name; // as the file has it (tidied), "" for none
+    std::string language;    // as the file has it (any case, maybe a code the game does not have), "" for none
     bool operator==(const Settings&) const = default;
 };
 
@@ -76,5 +84,13 @@ Settings parse(std::string_view text);
 std::string with_name(std::string_view text, std::string_view name);
 // Saves `name` (tidied) into `file`, keeping the rest of what it has (written anew when it cannot be read).
 bool save_name(const fs::path& file, std::string_view name, std::string* error = nullptr);
+
+// `text` with language set to `code`: the line that counts (the later one, when there are several) takes it, the
+// earlier ones are left out, or a line is added at the end; an empty `code` leaves the key out. Every other line kept
+// as it was; a new file (empty `text`) gets the short header.
+std::string with_language(std::string_view text, std::string_view code);
+// Saves `code` (a code of cafe::host::game::kLanguages, also "en": the choice is written) into `file`, keeping the
+// rest of what it has (written anew when it cannot be read).
+bool save_language(const fs::path& file, std::string_view code, std::string* error = nullptr);
 
 } // namespace launcher::game_ini

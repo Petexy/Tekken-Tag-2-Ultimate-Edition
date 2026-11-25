@@ -14,6 +14,8 @@
 #include "rules.h"
 #include "settings.h"
 
+#include "host/game_settings.h"
+
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -637,6 +639,16 @@ void App::test_tick(double t) {
         const game_ini::Loaded back = game_ini::load(game_ini::beside(display_file_));
         if (!back.error.empty()) test_said(false, back.error);
         else test_said(true, m::game_summary(back.settings));
+    } else if (n == "language") {
+        // (As Settings > Game's Language list set to it: its index in the game's languages.)
+        if (model_->page() != m::Page::kSettings) go(Screen::kSettings);
+        const cafe::host::game::Language* language = cafe::host::game::find_language(arg);
+        const int index = language ? static_cast<int>(language - std::begin(cafe::host::game::kLanguages)) : -1;
+        handle(model_->choose("language", index, t));
+        if (!model_->said().empty()) return test_said(false, model_->said());
+        const game_ini::Loaded back = game_ini::load(game_ini::beside(display_file_));
+        if (!back.error.empty()) test_said(false, back.error);
+        else test_said(language && back.settings.language == language->code, m::language_summary(back.settings));
     } else if (test_input(n, args, t)) {
     } else if (n == "tab") {
         // (As the shoulder buttons: Q / E.)

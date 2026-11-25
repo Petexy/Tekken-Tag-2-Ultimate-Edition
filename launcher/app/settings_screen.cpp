@@ -263,7 +263,9 @@ void App::settings(const Box& crimson, const Box& blue) {
                     // (A name: what it is now, typed on the blue side.)
                     s.chevron = true;
                     s.value_as_typed = !r.control.label.empty();  // (the name as the game shows it)
-                    s.value = r.control.label.empty() ? std::string(game_ini::kDefaultName) : r.control.label;
+                    s.value = !r.control.label.empty()       ? r.control.label
+                              : !r.control.placeholder.empty() ? r.control.placeholder
+                                                               : std::string(game_ini::kDefaultName);
                 } else {
                     s.value = value_of(r.control);
                     s.value_on = r.control.kind == m::ActionKind::kSwitch && r.control.checked;

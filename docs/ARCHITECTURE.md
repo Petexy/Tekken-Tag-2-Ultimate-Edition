@@ -2203,7 +2203,10 @@ Game builds the project itself with a pinned LLVM-MinGW,
     (`subprocess`), the start (`startup`, `single_instance`, `payload`),
     releases and the AppImage (`release`, `appimage`), the PC's checks before
     an install (`system`, `distro`), `uninstall`, the game's own
-    settings (`keymap`, `display`), and what is read from the player's own
+    settings (`keymap`, `display`, and `game_ini`: game.ini's player name
+    and language, each saved keeping the file's other lines, comments and
+    keys; of a language given twice the later line, the one the game reads,
+    takes the new code), and what is read from the player's own
     files as it runs: the game's menu sounds from the install's sound banks
     (`game_sounds`) and the added fighters' portraits from their packs
     (`game_art`).
@@ -2554,7 +2557,10 @@ input delay no (from <file>)` (or `display: defaults (no <file>)`), a line
 per variable set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU:
 rendering at <w>x<h> (scale <s>)`. The launcher's Settings show
 them in their Display section (but the input delay, which is in their Game
-section with the player's name from game.ini), a switch each and a list for the resolution
+section with the player's name and the language from game.ini: a list of the
+game's languages, `host::game::kLanguages`, by their English names, the one
+chosen being what the game's own reader makes of the file, and a note when the
+file names one the game does not have), a switch each and a list for the resolution
 (Automatic, 1280 × 720 ... 5120 × 2880). Resolution and 120 fps, focused,
 say what the game will do only as far as it can be sure, as the game goes by
 its primary display, which the launcher does not look for (`automatic_note` and `refresh_note` in
@@ -2663,7 +2669,7 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display and Game sections `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved), `player-name:<name>` (Game's Player name typed as a player does: the old one cleared, `<name>` typed, Done, which saves game.ini, then read back; empty: none) and `type:<text>` (`<text>` as the system's text input gives it, into the name being typed); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display and Game sections `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved), `player-name:<name>` (Game's Player name typed as a player does: the old one cleared, `<name>` typed, Done, which saves game.ini, then read back; empty: none), `language:<code>` (Game's Language list set to the game's language of that code, `en`, `fr` ... in any case, which saves game.ini, then read back: `ok` when it holds that code) and `type:<text>` (`<text>` as the system's text input gives it, into the name being typed); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |
