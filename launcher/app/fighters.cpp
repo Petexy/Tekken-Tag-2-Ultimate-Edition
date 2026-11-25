@@ -260,6 +260,7 @@ void App::fighters(const Box& crimson, const Box& blue) {
             for (const m::Action& a : l.actions) screen_actions_[a.id] = a;
         if (g.dlc) screen_actions_[g.dlc->add_owned.id] = g.dlc->add_owned;
     }
+    if (cv.add_all_owned) screen_actions_[cv.add_all_owned->id] = *cv.add_all_owned;
     if (cv.outfits_all) screen_actions_[cv.outfits_all->id] = *cv.outfits_all;
     for (const m::Line& l : cv.outfits_notes)
         for (const m::Action& a : l.actions) screen_actions_[a.id] = a;
@@ -292,6 +293,18 @@ void App::fighters(const Box& crimson, const Box& blue) {
             s.value = missing->lines.empty() ? "" : "See why";
             s.value_tone = Tone::Warn;
             menu_row(ui, "fx:needs", s, crimson_focus(), fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonSkewed));
+        }
+        // One button for every game's characters, above the games.
+        if (cv.add_all_owned) {
+            const m::Action& a = *cv.add_all_owned;
+            const size_t count = m::all_owned_to_add(model_->facts()).size();
+            MenuRowSpec s{"stroke:users", a.label};
+            s.value = count > 0 ? std::to_string(count) + " to add" : "None to add";
+            s.value_tone = count > 0 ? Tone::Ok : Tone::Neutral;
+            s.compact = true;
+            s.disabled = !a.enabled;
+            menu_row(ui, a.id, s, crimson_focus(false, !a.enabled),
+                     fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonSkewed));
         }
         bool first_tile = true;
         for (const FighterGroup& fg : groups) {
@@ -484,6 +497,7 @@ void App::fighters_blue(const Box& blue, const std::vector<FighterGroup>& groups
     else if (fo.starts_with("tile:")) key = "f:" + fo.substr(5);
     else if (group_of_button_.count(fo)) key = "g:" + group_of_button_.at(fo) + ":" + fo;
     else if (fo == "outfits-all") key = "outfits";
+    else if (fo == "add-all-owned:all") key = "all";
     else if (fo == "fx:needs") key = "needs";
     // (Nothing focused yet, or a key from another state: the first fighter.)
     const auto known = [&](const std::string& k) {
@@ -493,6 +507,7 @@ void App::fighters_blue(const Box& blue, const std::vector<FighterGroup>& groups
             return colon != std::string::npos && screen_actions_.count(k.substr(colon + 1)) > 0;
         }
         if (k == "outfits") return view_.characters.outfits_all.has_value();
+        if (k == "all") return view_.characters.add_all_owned.has_value();
         if (k == "needs") return std::any_of(view_.characters.facts.begin(), view_.characters.facts.end(),
                                               [](const m::Fact& f) { return f.name == "Missing"; });
         return false;
@@ -510,6 +525,7 @@ void App::fighters_blue(const Box& blue, const std::vector<FighterGroup>& groups
             const size_t colon = k.find(':', 2);
             group_view(k.substr(2, colon - 2), k.substr(colon + 1), groups);
         } else if (k == "outfits") outfits_view();
+        else if (k == "all") add_all_view();
         else if (k == "needs") needs_view();
     });
 }
@@ -739,6 +755,34 @@ void App::group_view(const std::string& group, const std::string& action_id,
     }
     if (!body.empty())
         describe_panel(ui, "gv/what", a.label, body, fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueSkewed));
+}
+
+// Add All Owned for every game: who it adds, or why it cannot now.
+void App::add_all_view() {
+    Ui& ui = *ui_;
+    const m::CharactersView& cv = view_.characters;
+    if (!cv.add_all_owned) return;
+    const m::Action& a = *cv.add_all_owned;
+    const m::Facts& fa = model_->facts();
+    const auto names = m::all_owned_to_add(fa);
+    section_label(ui, "av/label", "Every game", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    {
+        auto row = ui.open("av/count", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
+        pill(ui, "av/pill", names.empty() ? "None to add" : std::to_string(names.size()) + " to add",
+             names.empty() ? Tone::Neutral : Tone::Ok);
+    }
+    text(ui, "av/title", TextSpec{.text = a.label, .style = tx::kBig, .chroma = 3, .autofit_min = 28},
+         fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
+    text(ui, "av/about", TextSpec{.text = a.describe.explain, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
+         fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
+    std::string body = a.why;
+    if (a.enabled) {
+        std::vector<std::string> shown;
+        for (const std::string& nm : names) shown.push_back(m::display_name(fa, nm));
+        body = "Adds " + m::joined_most(shown, 8) +
+               ": a few minutes each; the first time, their game runs hidden in the background to save their moves.";
+    }
+    describe_panel(ui, "av/what", a.label, body, fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueSkewed));
 }
 
 void App::outfits_view() {

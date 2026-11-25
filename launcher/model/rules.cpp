@@ -265,6 +265,16 @@ std::vector<std::string> owned_to_add(const Facts& facts, const std::string& gam
     return names;
 }
 
+std::vector<std::string> all_owned_to_add(const Facts& facts) {
+    std::vector<std::string> names;
+    for (const char* game : {kTekken7, kTekken8}) {
+        if (!game_usable(facts, game)) continue;
+        for (const std::vector<std::string>& some : {base_to_add(facts, game), owned_to_add(facts, game)})
+            names.insert(names.end(), some.begin(), some.end());
+    }
+    return names;
+}
+
 std::vector<std::string> to_update(const Facts& facts, const std::string& game, bool stand_ins) {
     std::vector<std::string> names;
     if (facts.status) {

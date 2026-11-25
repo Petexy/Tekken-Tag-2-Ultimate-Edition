@@ -127,6 +127,17 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
             }
         }
     }
+    // I8 Fighters' Add All Owned for every game's characters at once (one button that adds them all): the model's
+    // element as it is, where the model has it (units.cpp add_all_everything checks what it adds).
+    if (const auto m = model.find("characters"); m != model.end()) {
+        for (size_t i = 0; i < m->second.size(); ++i) {
+            const auto id = m->second[i].text.find("id");
+            if (id == m->second[i].text.end() || id->second != "add-all-owned:all") continue;
+            Section& c = golden["characters"];
+            c.insert(c.begin() + static_cast<long>(std::min(i, c.size())), m->second[i]);
+            break;
+        }
+    }
     // I1 Settings is always reachable (U17): a gear beside Install/Resume when the game is not installed.
     Section& game = golden["game"];
     for (size_t i = 0; i < game.size(); ++i) {
@@ -398,6 +409,8 @@ const TkDifference kTkDifferences[] = {
     {false, "notice", "You have .*\\. Update on Home gets it first, then brings the game program and the fighters up to "
      "date\\.", "I7"},
     {true, "notice", "You have .*\\. Update replaces this launcher with it and opens it\\.", "I7"},
+    // I8 Add All Owned for every game's characters.
+    {false, "characters", "Add All Owned", "I8"},
     // W8 Linux's sentence with Windows' action.
     {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},
     {false, "characters",

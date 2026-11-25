@@ -1497,6 +1497,78 @@ void dlc_groups(const fs::path& golden, const fs::path& scratch) {
     }
 }
 
+// Fighters' Add All Owned for every game: each usable game's own and owned DLC characters, in one import.
+void add_all_everything(const fs::path& golden, const fs::path& scratch) {
+    current = "add all owned, every game";
+    std::string text = read(golden / "installed" / "case.json");
+    const auto insert = [&](const std::string& after, const std::string& what) {
+        const size_t at = text.find(after);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) text.insert(at + after.size(), what);
+    };
+    insert("\"fighters\": [",
+           R"({"name": "clive", "display": "Clive Rosfield", "game": "tekken8", "dlc": 3145880, "installed": false,
+               "outdated": false, "newer": false, "update": false, "moveset_saved": true, "stand_in": false,
+               "outfits": 0, "outfits_added": false, "needs_game": true},)");
+    insert("\"owned\": {\n  \"owned\": {", "\"clive\": true,");
+    const auto with_clive = json::parse(text);
+    CHECK(with_clive.has_value());
+    replay(with_clive.value_or(json::Value()), Caps::linux_caps(), scratch, {0, [](Harness& h) {
+        h.settle();
+        const Facts& f = h.model.facts();
+        std::vector<std::string> expected;
+        for (const char* game : {kTekken7, kTekken8})
+            for (const auto& some : {base_to_add(f, game), owned_to_add(f, game)})
+                expected.insert(expected.end(), some.begin(), some.end());
+        const std::vector<std::string> all = all_owned_to_add(f);
+        CHECK(all == expected);
+        // (Both games' own and owned DLC; a DLC the account does not own, never.)
+        CHECK(std::find(all.begin(), all.end(), "clive") != all.end());
+        bool tekken7_dlc = false, tekken7_own = false, unowned = false;
+        for (const std::string& name : all) {
+            const Fighter* x = fighter(f, name);
+            CHECK(x != nullptr);
+            if (!x) continue;
+            tekken7_dlc = tekken7_dlc || (x->of(kTekken7) && x->dlc != 0);
+            tekken7_own = tekken7_own || (x->of(kTekken7) && x->dlc == 0);
+            unowned = unowned || owns(f, *x) != true;
+        }
+        CHECK(tekken7_dlc && tekken7_own && !unowned);
+        const CharactersView v = characters_view(f);
+        CHECK(v.add_all_owned && v.add_all_owned->enabled && v.add_all_owned->id == "add-all-owned:all");
+        // One import of them all.
+        const size_t before = h.starter.started.size();
+        h.model.activate("add-all-owned:all", h.now);
+        CHECK(h.model.facts().task.has_value());
+        CHECK(h.starter.started.size() > before);
+        if (h.starter.started.size() > before) {
+            const std::vector<std::string>& argv = h.starter.started[before].argv;
+            for (const std::string& name : all) CHECK(std::find(argv.begin(), argv.end(), name) != argv.end());
+        }
+        // (A task running: it says why.)
+        const CharactersView busy = characters_view(h.model.facts());
+        CHECK(busy.add_all_owned && !busy.add_all_owned->enabled && !busy.add_all_owned->describe.why.empty());
+    }});
+    // Tekken 8 cannot be used: Tekken 7's only. Neither: none, and why.
+    replay(with_clive.value_or(json::Value()), Caps::linux_caps(), scratch / "t7", {0, [](Harness& h) {
+        h.settle();
+        Facts f = h.model.facts();
+        f.status->tekken8_found = false;
+        f.status->tekken8_error = "Tekken 8 is not installed in any Steam library";
+        // (Reina's pack keeps a copy of what the packs share of her: Tekken 7's can be added without Tekken 8.)
+        for (Fighter& x : f.status->fighters)
+            if (x.of(kTekken8)) x.needs_game = false;
+        for (const std::string& name : all_owned_to_add(f)) CHECK(fighter(f, name)->of(kTekken7));
+        CHECK(!all_owned_to_add(f).empty());
+        f.status->tekken7_found = false;
+        f.status->tekken7_error = "Tekken 7 is not installed in any Steam library";
+        CHECK(all_owned_to_add(f).empty());
+        const CharactersView v = characters_view(f);
+        CHECK(v.add_all_owned && !v.add_all_owned->enabled);
+        CHECK_EQ(v.add_all_owned->why, std::string("Neither Tekken 7 nor Tekken 8 can be used to add characters now."));
+    }});
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -1510,6 +1582,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     windows_before(scratch / "windows-before");
     update_all(golden, scratch / "update-all");
     dlc_groups(golden, scratch / "dlc-groups");
+    add_all_everything(golden, scratch / "add-all-everything");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

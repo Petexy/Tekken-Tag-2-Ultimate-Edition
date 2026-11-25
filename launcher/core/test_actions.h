@@ -5,7 +5,7 @@
 // confirmations are left out), one action after another:
 //
 //   install:<GAME>:<FOLDER>   update   add:<name>[,<name>...]   add-all-base
-//   add-all-owned[:<game>]   remove:<name>   uninstall:keep | uninstall:all   play   quit
+//   add-all-owned[:<game>|:all]   remove:<name>   uninstall:keep | uninstall:all   play   quit
 //   get-packages (the Download of numpy and Pillow)
 //
 // separated by ';'. (A path holding ':' or ';' cannot be given; GAME ends at
