@@ -18,7 +18,8 @@ convert/voice.py's Clips):
                                           text}} (convert/subtitles.py; languages SUBTITLE_LANGUAGES; a clip with
                                           no text left out)
     subtitle_languages(d)                 the languages of those its game was read in (a Tekken 7 fighter's: those
-                                          saved; the pack keeps them: character.ini subtitle_languages)
+                                          saved, and Polish, ours, with its English; the pack keeps them:
+                                          character.ini subtitle_languages)
     cloth(k, parts, log)                  (Tekken 8) the cloth it simulates as convert/cloth.add takes it
 Tekken7Source wraps the paks (tekken7/), Tekken8Source the store (tekken8/). A definition with TEKKEN8_CODE is a
 Tekken 8 fighter (characters.game_of); source_of() opens the source a definition needs, and Sources keeps one per
@@ -38,7 +39,7 @@ from . import InputError
 from .characters import GAMES, game_of
 
 # the languages an import reads the subtitles in: those the port shows (game.ini's language) and Japanese
-SUBTITLE_LANGUAGES = ('en', 'fr', 'de', 'it', 'es', 'ru', 'ja')
+SUBTITLE_LANGUAGES = ('en', 'fr', 'de', 'it', 'es', 'ru', 'pl', 'ja')
 TEKKEN8_APP_ID = 1778820        # Tekken 8's Steam app id (its manifest appmanifest_<id>.acf in a Steam library)
 TEKKEN8_FOLDER = 'TEKKEN 8'     # its folder below steamapps/common when the manifest names none
 
@@ -114,6 +115,9 @@ class Tekken7Source:
     # gives what was saved of them; Tekken 7's language codes for the subtitle languages)
     TEKKEN7_LANGUAGES = (('en', 'us'), ('fr', 'fr'), ('de', 'de'), ('it', 'it'), ('es', 'es'), ('ru', 'ru'),
                          ('ja', 'jp'))
+    # (the languages Tekken 7 has none of: a line's text in them is ours, tekken7/polish.py, wherever it has its
+    # English; Tekken 7 is never asked for them)
+    OWN_LANGUAGES = ('pl',)
 
     def subtitles(self, d, names, log=None):
         """Its clips' subtitles: tekken7/subtitles.lines(code, language) {event name ('mz_s00'): text}, saved in
@@ -133,14 +137,31 @@ class Tekken7Source:
             for name in names:
                 if low.get(name.lower()):
                     out.setdefault(name, {})[lang] = low[name.lower()]
-        return out
+        return with_own_lines(out, d.TEKKEN7_CODE)
 
     def subtitle_languages(self, d):
         """The languages its subtitles are saved in (those subtitles() read; an empty file counts: the game has
         none in that language)."""
         from .tekken7 import subtitles as text7
         have = text7.saved_languages(d.TEKKEN7_CODE, getattr(self.paks, 'saved', None))
-        return tuple(lang for lang, theirs in self.TEKKEN7_LANGUAGES if theirs in have)
+        read = {lang for lang, theirs in self.TEKKEN7_LANGUAGES if theirs in have}
+        if 'en' in read:
+            read |= set(self.OWN_LANGUAGES)
+        return tuple(lang for lang in SUBTITLE_LANGUAGES if lang in read)
+
+
+def with_own_lines(lines, code, own=None):
+    """A Tekken 7 fighter's subtitles {name: {language: text}} with ours (tekken7/polish.LINES, or `own`: {'<code>/<name>':
+    text}) in the languages Tekken 7 has none of, for each line it has in English."""
+    if own is None:
+        from .tekken7.polish import LINES as own
+    low = {k.lower(): v for k, v in own.items()}
+    for name, texts in lines.items():
+        ours = low.get(('%s/%s' % (code, name)).lower())
+        if ours and texts.get('en'):
+            for lang in Tekken7Source.OWN_LANGUAGES:
+                texts.setdefault(lang, ours)
+    return lines
 
 
 # ------------------------------------------------------------------------------------------------ Tekken 8

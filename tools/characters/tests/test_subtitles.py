@@ -11,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -20,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from test_tekken8_import_moveset import nus3                  # noqa: E402
 from ttt2char import pack, shared                              # noqa: E402
 from ttt2char.convert import moveset, subtitles as S, voice    # noqa: E402
+from ttt2char.tekken7 import polish as polish7                  # noqa: E402
 from ttt2char.tekken8 import text as text8, voice as voice8    # noqa: E402
 
 
@@ -108,9 +110,10 @@ class Table(unittest.TestCase):
 
     def test_every_language_shown(self):
         """A line read in each language an import reads gets each one's bank at that language's entry (the one the
-        title shows in that language), its language byte entry + 1; Russian (Cyrillic, which the font has) too."""
+        title shows in that language), its language byte entry + 1; Russian (Cyrillic, which the font has) too, and
+        Polish in the entry the title leaves unused that the port shows for it."""
         said = {'en': 'Ready now.', 'fr': 'Pr\u00eat.', 'de': 'Bereit.', 'it': 'Pronto.', 'es': 'Listo.',
-                'ru': '\u0413\u043e\u0442\u043e\u0432.', 'ja': '\u3088\u3057\u3002'}
+                'ru': '\u0413\u043e\u0442\u043e\u0432.', 'pl': 'Got\u00f3w, \u017ce\u0144.', 'ja': '\u3088\u3057\u3002'}
         glyphs = {ord(c) for text in said.values() for c in text}
         lines = {0: {'show': 20, 'hide': 120, 'clip': 'Play_abc_sta_00', 'text': said}}
         banks = S.read_container(S.read_table(S.table(original(), {66: lines}, glyphs))[66 * S.LINES])
@@ -118,8 +121,8 @@ class Table(unittest.TestCase):
             bank = banks[S.ENTRY[lang]]
             self.assertEqual(S.unmarked(S.bank_text(bank)), (text, 20, 120), lang)
             self.assertEqual(bank[6], S.ENTRY[lang] + 1, lang)
-        self.assertEqual((S.ENTRY['ru'], S.ENTRY['ja']), (9, 0))
-        for i in (2, 7, 8, 10, 15):
+        self.assertEqual((S.ENTRY['ru'], S.ENTRY['pl'], S.ENTRY['ja']), (9, 10, 0))
+        for i in (2, 7, 8, 11, 15):
             self.assertEqual(banks[i], banks[1])                     # (no text of its own: the English bank)
 
     def test_no_template(self):
@@ -447,6 +450,7 @@ class TextBanks(unittest.TestCase):
                                'Play_okm_win_00': {'en': 'First half, second half.',
                                                    'ru': '\u0420\u0430\u0437, \u0434\u0432\u0430.'}})
         self.assertIn('ru', text8.LANGUAGES)
+        self.assertIn('pl', text8.LANGUAGES)                                            # (Tekken 8 has Polish)
         self.assertNotIn('Polaris/Content/Localize/fr/GTB_Other.uasset', store.read)     # (only banks with lines)
 
 
@@ -471,12 +475,14 @@ class Tekken7Text(unittest.TestCase):
 
     def test_languages(self):
         """Every language an import reads (source.SUBTITLE_LANGUAGES) is one Tekken 7 saves (by its own folder
-        names), Russian too; a source says which it was read in (a Tekken 7 fighter's: those saved)."""
+        names), Russian too, but those it has none of (Polish: ours); a source says which it was read in (a Tekken 7
+        fighter's: those saved, and ours with its English)."""
         from test_tekken7_subtitles import record, saved
         from ttt2char import source
         from ttt2char.tekken7 import autodump
         ours = dict(source.Tekken7Source.TEKKEN7_LANGUAGES)
-        self.assertEqual(sorted(ours), sorted(source.SUBTITLE_LANGUAGES))
+        self.assertEqual(sorted(list(ours) + list(source.Tekken7Source.OWN_LANGUAGES)), sorted(source.SUBTITLE_LANGUAGES))
+        self.assertNotIn('pl', autodump.SUBTITLE_LANGUAGES)            # (never asked of Tekken 7)
         self.assertEqual(sorted(ours.values()), sorted(autodump.SUBTITLE_LANGUAGES))
         self.assertEqual(sorted(text8.LANGUAGES), sorted(source.SUBTITLE_LANGUAGES))
         self.assertEqual(source.SUBTITLE_LANGUAGES[0], 'en')          # (Tekken 8: the banks found in English first)
@@ -488,9 +494,33 @@ class Tekken7Text(unittest.TestCase):
             saved(folder, 'abc', record('ab_s00', 'Ready?'))
             saved(folder, 'abc', record('ab_s00', '\u0413\u043e\u0442\u043e\u0432?'), 'ru')
             saved(folder, 'abc', b'', 'jp')                          # (the game has none: read all the same)
-            self.assertEqual(t7.subtitle_languages(d), ('en', 'ru', 'ja'))
-            self.assertEqual(t7.subtitles(d, ['ab_s00']), {'ab_s00': {'en': 'Ready?', 'ru': '\u0413\u043e\u0442\u043e\u0432?'}})
+            self.assertEqual(t7.subtitle_languages(d), ('en', 'ru', 'pl', 'ja'))
+            with mock.patch.dict(polish7.LINES, clear=True):
+                self.assertEqual(t7.subtitles(d, ['ab_s00']),
+                                 {'ab_s00': {'en': 'Ready?', 'ru': '\u0413\u043e\u0442\u043e\u0432?'}})
         self.assertEqual(source.Tekken8Source(None).subtitle_languages(d), source.SUBTITLE_LANGUAGES)
+
+    def test_polish_ours(self):
+        """A Tekken 7 fighter's Polish is our line for it (tekken7/polish.LINES, '<code>/<key>' whatever the case),
+        for each line Tekken 7 has in English; its other languages without it."""
+        from test_tekken7_subtitles import record, saved
+        from ttt2char import source
+        with tempfile.TemporaryDirectory() as folder:
+            saved(folder, 'abc', record('ab_s00', 'Ready?') + record('ab_w01', 'Done.'))
+            saved(folder, 'abc', record('ab_s02', 'Pret ?'), 'fr')
+            t7 = source.Tekken7Source(types.SimpleNamespace(saved=folder))
+            d = types.SimpleNamespace(TEKKEN7_CODE='abc')
+            made_up = {'ABC/ab_s00': 'Gotowy?', 'abc/ab_s02': 'Gotowa?', 'xyz/ab_w01': 'Koniec.'}
+            with mock.patch.dict(polish7.LINES, made_up, clear=True):
+                self.assertEqual(t7.subtitles(d, ['ab_s00', 'ab_w01', 'ab_s02']),
+                                 {'ab_s00': {'en': 'Ready?', 'pl': 'Gotowy?'}, 'ab_w01': {'en': 'Done.'},
+                                  'ab_s02': {'fr': 'Pret ?'}})
+            self.assertEqual(source.with_own_lines({'ab_s00': {'en': 'A', 'pl': 'B'}}, 'abc', {'abc/ab_s00': 'C'}),
+                             {'ab_s00': {'en': 'A', 'pl': 'B'}})
+        with tempfile.TemporaryDirectory() as folder:                       # (no English saved: no Polish either)
+            saved(folder, 'abc', record('ab_s00', 'Pret ?'), 'fr')
+            t7 = source.Tekken7Source(types.SimpleNamespace(saved=folder))
+            self.assertEqual(t7.subtitle_languages(types.SimpleNamespace(TEKKEN7_CODE='abc')), ('fr',))
 
 
 class SharedFile(unittest.TestCase):
