@@ -742,9 +742,10 @@ void App::home_task(const Box& crimson, const Box& blue) {
         auto g = ui.open("home/crimson", crimson);
         const std::string steps_label = build ? std::to_string(steps.size()) + " steps" : std::string("Steps");
         section_label(ui, "task/steps-label",
-                      update ? "Part " + std::to_string(chain.waiting ? chain.at - 1 : chain.at) + " of " +
-                                   std::to_string(chain.count) + " · " + steps_label
-                             : steps_label,
+                      !update       ? steps_label
+                      : chain.done ? "Last part · " + steps_label
+                                   : "Part " + std::to_string(chain.waiting ? chain.at - 1 : chain.at) + " of " +
+                                         std::to_string(chain.count) + " · " + steps_label,
                       Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         {
             auto rows = ui.open("task/rows", Box{.gap = 6});
