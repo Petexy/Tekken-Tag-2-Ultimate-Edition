@@ -108,7 +108,7 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
     return c;
 }
 
-std::optional<Command> WindowsCommands::release(const Facts& facts) const {
+std::optional<Command> WindowsCommands::release(const Facts& facts) {
     if (facts.python.empty() || facts.windows.root.empty() || !facts.self_update) return std::nullopt;
     return query(facts, "release");
 }
@@ -567,8 +567,10 @@ void LauncherModel::check_ownership(double now) {
 }
 
 void LauncherModel::check_release(double now) {
-    if (!self_update_ || release_checking_) return;
-    const auto command = self_update_->check_command();
+    if (release_checking_) return;
+    // (The AppImage asks GitHub itself; the release .exe asks its files, which answer whether it is newer.)
+    const bool files = !self_update_;
+    const auto command = self_update_ ? self_update_->check_command() : parts_.commands.release(facts_);
     if (!command) return;
     release_checking_ = true;
     release_time_ = now;
@@ -578,10 +580,18 @@ void LauncherModel::check_release(double now) {
     release_job_ = parts_.starter.start(
         *command,
         {[this](const std::string& line, bool is_error) { (is_error ? release_err_ : release_out_) += line + "\n"; },
-         [this](int code) {
+         [this, files](int code) {
              release_checking_ = false;
              // (Quietly: no notice when GitHub cannot be asked now.)
-             if (code == 0 || json::parse(release_out_)) {
+             if (files) {
+                 const auto value = json::parse(answer_of(release_out_));
+                 if (const auto answer = value ? release_query_answer(*value) : std::nullopt) {
+                     if (answer->release)
+                         facts_.newer = answer->release;
+                     else if (answer->none || answer->error.empty())
+                         facts_.newer.reset(); // (none published, or none newer than this one)
+                 }
+             } else if (code == 0 || json::parse(release_out_)) {
                  const ReleaseAnswer answer = parse_release(answer_of(release_out_));
                  if (self_update_->on_release) self_update_->on_release(answer);
              }

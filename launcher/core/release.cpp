@@ -64,6 +64,25 @@ bool built_older(std::string_view built, std::string_view kit) {
     return order && *order < 0;
 }
 
+std::optional<ReleaseAnswer> release_query_answer(const json::Value& v) {
+    if (v["none"].type() != json::Value::Type::kBool) return std::nullopt;
+    ReleaseAnswer answer;
+    answer.none = v["none"].boolean();
+    answer.error = v["error"].string();
+    if (const json::Value& n = v["newer"]; n.is_object()) {
+        Release r;
+        r.version = n["version"].string();
+        r.tag = n["tag"].string();
+        r.page = n["page"].string();
+        r.asset = n["asset"].string();
+        r.url = n["url"].string();
+        r.size = static_cast<uint64_t>(n["size"].number());
+        r.sha256 = n["sha256"].string();
+        answer.release = r;
+    }
+    return answer;
+}
+
 ReleaseAnswer parse_release(std::string_view text) {
     ReleaseAnswer answer;
     std::string why;

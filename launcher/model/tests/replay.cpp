@@ -225,6 +225,8 @@ CaseRun replay(const json::Value& c, const Caps& caps, const fs::path& scratch, 
         facts.windows.root = home / "repo";
         facts.windows.build = home / "repo/build-windows-tools";
         facts.windows.config = home / "repo/local/windows-launcher.json";
+        // (The release .exe's files: they answer --query release with the fixture's "release", in their form.)
+        facts.self_update = c["release_exe"].boolean();
         if (install == "installed") {
             facts.windows.play =
                 Command{{(folder / "TTT2 Ultimate.exe").string()}, {}, folder, {}, {}, Command::Mode::kDetached};

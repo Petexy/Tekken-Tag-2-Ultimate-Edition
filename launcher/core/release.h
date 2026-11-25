@@ -5,6 +5,7 @@
 // curl or wget, and the AppImage the launcher runs from, which an update
 // replaces with the newer one.
 
+#include "json.h"
 #include "paths.h"
 
 #include <cstdint>
@@ -65,6 +66,10 @@ struct ReleaseAnswer {
     std::string error;
 };
 ReleaseAnswer parse_release(std::string_view json);
+// The release .exe's files' answer (`main.py --query release`, launcher/windows/query.py): {"newer": {...} | null,
+// "none": bool, "error": raw}, the release only when it is newer than those files (a test build's own version's
+// release too); none when it is not such an answer (no "none": a failure's {"error": reason}).
+std::optional<ReleaseAnswer> release_query_answer(const json::Value& answer);
 
 // The AppImage this launcher runs from: $APPIMAGE, as the AppImage's runtime
 // sets it, when the program (/proc/self/exe) is inside $APPDIR, where that
