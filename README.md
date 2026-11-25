@@ -319,7 +319,7 @@ its last lines are shown on Home: attach that file to a report.
 **Settings** has
 the name the game shows for you in place of Player (typed on the keyboard, or with a controller on keys the
 launcher shows), the language the game shows its texts and menus in (English, French, German, Italian, Spanish or
-Russian: those the European Wii U game has), whether the game starts fullscreen, the resolution it draws at, its 120
+Russian: those the European Wii U game has; or Polish, the port's own translation), whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
 its keyboard keys ([Playing](#playing)), and the launcher's own sounds, motion, button prompts and text size.
@@ -581,7 +581,7 @@ and the language of the game's texts and menus are kept beside it in
 
 ```ini
 player_name = Mira Q        # up to 16 characters; empty or missing: the game's own name
-language = fr               # en, fr, de, it, es or ru (any case); empty, missing or another: English
+language = fr               # en, fr, de, it, es, ru or pl (any case); empty, missing or another: English
 ```
 
 The game reads it when it starts too. A character it cannot show (anything
