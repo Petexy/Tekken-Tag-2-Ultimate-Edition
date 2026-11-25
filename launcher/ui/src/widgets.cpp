@@ -639,20 +639,18 @@ void watermark(Canvas& canvas, TextEngine& text, const std::string& word, Vec2 b
 void brand(Ui& ui, const std::string& id, const std::string& line1, const std::string& line2, const Box& box) {
     Box b = with_height(box, 34);
     // (Its words go when the top band is short of room: shrink_order 1, down to the mark.)
-    if (b.w.mode == Size::Fit && b.min_w == 0) b.min_w = 44;
+    if (b.w.mode == Size::Fit && b.min_w == 0) b.min_w = 36;
     if (b.shrink_order == 0) b.shrink_order = 1;
     static constexpr theme::TextStyle kSecond{theme::Font::DisplayBoldItalic, 14, .24f, true, 1.05f};
-    ui.leaf(id, b, [](float) { return Vec2{196, 34}; }, [line1, line2](PaintContext& ctx) {
+    ui.leaf(id, b, [](float) { return Vec2{188, 34}; }, [line1, line2](PaintContext& ctx) {
         Canvas& cv = ctx.canvas;
         const float x = ctx.rect.x, cy = ctx.rect.y + ctx.rect.h / 2;
-        const Rect red{x + 2, cy - 15, 20, 30}, blue{x + 19, cy - 15, 20, 30};
-        cv.fill(skewed(red, kSeamTan), Gradient::linear({0, red.y}, {0, red.bottom()}, rgb(0xff4d72), rgb(0xc40f39)));
-        cv.fill(skewed(blue, kSeamTan),
-                Gradient::linear({0, blue.y}, {0, blue.bottom()}, rgb(0x4b98ff, .92f), rgb(0x1650d6, .92f)));
-        if (ctx.rect.w < 52 + std::max(ctx.text.width(tx::kBrand, line1), ctx.text.width(kSecond, line2))) return;
+        // The mark: the launcher's own icon (the program's icon too).
+        ctx.icons.draw(cv, kLauncherIcon, {x, cy - 17, 34, 34});
+        if (ctx.rect.w < 44 + std::max(ctx.text.width(tx::kBrand, line1), ctx.text.width(kSecond, line2))) return;
         const float lh = ctx.text.line_height(tx::kBrand);
-        ctx.text.draw(cv, tx::kBrand, line1, {x + 52, cy - lh}, rgb(0xe6e9f2));
-        ctx.text.draw(cv, kSecond, line2, {x + 52, cy}, c::kDim);
+        ctx.text.draw(cv, tx::kBrand, line1, {x + 44, cy - lh}, rgb(0xe6e9f2));
+        ctx.text.draw(cv, kSecond, line2, {x + 44, cy}, c::kDim);
     });
 }
 

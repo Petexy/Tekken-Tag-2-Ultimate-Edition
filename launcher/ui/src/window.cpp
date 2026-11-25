@@ -8,9 +8,34 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "ttt2ui/icons.h"
 #include "ttt2ui/theme.h"
 
 namespace ttt2::ui {
+
+namespace {
+// The launcher's icon on its window (Wayland's toplevel icon, X11's _NET_WM_ICON, Windows' title bar and task bar):
+// 256 pixels with smaller sizes beside it, so a desktop that asks for 16 or 32 gets one drawn for that size.
+void set_window_icon(SDL_Window* window) {
+    std::vector<std::vector<std::uint8_t>> pixels;  // (kept until the icon is set: the surfaces point into them)
+    SDL_Surface* main = nullptr;
+    for (const int size : {256, 128, 64, 48, 32, 24, 16}) {
+        std::vector<std::uint8_t>& rgba = pixels.emplace_back(rasterise_icon(kLauncherIcon, size));
+        if (rgba.empty()) break;
+        SDL_Surface* s = SDL_CreateSurfaceFrom(size, size, SDL_PIXELFORMAT_RGBA32, rgba.data(), size * 4);
+        if (!s) break;
+        if (!main) {
+            main = s;
+            continue;
+        }
+        SDL_AddSurfaceAlternateImage(main, s);
+        SDL_DestroySurface(s);  // (the main surface holds its own reference)
+    }
+    if (!main) return;
+    SDL_SetWindowIcon(window, main);
+    SDL_DestroySurface(main);
+}
+}  // namespace
 
 bool running_under_gamescope() {
     auto is = [](const char* name, const char* value) {
@@ -83,6 +108,7 @@ bool Window::try_open(const WindowOptions& o, const char* video, const char* ren
     SDL_SetWindowMinimumSize(window_, static_cast<int>(std::lround(o.min_size.x * content)),
                              static_cast<int>(std::lround(o.min_size.y * content)));
     SDL_SetWindowHitTest(window_, hit_test, this);
+    if (!o.offscreen) set_window_icon(window_);
     return true;
 }
 
