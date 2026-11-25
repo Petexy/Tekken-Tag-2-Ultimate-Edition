@@ -86,7 +86,8 @@ std::pair<std::string, std::string> split_name(const std::string& display) {
     return {display.substr(0, sp), display.substr(sp + 1)};
 }
 
-const char* kGroupTitles[] = {"Tekken 7", "Tekken 7 DLC", "Tekken 8"};
+// [Tekken 8?][DLC?]
+const char* kGroupTitles[2][2] = {{"Tekken 7", "Tekken 7 DLC"}, {"Tekken 8", "Tekken 8 DLC"}};
 
 namespace art = launcher::game_art;
 
@@ -141,15 +142,15 @@ std::vector<App::FighterGroup> App::fighter_groups() const {
         const bool t8 = g.game == kTekken8;
         FighterGroup base;
         base.key = t8 ? "t8" : "t7";
-        base.title = t8 ? kGroupTitles[2] : kGroupTitles[0];
+        base.title = kGroupTitles[t8][0];
         base.game = g.game;
         base.group = &g;
         for (const m::FighterRow& r : g.rows) base.rows.push_back(&r);
         out.push_back(base);
         if (g.dlc && !g.dlc->rows.empty()) {
             FighterGroup dlc;
-            dlc.key = "dlc";
-            dlc.title = kGroupTitles[1];
+            dlc.key = t8 ? "dlc8" : "dlc";
+            dlc.title = kGroupTitles[t8][1];
             dlc.game = g.game;
             dlc.group = &g;
             dlc.dlc = true;
@@ -339,7 +340,9 @@ void App::fighters(const Box& crimson, const Box& blue) {
                 TileSpec t;
                 t.code = tile_code(r->display);
                 t.name = short_name(r->display);
-                t.tone = fg.key == "t8" ? TileTone::Orange : fg.dlc ? TileTone::Pink : TileTone::Red;
+                t.tone = fg.game == kTekken8 ? (fg.dlc ? TileTone::Gold : TileTone::Orange)
+                         : fg.dlc            ? TileTone::Pink
+                                             : TileTone::Red;
                 const std::optional<bool> o = f ? m::owns(model_->facts(), *f) : std::nullopt;
                 if (!f) t.state = TileState::None;
                 else if (f->added() && (f->update || m::outfits_changed(model_->facts(), *f))) t.state = TileState::Update;
@@ -529,7 +532,7 @@ void App::fighter_view(const std::string& name) {
         auto row = ui.open("fv/game", fit(Box{.layout = Layout::Row, .h = Size::fixed(26), .margin = {0, 0, 0, 10},
                                               .gap = 12, .align = Align::Center},
                                           SeamFit::BlueRect));
-        pill(ui, "fv/game-pill", t8 ? "Tekken 8" : f->dlc ? "Tekken 7 · DLC" : "Tekken 7", t8 ? Tone::Blue : Tone::Red);
+        pill(ui, "fv/game-pill", (t8 ? "Tekken 8" : "Tekken 7") + std::string(f->dlc ? " · DLC" : ""), t8 ? Tone::Blue : Tone::Red);
         std::string found;
         if (f->dlc) {
             found = owned == true    ? "Steam: owned"
@@ -714,7 +717,8 @@ void App::group_view(const std::string& group, const std::string& action_id,
     std::string doing;
     if (action_id == "add-all") names = m::base_to_add(fa, kTekken7), doing = "Adds ";
     else if (action_id == "add-all:tekken8") names = m::base_to_add(fa, kTekken8), doing = "Adds ";
-    else if (action_id == "add-all-owned") names = m::owned_to_add(fa), doing = "Adds ";
+    else if (action_id == "add-all-owned") names = m::owned_to_add(fa, kTekken7), doing = "Adds ";
+    else if (action_id == "add-all-owned:tekken8") names = m::owned_to_add(fa, kTekken8), doing = "Adds ";
     else if (action_id == "update-all") names = m::to_update(fa, kTekken7), doing = "Updates ";
     else if (action_id == "update-all:tekken8") names = m::to_update(fa, kTekken8), doing = "Updates ";
     else if (action_id == "update-stand-ins") names = m::to_update(fa, kTekken8, true), doing = "Gives their own moves to ";

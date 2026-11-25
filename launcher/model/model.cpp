@@ -1227,8 +1227,10 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     else if (const auto game = rest("update-all:"))
         start_import(to_update(facts_, *game), now);
     else if (id == "add-all-owned")
-        start_import(owned_to_add(facts_), now);
-    else if (id == "dlc")
+        start_import(owned_to_add(facts_, kTekken7), now);
+    else if (const auto game = rest("add-all-owned:"))
+        start_import(owned_to_add(facts_, *game), now);
+    else if (id == "dlc" || id == "dlc:tekken8") // (both games' open together)
         facts_.dlc_expanded = !facts_.dlc_expanded;
     else if (id == "task") {
         if (task)

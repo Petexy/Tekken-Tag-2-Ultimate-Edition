@@ -255,11 +255,11 @@ UpdatePlan update_plan(const Facts& facts) {
     return p;
 }
 
-std::vector<std::string> owned_to_add(const Facts& facts) {
+std::vector<std::string> owned_to_add(const Facts& facts, const std::string& game) {
     std::vector<std::string> names;
     if (facts.status) {
         for (const Fighter& f : facts.status->fighters) {
-            if (f.of(kTekken7) && f.dlc != 0 && !f.added() && addable(facts, f)) names.push_back(f.name);
+            if (f.of(game) && f.dlc != 0 && !f.added() && addable(facts, f)) names.push_back(f.name);
         }
     }
     return names;

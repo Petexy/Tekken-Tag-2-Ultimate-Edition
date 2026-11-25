@@ -135,7 +135,7 @@ struct MenuRowSpec {
 void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focus = {}, const Box& box = {});
 // A fighter tile with its corner badge.
 enum class TileState : std::uint8_t { Added, Update, None, NotOwned, Checking, Newer };
-enum class TileTone : std::uint8_t { Red, Pink, Orange };
+enum class TileTone : std::uint8_t { Red, Pink, Orange, Gold };
 struct TileSpec {
     std::string code{}, name{}, tag{};  // tag: the white corner label ("OUTFITS"), empty for none
     TileTone tone = TileTone::Red;
