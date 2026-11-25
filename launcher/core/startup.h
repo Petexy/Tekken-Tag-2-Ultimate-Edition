@@ -1,8 +1,8 @@
 #pragma once
 
-// What the launcher does first, before SDL or any window (ARCHITECTURE
-// section 1, C6, C12, C15); the program calls begin() as the first thing in
-// main() and ends at once when it says so.
+// What the launcher does first, before SDL or any window; the program
+// calls begin() as the first thing in main() and ends at once when it says
+// so.
 //
 //  1. --version anywhere: "ttt2-launcher <version>\n" on standard output, 0
 //     (an update asks the new launcher this before putting it in place);
@@ -22,7 +22,7 @@
 //  4. Windows release .exe: its files into the files folder (payload.h), under
 //     the mutex Local\TTT2UltimateLauncherFiles; TTT2_LAUNCHER_EXE names this
 //     .exe and TTT2_LAUNCHER_UI_PID this process for the Python workers (the
-//     update reopens the launcher after this pid ends, C3).
+//     update reopens the launcher after this pid ends).
 //
 // Then the program runs, with Start::instance telling it of later starts.
 

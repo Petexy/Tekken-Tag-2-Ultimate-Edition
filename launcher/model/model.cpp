@@ -101,7 +101,7 @@ Command WindowsCommands::worker_command(const Facts& facts, const std::string& a
               outfits.empty() ? "none" : outfits};
     c.argv.insert(c.argv.end(), names.begin(), names.end());
     c.cwd = w.root;
-    // (The launcher's own update replaces the .exe or its files: never ended half-way, C3.)
+    // (The launcher's own update replaces the .exe or its files: never ended half-way.)
     if (action == "launcher" || action == "files") c.mode = Command::Mode::kSelfUpdate;
     // (A test build's files: the .exe's program stays as it is, so changes to it are refused, self_update.py.)
     if (action == "files" && facts.program_in_exe) c.env["TTT2_LAUNCHER_PROGRAM_IN_EXE"] = "1";
@@ -458,7 +458,7 @@ void LauncherModel::deactivated() {
 
 void LauncherModel::refresh(double now) {
     parts_.environment.look(facts_);
-    // (Settings stays open when the game is gone: its launcher section is always there, U17.)
+    // (Settings stays open when the game is gone: its launcher section is always there.)
     load_status(now);
 }
 
@@ -1097,7 +1097,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         return effects;
     }
 
-    // (Another OS's item: not there to activate, U1.)
+    // (Another OS's item: not there to activate.)
     if (!of_this_os(facts_.caps, id)) {
         said_ = "no " + id + " to activate";
         return effects;
@@ -1108,7 +1108,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         keys_.close();
         page_ = Page::kMain;
     } else if (id == "settings") {
-        // U17: always there (the game's part when it is installed; Windows' folders always).
+        // Always there (the game's part when it is installed; Windows' folders always).
         display_.load();
         keys_.load();
         page_ = Page::kSettings;

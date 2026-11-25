@@ -1,8 +1,8 @@
 // Settings: the section switcher (Display, Keyboard, Launcher, and Folders on Windows; Display and Keyboard once the
 // game is installed, Launcher always) and the open section's rows on the crimson side, their values changed in
-// place (FEEDBACK F5: every row, value box and arrow inside the plate, each row's end following the seam), the
-// focused setting on the blue side (FEEDBACK F2: right-aligned): what it does, its options, notes. Keyboard: the 19
-// inputs in three columns, a gamepad with the focused input lit, choosing a key (U4) with its 10 s countdown.
+// place (every row, value box and arrow inside the plate, each row's end following the seam), the
+// focused setting on the blue side (right-aligned): what it does, its options, notes. Keyboard: the 19
+// inputs in three columns, a gamepad with the focused input lit, choosing a key with its 10 s countdown.
 
 #include "app.h"
 #include "utf8_path.h"
@@ -153,7 +153,7 @@ void paint_pad(PaintContext& ctx, const std::string& lit, bool capturing) {
 
 } // namespace
 
-// The sections this Settings has (U17: the launcher's own always; the game's once it is installed, or on Windows).
+// The sections this Settings has (the launcher's own always; the game's once it is installed, or on Windows).
 std::vector<std::string> App::settings_sections() const {
     std::vector<std::string> out;
     if (!view_.settings) return {"launcher"};
@@ -180,7 +180,7 @@ void App::settings_switch(int delta, const std::string& to) {
     if (model_->keys().picking() >= 0) model_->cancel_key();
     settings_section_ = secs[static_cast<size_t>(i)];
     cue(ttt2::app::Cue::SectionSwitch);
-    // (Its first row, as when Settings opens: U7.)
+    // (Its first row, as when Settings opens.)
     ui_->focus("", true);
     settings_key_.clear();
     stage_->note_input(now());
@@ -611,7 +611,7 @@ bool App::settings_activate(const std::string& id, ttt2::ui::Device device) {
     return false;
 }
 
-// Choosing a key: the router hands the keys over (U4), the model takes them; 10 s without one stops it.
+// Choosing a key: the router hands the keys over, the model takes them; 10 s without one stops it.
 void App::key_capture_tick(double t) {
     if (!router_.capturing()) return;
     bool keyed = false;

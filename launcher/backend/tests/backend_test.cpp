@@ -205,7 +205,7 @@ void test_windows_answers(const fs::path& data) {
     check_eq(backend::kit_id("0.8.0 abc"), std::string("0.8.0-abc"), "kit id");
 }
 
-// A José in every folder (compat review #1): the players' own Windows builds (llvm-mingw, libc++) made path::string()
+// A José in every folder: the players' own Windows builds (llvm-mingw, libc++) made path::string()
 // and path(std::string) in the ANSI code page, so Python and main.py were started with broken names. Here this test
 // program, copied into such a folder as "python", is started as the model's --query and worker commands are: it
 // says the arguments it got and whether the script they name is there, as Python would open it.

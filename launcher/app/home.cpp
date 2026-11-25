@@ -221,7 +221,7 @@ void App::notice_card() {
         b.size = ButtonSize::Tiny;
         button(ui, "release-page", b, blue_focus());
     }
-    // (Home's UPDATE gets it with the rest: one Update, the slab's, FEEDBACK of 2026-11-25.)
+    // (Home's UPDATE gets it with the rest: one Update, the slab's.)
     if (view_.notice.whole && screen_ == Screen::kHome) return;
     ButtonSpec u;
     u.label = view_.notice.update.label;
@@ -429,7 +429,7 @@ void App::home_setup(const Box& crimson, const Box& blue) {
     home_readout(readout_key_);
 }
 
-// Windows' More, drilled into from its row: its entries on the blue side (the crimson side locked, F4).
+// Windows' More, drilled into from its row: its entries on the blue side (the crimson side locked).
 void App::more_view() {
     Ui& ui = *ui_;
     section_label(ui, "more/label", "More", Half::Blue, {}, fit(Box{.margin = {0, 6, 0, 8}}, SeamFit::BlueRect));

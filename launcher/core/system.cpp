@@ -156,7 +156,7 @@ std::optional<std::string> run_output(const std::vector<std::string>& argv) {
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     // (Called off the UI thread - the preflight's compiler probe -, so not through ProcessHost; it keeps ProcessHost's
-    // rules for the child (C5): every file the launcher has open beyond 0-2 is closed in it, whoever opened it and
+    // rules for the child: every file the launcher has open beyond 0-2 is closed in it, whoever opened it and
     // however (another thread, a library without O_CLOEXEC), no signal blocked, SIGPIPE back to its default.
     // posix_spawn is made for threaded programs (glibc: CLONE_VM | CLONE_VFORK, nothing but the file actions and
     // execve in the child); the probe is waited for here, so no PR_SET_PDEATHSIG is needed.)

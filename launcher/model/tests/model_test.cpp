@@ -42,7 +42,7 @@ std::string read(const fs::path& file) {
 
 // ---------------------------------------------------------------- intended differences (golden/INTENDED.md)
 
-// I5 Ids the old app gave no element: new ones (U14).
+// I5 Ids the old app gave no element: new ones.
 const std::vector<std::string> kNewIds = {
     "refresh", "details", "uninstall-saves", "uninstall-characters", "uninstall-cancel", "uninstall-confirm"};
 
@@ -127,7 +127,7 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
             }
         }
     }
-    // I1 Settings is always reachable (U17): a gear beside Install/Resume when the game is not installed.
+    // I1 Settings is always reachable: a gear beside Install/Resume when the game is not installed.
     Section& game = golden["game"];
     for (size_t i = 0; i < game.size(); ++i) {
         const auto id = game[i].text.find("id");
@@ -142,7 +142,7 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         }
         break;
     }
-    // I2 Settings has the launcher's own section (U6, U9, U17) after Keyboard.
+    // I2 Settings has the launcher's own section after Keyboard.
     Section& settings = golden["settings"];
     if (!settings.empty()) {
         const auto add = [&](Element e) { settings.push_back(std::move(e)); };
@@ -235,7 +235,7 @@ void goldens(const fs::path& dir, const fs::path& scratch, const std::string& on
 
 // ---------------------------------------------------------------- 2. what every view keeps to (both OSes)
 
-// Ids only one OS has (U1: the caps decide).
+// Ids only one OS has (the caps decide).
 const std::vector<std::string> kLinuxOnly = {"install",   "resume",       "check-again", "preflight-cancel",
                                              "uninstall", "get-packages", "copy:"};
 const std::vector<std::string> kWindowsOnly = {
@@ -257,9 +257,9 @@ void invariants(const std::string& shot, const std::vector<Action>& actions, con
         if (listed(a.id, caps.windows ? kLinuxOnly : kWindowsOnly)) {
             fail(__FILE__, __LINE__, shot + ": " + a.id + " is not " + caps.platform_name + "'s");
         }
-        // U7: every item has its describe block (the blue side): what it is at least.
+        // Every item has its describe block (the blue side): what it is at least.
         if (a.describe.title.empty()) fail(__FILE__, __LINE__, shot + ": " + a.id + " has no describe block");
-        // U7: a disabled item stays, and says why (in the blue side: describe.why).
+        // A disabled item stays, and says why (in the blue side: describe.why).
         if (!a.enabled && a.describe.why.empty())
             fail(__FILE__, __LINE__, shot + ": " + a.id + " is disabled without a why");
     }

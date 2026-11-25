@@ -105,7 +105,7 @@ std::string make_executable(const fs::path& update, const fs::path& appimage);
 // `update` renamed over `appimage`. Why not, or empty.
 std::string replace_appimage(const fs::path& update, const fs::path& appimage);
 
-// C2's way back: the AppImage an update replaces is kept beside it, hidden, until the new one drew its first frame.
+// The way back: the AppImage an update replaces is kept beside it, hidden, until the new one drew its first frame.
 fs::path previous_file(const fs::path& appimage); // ".<name>.previous"
 // `appimage` kept as previous_file() (a hard link, else a copy). Why not, or empty.
 std::string keep_previous(const fs::path& appimage);

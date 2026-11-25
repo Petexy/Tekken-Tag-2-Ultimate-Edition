@@ -619,7 +619,7 @@ void test_cancel(ProcessHost& host) {
     check(wait_end(host, *run, 10), "stubborn worker: it ended");
     check(seconds_since(t1) >= 1.4, "stubborn worker: after the stop time");
 
-    // The update workers (C3): never ended, no job.
+    // The update workers: never ended, no job.
     spec = child({"worker", (g_root / "w3.cancel").string(), "stubborn"});
     spec.cancel_file = g_root / "w3.cancel";
     spec.mode = ProcessSpec::Mode::kSelfUpdate;

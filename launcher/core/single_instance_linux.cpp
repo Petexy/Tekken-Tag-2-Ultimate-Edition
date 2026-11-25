@@ -309,7 +309,7 @@ std::string file_path(const std::string& uri) {
     return out.empty() || out[0] != '/' ? std::string() : out;
 }
 
-// The reverse of activate_old (C12): this launcher answers under the old GTK launcher's bus name, so that an old
+// The reverse of activate_old: this launcher answers under the old GTK launcher's bus name, so that an old
 // launcher started now (a second copy of 0.8.0's AppImage, its menu entry) hands over to it as it would to itself:
 // GApplication's org.gtk.Actions DescribeAll (the old one asks it first), org.gtk.Application and
 // org.freedesktop.Application Activate / Open arrive as later starts (their files and activation token).
@@ -467,7 +467,7 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
     const Address a = address_of(options.name);
     const auto t0 = Clock::now();
     const double patience = options.after ? options.after_seconds : 2;
-    bool asked_old = false; // (an old launcher is asked to show itself once, not at each try: compat review #8)
+    bool asked_old = false; // (an old launcher is asked to show itself once, not at each try)
     for (;;) {
         const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         if (fd < 0) {

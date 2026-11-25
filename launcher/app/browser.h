@@ -21,7 +21,7 @@ struct Place {
     std::string kind;     // what the row says beside the name ("Wine", "Drive"; "" for none)
 };
 // Home, Downloads, Games (when there); on Linux also the folders players look in that a file manager hides (no
-// path can be typed, U11): Steam (~/.local/share/Steam, else ~/.steam/steam; Flatpak Steam's too), Flatpak apps
+// path can be typed): Steam (~/.local/share/Steam, else ~/.steam/steam; Flatpak Steam's too), Flatpak apps
 // (~/.var/app), the Wine prefixes found (~/.wine, winetricks', Bottles', Lutris'/Heroic's under ~/Games, Faugus'), and
 // every drive mounted for the player (under /run/media/<user> and /media/<user>, and a mount point right under
 // /run/media, /media or /mnt: the Steam Deck's SD card); Computer (/) last. Windows: each drive (C:, D:, ...).

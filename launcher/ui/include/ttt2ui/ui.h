@@ -69,12 +69,12 @@ struct Box {
     Vec2 shift{};
     float opacity = 1;
     bool inert = false;           // nothing inside takes focus or clicks (content fading out)
-    // The blue half (FEEDBACK F2): its straight edge is its RIGHT one, so everything inside is anchored and aligned
+    // The blue half: its straight edge is its RIGHT one, so everything inside is anchored and aligned
     // to the right (inherited): rows and narrower children go to the right end, the widgets right-align their
     // text, mirror their tables (facts) and put their marks (label bar, note icon, accent) on the right; the slanted
     // left side only takes up the slack, its seam fit keeping the gap on every row.
     bool mirror = false;
-    // A drill-in lock (FEEDBACK F4): the half whose item opened the other half's actions. Nothing inside takes the
+    // A drill-in lock: the half whose item opened the other half's actions. Nothing inside takes the
     // focus (navigation, hover) so the pointer travels over it freely; it fades and moves back (eased, drawn
     // only); a left click anywhere on it is an Unlock event (id: the item under the pointer, else this box).
     bool locked = false;
@@ -135,7 +135,7 @@ struct PaintContext {
     bool line_start;     // the first in its line of a row (or any item of a column): it has nothing before it
     bool line_end;       // ... the last in its line: nothing after it
     // The ambient clock (FrameInput::ambient): endless decorative loops (a sheen, a blinking dot, a pulse, moving
-    // stripes) take their phase from it and call loop(), never animate(). Like the stage's ambient layer (U9) they
+    // stripes) take their phase from it and call loop(), never animate(). Like the stage's ambient layer they
     // never count as animation: the loop draws them at most theme::motion::kAmbientHz times a second, and the clock
     // stands still (a still picture) while ambient motion is paused, unfocused, hidden or the game runs.
     double ambient;

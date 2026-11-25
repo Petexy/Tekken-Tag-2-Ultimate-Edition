@@ -73,7 +73,7 @@ std::optional<Payload> own(const fs::path& exe, bool check = true);
 // letters), then %PUBLIC%'s, else the system drive's. Throws "LOCALAPPDATA is not set."
 fs::path files_folder();
 // This program's own files written into `root` again, whatever its stamp says, under kFilesMutex: a test build's
-// Update got files of a newer program (their answers' protocol is another, C6), and the .exe goes on with its own.
+// Update got files of a newer program (their answers' protocol is another), and the .exe goes on with its own.
 // Throws as own() and unpack() do, and "This launcher holds no files." for a build without them.
 void unpack_own_again(const fs::path& exe, const fs::path& root);
 // The mutex around unpacking (two starts at once: one unpacks, the other then finds the files there).

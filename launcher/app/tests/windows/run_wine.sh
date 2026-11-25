@@ -10,9 +10,9 @@
 # bootstrap-fail (no download: the failure and Try Again), protocol (another version's files: refused, Releases
 # Page), setup (Set Up Game: the .wua and the folder in the in-app browser, then the confirmation), installed (Home,
 # More drilled into), folders (Settings > Folders, Browse with New Folder), sounds (Sound on: what is heard), josé
-# (a José in every folder: the later queries reach Python, compat review #1), restore (a test build whose Update got
-# a newer program's files: the .exe puts its own back and says a new test build is needed, compat review #3),
-# log-held (launcher.log held as an old test build's starter holds it: the log goes to launcher-ui.log, review #7).
+# (a José in every folder: the later queries reach Python), restore (a test build whose Update got
+# a newer program's files: the .exe puts its own back and says a new test build is needed),
+# log-held (launcher.log held as an old test build's starter holds it: the log goes to launcher-ui.log).
 set -euo pipefail
 B=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -151,7 +151,7 @@ if want_case folders; then
     run folders 0 "tab:settings;focus:sec:folders;press:Return;wait:0.6;focus:fold:data;wait:0.6"
 fi
 
-# A José in every folder (compat review #1: a libc++ build, as a player's Set Up Game makes, turned the model's
+# A José in every folder (a libc++ build, as a player's Set Up Game makes, turned the model's
 # paths into the ANSI code page): the first state, then the status and owned questions through the model's
 # own commands reach the stub Python, and Home shows the installed game.
 # A test build's .exe (files appended) whose files an Update replaced with a newer program's: query.py's PROTOCOL 2
@@ -222,7 +222,7 @@ if want_case josé; then
     [ "$(grep -c . "$WORK/josé/answers/queries.log" 2>/dev/null)" -ge 3 ] || fail josé "too few queries"
 fi
 
-# Sounds (FEEDBACK F7): Sound on (launcher.ini beside display.ini), SDL's disk audio driver into a file: moving, a
+# Sounds: Sound on (launcher.ini beside display.ini), SDL's disk audio driver into a file: moving, a
 # drill-in and out, the next tab are heard. GAME_SOUNDS (optional: an installed game's folder, only read, linked
 # in): the game's own sounds are the ones used.
 if want_case sounds; then

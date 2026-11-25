@@ -174,7 +174,7 @@ void SelfUpdate::started(int code, const std::string& out) {
     if (compare_versions(said, version).value_or(1) != 0) {
         return failed("Update failed", "The AppImage released as version " + version + " is version " + said + ".");
     }
-    // (C2: this version stays beside it until the new one drew its first frame, the way back when it cannot.)
+    // (This version stays beside it until the new one drew its first frame, the way back when it cannot.)
     const fs::path previous = previous_file(*config_.appimage);
     if (const std::string why = files_.keep_previous(*config_.appimage); !why.empty())
         runner_.add_log("No copy of this version is kept to go back to (" + why + ").");

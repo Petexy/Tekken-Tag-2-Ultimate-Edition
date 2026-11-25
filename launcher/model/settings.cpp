@@ -410,7 +410,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         if (!in.folders_note.empty()) v.folders_notes.push_back(text_line(in.folders_note, Tone::kOk, true));
     }
 
-    // The launcher's own (new: U6, U9, U17).
+    // The launcher's own (new).
     SettingRow sounds = setting("sounds", ActionKind::kSwitch, "Sounds",
                                 "Short sounds when moving between and choosing items.", in.launcher.sounds);
     SettingRow motion = setting("reduce-motion", ActionKind::kSwitch, "Reduce motion",

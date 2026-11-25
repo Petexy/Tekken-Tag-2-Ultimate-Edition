@@ -43,7 +43,7 @@ EXE_VARIABLE = 'TTT2_LAUNCHER_EXE'
 # The pid of the launcher an update replaces: the new .exe waits for it to end.
 REPLACES_VARIABLE = 'TTT2_LAUNCHER_AFTER'
 # The launcher's window's pid, which the new launcher (launcher/core/startup.h) gives the workers it starts: the
-# update's worker is a program of its own there, and the window it replaces is that one, not the worker (C3).
+# update's worker is a program of its own there, and the window it replaces is that one, not the worker.
 UI_PID_VARIABLE = 'TTT2_LAUNCHER_UI_PID'
 # entry.cpp's trailer after its files: their size, count, SHA-256, magic.
 TRAILER = struct.Struct('<QQ32s8s')
@@ -460,7 +460,7 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
         if compare_versions(said, release.version) != 0:
             raise UpdateError('The launcher released as version %s is version %s.' % (release.version, said))
         if cancelled(): raise Cancelled()
-        # (From here on it is never cancelled, C3: the launcher hides Cancel once it says so.)
+        # (From here on it is never cancelled: the launcher hides Cancel once it says so.)
         say('@step update Putting version %s in place' % release.version)
         try:
             replace(file, exe)
@@ -617,7 +617,7 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     files[BUILD_COMMIT] = (head + '\n').encode()
     files[BUILD_BRANCH] = (branch + '\n').encode()
     if cancelled(): raise Cancelled()
-    # (From here on it is never cancelled, C3: the launcher hides Cancel once it says so.)
+    # (From here on it is never cancelled: the launcher hides Cancel once it says so.)
     say('@step update Putting %s in place' % head[:7])
     try:
         install_files(root, files)

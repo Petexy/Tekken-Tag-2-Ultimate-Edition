@@ -13,11 +13,11 @@ they differ in just that.
 
 ## Linux (compared with the GTK goldens)
 
-- **I1 Settings is always reachable** (ARCHITECTURE U17). The old app had the
+- **I1 Settings is always reachable**. The old app had the
   settings button only once the game was installed; the model puts it beside
   Install and Resume too, because Settings now also has the launcher's own
   section.
-- **I2 The launcher's own settings** (U6, U9, U17): a section "Golden Fist
+- **I2 The launcher's own settings**: a section "Golden Fist
   Launcher" after Keyboard with Sounds (on by default), Reduce motion and
   Text size (100 %, 125 %, 150 %).
 - **I3 Play reads display.ini when it is pressed.** The old app used what
@@ -28,7 +28,7 @@ they differ in just that.
 - **I4 A cancelled removal says calmly what is left**: "Removing cancelled" /
   "The characters removed before stay removed, the others are kept." instead
   of the signal ("It was stopped: Terminated (code 143, see Details)").
-- **I5 New ids** (U14: everything that can be activated has one): the header's
+- **I5 New ids** (everything that can be activated has one): the header's
   `refresh`, the task panel's `details`, and the uninstall dialog's
   `uninstall-saves`, `uninstall-characters`, `uninstall-cancel` and
   `uninstall-confirm`. The old app's elements had no id there; the comparison
@@ -50,7 +50,7 @@ they differ in just that.
   model's UPDATE element as it is (units.cpp `update_all` checks its parts).
 
 Not seen in the goldens but also changed on purpose: every item that cannot
-be used now keeps a reason (`describe.why`, U7) instead of only being
+be used now keeps a reason (`describe.why`) instead of only being
 greyed out, and nothing is said only in a tooltip (the blue side shows the
 focused item's `describe` block).
 
@@ -70,9 +70,9 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
   Mishima failed" where Tk said "Could not add Kazumi Mishima"; Windows-only
   tasks (Set Up Game, Build, Install, Update installed, the launcher's files)
   keep Tk's texts.
-- **W4 Folders are chosen, not typed** (U11): each folder row has Browse
+- **W4 Folders are chosen, not typed**: each folder row has Browse
   (`folder:<key>`) and shows the folder, no text entry.
-- **W5 Every sentence is the model's** (U2): `main.py --query` answers facts
+- **W5 Every sentence is the model's**: `main.py --query` answers facts
   and codes only; only a worker's `@error` lines carry Python's words.
 - **W6 Linux's words where Tk's had drifted, or Tk said nothing**: the
   resolution's Automatic note, the notes on a keyboard.ini or display.ini

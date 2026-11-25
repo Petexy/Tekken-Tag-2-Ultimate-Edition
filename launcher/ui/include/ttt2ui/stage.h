@@ -3,7 +3,7 @@
 // (halftone along the seam, speed lines, sparks, a pulse down the seam). The seam is one spring value (the split C)
 // that every part follows; it leans toward the half that holds the focus.
 //
-// The ambient layer never counts as animation (U9): it is drawn at most theme::motion::kAmbientHz times a second
+// The ambient layer never counts as animation: it is drawn at most theme::motion::kAmbientHz times a second
 // into a cached render target, pauses after kAmbientIdlePause seconds without input, stops while the window is
 // unfocused / occluded / minimised, and is still under Reduce motion. Tests freeze it (fixed clock, seeded random).
 #pragma once
@@ -22,7 +22,7 @@ public:
     // Where the seam should go: `share` of the width (theme::split::*), tall plates (a task fills the screen),
     // which half has the focus (-1 crimson, 0 none, 1 blue).
     void set_target(float share, bool tall_plates, int focus_side);
-    // A drill-in lock (FEEDBACK F4): that half's plate darkens (eased) while its content is locked (Box::locked);
+    // A drill-in lock: that half's plate darkens (eased) while its content is locked (Box::locked);
     // -1 crimson, 1 blue, 0 none.
     void set_locked(int side) { lock_side_ = side; }
     void snap();

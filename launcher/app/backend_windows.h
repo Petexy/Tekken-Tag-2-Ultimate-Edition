@@ -1,11 +1,11 @@
 #pragma once
 
-// What the launcher asks of Windows (ARCHITECTURE 6, C8, C9): Python only where it already lives. The launcher's
+// What the launcher asks of Windows: Python only where it already lives. The launcher's
 // files (the release .exe's files folder, or the project a CMake build is in) hold launcher/windows/main.py, which
 // answers `--query NAME` (one JSON object on its last line, launcher/backend/windows_backend.h) and runs the
 // `--worker` tasks; the private Python is local\windows-tools\python-runtime. Its first start without that Python
 // runs "Start Golden Fist Launcher.cmd --check" hidden, its progress read from local\windows-bootstrap.log (the .exe
-// never downloads anything itself, C9). Natively here: display.ini, keyboard.ini, opening folders and pages, Play.
+// never downloads anything itself). Natively here: display.ini, keyboard.ini, opening folders and pages, Play.
 
 #include "backend.h"
 #include "steps.h"
@@ -64,7 +64,7 @@ private:
 };
 
 // Getting ready before the window can show the launcher (the model needs --query state's folders and files):
-// the first start's Python (C9), then the state, its protocol checked (C6: these files and this .exe must be the
+// the first start's Python, then the state, its protocol checked (these files and this .exe must be the
 // same version's).
 class WindowsReady {
 public:
@@ -78,7 +78,7 @@ public:
 
     WindowsReady(WindowsFiles files, model::Starter& starter) : files_(std::move(files)), starter_(starter) {}
     // The release .exe's own files written again ("" done, else why not): set for a release .exe's files. When the
-    // state's protocol is another one (a test build's Update got files of a newer program, REVIEW2_compat #3), they
+    // state's protocol is another one (a test build's Update got files of a newer program), they
     // are put back once and the state asked again; restored() then says the other files' protocol.
     std::function<std::string()> restore_files;
     const std::string& restored() const { return restored_; }

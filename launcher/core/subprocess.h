@@ -50,7 +50,7 @@
 //    (TerminateJobObject), and all of it when it has not ended within
 //    kStopSeconds. Its output and lines go also into `output` when given (the
 //    task's log file, as the Tk window wrote it).
-//  - Mode::kSelfUpdate (the 'launcher' and 'files' workers, C3): like a task,
+//  - Mode::kSelfUpdate (the 'launcher' and 'files' workers): like a task,
 //    but in no job (closing the launcher never ends it half-way through
 //    replacing the .exe or its files) and never killed: terminate() only makes
 //    its cancel file.

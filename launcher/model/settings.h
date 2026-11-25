@@ -2,7 +2,7 @@
 
 // Settings: the game's display.ini (DisplayController: shown = saved, a save
 // that fails puts the controls back), keyboard.ini (KeyCapture: choosing a
-// key, U4) and, new, the launcher's own; on Windows also the folders. The
+// key) and, new, the launcher's own; on Windows also the folders. The
 // texts are the GTK app's (launcher/app/settings.cpp); Windows shows the same
 // (Tk's own had drifted: "Cannot save: ...").
 
@@ -75,10 +75,10 @@ struct KeyFile final : KeyStore {
 using KeyLabel = std::function<std::string(int usage)>;
 std::string us_key_label(int usage);
 
-// Which device a press came from (U4).
+// Which device a press came from.
 enum class Device { kKeyboard, kPad, kMouse };
 
-// Choosing a key (spec linux 3.3, ARCHITECTURE U4): a keycap clicked waits
+// Choosing a key: a keycap clicked waits
 // for a key; Esc, the pad's B (or A again on it), a click elsewhere or a
 // shortcut stop it; a modifier alone is taken once it is let go; a held key's
 // repeats are not taken; while a pad started it, the keyboard is ignored for
@@ -155,7 +155,7 @@ private:
     std::map<int, RowNote> rows_;
 };
 
-// XKB keycodes (bind:<input>:<keycode>[+...], spec linux 6.3) as HID usages:
+// XKB keycodes (bind:<input>:<keycode>[+...]) as HID usages:
 // a keycode less 8 is the evdev code. 0 for a keycode no key has.
 int usage_of_xkb(int keycode);
 

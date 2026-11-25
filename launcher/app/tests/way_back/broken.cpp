@@ -1,4 +1,4 @@
-// A new launcher version that passes the update's checks and then breaks (tests/way_back/way_back.sh, C2's way
+// A new launcher version that passes the update's checks and then breaks (tests/way_back/way_back.sh, the update's way
 // back): --version says TTT2_BROKEN_VERSION; opened, it ends by SIGSEGV before any frame (TTT2_BROKEN=crash), or
 // runs the launcher TTT2_BROKEN_LAUNCHER as this AppImage where no window can open (TTT2_BROKEN=window).
 // way_back.sh gives it an AppImage's header (bytes 8 to 10: "AI", 2).

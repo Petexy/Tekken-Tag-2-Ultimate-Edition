@@ -48,7 +48,7 @@ jobs:
           cmake --build build-launcher --parallel 2
           ctest --test-dir build-launcher -L launcher --output-on-failure --timeout 180
   launcher:
-    # The launcher's release programs as they are released (ARCHITECTURE C11): the AppImage with SDL built in and its
+    # The launcher's release programs as they are released: the AppImage with SDL built in and its
     # checks, the Windows .exe cross-built with MinGW-w64 and tested under Wine (no display) as old launchers check it
     # and as a player starts it.
     name: Launcher release programs (AppImage, Windows .exe under Wine)

@@ -64,7 +64,7 @@ struct Options {
     // --ui-smoke-test FILE / TTT2_LAUNCHER_TEST_SMOKE: the first frame drawn, what was found written there as JSON
     // (smoke_start: this start's facts, JSON members), then the end.
     fs::path smoke;
-    std::string rolled_back; // TTT2_LAUNCHER_ROLLED_BACK (C2): the version an update opened, which never drew
+    std::string rolled_back; // TTT2_LAUNCHER_ROLLED_BACK: the version an update opened, which never drew
     bool go_on_update = false; // TTT2_LAUNCHER_CONTINUE=update: Home's UPDATE goes on here after the launcher's part
     std::string smoke_start;
     bool offscreen = false; // TTT2_LAUNCHER_TEST_VIDEO=offscreen (Wine without a display)
@@ -139,7 +139,7 @@ private:
     void finish_sounds();  // at the end: a Play sound still heard is let finish (the window hidden), then closed
     static constexpr double kPlayHeard = 1.4; // seconds the Play sound is let finish when the launcher ends
     fs::path sound_folder() const;
-    // The drill-in lock (FEEDBACK F4): `opener` (a crimson item) gave the focus to `target` on the blue side; the
+    // The drill-in lock: `opener` (a crimson item) gave the focus to `target` on the blue side; the
     // crimson half is locked (ui::Box::locked, the stage's veil) until Back or a click on it. drill_out: the focus
     // goes to `to` (a crimson item clicked), else back to the opener.
     void drill_in(const std::string& opener, const std::string& target);
@@ -285,8 +285,8 @@ private:
     // A key the window takes before the router does (Ctrl+H in the browser): true when it was taken.
     bool shortcut(const ui::RawEvent& raw);
 
-    // ---- Windows (windows_app.cpp): getting ready before the model (C9 bootstrap, --query state), the state
-    // asked again after each task, Settings > Folders saved.
+    // ---- Windows (windows_app.cpp): getting ready before the model (the first start's Python, --query state), the
+    // state asked again after each task, Settings > Folders saved.
 #ifdef _WIN32
     bool windows_ready();
     void ready_frame(double now);

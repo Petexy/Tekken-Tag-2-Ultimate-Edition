@@ -1,6 +1,6 @@
-// model_test's unit tests of the controllers (no goldens): keys (U4),
+// model_test's unit tests of the controllers (no goldens): keys,
 // display.ini, the task runner, the refresh rules, closing while a task runs,
-// the AppImage's update, activate(id) (U14).
+// the AppImage's update, activate(id).
 
 #include "units.h"
 
@@ -32,7 +32,7 @@ std::string read(const fs::path& file) {
     return s.str();
 }
 
-// ---------------------------------------------------------------- keys (spec linux 3.3, U4)
+// ---------------------------------------------------------------- keys
 
 void keys() {
     current = "keys";
@@ -376,7 +376,7 @@ void self_update() {
         CHECK(rig.update.opened());
         CHECK(rig.opened.size() == 1 && rig.opened[0].env.at(kReplacesVariable) == "42");
         CHECK(rig.opened.size() == 1 && rig.opened[0].mode == Command::Mode::kDetached); // (it outlives this one)
-        // (C2: this version kept before the new one is put in its place; the new one opened through the way back.)
+        // (This version kept before the new one is put in its place; the new one opened through the way back.)
         CHECK((rig.files.steps == std::vector<std::string>{"keep", "replace"}));
         CHECK(rig.opened.size() == 1 &&
               rig.opened[0].argv == open_with_rollback("/home/player/Golden_Fist_Launcher-x86_64.AppImage", "0.9.0"));
@@ -469,7 +469,7 @@ void self_update() {
         CHECK(rig.opened.empty());
     }
     {
-        // A test build's newer changes: Update gets its files, never its .exe's program (compat review #3).
+        // A test build's newer changes: Update gets its files, never its .exe's program.
         Facts f;
         f.caps = Caps::windows_caps();
         f.self_update = true;
@@ -734,7 +734,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                 CHECK(argv.size() == 4 && argv[1] == "install" && argv[2] == "/home/player/TTT2.wua");
             }});
 
-    // REVIEW2_app #7: an answer goes with its request only.
+    // An answer goes with its request only.
     current = "a preflight's answer for another folder is dropped";
     replay(fixture(golden, "not-installed"), Caps::linux_caps(), scratch / "h",
            {0, [](Harness& h) {
@@ -788,7 +788,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
                 CHECK(h.model.facts().preflight && !h.model.facts().preflight->running);
             }});
 
-    // REVIEW2_app #5: a game started elsewhere is watched until it ends (every kGameWatchSeconds, cheaply).
+    // A game started elsewhere is watched until it ends (every kGameWatchSeconds, cheaply).
     current = "a game started elsewhere is watched";
     replay(installed, Caps::linux_caps(), scratch / "a",
            {0, [](Harness& h) {
@@ -883,13 +883,13 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
         CHECK_EQ(save.argv.back(), std::string("save-settings"));
         CHECK_EQ(save.input, std::string("{\"data\": \"C:\\\\Users\\\\Jos\\u00e9\\\\TTT2Ultimate\", \"packs\": \"a\\\"b\"}"));
         CHECK_EQ(json::quote("\xf0\x9f\x8e\xae\x01\xff"), std::string("\"\\ud83c\\udfae\\u0001\\ufffd\""));
-        // How each runs (core/subprocess.h): the update workers never in a job nor killed (C3), the rest tasks.
+        // How each runs (core/subprocess.h): the update workers never in a job nor killed, the rest tasks.
         CHECK(import.mode == Command::Mode::kTask && status->mode == Command::Mode::kTask);
         CHECK(w.worker(f, TaskKind::kLauncherUpdate)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kLauncherFiles)->mode == Command::Mode::kSelfUpdate);
         CHECK(w.worker(f, TaskKind::kSetup)->mode == Command::Mode::kTask);
-        // (A test build's files update: told when the program is the .exe's, which only opens newer files, compat
-        // review #3: self_update.py then refuses changes to the program.)
+        // (A test build's files update: told when the program is the .exe's, which only opens newer files:
+        // self_update.py then refuses changes to the program.)
         CHECK(!w.worker(f, TaskKind::kLauncherFiles)->env.count("TTT2_LAUNCHER_PROGRAM_IN_EXE"));
         f.program_in_exe = true;
         CHECK_EQ(w.worker(f, TaskKind::kLauncherFiles)->env.at("TTT2_LAUNCHER_PROGRAM_IN_EXE"), std::string("1"));
@@ -925,7 +925,7 @@ void model_rules(const fs::path& golden, const fs::path& scratch) {
 
 int activated = 0;
 
-// Every focusable item of every case's first view does something (U14): activated in a fresh replay, it is
+// Every focusable item of every case's first view does something: activated in a fresh replay, it is
 // never "no <id> to activate".
 void every_id(const fs::path& golden, const fs::path& scratch, const Caps& caps) {
     for (const auto& entry : fs::directory_iterator(golden)) {

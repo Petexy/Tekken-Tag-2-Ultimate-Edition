@@ -1,5 +1,5 @@
 # The classic starter (entry.cpp: the .exe of releases up to 0.8.0, make_launcher_exe.py --stub: it runs main.py,
-# which builds the native launcher from these files); the native launcher is launcher/app (target ttt2-launcher, C1).
+# which builds the native launcher from these files); the native launcher is launcher/app (target ttt2-launcher).
 # Its version is the Linux launcher's (one release has both).
 file(STRINGS ${CMAKE_SOURCE_DIR}/launcher/builder/CMakeLists.txt version_line REGEX "^set\\(TTT2_LAUNCHER_VERSION [0-9.]+\\)")
 string(REGEX REPLACE "^set\\(TTT2_LAUNCHER_VERSION ([0-9.]+)\\)$" "\\1" windows_launcher_version "${version_line}")

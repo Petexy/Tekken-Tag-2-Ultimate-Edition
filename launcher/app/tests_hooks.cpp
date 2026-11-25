@@ -1,4 +1,4 @@
-// The test hooks (spec/linux_app.md 6.2, 6.3): TTT2_LAUNCHER_TEST_ACTIONS played one after another through the
+// The test hooks: TTT2_LAUNCHER_TEST_ACTIONS played one after another through the
 // same code as the window's items, each once everything has settled (nothing busy, 400 ms, two frames), with
 // "@test <action> started" / "@test <action> ok|failed <words>" on standard error and a picture per step in
 // TTT2_LAUNCHER_TEST_SHOTS (00-start, NN-<label>, -running at half the progress, -stopping when a test cancels);
@@ -169,7 +169,7 @@ void App::test_watch_task() {
 void App::test_audit(double t) {
     std::vector<std::string> problems = ui_->audit();
     // Once it has settled (this frame too: a change that came without input, as checks' results, starts a move):
-    // the highlight on the focused item, and something focused when anything can be (FEEDBACK F1/F6: no empty or
+    // the highlight on the focused item, and something focused when anything can be (no empty or
     // stale focus frame until the next input).
     if (settled(t) && !ui_->animating() && !stage_->animating()) {
         const Rect h = painted_highlight_, f = painted_focus_rect_;
@@ -191,7 +191,7 @@ void App::test_audit(double t) {
 
 // --frames: the frames after the last action at the times asked for (the clock held and stepped), then the frame
 // once everything has settled; each one is saved and checked: the audit, and the highlight exactly on the focused
-// item (no empty or stale frame, FEEDBACK F1).
+// item (no empty or stale frame).
 void App::test_capture(double t) {
     const auto check = [&](const std::string& name) {
         std::string error;

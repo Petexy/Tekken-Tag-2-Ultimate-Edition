@@ -6,13 +6,13 @@
 #
 # Every frame of every run is checked by the launcher itself ("@audit failed ..."): everything painted keeps the
 # gutter from its half's seam, and once settled the focus frame is on the focused item. On top:
-# - F1: frame sequences with no input after a tab change (0, 50, 100, 200, 400, 700 ms, then settled) at several
+# - frame sequences with no input after a tab change (0, 50, 100, 200, 400, 700 ms, then settled) at several
 #   window sizes and scales: each "@frames <t> ok" (nothing across the seam, the focus frame on its item);
-# - F4: the drill-in lock on the checks before an install (Accept on a check with a command -> its Copy button,
+# - the drill-in lock on the checks before an install (Accept on a check with a command -> its Copy button,
 #   the crimson side locked; the pointer crosses crimson without taking the focus; a click on a crimson row or
 #   Back returns);
 # - the Steam Controller's double report (its pad button and the key Steam types for it) is one press;
-# - F6: Home after every combination of the Display settings, and in every state with all of them on; Play with
+# - Home after every combination of the Display settings, and in every state with all of them on; Play with
 #   "Prepare shaders before playing" (the task strip).
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4
@@ -92,7 +92,7 @@ clean() {
 
 case_of() { [ "$1" = none ] && echo not-installed || echo installed; }
 
-# F1: after a tab change, no input: each frame laid out for the seam as drawn, the focus frame on its item.
+# After a tab change, no input: each frame laid out for the seam as drawn, the focus frame on its item.
 for spec in "installed 1280x800 1 tab:fighters" "installed 1920x1080 1.5 tab:settings" \
     "installed 2560x1440 2 tab:settings;tab:home" "installed 2560x1440 1.25 tab:fighters;tab:home" \
     "none 1280x800 1 tab:settings;tab:home" "older 1920x1080 1.25 tab:fighters"; do
@@ -104,7 +104,7 @@ for spec in "installed 1280x800 1 tab:fighters" "installed 1920x1080 1.5 tab:set
     clean "$h" 7
 done
 
-# F4: the drill-in lock (a C++ compiler that is not there: its check has a command to copy).
+# The drill-in lock (a C++ compiler that is not there: its check has a command to copy).
 missing_cxx() {
     local h
     h=$(home "$1" none)
@@ -143,7 +143,7 @@ clean "$h" 7
     fail "steam-key: the pad's report of the A acted on the Settings page"
 grep -q '@frames idle ok (focus fullscreen,' "$h/out.txt" || fail "steam-key: $(grep -m 1 '@frames idle' "$h/out.txt")"
 
-# F6: Home after every combination of the Display settings (changed in Settings, one at a time: a Gray code walk).
+# Home after every combination of the Display settings (changed in Settings, one at a time: a Gray code walk).
 settings=(fullscreen interpolation input-delay async-shaders precompile-shaders)
 actions="fullscreen:no;interpolation:no;input-delay:no;async-shaders:no;precompile-shaders:no;tab:home"
 for i in $(seq 1 31); do

@@ -1,7 +1,7 @@
 #pragma once
 
 // The view builders: pure functions from the facts to what the player sees
-// (view.h). Every text is the old launchers' (spec/linux_app.md, the GTK
+// (view.h). Every text is the old launchers' (the GTK
 // app's sources; Windows-only parts from launcher/windows/window.py), and
 // the goldens (tests/golden) hold them to it.
 
