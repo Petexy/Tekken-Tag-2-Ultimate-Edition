@@ -75,6 +75,21 @@ class Lines(unittest.TestCase):
             saved(d, 'abc', b'', 'fr')
             self.assertTrue(subtitles.all_saved('abc', d))
 
+    def test_every_language_the_port_shows(self):
+        """Saved: English, French, German, Italian, Spanish, Russian (game.ini's languages) and Japanese. Files an
+        earlier version saved (English only) are not all."""
+        self.assertEqual(sorted(autodump.SUBTITLE_LANGUAGES), sorted(('us', 'fr', 'de', 'it', 'es', 'ru', 'jp')))
+        self.assertEqual(autodump.SUBTITLE_LANGUAGES[0], 'us')       # (first: a stopped save has English)
+        self.assertTrue(set(autodump.SUBTITLE_LANGUAGES) <= set(subtitles.LANGUAGES))
+        with tempfile.TemporaryDirectory() as d:
+            saved(d, 'abc', b'')
+            self.assertEqual(subtitles.saved_languages('abc', d), ('us',))
+            self.assertFalse(subtitles.all_saved('abc', d))
+            for language in autodump.SUBTITLE_LANGUAGES:
+                saved(d, 'abc', b'', language)
+            self.assertEqual(subtitles.saved_languages('abc', d), autodump.SUBTITLE_LANGUAGES)
+            self.assertTrue(subtitles.all_saved('abc', d))
+
     def test_lines_of_a_saved_file(self):
         data = (record('ab_s00', 'Ready?') + record('ab_s01', 'One...', 15, 100) +
                 record('ab_s01', " two and\nthree.", 104, 269) + record('ab_w00', '\nOver  and out. '))
@@ -87,6 +102,12 @@ class Lines(unittest.TestCase):
                              [(15, 100, 'One...'), (104, 269, ' two and\nthree.')])
             self.assertTrue(subtitles.saved('abc', folder=d))
             self.assertEqual(subtitles.lines('abc', 'fr', folder=d), {})         # (not saved in French)
+
+    def test_japanese_parts_joined_without_spaces(self):
+        data = record('ab_s00', '\u3088\u3057\n\u3044\u304f') + record('ab_s00', '\u305e\u3002', 120, 200)
+        with tempfile.TemporaryDirectory() as d:
+            saved(d, 'abc', data, 'jp')
+            self.assertEqual(subtitles.lines('abc', 'jp', folder=d), {'ab_s00': '\u3088\u3057\u3044\u304f\u305e\u3002'})
 
     def test_none(self):
         with tempfile.TemporaryDirectory() as d:
@@ -178,8 +199,15 @@ class TheImportAsks(unittest.TestCase):
 
     def test_saved(self):
         with tempfile.TemporaryDirectory() as d:
-            saved(d, 'mry', b'')
+            for language in autodump.SUBTITLE_LANGUAGES:
+                saved(d, 'mry', b'', language)
             self.ready(d).assert_not_called()                       # (nothing to ask the game for)
+
+    def test_saved_in_english_only(self):
+        """Saved by an earlier version (English only): the game is asked for them, every language."""
+        with tempfile.TemporaryDirectory() as d:
+            saved(d, 'mry', b'')
+            self.ready(d).assert_called_once()
 
     def test_not_saved_without_steam(self):
         """Only the subtitles wanted and Tekken 7 cannot run (Steam not started): imported all the same, warned."""

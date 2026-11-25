@@ -29,9 +29,11 @@ read from Tekken 8), its "moveset_saved" is whether its own Tekken 8 moveset is 
 "stand_in" whether the pack the game loads fights with its stand-in's moveset because its own could not be had when
 it was imported (character.ini stand_in): "update" is true then once its own can be had (saved, or Tekken 8 is a
 build the helper knows, so Steam running saves it). A Tekken 7 fighter has "subtitles_saved": whether its intro and
-win subtitles are saved (else the import has Tekken 7 read them, which needs Steam running, or makes the pack without
-them). "without_subtitles": the pack the game loads was made without them; "update" is true for it too. With --game:
-whether that folder is an installed game the importer can read.
+win subtitles are saved in every language an import reads them in (else the import has Tekken 7 read them, which
+needs Steam running, or makes the pack without them). "without_subtitles": the pack the game loads was made without
+them, or without some of their languages (a Tekken 7 fighter added while Steam was not running); "update" is true for
+it too, and for a pack made without a language an import now reads (an earlier version's: character.ini
+subtitle_languages). With --game: whether that folder is an installed game the importer can read.
 
 owned: which DLC fighters the player's Steam account owns, as Steam tells the game ({"owned": {name: true|false}}):
 each game's helper runs hidden in that game's Proton prefix while Proton starts it and it asks (not the game): Tekken
@@ -136,6 +138,14 @@ def steam():
     return {'installed': path is not None, 'running': autodump.steam_running(), 'path': path, 'sandbox': sandbox}
 
 
+def subtitles_missing(p):
+    """The languages an import reads subtitles in (source.SUBTITLE_LANGUAGES) that a pack (pack.installed) was made
+    without: those its game was not read in (a Tekken 7 fighter's not saved, Steam not running), all of them for a
+    pack made before packs said."""
+    have = p['subtitle_languages'] or ()
+    return [lang for lang in source.SUBTITLE_LANGUAGES if lang not in have]
+
+
 def status(game=None, movesets=None, movesets8=None):
     folder = os.path.abspath(pack.default_folder())
     packs = {}                      # {code: its packs' state: 'current' (one is loaded), else 'newer' or 'outdated'}
@@ -169,8 +179,11 @@ def status(game=None, movesets=None, movesets8=None):
                    'installed': d.CODE in packs, 'outdated': packs.get(d.CODE) == 'outdated',
                    'newer': packs.get(d.CODE) == 'newer',
                    'update': d.CODE in loaded and (loaded[d.CODE]['revision'] < pack.revision(d)
-                                                   or loaded[d.CODE]['without_subtitles']),
-                   'without_subtitles': d.CODE in loaded and loaded[d.CODE]['without_subtitles'],
+                                                   or loaded[d.CODE]['without_subtitles']
+                                                   or bool(subtitles_missing(loaded[d.CODE]))),
+                   'without_subtitles': d.CODE in loaded and (loaded[d.CODE]['without_subtitles'] or (
+                       not tekken8_fighter and loaded[d.CODE]['subtitle_languages'] is not None
+                       and bool(subtitles_missing(loaded[d.CODE])))),
                    'moveset_saved': tekken8_fighter or d.TEKKEN7_ID in saved,
                    'outfits': len(getattr(d, 'PRESETS', ())),
                    'outfits_added': d.CODE in loaded and loaded[d.CODE]['outfits'] > 0,

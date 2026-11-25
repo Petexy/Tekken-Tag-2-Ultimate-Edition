@@ -21,7 +21,7 @@ HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, HERE)
 
 import launcher                                       # noqa: E402
-from ttt2char import InputError, pack, shared, signals    # noqa: E402
+from ttt2char import InputError, pack, shared, signals, source    # noqa: E402
 from ttt2char.characters import definition             # noqa: E402
 from ttt2char.tekken7 import autodump                 # noqa: E402
 
@@ -56,7 +56,7 @@ def files_in(folder):
 
 
 def current_pack(folder, d, slot):
-    return pack.write(folder, d, {'.nud': b'nud'}, slot)
+    return pack.write(folder, d, {'.nud': b'nud'}, slot, subtitle_languages=source.SUBTITLE_LANGUAGES)
 
 
 class Format(unittest.TestCase):
@@ -77,6 +77,17 @@ class Format(unittest.TestCase):
             pack.write(d, definition('chloe'), {'.nud': b'nud'}, 4, without_subtitles=True)
             self.assertEqual({p['code']: p['without_subtitles'] for p in pack.installed(d)},
                              {'kzm': False, 'dnc': True})
+
+    def test_the_languages_of_its_subtitles(self):
+        """character.ini subtitle_languages: those its subtitles were read in; none written by an earlier version."""
+        self.assertNotIn('subtitle_languages', pack.character_ini(KAZUMI, 3))
+        self.assertIn('subtitle_languages = en ru\n', pack.character_ini(KAZUMI, 3, subtitle_languages=('en', 'ru')))
+        with tempfile.TemporaryDirectory() as d:
+            pack.write(d, KAZUMI, {'.nud': b'nud'}, 3)
+            pack.write(d, definition('chloe'), {'.nud': b'nud'}, 4, subtitle_languages=source.SUBTITLE_LANGUAGES)
+            pack.write(d, definition('eliza'), {'.nud': b'nud'}, 5, without_subtitles=True, subtitle_languages=())
+            self.assertEqual({p['code']: p['subtitle_languages'] for p in pack.installed(d)},
+                             {'kzm': None, 'dnc': source.SUBTITLE_LANGUAGES, 'elz': None})
 
     def test_unblurred_meshes_listed_only_for_a_definition_that_names_them(self):
         made_up = dict(NAME='X', CODE='abc', DONOR='lar', SEX='male')

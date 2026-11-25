@@ -218,7 +218,7 @@ class RunStandIn(unittest.TestCase):
                                                        'hei.nud': b'nud'}[name]
         archives.entry.side_effect = lambda what, row: {('data006', 13): donor_moveset(),
                                                          ('data005', 13): motion}[(what, row)]
-        src = mock.Mock(game='tekken8', NAME='Tekken 8')
+        src = mock.Mock(game='tekken8', NAME='Tekken 8', **{'subtitle_languages.return_value': source.SUBTITLE_LANGUAGES})
         src.clips.return_value = 'clips'
         banks = {'se_Chr_rei.nus3bank': b'chr', 'se_Dwi_rei.nus3bank': b'dwi', 'rm_Dst_rei.nus3bank': b'dst',
                  'rm_Dwi_rei.nus3bank': b'rdwi'}
@@ -274,6 +274,8 @@ class RunStandIn(unittest.TestCase):
                               'alo', 'art', 'source'}, files)     # (source/: her pictures and name call for shared/)
         self.assertEqual((ini['donor'], ini['code'], ini['slot']), ('hei', 'rei', '0'))
         self.assertEqual(ini['stand_in'], 'hei')                    # (the launcher offers an update for her own)
+        self.assertEqual(ini['subtitle_languages'], 'en fr de it es ru ja')     # (her game's, all read)
+        self.assertNotIn('without_subtitles', ini)
         self.assertTrue(any(line.startswith('WARNING: Reina\'s own moveset cannot be had: not saved') for line in lines))
         row = pack.place(0)['row']
         self.assertEqual(struct.unpack_from('>4H', moves, 0xF8 + 64),
@@ -312,7 +314,7 @@ class RunOwnVoice(unittest.TestCase):
         archives.has.return_value = True
         archives.read_name.side_effect = lambda name: {'jun.xml': b'<jun/>', 'jun.bon': b'bon', 'jun.nud': b'nud'}[name]
         k = mock.Mock(name='her moveset')
-        src = mock.Mock(game='tekken8', NAME='Tekken 8')
+        src = mock.Mock(game='tekken8', NAME='Tekken 8', **{'subtitle_languages.return_value': source.SUBTITLE_LANGUAGES})
         clips = src.clips.return_value
         order = []
         clips.add_lines.side_effect = lambda m: order.append('lines')

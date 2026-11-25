@@ -67,7 +67,9 @@ FILE_BATCH = 64                                 # files the game reads at once (
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
 unread = {}                                     # {pak path: why} of the files the game did not read (this run's) ...
 UNREAD_SHOWN = 5                                # ... the ones named in the log (then how many more)
-SUBTITLE_LANGUAGES = ('us',)                    # the battle subtitles saved: English (the language the port shows)
+# the battle subtitles saved: the languages the port shows (game.ini's language: English, French, German, Italian,
+# Spanish, Russian) and Japanese, by the game's names of its subtitle folders (subtitles.LANGUAGES)
+SUBTITLE_LANGUAGES = ('us', 'fr', 'de', 'it', 'es', 'ru', 'jp')
 SUBTITLE_BATCH = 32                             # fighters whose subtitles the game reads at once (the helper: 64)
 
 

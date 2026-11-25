@@ -406,10 +406,12 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
         except autodump.DumpError as error:
             if needed or files:
                 progress.fail(str(error))
-            # (only the subtitles were wanted, Steam not running say: the fighters are made without them, their intro
-            # and win poses showing no subtitle, and their packs say so: launcher.py status offers to update them)
+            # (only the subtitles were wanted, Steam not running say: the fighters are made without them, or with the
+            # languages an earlier version saved (English), and their packs say so: launcher.py status offers to
+            # update them)
             print('WARNING: the Tekken 7 subtitles of %s were not saved (%s): their intro and win poses show no '
-                  'subtitle until they are updated with Steam running' % (', '.join(name for _, name in subs.values()), error))
+                  'subtitle, or only those saved before (English), until they are updated with Steam running'
+                  % (', '.join(name for _, name in subs.values()), error))
             skipped = {}
         who = {fid: name for fid, (_, name) in needed.items()}
         who.update((fid, name) for fid, (name, _) in files.items())

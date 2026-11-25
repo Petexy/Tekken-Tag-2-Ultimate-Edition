@@ -106,6 +106,22 @@ class Table(unittest.TestCase):
         self.assertNotEqual(struct.unpack_from('>II', e, 4 + 8 * 3), en)
         self.assertEqual(en[0], S.CONTAINER_START)
 
+    def test_every_language_shown(self):
+        """A line read in each language an import reads gets each one's bank at that language's entry (the one the
+        title shows in that language), its language byte entry + 1; Russian (Cyrillic, which the font has) too."""
+        said = {'en': 'Ready now.', 'fr': 'Pr\u00eat.', 'de': 'Bereit.', 'it': 'Pronto.', 'es': 'Listo.',
+                'ru': '\u0413\u043e\u0442\u043e\u0432.', 'ja': '\u3088\u3057\u3002'}
+        glyphs = {ord(c) for text in said.values() for c in text}
+        lines = {0: {'show': 20, 'hide': 120, 'clip': 'Play_abc_sta_00', 'text': said}}
+        banks = S.read_container(S.read_table(S.table(original(), {66: lines}, glyphs))[66 * S.LINES])
+        for lang, text in said.items():
+            bank = banks[S.ENTRY[lang]]
+            self.assertEqual(S.unmarked(S.bank_text(bank)), (text, 20, 120), lang)
+            self.assertEqual(bank[6], S.ENTRY[lang] + 1, lang)
+        self.assertEqual((S.ENTRY['ru'], S.ENTRY['ja']), (9, 0))
+        for i in (2, 7, 8, 10, 15):
+            self.assertEqual(banks[i], banks[1])                     # (no text of its own: the English bank)
+
     def test_no_template(self):
         with self.assertRaises(ValueError):
             S.template([None, None])
@@ -130,6 +146,21 @@ class Fit(unittest.TestCase):
         self.assertEqual(S.fit('\u3042\u3000\u3042', glyphs), '\u3042\u3000\u3042')
         self.assertEqual(S.fit('Oui\u00a0!', glyphs), 'Oui !')
         self.assertEqual(S.fit('Oui\u00a0!'), 'Oui !')
+
+    def test_never_a_button_icon(self):
+        """The code points the port draws as button icons in the subtitles' font (presentation.cpp's carriers) are
+        never kept, though the font has them: guillemets become straight quotes without the spaces inside them, the
+        others plain or left out."""
+        glyphs = self.GLYPHS | {ord(c) for c in '\u00a3\u00a5\u00a2\u00aa\uff3c\u00b3\u00bb\u00ab3'}
+        for font in (glyphs, None):
+            self.assertEqual(S.fit('Il dit \u00ab\u00a0allez\u00a0\u00bb\u00a0!', font), 'Il dit "allez" !')
+            self.assertEqual(S.fit('Er sagt \u00bbja\u00ab, gut.', font), 'Er sagt "ja", gut.')
+            self.assertEqual(S.fit('x\u00b3 \u00a3\u00a5\u00a2 end', font), 'x3 end')
+            self.assertFalse(S.CARRIERS.intersection(S.fit('\u00aa\uff3c\u00bb \u00ab', font)))
+
+    def test_cyrillic_kept(self):
+        word = '\u0414\u0430, \u0451\u0436!'
+        self.assertEqual(S.fit(word, self.GLYPHS | {ord(c) for c in word}), word)
 
     def test_glyph_codes(self):
         nfh = bytearray(0x450 + 64)
@@ -378,11 +409,16 @@ class TextBanks(unittest.TestCase):
                            'Polaris/Content/Localize/en/GTB_Other.uasset': gtb([('TEXT_SYS_a_000', 'x')]),
                            'Polaris/Content/Localize/fr/GTB_Upd_010_System02.uasset': gtb(
                                [('TEXT_VO_010_okm_sta_00_000', 'Sur mon épée.')]),
-                           'Polaris/Content/Localize/fr/GTB_Other.uasset': gtb([])})
+                           'Polaris/Content/Localize/fr/GTB_Other.uasset': gtb([]),
+                           'Polaris/Content/Localize/ru/GTB_Upd_010_System02.uasset': gtb(
+                               [('TEXT_VO_010_okm_win_00a_000', '\u0420\u0430\u0437,'),
+                                ('TEXT_VO_010_okm_win_00b_000', '\u0434\u0432\u0430.')])})
         got = text8.pose_lines(store, ['Play_okm_sta_00', 'Play_okm_win_00', 'Play_okm_win_03',
                                        'Play_OKM_Damage_KO_001'])
         self.assertEqual(got, {'Play_okm_sta_00': {'en': 'By this blade.', 'fr': 'Sur mon épée.'},
-                               'Play_okm_win_00': {'en': 'First half, second half.'}})
+                               'Play_okm_win_00': {'en': 'First half, second half.',
+                                                   'ru': '\u0420\u0430\u0437, \u0434\u0432\u0430.'}})
+        self.assertIn('ru', text8.LANGUAGES)
         self.assertNotIn('Polaris/Content/Localize/fr/GTB_Other.uasset', store.read)     # (only banks with lines)
 
 
@@ -404,6 +440,29 @@ class Tekken7Text(unittest.TestCase):
             logged = []
             self.assertEqual(t7.subtitles(d, ['ab_s00'], log=logged.append), {'ab_s00': {'fr': 'Pret ?'}})
             self.assertEqual(len(logged), 1)
+
+    def test_languages(self):
+        """Every language an import reads (source.SUBTITLE_LANGUAGES) is one Tekken 7 saves (by its own folder
+        names), Russian too; a source says which it was read in (a Tekken 7 fighter's: those saved)."""
+        from test_tekken7_subtitles import record, saved
+        from ttt2char import source
+        from ttt2char.tekken7 import autodump
+        ours = dict(source.Tekken7Source.TEKKEN7_LANGUAGES)
+        self.assertEqual(sorted(ours), sorted(source.SUBTITLE_LANGUAGES))
+        self.assertEqual(sorted(ours.values()), sorted(autodump.SUBTITLE_LANGUAGES))
+        self.assertEqual(sorted(text8.LANGUAGES), sorted(source.SUBTITLE_LANGUAGES))
+        self.assertEqual(source.SUBTITLE_LANGUAGES[0], 'en')          # (Tekken 8: the banks found in English first)
+        self.assertTrue(set(source.SUBTITLE_LANGUAGES) <= set(S.ENTRY))
+        with tempfile.TemporaryDirectory() as folder:
+            t7 = source.Tekken7Source(types.SimpleNamespace(saved=folder))
+            d = types.SimpleNamespace(TEKKEN7_CODE='abc')
+            self.assertEqual(t7.subtitle_languages(d), ())
+            saved(folder, 'abc', record('ab_s00', 'Ready?'))
+            saved(folder, 'abc', record('ab_s00', '\u0413\u043e\u0442\u043e\u0432?'), 'ru')
+            saved(folder, 'abc', b'', 'jp')                          # (the game has none: read all the same)
+            self.assertEqual(t7.subtitle_languages(d), ('en', 'ru', 'ja'))
+            self.assertEqual(t7.subtitles(d, ['ab_s00']), {'ab_s00': {'en': 'Ready?', 'ru': '\u0413\u043e\u0442\u043e\u0432?'}})
+        self.assertEqual(source.Tekken8Source(None).subtitle_languages(d), source.SUBTITLE_LANGUAGES)
 
 
 class SharedFile(unittest.TestCase):

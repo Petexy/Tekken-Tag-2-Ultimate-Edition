@@ -17,8 +17,10 @@ The subtitle file (big-endian): u32 count (the title's: 59 fighter ids x LINES),
 nothing for it, nor for an index past the count, so ids up to the count are all the file has to cover). An entry is
 a language container: u32 16, 16 x {u32 offset, u32 size} (from the container's start), then the text banks, the
 first at 0x90; the title shows entry (text language - 1): 0 Japanese, 1 English (2 English again), 3 French,
-4 Italian, 5 German, 6 Spanish, 7 Korean, 8 Chinese, 9 Russian, 10-15 unused (" "). The port always shows entry 1
-(its system language is English), so every entry without a text of its own here points at the English bank.
+4 Italian, 5 German, 6 Spanish, 7 Korean, 8 Chinese, 9 Russian, 10-15 unused (" "). The entry shown follows the
+game's language (the port's game.ini `language`: English, French, German, Italian, Spanish or Russian), so a line has
+a bank in each language its source game has a text in (lines_of: the import reads source.SUBTITLE_LANGUAGES), and
+every entry without a text of its own points at the English bank (a line is English where its game has no text).
 A text bank (NTXB) of one text: a 0x70-byte header ("NTXB", u16 2, u8 language + 1, u8 1, u32 bank size, the table
 offsets 0x30 0x30 0x50 0x60 0x70, the index of its one key with the key's offset at 0x38 and 0x3C, and words this
 copies from a bank of the title's own file: template), then the record at 0x70: u32 record size, u16 (a checksum of
@@ -29,8 +31,9 @@ show U+FFFC hide U+FFF5 U+0001, the line, U+FFFB U+0001 U+FFFC U+FFFF; show and 
 line's start, each one UTF-16 unit (the title's lines: show at the voice's onset, hide about 27 frames after it ends).
 
 The title draws the subtitles with glyph table 46b70814 (the only title font holding every character of its own
-subtitles in its six languages): a character it lacks becomes a plain one (fit: curly quotes straight, an ellipsis
-three dots, a dash a hyphen, accents dropped) or is left out.
+subtitles in its languages, Cyrillic too): a character it lacks becomes a plain one (fit: curly quotes straight, an
+ellipsis three dots, a dash a hyphen, accents dropped) or is left out, and so does one the port draws as a button icon
+in that font (CARRIERS, presentation.cpp: guillemets become straight quotes).
 
 Written for this project from the files themselves (no third-party code, no game data: the template and the font
 are read from the player's own game when shared/ is made).
@@ -47,7 +50,7 @@ KEY = 0x917395EB                    # the subtitle file's title entry
 LINES = 30                          # lines per fighter id (index = id * LINES + line)
 WIN_LINE = 10                       # line of rm_Dwi tone 0 (the title's own: Lars's 0x260A, Jun's 0x2A0A)
 LANGUAGES = 16                      # entries of a language container
-ENGLISH = 1                         # the entry the port shows
+ENGLISH = 1                         # the entry every language without a text of its own shows
 ENTRY = {'ja': 0, 'en': 1, 'fr': 3, 'it': 4, 'de': 5, 'es': 6, 'ko': 7, 'zh': 8, 'ru': 9}
 STREAM_VALUE, WIN_STREAM = 0x0D000000, 0x1000   # a pose's streamed line (0x8300): rm_Dst n, rm_Dwi 0x1000 | n
 FONT = 0x46B70814                   # the glyph table the subtitles are drawn with
@@ -65,10 +68,15 @@ END = '￻\x01￼￿'
 # a character the font lacks -> plain ones (tried in turn)
 PLAIN_FORMS = {'‘': "'", '’': "'", '‚': "'", '‛': "'", '′': "'", '´': "'",
                '“': '"', '”': '"', '„': '"', '‟': '"', '″': '"', '«': '"',
-               '»': '"', '…': '...', '—': '-', '–': '-', '‒': '-', '‐': '-',
+               '»': '"', '‹': "'", '›': "'", '…': '...', '—': '-', '–': '-', '‒': '-', '‐': '-',
                '‑': '-', '―': '-', '−': '-', ' ': ' ', ' ': ' ', ' ': ' ',
                '　': ' ', '〜': '~', '～': '~'}
+# the code points the port draws as button icons in the title's fonts, this one too (runtime/src/title/text.h's
+# carriers, presentation.cpp): never kept, made plain or left out
+CARRIERS = frozenset('\u00a3\u00a5\u00a2\u00aa\uff3c\u00b3\u00bb')
 TAG = re.compile(r'<[#/]?[A-Za-z_][^<>]*>')     # the source games' markup in a text (Tekken 7's <#...>)
+# guillemet pairs (« » French and Russian, » « German) -> straight quotes without the spaces inside them
+GUILLEMETS = (re.compile(r'«\s*([^«»]*?)\s*»'), re.compile(r'»\s*([^«»]*?)\s*«'))
 SPACES = re.compile(r'[ \t\r\n\f\v]+')
 
 
@@ -210,23 +218,28 @@ def glyph_codes(nfh):
 
 def fit(text, glyphs=None):
     """A source game's text as the subtitles can show it: one line (line breaks and runs of spaces one space), no
-    markup, every character one the font has (glyphs; None: typographic ones made plain, the rest kept), others
+    markup, every character one the font has (glyphs; None: typographic ones made plain, the rest kept) and none
+    the port draws as an icon (CARRIERS: guillemets become straight quotes, without the spaces inside them), others
     made plain (PLAIN_FORMS, then without accents) or left out (an ideographic space stays where the font has it,
     as in the title's own Japanese lines; a no-break space, which it lacks, becomes a space)."""
-    text = SPACES.sub(' ', TAG.sub('', text)).strip(' ')
+    text = SPACES.sub(' ', TAG.sub('', text))
+    for pair in GUILLEMETS:
+        text = pair.sub(r'"\1"', text)
+    text = text.strip(' ')
     out = []
     for ch in text:
         if ord(ch) > 0xFFFF or unicodedata.category(ch) in ('Cc', 'Cf', 'Co', 'Cs'):
             continue
-        if glyphs is None:
+        if glyphs is None and ch not in CARRIERS:
             out.append(PLAIN_FORMS.get(ch, ch))
             continue
-        if ord(ch) in glyphs:
+        if glyphs is not None and ord(ch) in glyphs and ch not in CARRIERS:
             out.append(ch)
             continue
         for plain in (PLAIN_FORMS.get(ch), ''.join(c for c in unicodedata.normalize('NFKD', ch)
                                                     if not unicodedata.combining(c))):
-            if plain and plain != ch and all(ord(c) in glyphs for c in plain):
+            if plain and plain != ch and not CARRIERS.intersection(plain) and \
+                    (glyphs is None or all(ord(c) in glyphs for c in plain)):
                 out.append(plain)
                 break
     return SPACES.sub(' ', ''.join(out)).strip(' ')

@@ -1382,8 +1382,19 @@ n) with the text its source game shows for the clip on that tone (kept in the
 pack's `source/subtitles.json`), points each pose's 0x8180 at the line it
 streams (a pose whose clip has no text shows none), and the shared folder holds
 the file with the count raised to cover every added fighter's id
-(`convert/subtitles.py`). The port's system language is English, so every
-language entry without a text of its own shows the English one.
+(`convert/subtitles.py`). The entry the title shows follows the game's
+language (game.ini's `language`), so each line has a text bank in every
+language its source game has a text in: an import reads English, French,
+German, Italian, Spanish, Russian and Japanese (Tekken 8's text banks; Tekken
+7's subtitle files, which the hidden Tekken 7 reads and the importer saves per
+language), and every language entry without a text of its own shows the
+English one. A pack keeps the languages it was read in (character.ini
+`subtitle_languages`): a pack of an earlier version, which has English only, or
+a Tekken 7 fighter's made while Steam was not running, is offered as an update.
+Russian needs no glyphs of the port's: the subtitles' font (46b70814) has
+Cyrillic. The characters the port draws as button icons in that font
+(presentation.cpp's carriers, `»` among them) are never kept: guillemets become
+straight quotes.
 
 **Its pictures.** The 2D screens find a fighter's pictures by its UI
 position, its row in tables of 59 (from the select id through `sub_06F0A484`
