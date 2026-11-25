@@ -153,8 +153,9 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         }
         break;
     }
-    // I9 Settings has a Game section first: the player's name (game.ini) and the input delay, which leaves the
-    // display section (now called Display); display.ini's notes go with it too. (No case has a game.ini: no name.)
+    // I9 Settings has a Game section first: the player's name and the language of the game's texts (game.ini) and the
+    // input delay, which leaves the display section (now called Display); display.ini's notes go with it too. (No
+    // case has a game.ini: no name, English.)
     Section& settings = golden["settings"];
     const auto is_label = [](const Element& e, const char* t, const char* tone = nullptr) {
         return e.kind == "label" && e.text.count("t") && e.text.at("t") == t &&
@@ -165,7 +166,8 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         Section game = {
             {"label", {{"t", "Game"}, {"tone", "heading"}}, {}},
             {"label",
-             {{"t", "Your name in the game, and how it takes your presses. The game uses these when it starts."},
+             {{"t", "Your name in the game, the language of its texts, and how it takes your presses. The game uses "
+                    "these when it starts."},
               {"tone", "dim"}},
              {}}};
         // (display.ini's notes: between its section's words and its first setting.)
@@ -174,10 +176,14 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         game.push_back({"label", {{"t", "The name the game shows for you, in place of Player."}, {"tone", "dim"}}, {}});
         game.push_back({"label",
                         {{"t", "Up to 16 characters: the letters A to Z, digits, spaces and the punctuation of an "
-                               "English keyboard but #. Left empty, the game's own name (Player in English)."},
+                               "English keyboard but #. Left empty, the game's own name in its language (Player in "
+                               "English)."},
                          {"tone", "dim"}},
                         {}});
         game.push_back({"entry", {{"id", "player-name"}}, {{"s", true}}});
+        game.push_back({"label", {{"t", "Language"}}, {}});
+        game.push_back({"label", {{"t", "The game's texts and menus show in this language."}, {"tone", "dim"}}, {}});
+        game.push_back({"choice", {{"id", "language"}, {"t", "English"}}, {{"s", true}}});
         for (size_t i = 0; i + 2 < settings.size(); ++i) {
             if (!is_label(settings[i], "Input delay")) continue;
             game.insert(game.end(), settings.begin() + static_cast<long>(i), settings.begin() + static_cast<long>(i) + 3);
@@ -443,12 +449,13 @@ const TkDifference kTkDifferences[] = {
     {true, "notice", "You have .*\\. Update replaces this launcher with it and opens it\\.", "I7"},
     // I8 Add All Owned for every game's characters.
     {false, "characters", "Add All Owned", "I8"},
-    // I9 Settings' Game section: the player's name; the display section called Display.
+    // I9 Settings' Game section: the player's name, the language; the display section called Display.
     {false, "settings",
      "Display|Player name|The name the game shows for you, in place of Player\\.|Up to 16 characters: the letters A "
-     "to Z, digits, spaces and the punctuation of an English keyboard but #\\. Left empty, the game's own name "
-     "\\(Player in English\\)\\.|Your "
-     "name in the game, and how it takes your presses\\. The game uses these when it starts\\.",
+     "to Z, digits, spaces and the punctuation of an English keyboard but #\\. Left empty, the game's own name in its "
+     "language \\(Player in English\\)\\.|Language|English|The game's texts and menus show in this language\\.|Your "
+     "name in the game, the language of its texts, and how it takes your presses\\. The game uses these when it "
+     "starts\\.",
      "I9"},
     // W8 Linux's sentence with Windows' action.
     {true, "characters", "Set up the game first: characters are made from it\\.", "W8"},

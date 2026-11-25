@@ -252,10 +252,10 @@ struct NameEditView {
 };
 
 struct SettingsView {
-    // Game (game.ini; Input delay: display.ini)
+    // Game (game.ini: the player's name, the language; Input delay: display.ini)
     std::string game_title = "Game";
-    std::string game_about = "Your name in the game, and how it takes your presses. The game uses these when it "
-                             "starts.";
+    std::string game_about = "Your name in the game, the language of its texts, and how it takes your presses. The "
+                             "game uses these when it starts.";
     std::vector<Line> game_notes; // error / unreadable note
     std::vector<SettingRow> game;
     std::optional<NameEditView> name_edit; // the player's name being typed

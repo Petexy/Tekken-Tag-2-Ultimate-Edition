@@ -39,19 +39,28 @@ void GameController::load() {
     log_ = loaded.log;
     settings_ = loaded.settings;
     shown_.clear();
+    language_ = std::string(cafe::host::game::kLanguages[0].code);
     error_.clear();
     note_.clear();
-    if (!loaded.error.empty()) {
+    language_note_.clear();
+    unreadable_ = !loaded.error.empty();
+    if (unreadable_) {
         note_ = "game.ini cannot be read (" + unreadable_reason(loaded.error, file_) +
-                "): the game shows its own name (Player in English). Saving a name here writes it anew.";
+                "): the game shows its own name (Player in English) and its texts in English. Saving a name or "
+                "choosing a language here writes it anew.";
         return;
     }
     // (What the game makes of the file: its own reader's, so what is shown here is what it shows.)
-    shown_ = cafe::host::game::parse(loaded.text).settings.player_name;
+    const cafe::host::game::Settings game = cafe::host::game::parse(loaded.text).settings;
+    shown_ = game.player_name;
+    language_ = std::string(cafe::host::game::language_of(game).code);
     if (!settings_.player_name.empty() && shown_ != settings_.player_name)
         note_ = "game.ini's player name “" + settings_.player_name + "” shows in the game as " +
                 (shown_.empty() ? std::string("its own name") : "“" + shown_ + "”") +
                 ". Saving a name here replaces it.";
+    if (!settings_.language.empty() && !cafe::host::game::find_language(settings_.language))
+        language_note_ = "game.ini's language “" + settings_.language +
+                         "” is not one the game has: the game shows English. Choosing one here replaces it.";
 }
 
 bool GameController::set_name(std::string_view name) {
@@ -66,12 +75,48 @@ bool GameController::set_name(std::string_view name) {
     shown_ = cafe::host::game::clean_name(tidy);
     error_.clear();
     note_.clear(); // (the file is what is shown now)
+    if (unreadable_) {
+        // (Written anew: its language is the game's own now.)
+        unreadable_ = false;
+        settings_.language.clear();
+        language_ = std::string(cafe::host::game::kLanguages[0].code);
+    }
+    return true;
+}
+
+bool GameController::set_language(std::string_view code) {
+    const cafe::host::game::Language* language = cafe::host::game::find_language(code);
+    if (!language) {
+        error_ = "The language cannot be saved: the game has no language “" + std::string(code) + "”.";
+        return false;
+    }
+    std::string error;
+    if (!game_ini::save_language(file_, language->code, &error)) {
+        // (What is shown is what the game reads.)
+        error_ = "The language cannot be saved: " + error;
+        return false;
+    }
+    if (unreadable_) {
+        // (Written anew: no name in it now.)
+        unreadable_ = false;
+        note_.clear();
+        settings_.player_name.clear();
+        shown_.clear();
+    }
+    settings_.language = std::string(language->code);
+    language_ = settings_.language;
+    error_.clear();
+    language_note_.clear(); // (the file is what is shown now)
     return true;
 }
 
 std::string game_summary(const game_ini::Settings& s) {
     return s.player_name.empty() ? std::string("game.ini: no player name")
                                  : "game.ini: player name " + s.player_name;
+}
+
+std::string language_summary(const game_ini::Settings& s) {
+    return s.language.empty() ? std::string("game.ini: no language") : "game.ini: language " + s.language;
 }
 
 void NameEditor::begin(std::string_view name, double now) {
@@ -448,15 +493,30 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         const GameController& g = *in.game;
         if (!g.error().empty()) v.game_notes.push_back(text_line(g.error(), Tone::kError));
         if (!g.note().empty()) v.game_notes.push_back(warning_note(g.note()));
+        if (!g.language_note().empty()) v.game_notes.push_back(warning_note(g.language_note()));
         const std::string& name = g.shown();
+        const bool english = g.language() == cafe::host::game::kLanguages[0].code;
         SettingRow player = setting("player-name", ActionKind::kEntry, "Player name",
                                     "The name the game shows for you, in place of Player.", false);
         player.control.label = name;
-        player.control.describe.state = name.empty() ? std::string("Player (the game's own)") : name;
-        const std::string rule = game_ini::name_rule() + " Left empty, the game's own name (Player in English).";
+        player.control.describe.state = !name.empty() ? name
+                                        : english     ? std::string("Player (the game's own)")
+                                                      : std::string("The game's own (Player in English)");
+        const std::string rule =
+            game_ini::name_rule() + " Left empty, the game's own name in its language (Player in English).";
         player.notes.push_back(text_line(rule, Tone::kDim, true));
         player.control.describe.more.push_back(rule);
         v.game.push_back(player);
+        // The language of the game's texts: its languages by their English names (the launcher's font has no other
+        // scripts), the one the game will show chosen.
+        SettingRow language = setting("language", ActionKind::kChoice, "Language",
+                                      "The game's texts and menus show in this language.", false);
+        for (const cafe::host::game::Language& l : cafe::host::game::kLanguages)
+            language.control.choices.push_back(std::string(l.name));
+        const cafe::host::game::Language* chosen = cafe::host::game::find_language(g.language());
+        language.control.chosen = chosen ? static_cast<int>(chosen - std::begin(cafe::host::game::kLanguages)) : 0;
+        language.control.describe.state = language.control.choices[static_cast<size_t>(language.control.chosen)];
+        v.game.push_back(language);
         if (in.display) {
             const DisplayController& d = *in.display;
             // (display.ini's: what is said of it goes with its setting here too.)
