@@ -622,14 +622,19 @@ and the Korean and Japanese gothic fonts (22 px, help panels such as
 Controller Setup; B1277EE3/C4C9633E, 46B70814/335915C9), which have Latin
 letters; only the main font has the icon glyphs.
 
-**Texts** (`title/text.*`). An `NTXB` record is the key (padded to four with
-at least one zero), two bytes, the length in characters, the UTF-8 text and
-the English original (each padded with at least two zeros); the bank's index
-points at records, so a text can change in place. In every bank (data003's
+**Texts** (`title/text.*`). An `NTXB` record is two bytes, the length in
+characters, the UTF-8 text and the English original (each padded with at
+least two zeros), then its key (padded to four with at least one zero),
+which the next record follows; the bank's index points at records, so a
+text can change in place. In every bank (data003's
 and data100's), names of the Wii U's buttons (English, French, Italian,
-German, Spanish: "the X Button", "bouton X", "X-Knopf", "+Control Pad", …)
-become the buttons' icons, which are always shorter, and the prompt "PRESS
-THE + BUTTON" and its translations show the Start icon. An icon in a text is
+German, Spanish: "the X Button", "bouton X", "X-Knopf", "+Control Pad", …;
+Russian, whose texts are the PlayStation 3's and Xbox 360's: "кнопку
+START", "кнопку SELECT", "кнопку BACK"; and our Russian translations'
+"кнопку A", "кнопками A, B, X и Y", "крестовину") become the buttons' icons, which
+are always shorter, and the prompt "PRESS THE + BUTTON" and its
+translations show the Start icon (the Russian texts' "кнопку PS", the HOME
+Button elsewhere, stays). An icon in a text is
 a symbol no text uses that all four fonts have (£ ¥ ¢ ª for the right,
 bottom, top and left buttons, ＼ ³ » for +, − and the D-pad), its glyph
 changed in each: in the main font to the icon's box and placement, in the
@@ -803,8 +808,8 @@ line where the title puts its hints (Defensive Training's "Select +
 button: Start", at the left: 23 pixels high at y 643 to 666 of the TV
 image): Select's icon and 3's button picture from the main font's texture
 with the port's icons for the controller in use (neutral or PlayStation,
-`font::neutral_icons`/`playstation_icons`), "+" and "Reset Position" in
-the label font outlined as the title outlines its hints. The panels and
+`font::neutral_icons`/`playstation_icons`), "+" and "Reset Position" (in
+the language shown) in the label font outlined as the title outlines its hints. The panels and
 the top view stand above that line (their bottom at y 634, whether DAMAGE
 INFO 2's bars are on or not; those bars share the line). The title's own
 hints stay where its HUD movie puts them: their place is in that movie's
@@ -830,8 +835,11 @@ inside dark glass at 72% and the rim opaque, all at four texels a pixel,
 filtered, so the outline cuts smoothly on larger screens. 2P's has its
 colours turned to their opposites (the teal rim red). Without the texture
 a box drawn in its likeness stands in. The panels sit in
-from the screen's sides under the fighters, and the ASCII glyphs of the title's Japanese gothic font (labels)
-and main bold italic font (values), neither of which has a space glyph.
+from the screen's sides under the fighters, and the glyphs of the title's Japanese gothic font (labels)
+and main bold italic font (values), neither of which has a space glyph: ASCII, Latin-1, Latin Extended-A and
+Cyrillic, for the panels' words in each language shown (`words::` in `framedata.cpp`: the game's own HUD words
+where it has them). A label too long to leave its value room is drawn smaller; the flags' row (Clean, Counter,
+Punish, Wall) closes its gaps, then shrinks, where a language's words are longer.
 
 The pause menu's ULTIMATE SETTINGS row takes the place of TOUCH SELECT, which
 opens the GamePad's Easy Input screen. The pause menu is a Lumen movie
@@ -879,9 +887,13 @@ description (menu text Manu_1669, which other menus may show) while
 Practice runs, the submenu's while it is open; a text can only take the
 space of the one it replaces. The row's label, longer than TOUCH SELECT's
 space, is set on the row itself whenever the pause menu's frame comes up
-(`MenuEntitySetText`, `sub_085A9978`: r3 the text, plain ASCII, r4 the
+(`MenuEntitySetText`, `sub_085A9978`: r3 the text, UTF-8, r4 the
 entity's name); the pause menu's labels come from the movie's own data,
-not through the script (`MenuEntitySetTextID` is not called).
+not through the script (`MenuEntitySetTextID` is not called). The texts
+are in each language shown (see Language), each within that language's
+space; one that does not fit is English's. SLOW MOTION's 1/2 and 1/4 take
+the place of the ON word of the language shown (ON, OUI, EIN, SÌ, SÍ,
+ВКЛ).
 
 HITBOXES draws where the title tests attacks against bodies. Each fighter
 has 14 spheres on its bones (+2168, 24 bytes each: the centre, the radius
@@ -1046,6 +1058,82 @@ before without the file). The game logs
 game's own (from <file>)` or `game: defaults (no <file>)`, and a line for
 each line of the file it leaves out or changes.
 
+## Language
+
+The European Wii U game has its texts in English, French, German, Italian
+and Spanish, and the Russian texts of the PlayStation 3 and Xbox 360
+versions; `game.ini`'s `language` (`host::game::kLanguages`: en, fr, de,
+it, es, ru; none: English) chooses the one shown. `main.cpp` reads
+game.ini once before the title runs and makes the language the console's
+(`cafe.language` of `UCReadSysConfig`, `os/system_config.cpp`: 1 English,
+2 French, 3 German, 4 Italian, 5 Spanish, 10 Russian; the console stays a
+European one in the United Kingdom) and the port's (`title/language.h`),
+and logs `ttt2: the console's language: <name> (cafe.language <n>)`.
+
+The title loads every language's text banks (data003: each part of the
+game, online, common, practice, menus, tutorial, has ten banks, their byte
+6 the language: 1 Japanese, 2 English, 3 English again, 4 French, 5
+Italian, 6 German, 7 Spanish, 8 Korean, 9 Chinese, 10 Russian) and shows
+the language at +4 of its system settings object (`sub_0864107C`: 1
+Japanese, 2 English, 3 French, 4 Italian, 5 German, 6 Spanish, 7 Russian),
+which it sets from `cafe.language` (0 to 5 through a table; 10, Russian,
+it takes for English). With game.ini's Russian the port sets +4 to 7 as
+the object is made (`presentation.cpp`). The pictures with words (the
+select screen's movie and textures, data007 entries 6 to 21) follow the
+language too; the copyright lines of the title screen are one picture for
+all.
+
+The Russian banks lack the texts only the Wii U has: Practice's bank has
+none, and the menus', common and online ones lack their Wii U screens'
+(the main menu's SPECIAL GAME MODE row, Tekken Ball, paint ...), which
+showed blank. `text::fill_missing_texts` rebuilds each such Russian bank
+(served through the archive overlay, its language byte kept) with every
+record it has and, for the 1,471 numbers it lacks, English's records with
+our own Russian: `title/text_russian.inc`, the port's translation of each
+such text by key (`text::russian_texts`; UTF-8, the game's control codes
+as `\u` escapes; about 1,030 records, only keys and our Russian, none of
+the game's texts). Where ours would say what a record of the player's
+Russian banks says (a mode's name, a menu's, a term the game uses
+elsewhere: about 40 entries), the entry names that record by key with
+our markup around it, `■{common_82}`, `{common_911:upper}` (in capitals),
+`{common_375:capital}` (a capital first letter only), and
+`text::with_references` puts in the player's text of that record (spaces
+at its ends dropped) before the markup check; an entry naming a record the
+banks lack stays English, and the port logs `ttt2: Russian text <key> left
+in English: it names a record the Russian banks lack`. A record the table
+has no entry for gets the Russian text the bank has for the same English
+text under another number (SELECT, CONFIRM, ON, OFF, COMMAND LIST ...), if
+any; the rest (song titles, a stage's name, texts of icons only) stay
+English. A text goes in only with its English record's markup
+(`text::markup`: after the button names become icons, the control codes
+with their arguments (as the title's table of them at 0x102F619C says:
+two for U+FFF2, a colour's two halves, none for U+FFFF, one for the
+others), the line breaks, the icons and the symbols ☆【】↑↓, in order); one
+that differs (the player's banks decide, and another version of the game
+may differ) leaves the record English, and the port logs `ttt2: Russian
+text <key> left in English: its markup is not the English text's`. A bank
+is its header, three tables and its records: table 1 one entry per record
+by number (offsets of its header, English text and key, its number), table
+2 the English texts' hashes (and lengths), table 3 the keys', each
+pointing at a table 1 entry (4 + 16 per entry from table 1), then the
+records (the text's hash, its length in characters, the text, the English
+one, the key). A rebuilt record keeps its English record's index entries,
+with its own text's hash (`text::text_hash`: for each character c, h =
+T(h) ^ c, T a linear map of the 16 bits) and length.
+
+The port's own texts (ULTIMATE SETTINGS, SOLO GHOST BATTLE, the frame data
+panels and the position reset's hint, the customization's messages) are a
+`language::Text` each, in every language offered (English where one has
+none), chosen by `language::in_current`; non-ASCII characters are written
+as `\x` escapes (the Russian table above as UTF-8). A text written over one
+of the title's fits that text's space in that language's bank (in Russian,
+for the texts the Wii U lacks, our translation's).
+
+Japanese (`cafe.language` 0) is not offered: the title's Japanese menus
+draw, but the port's own texts have no Japanese (the frame data panels'
+atlas has no faces for it), and its texts name the Wii U's buttons
+("Aボタン", "十字ボタン") with no rewrite to the icons.
+
 ## Paint without a GamePad
 
 CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
@@ -1127,7 +1215,9 @@ arrays its OnLoad script fills (an append each: `02 02 00 VV` loads the
 icon's number, `43 01 02` appends it). At start-up the port writes the file
 again with a ninth row, MenuItemMode002-09, at place 2: a copy of GHOST
 BATTLE's (the same OnEnter script) with its own label (the `text`
-attribute, without GHOST BATTLE's `textid`), an append more after GHOST
+attribute, without GHOST BATTLE's `textid`; in the language shown, from
+the game's GHOST BATTLE and SOLO, as its description and the fight
+corner's mode name are), an append more after GHOST
 BATTLE's in both icon arrays (the script's code size, at +8, and the word
 holding the code's size less one, 66 bytes after the code, grow by 14), and
 a description and a value at place 2 (the later ones renamed a number on),
@@ -1525,7 +1615,8 @@ costumes are whole bodies, not records), and the mode's save writes that
 file, with the slot's picture.
 The title's save call has no failure of its own, so a save the disk refuses
 is said on the screen by the port (`framedata::notice`: a box in the title's
-fonts over the picture, the overlay Practice's panels use), and again when
+fonts over the picture, the overlay Practice's panels use, in the language
+shown), and again when
 a later try has written it. The mode's two other screens with a character
 grid, REGISTER TAG and TOUCH SELECT, are the title's own code with the
 fights' grid, where the cursor stands on an added fighter's cell as on any
@@ -2097,7 +2188,10 @@ Game builds the project itself with a pinned LLVM-MinGW,
     (`subprocess`), the start (`startup`, `single_instance`, `payload`),
     releases and the AppImage (`release`, `appimage`), the PC's checks before
     an install (`system`, `distro`), `uninstall`, the game's own
-    settings (`keymap`, `display`), and what is read from the player's own
+    settings (`keymap`, `display`, and `game_ini`: game.ini's player name
+    and language, each saved keeping the file's other lines, comments and
+    keys; of a language given twice the later line, the one the game reads,
+    takes the new code), and what is read from the player's own
     files as it runs: the game's menu sounds from the install's sound banks
     (`game_sounds`) and the added fighters' portraits from their packs
     (`game_art`).
@@ -2448,7 +2542,10 @@ input delay no (from <file>)` (or `display: defaults (no <file>)`), a line
 per variable set, `ttt2: window: <w>x<h> pixels, windowed` and `ttt2: GPU:
 rendering at <w>x<h> (scale <s>)`. The launcher's Settings show
 them in their Display section (but the input delay, which is in their Game
-section with the player's name from game.ini), a switch each and a list for the resolution
+section with the player's name and the language from game.ini: a list of the
+game's languages, `host::game::kLanguages`, by their English names, the one
+chosen being what the game's own reader makes of the file, and a note when the
+file names one the game does not have), a switch each and a list for the resolution
 (Automatic, 1280 × 720 ... 5120 × 2880). Resolution and 120 fps, focused,
 say what the game will do only as far as it can be sure, as the game goes by
 its primary display, which the launcher does not look for (`automatic_note` and `refresh_note` in
@@ -2557,7 +2654,7 @@ has loaded, then quits:
 
 | Variable | Effect |
 | --- | --- |
-| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display and Game sections `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved), `player-name:<name>` (Game's Player name typed as a player does: the old one cleared, `<name>` typed, Done, which saves game.ini, then read back; empty: none) and `type:<text>` (`<text>` as the system's text input gives it, into the name being typed); each logs `@test <action> ok\|failed <why>` to stderr |
+| `TTT2_LAUNCHER_TEST_ACTIONS="install:<GAME>:<FOLDER>;add:kazumi;quit"` | actions one after another, each once the one before has ended: `install:<GAME>:<FOLDER>`, `update`, `add:<name>[,<name>...]`, `add-all-base`, `add-all-owned`, `remove:<name>`, `uninstall:keep`, `uninstall:all`, `play` (ends once the game has run 3 s), `quit`, `add-all:<game>` and `remove-all:<game>` (a game's Add All and Remove All, `tekken7` or `tekken8`, the latter without its question), and `expand-dlc`, `expand-log`, `show-uninstall`, `wait:<seconds>`, `focus:<id>` (the keyboard focus on `play`, `uninstall`, `fighter:<name>`, `add-all`, `dlc` ...) and `refresh` (logs the id focused afterwards); for Settings `settings` (opens it through the gear), `back`, `bind:<input>:<XKB keycode>[+<XKB keycode>...]` (that input's key clicked unless it waits for one already, then those keys pressed one after another and let go the other way round through the window's key handler, e.g. `bind:face_bottom:39` gives it S, `bind:zl:64` Left Alt, `bind:zl:64+23` is Alt+Tab, which stops choosing; a refused key, Esc and a shortcut log `failed` with the reason) and `reset-keys` (Restore Defaults), and for its Display and Game sections `fullscreen:yes`/`no`, `interpolation:yes`/`no`, `input-delay:yes`/`no`, `async-shaders:yes`/`no`, `precompile-shaders:yes`/`no` and `resolution:<value>` (a value of display.ini's `resolution`, in any case: `auto`, `1920x1080` ...), each setting that switch or list as a click does, which saves display.ini, then reading the file back (`ok` when it holds what was set; the text is what it holds, or why it could not be saved), `player-name:<name>` (Game's Player name typed as a player does: the old one cleared, `<name>` typed, Done, which saves game.ini, then read back; empty: none), `language:<code>` (Game's Language list set to the game's language of that code, `en`, `fr` ... in any case, which saves game.ini, then read back: `ok` when it holds that code) and `type:<text>` (`<text>` as the system's text input gives it, into the name being typed); each logs `@test <action> ok\|failed <why>` to stderr |
 | `TTT2_LAUNCHER_TEST_SHOTS=<dir>` | the window as `<dir>/NN-<action>.png` after each action (`00-start.png` first, `NN-<action>-running.png` half-way through its task) |
 | `TTT2_LAUNCHER_TEST_PAGE=1` | also all of the window's content, scrolled into view or not, as `...-page.png` |
 | `TTT2_LAUNCHER_TEST_SCALE=2`, `TTT2_LAUNCHER_TEST_SIZE=<w>x<h>` | pictures at twice the scale; the window's size |

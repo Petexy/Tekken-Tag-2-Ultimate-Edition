@@ -1,11 +1,12 @@
 #pragma once
 
 // Settings: the game's game.ini (GameController: the player's name, typed
-// with NameEditor), display.ini (DisplayController: shown = saved, a save
-// that fails puts the controls back), keyboard.ini (KeyCapture: choosing a
-// key) and, new, the launcher's own; on Windows also the folders. The
-// texts are the GTK app's (launcher/app/settings.cpp); Windows shows the same
-// (Tk's own had drifted: "Cannot save: ...").
+// with NameEditor, and the language of the game's texts), display.ini
+// (DisplayController: shown = saved, a save that fails puts the controls
+// back), keyboard.ini (KeyCapture: choosing a key) and, new, the launcher's
+// own; on Windows also the folders. The texts are the GTK app's
+// (launcher/app/settings.cpp); Windows shows the same (Tk's own had drifted:
+// "Cannot save: ...").
 
 #include "facts.h"
 #include "game_ini.h"
@@ -27,29 +28,39 @@ public:
     void set_file(fs::path file) { file_ = std::move(file); }
     const fs::path& file() const { return file_; }
 
-    // Read game.ini (each time Settings opens): what it says and what the game makes of it (shown()), with a note
-    // when it cannot be read or the game shows its name differently.
+    // Read game.ini (each time Settings opens): what it says and what the game makes of it (shown(), language()),
+    // with a note when it cannot be read, the game shows its name differently or does not have its language.
     void load();
     // A name chosen (tidied: the spaces at both ends left out; "" the game's own): saved at once; false (error())
     // when it cannot be, what is shown staying what the file has.
     bool set_name(std::string_view name);
+    // A language chosen (a code of cafe::host::game::kLanguages; English too is written): saved at once; false
+    // (error()) when it cannot be, or when the game has no such language.
+    bool set_language(std::string_view code);
 
     const game_ini::Settings& settings() const { return settings_; }
     // The name the game shows, as its own reader makes it of the file (cafe::host::game); "" for its own name.
     const std::string& shown() const { return shown_; }
-    const std::string& note() const { return note_; }   // game.ini cannot be read (...) / the game shows its name as ...
-    const std::string& error() const { return error_; } // The game settings cannot be saved: ...
+    // The language the game shows its texts in, as its own reader makes it of the file: a code of kLanguages ("en"
+    // for English, also when the file has none or one the game does not have).
+    const std::string& language() const { return language_; }
+    const std::string& note() const { return note_; } // game.ini cannot be read (...) / the game shows its name as ...
+    const std::string& language_note() const { return language_note_; } // game.ini's language "xx" is not one ...
+    const std::string& error() const { return error_; } // The player name / language cannot be saved: ...
     const std::vector<std::string>& log() const { return log_; }
 
 private:
     fs::path file_;
     game_ini::Settings settings_;
-    std::string shown_, note_, error_;
+    std::string shown_, language_ = "en", note_, language_note_, error_;
+    bool unreadable_ = false; // note_ says game.ini cannot be read
     std::vector<std::string> log_;
 };
 
 // "game.ini: player name Mira" / "game.ini: no player name" (the test action's answer).
 std::string game_summary(const game_ini::Settings& settings);
+// "game.ini: language fr" / "game.ini: no language" (the test action's answer).
+std::string language_summary(const game_ini::Settings& settings);
 
 // Typing the player's name: the text so far and where the next character goes. What a name cannot have is not
 // taken (its refusal said for a moment); the on-screen keyboard's letters are capitals while shifted (by its Shift,

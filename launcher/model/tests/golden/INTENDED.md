@@ -56,12 +56,15 @@ they differ in just that.
   element as it is (units.cpp `add_all_everything` checks what it adds).
 
 - **I9 A Game section in Settings** (players asked to be called by their own
-  name): first, before the display section (which is now called Display, as
-  its tab), with Player name (`player-name`, an entry: the name the game
-  shows instead of Player, kept in game.ini beside display.ini; empty, the
-  game's own) and Input delay, moved there from the display section (the same
+  name, and for the game's other languages): first, before the display
+  section (which is now called Display, as its tab), with Player name
+  (`player-name`, an entry: the name the game shows instead of Player, kept in
+  game.ini beside display.ini; empty, the game's own), Language (`language`,
+  a list of the game's languages by their English names, kept in game.ini
+  too) and Input delay, moved there from the display section (the same
   switch and words, still in display.ini). display.ini's notes are said there
-  too. No case has a game.ini, so the entry is empty.
+  too. No case has a game.ini, so the entry is empty and the language
+  English.
 
 Not seen in the goldens but also changed on purpose: every item that cannot
 be used now keeps a reason (`describe.why`) instead of only being
@@ -102,8 +105,8 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
 - **I7** as above: Home's UPDATE, and the notice's sentence ("Update
   replaces this launcher with it and opens it." on Windows).
 - **I8** as above: Add All Owned for every game.
-- **I9** as above: Settings' Game section with Player name; the display
-  section called Display.
+- **I9** as above: Settings' Game section with Player name and Language;
+  the display section called Display.
 - **W8 Linux's sentence with Windows' action**: "Set up the game first: the
   characters are made from it and from your Tekken 7 or Tekken 8." (Tk: "Set
   up the game first: characters are made from it.").

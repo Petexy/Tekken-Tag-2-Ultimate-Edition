@@ -76,6 +76,7 @@ struct Action {
     bool inconsistent = false;        // check: some of them
     std::vector<std::string> choices; // choice: its entries
     int chosen = -1;
+    std::string placeholder;          // entry: shown while it holds nothing (the game's own name)
     Describe describe;
     bool operator==(const Action&) const = default;
 };
@@ -252,10 +253,10 @@ struct NameEditView {
 };
 
 struct SettingsView {
-    // Game (game.ini; Input delay: display.ini)
+    // Game (game.ini: the player's name, the language; Input delay: display.ini)
     std::string game_title = "Game";
-    std::string game_about = "Your name in the game, and how it takes your presses. The game uses these when it "
-                             "starts.";
+    std::string game_about = "Your name in the game, the language of its texts, and how it takes your presses. The "
+                             "game uses these when it starts.";
     std::vector<Line> game_notes; // error / unreadable note
     std::vector<SettingRow> game;
     std::optional<NameEditView> name_edit; // the player's name being typed

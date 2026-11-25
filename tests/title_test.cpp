@@ -9,6 +9,7 @@
 #include "title/draw.h"
 #include "title/font.h"
 #include "title/image.h"
+#include "title/language.h"
 #include "title/menudata.h"
 #include "title/pictures.h"
 #include "title/text.h"
@@ -453,10 +454,366 @@ void test_text() {
     auto wrong = make_bank({{"common_4", "PRESS THE + BUTTON", "PRESS THE + BUTTON"}}, true);
     check(text::show_button_icons(wrong) == 0, "text: a record whose length does not match is left alone");
 
+    // Russian: the PlayStation 3's and Xbox 360's names (START, SELECT, BACK) and our translations' (made-up texts)
+    auto russian = make_bank({
+        {"common_193", "Жмите кнопку START дважды.", "Push plus twice."},
+        {"common_1319", "Нажать START и ждать.", "Push plus, wait."},
+        {"Manu_635", "Держите кнопку BACK, чтобы закрыть.", "Hold minus to close."},
+        {"common_1307", "НАЖАТЬ START", "PUSH"},
+        {"common_1380", "Только не кнопку PS.", "Leave HOME be."},
+        {"common_2", "РЕЖИМ START", "MODE"},
+        {"practice_1", "Жмите кнопку - и кнопку B, затем крестовину.", "Minus, B, then the pad."},
+        {"Manu_1", "Бейте кнопками A, B, X и Y.", "Hit with all four."},
+    });
+    check(text::show_button_icons(russian) == 6, "text: six Russian texts name buttons");
+    const auto r = texts(russian);
+    check(r.size() == 8 && r[0].first == "Жмите " + start + " дважды." && r[0].second == 15, "text: Russian START");
+    check(r.size() == 8 && r[1].first == "Нажать " + start + " и ждать.", "text: Russian press START");
+    check(r.size() == 8 && r[2].first == "Держите " + select + ", чтобы закрыть.", "text: Russian BACK");
+    check(r.size() == 8 && r[3].first == "НАЖАТЬ " + start, "text: the Russian prompt");
+    check(r.size() == 8 && r[4].first == "Только не кнопку PS." && r[5].first == "РЕЖИМ START",
+          "text: no other START or PS");
+    check(r.size() == 8 && r[6].first == "Жмите " + select + " и " + b + ", затем " + pad_icon + ".",
+          "text: our Russian names of the - and B buttons and the +Control Pad");
+    check(r.size() == 8 && r[7].first == "Бейте " + a + ", " + b + ", " + x + " и " + y + ".",
+          "text: our Russian list of buttons");
+
     std::set<char32_t> used;
     text::code_points(make_bank({{"common_5", "Drücke \xE2\x94\xBC!", "Press the pad!"}}), used);
     check(used == std::set<char32_t>{U'D', U'r', U'\u00FC', U'c', U'k', U'e', U' ', U'\u253C', U'!'},
           "text: the code points texts use (not the English originals')");
+}
+
+// A text bank as the title's are (text.cpp's read_index): table 1 by
+// number, tables 2 and 3 (the English originals' and keys' hashes) by hash,
+// the records after them (read back: with their headers' hash and length).
+struct Numbered {
+    uint32_t number;
+    std::string key, text, english;
+    uint16_t header_hash = 0;
+    size_t count = 0;
+};
+
+uint32_t get32(const std::vector<uint8_t>& b, size_t at) {
+    return uint32_t{b[at]} << 24 | uint32_t{b[at + 1]} << 16 | uint32_t{b[at + 2]} << 8 | b[at + 3];
+}
+
+void put32(std::vector<uint8_t>& b, size_t at, uint32_t v) {
+    for (int k = 0; k < 4; ++k) b[at + k] = static_cast<uint8_t>(v >> (24 - 8 * k));
+}
+
+uint32_t hash_of(const std::string& s) {
+    uint32_t h = 2166136261u;
+    for (const char c : s) h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
+    return h;
+}
+
+size_t to16(size_t v) { return (v + 15) & ~size_t{15}; }
+
+std::vector<uint8_t> make_indexed(uint8_t language, std::vector<Numbered> records) {
+    std::stable_sort(records.begin(), records.end(), [](const auto& a, const auto& b) { return a.number < b.number; });
+    const size_t n = records.size();
+    std::vector<std::pair<uint32_t, size_t>> tables[2];
+    std::vector<uint8_t> area(4, 0);
+    std::vector<uint32_t> at(n), english(n), key(n);
+    for (size_t i = 0; i < n; ++i) {
+        const Numbered& r = records[i];
+        at[i] = static_cast<uint32_t>(area.size());
+        const size_t count = language::characters(r.text);
+        area.insert(area.end(), {0x12, 0x34, static_cast<uint8_t>(count >> 8), static_cast<uint8_t>(count)});
+        for (const std::string* t : {&r.text, &r.english, &r.key}) {
+            if (t == &r.english) english[i] = static_cast<uint32_t>(area.size());
+            if (t == &r.key) key[i] = static_cast<uint32_t>(area.size());
+            std::vector<uint8_t> bytes(t->begin(), t->end());
+            bytes.resize(pad(bytes.size(), t == &r.key ? 1 : 2), 0);
+            area.insert(area.end(), bytes.begin(), bytes.end());
+        }
+        tables[0].push_back({(hash_of(r.english) & 0xFFFF0000) | static_cast<uint32_t>(r.english.size()), i});
+        if (!r.key.empty()) tables[1].push_back({hash_of(r.key), i});
+    }
+    put32(area, 0, static_cast<uint32_t>(area.size() + 4));
+    for (auto& t : tables) {
+        std::stable_sort(t.begin(), t.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    }
+    const size_t t2 = to16(0x30 + 4 + 16 * n), t3 = to16(t2 + 4 + 8 * tables[0].size()),
+                 rec = to16(t3 + 4 + 8 * tables[1].size());
+    std::vector<uint8_t> bank(to16(rec + area.size() + 4 + 1), 0xFF);
+    std::memcpy(bank.data(), "NTXB", 4);
+    put32(bank, 4, 0x00020000u | uint32_t{language} << 8);
+    put32(bank, 8, static_cast<uint32_t>(bank.size()));
+    put32(bank, 12, 0x30);
+    put32(bank, 16, 0x30);
+    put32(bank, 20, static_cast<uint32_t>(t2));
+    put32(bank, 24, static_cast<uint32_t>(t3));
+    put32(bank, 28, static_cast<uint32_t>(rec));
+    put32(bank, 0x30, static_cast<uint32_t>(n));
+    for (size_t i = 0; i < n; ++i) {
+        put32(bank, 0x34 + 16 * i, at[i]);
+        put32(bank, 0x38 + 16 * i, english[i]);
+        put32(bank, 0x3C + 16 * i, key[i]);
+        put32(bank, 0x40 + 16 * i, records[i].number << 16 | 0x12);
+    }
+    for (int k = 0; k < 2; ++k) {
+        const size_t t = k == 0 ? t2 : t3;
+        put32(bank, t, static_cast<uint32_t>(tables[k].size()));
+        for (size_t j = 0; j < tables[k].size(); ++j) {
+            put32(bank, t + 4 + 8 * j, tables[k][j].first);
+            put32(bank, t + 8 + 8 * j, static_cast<uint32_t>(4 + 16 * tables[k][j].second));
+        }
+    }
+    std::copy(area.begin(), area.end(), bank.begin() + static_cast<ptrdiff_t>(rec));
+    return bank;
+}
+
+// The bank's records through its index, in table 1's order; empty if the
+// index is not one the title can read (tables in order, each record found
+// once by its text and, with a key, once by its key; the size its header's).
+std::vector<Numbered> indexed(const std::vector<uint8_t>& bank) {
+    if (bank.size() < 0x30 || get32(bank, 8) != bank.size()) return {};
+    const size_t rec = get32(bank, 28), n = get32(bank, 0x30);
+    std::vector<Numbered> out;
+    const auto string = [&](size_t at) { return std::string(reinterpret_cast<const char*>(&bank[rec + at])); };
+    size_t keyed = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const size_t e = 0x34 + 16 * i;
+        const size_t header = rec + get32(bank, e);
+        out.push_back({get32(bank, e + 12) >> 16, string(get32(bank, e + 8)), string(get32(bank, e) + 4),
+                       string(get32(bank, e + 4)), static_cast<uint16_t>(bank[header] | bank[header + 1] << 8),
+                       size_t{bank[header + 2]} << 8 | bank[header + 3]});
+        keyed += !out.back().key.empty();
+        if (i > 0 && out[i].number < out[i - 1].number) return {};
+    }
+    for (int k = 0; k < 2; ++k) {
+        const size_t t = get32(bank, k == 0 ? 20 : 24), entries = get32(bank, t);
+        if (entries != (k == 0 ? n : keyed)) return {};
+        std::set<size_t> seen;
+        for (size_t j = 0; j < entries; ++j) {
+            const uint32_t hash = get32(bank, t + 4 + 8 * j), entry = get32(bank, t + 8 + 8 * j);
+            const size_t i = (entry - 4) / 16;
+            if ((entry - 4) % 16 != 0 || i >= n || !seen.insert(i).second) return {};
+            const Numbered& r = out[i];
+            const uint32_t want =
+                k == 0 ? (hash_of(r.english) & 0xFFFF0000) | static_cast<uint32_t>(r.english.size()) : hash_of(r.key);
+            if (hash != want || (j > 0 && (get32(bank, t - 4 + 8 * j) & 0xFFFF0000) > (hash & 0xFFFF0000))) return {};
+        }
+    }
+    return out;
+}
+
+// A part's banks, Japanese (1) to Russian (10): texts 1, 2, 3 and 5, and one
+// without a number (found by its key). English's 3 is its 1 again, its 2
+// "ENGLISH", its 5 "FIVE" or, in a part whose Russian has none of its own
+// (a stand-in record), "ENGLISH ONLY"; Russian has text 1 or all.
+enum class Russian { kStandIn, kSome, kAll };
+std::vector<std::vector<uint8_t>> part(Russian russian) {
+    std::vector<std::vector<uint8_t>> banks;
+    for (uint8_t l = 1; l <= text::kBankRussian; ++l) {
+        const std::string own = "TEXT " + std::to_string(l);
+        std::vector<Numbered> records = {{1, "practice_1", own, "TEXT"},
+                                         {2, "practice_2", "TWO " + own, "TWO"},
+                                         {3, "practice_3", "THREE " + own, "THREE"},
+                                         {5, "practice_5", "FIVE " + own, "FIVE"},
+                                         {0xFFFF, "practice_9_2", "BY KEY " + own, "BY KEY"}};
+        if (l == text::kBankEnglish) {
+            records[1].text = "ENGLISH";
+            records[2].text = own;
+            records[3].text = russian == Russian::kStandIn ? "ENGLISH ONLY" : "FIVE";
+        }
+        if (l == text::kBankRussian && russian == Russian::kStandIn) records = {{0xFFFF, "", " ", "@_@"}};
+        if (l == text::kBankRussian && russian == Russian::kSome) records.resize(1);
+        banks.push_back(make_indexed(l, records));
+    }
+    return banks;
+}
+
+std::vector<std::vector<uint8_t>> three_parts() {
+    std::vector<std::vector<uint8_t>> banks;
+    for (const Russian r : {Russian::kStandIn, Russian::kSome, Russian::kAll}) {
+        auto more = part(r);
+        banks.insert(banks.end(), more.begin(), more.end());
+    }
+    return banks;
+}
+
+std::vector<std::vector<uint8_t>*> pointers_to(std::vector<std::vector<uint8_t>>& banks) {
+    std::vector<std::vector<uint8_t>*> out;
+    for (auto& b : banks) out.push_back(&b);
+    return out;
+}
+
+void test_missing_texts() {
+    std::vector<std::vector<uint8_t>> banks = three_parts();
+    check(indexed(banks[1]).size() == 5 && indexed(banks[9]).size() == 1, "text: the test's banks read");
+    const std::vector<std::vector<uint8_t>> before = banks;
+    check(text::bank_language(banks[9]) == text::kBankRussian && text::bank_language(banks[1]) == text::kBankEnglish,
+          "text: a bank's language");
+    const text::Filled filled = text::fill_missing_texts(pointers_to(banks), {});
+    check(filled.banks == (std::vector<size_t>{9, 19}) && filled.kept_english.empty(),
+          "text: the Russian banks lacking texts, only");
+    // English's texts by number; in Russian where Russian has the same English text (TEXT 2: twice TEXT 10, once
+    // THREE TEXT 10) in any part, the header that text's; the keys English's
+    const auto stand_in = indexed(banks[9]), some = indexed(banks[19]);
+    check(banks[9][6] == text::kBankRussian && stand_in.size() == 5 && stand_in[0].text == "TEXT 10" &&
+              stand_in[0].key == "practice_1" && stand_in[1].text == "TWO TEXT 10" && stand_in[2].text == "TEXT 10" &&
+              stand_in[2].key == "practice_3" && stand_in[3].text == "ENGLISH ONLY" && stand_in[3].english == "FIVE" &&
+              stand_in[4].number == 0xFFFF && stand_in[4].key.empty(),
+          "text: a Russian bank without texts gets English's, in Russian where another has them, its stand-in kept");
+    check(stand_in.size() == 5 && stand_in[0].header_hash == text::text_hash("TEXT 10") && stand_in[0].count == 7 &&
+              stand_in[3].header_hash == 0x3412 && stand_in[3].count == 12,
+          "text: a Russian text's header is its own, an English record's as it was");
+    check(some.size() == 4 && some[0].text == "TEXT 10" && some[1].number == 2 && some[1].text == "TWO TEXT 10" &&
+              some[2].text == "TEXT 10" && some[3].text == "FIVE TEXT 10" && some[3].key == "practice_5",
+          "text: a Russian bank keeps its texts and gets those of the numbers it lacks");
+    bool others = true;
+    for (size_t i = 0; i < banks.size(); ++i) {
+        if (i != 9 && i != 19) others = others && banks[i] == before[i];
+    }
+    check(others, "text: the other banks stay");
+
+    // our translations (by key) before the game's texts; one whose markup is not its English text's stays English
+    std::vector<std::vector<uint8_t>> with_ours = three_parts();
+    const text::Translation ours[] = {{"practice_2", "ДВА"}, {"practice_3", "ТРИ"}, {"practice_5", "ПЯТЬ\nШЕСТЬ"}};
+    const text::Filled filled_ours = text::fill_missing_texts(pointers_to(with_ours), ours);
+    const auto ours_stand_in = indexed(with_ours[9]), ours_some = indexed(with_ours[19]);
+    check(filled_ours.banks == (std::vector<size_t>{9, 19}) &&
+              filled_ours.kept_english == (std::vector<std::string>{"practice_5", "practice_5"}),
+          "text: our translations, those whose markup differs named");
+    check(ours_stand_in.size() == 5 && ours_stand_in[0].text == "TEXT 10" && ours_stand_in[1].text == "ДВА" &&
+              ours_stand_in[1].english == "TWO" && ours_stand_in[1].key == "practice_2" &&
+              ours_stand_in[1].header_hash == 0x0738 && ours_stand_in[1].count == 3 &&
+              ours_stand_in[2].text == "ТРИ" && ours_stand_in[3].text == "ENGLISH ONLY",
+          "text: our translation with its own header, before the game's text; English where its markup differs");
+    check(ours_some.size() == 4 && ours_some[0].text == "TEXT 10" && ours_some[1].text == "ДВА" &&
+              ours_some[2].text == "ТРИ" && ours_some[3].text == "FIVE" && ours_some[3].english == "FIVE",
+          "text: our translations only for the numbers Russian lacks; English, not the game's text, for one left out");
+
+    // our texts' references: expanded from the Russian banks as they were, then markup checked; one naming a
+    // record no Russian bank has leaves English (named)
+    std::vector<std::vector<uint8_t>> with_references = three_parts();
+    with_references[29] = make_indexed(text::kBankRussian, {{1, "practice_1", "TEXT 10", "TEXT"},
+                                                            {2, "practice_2", "ДВА\nСЛОВА", "TWO"},
+                                                            {3, "practice_3", "ЛЕВЫЙ", "THREE"},
+                                                            {5, "practice_5", " жёлтый ", "FIVE"},
+                                                            {0xFFFF, "practice_9_2", "BY KEY", "BY KEY"}});
+    const text::Translation referring[] = {{"practice_1", "{practice_4}"},
+                                           {"practice_2", "\xE2\x96\xA0{practice_3:capital}"},
+                                           {"practice_3", "{practice_5:upper}!"},
+                                           {"practice_5", "{practice_2}"}};
+    const text::Filled filled_refs = text::fill_missing_texts(pointers_to(with_references), referring);
+    const auto refs_stand_in = indexed(with_references[9]), refs_some = indexed(with_references[19]);
+    check(filled_refs.banks == (std::vector<size_t>{9, 19}) &&
+              filled_refs.unresolved == (std::vector<std::string>{"practice_1"}) &&
+              filled_refs.kept_english == (std::vector<std::string>{"practice_5", "practice_5"}),
+          "text: references to records the banks lack, and those whose expanded markup differs, named");
+    const std::string left = "\xE2\x96\xA0Левый"; // (■ and the record's text, a capital first letter only)
+    check(refs_stand_in.size() == 5 && refs_stand_in[0].text == "TEXT 2" && refs_stand_in[0].key == "practice_1" &&
+              refs_stand_in[1].text == left && refs_stand_in[1].header_hash == text::text_hash(left) &&
+              refs_stand_in[1].count == 6 && refs_stand_in[2].text == "ЖЁЛТЫЙ!" &&
+              refs_stand_in[3].text == "ENGLISH ONLY" && refs_some.size() == 4 && refs_some[1].text == left &&
+              refs_some[2].text == "ЖЁЛТЫЙ!" && refs_some[3].text == "FIVE",
+          "text: references expanded from the player's Russian records; English where one is missing or its markup "
+          "differs");
+
+    auto shuffled = part(Russian::kStandIn);
+    std::swap(shuffled[2], shuffled[3]);
+    check(text::fill_missing_texts(pointers_to(shuffled), {}).banks.empty(),
+          "text: banks not in the languages' order stay");
+    auto broken = part(Russian::kSome);
+    put32(broken[9], 0x30, 1000); // table 1 runs past the bank
+    check(text::fill_missing_texts(pointers_to(broken), {}).banks.empty(), "text: a bank whose index does not read stays");
+}
+
+// The markup a translation keeps, and the records' header hash (made-up texts).
+void test_markup() {
+    check(text::text_hash("") == 0 && text::text_hash("Q") == 0x51 && text::text_hash("Mug") == 0xB6C7 &&
+              text::text_hash("Кот") == 0xD68B && text::text_hash("Ящик\nпуст") == 0x064B,
+          "text: the header's hash of a text");
+    const std::string code = "\xEF\xBF\xB4\xE8\x80\x81"; // U+FFF4 and its argument U+8001
+    const std::string icon = "\xEE\x81\xA4";                // U+E064, a private-use icon
+    check(text::markup("Mug " + code + "of\ntea " + icon + "!") == U"\uFFF4\u8001\n\uE064",
+          "text: markup: a code with its argument, a line break, an icon, in order");
+    check(text::markup("Press the X Button, then \xE2\x98\x86.") == U"\u00A2\u2606" &&
+              text::markup("Жмите кнопку X, затем \xE2\x98\x86.") == text::markup("Press the X Button, then \xE2\x98\x86.") &&
+              text::markup("Жмите \xE2\x98\x86, затем кнопку X.") != text::markup("Press the X Button, then \xE2\x98\x86."),
+          "text: markup: button names as their icons, input symbols, in order");
+    check(text::markup("Plain words [in brackets].") == U"", "text: markup: none in plain words");
+    // a colour (U+FFF2) has two arguments, U+FFFF none: a translation must keep both halves
+    const std::string colour = "\xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBC\xA0"; // U+FFF2 U+FFFF U+FF20
+    const std::string original = "Hat " + colour + "yellow" + code;
+    check(text::markup(original) == U"\uFFF2\uFFFF\uFF20\uFFF4\u8001" &&
+              text::markup("Шляпа " + colour + "жёлтая" + code) == text::markup(original),
+          "text: markup: a colour with both its halves");
+    check(text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF" "жёлтая" + code) != text::markup(original) &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBF\xBF" "жёлтая" + code) != text::markup(original) &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBC\xA1" "жёлтая" + code) != text::markup(original),
+          "text: markup: a colour's second half dropped or changed differs");
+    check(text::markup("Hat " + colour) != text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF") &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF") == U"\uFFF2\uFFFF",
+          "text: markup: a text ending after a colour's first half differs");
+    check(text::markup("Mug\xEF\xBF\xBF" "a\n") == U"\uFFFF\n", "text: markup: U+FFFF takes no argument");
+
+    // references to the player's Russian records: as they are (spaces at the ends dropped), in capitals, with
+    // a capital first letter only; nothing when one is not well formed or names a record there is none of
+    const std::map<std::string_view, std::string_view> records = {
+        {"common_7", " Ёжик в тумане "}, {"Manu_12", "СТАРАЯ ЛАМПА"}, {"online_3", "Стул"}, {"common_8", "  "}};
+    const auto record = [&](std::string_view key) -> std::optional<std::string_view> {
+        const auto found = records.find(key);
+        return found == records.end() ? std::nullopt : std::optional(found->second);
+    };
+    check(text::with_references("\xE2\x96\xA0{common_7}", record) == "\xE2\x96\xA0Ёжик в тумане" &&
+              text::with_references(code + " {online_3:upper} " + code, record) == code + " СТУЛ " + code &&
+              text::with_references("{Manu_12:capital} / {common_7:upper}", record) == "Старая лампа / ЁЖИК В ТУМАНЕ" &&
+              text::with_references(code + "{common_7:capital}", record) == code + "Ёжик в тумане" &&
+              text::with_references("Без ссылок.", record) == "Без ссылок.",
+          "text: references expanded, in their case forms");
+    check(!text::with_references("{common_9}", record) && !text::with_references("{common_8}", record) &&
+              !text::with_references("{common_7", record) && !text::with_references("common_7}", record) &&
+              !text::with_references("a} {common_7}", record) && !text::with_references("{common_7:bold}", record) &&
+              !text::with_references("{common 7}", record) && !text::with_references("{}", record),
+          "text: a reference to a record there is none of, an empty one, or one not well formed: nothing");
+
+    // our Russian table: keys of a part's records, each once, texts without the icons' code points, references
+    // well formed
+    std::set<std::string_view> keys;
+    bool well_formed = !text::russian_texts().empty();
+    const auto any_record = [](std::string_view) -> std::optional<std::string_view> { return "Слово"; };
+    for (const text::Translation& t : text::russian_texts()) {
+        const size_t underscore = t.key.find('_');
+        well_formed = well_formed && underscore != std::string_view::npos && underscore > 0 && !t.text.empty() &&
+                      keys.insert(t.key).second && text::with_references(t.text, any_record).has_value();
+        for (const char32_t c : {text::kRightButton, text::kBottomButton, text::kTopButton, text::kLeftButton,
+                                 text::kStartButton, text::kSelectButton, text::kPad}) {
+            std::string utf8;
+            if (c < 0x800) utf8 = {static_cast<char>(0xC0 | (c >> 6)), static_cast<char>(0x80 | (c & 0x3F))};
+            else utf8 = {static_cast<char>(0xE0 | (c >> 12)), static_cast<char>(0x80 | ((c >> 6) & 0x3F)),
+                         static_cast<char>(0x80 | (c & 0x3F))};
+            well_formed = well_formed && t.text.find(utf8) == std::string_view::npos;
+        }
+    }
+    check(well_formed,
+          "text: our Russian texts by key, each once, none with an icon's code point, references well formed");
+}
+
+void test_language() {
+    const language::Text t = {"English", "Fran\xC3\xA7" "ais", nullptr, "", "Espa\xC3\xB1ol", "\xD0\xA0\xD1\x83\xD1\x81"};
+    check(language::in(t, language::kEnglish) == "English" && language::in(t, language::kFrench) == "Français" &&
+              language::in(t, language::kSpanish) == "Español" && language::in(t, language::kRussian) == "Рус",
+          "language: a text in each language");
+    check(language::in(t, language::kGerman) == "English" && language::in(t, language::kItalian) == "English" &&
+              language::in(t, language::kPlaces) == "English",
+          "language: English where one has none");
+    check(language::place_of("ru") == language::kRussian && language::place_of("de") == language::kGerman &&
+              language::place_of("en") == language::kEnglish && language::place_of("ja") == language::kPlaces &&
+              language::place_of("") == language::kPlaces,
+          "language: the places of the launcher's codes");
+    check(language::place() == language::kEnglish && language::in_current(t) == "English", "language: English until set");
+    language::set(cafe::host::game::kLanguages[language::kFrench]);
+    check(language::place() == language::kFrench && language::current().code == "fr" &&
+              language::in_current(t) == "Français",
+          "language: the language set");
+    language::set(cafe::host::game::Language{"xx", "None", 99});
+    check(language::place() == language::kEnglish, "language: one the game does not have is English");
+    check(language::characters("Рус ok") == 6 && language::characters("") == 0, "language: characters of UTF-8");
 }
 
 // ------------------------------------------------------------------ the copyright line
@@ -641,6 +998,14 @@ void test_menudata() {
     const size_t script = std::string_view(reinterpret_cast<const char*>(file.data()), file.size()).find("xtal ghost 3");
     long_text[script - 4] = 0x7F; // the script's length, past the file's end
     check(!menudata::add_solo_ghost_row(long_text), "menudata: a text longer than the file");
+    const auto german = menudata::add_solo_ghost_row(file, language::kGerman);
+    const auto russian = menudata::add_solo_ghost_row(file, language::kRussian);
+    const auto has = [](const std::optional<std::vector<uint8_t>>& f, std::string_view s) {
+        return f && std::string_view(reinterpret_cast<const char*>(f->data()), f->size()).find(s) != std::string_view::npos;
+    };
+    check(has(german, "SOLO-GEISTERKAMPF") && has(german, "ein Geist nach dem anderen") && !has(german, "SOLO GHOST BATTLE"),
+          "menudata: the row in German");
+    check(has(russian, "СОЛО-БОЙ С ПРИЗРАКАМИ") && has(russian, "один за другим"), "menudata: the row in Russian");
     const auto last = menudata::add_solo_ghost_row(offline_menu(true, true));
     check(last && std::string_view(reinterpret_cast<const char*>(last->data()), last->size()).find("MenuItemMode002-09") !=
                       std::string_view::npos,
@@ -659,6 +1024,9 @@ int main() {
     test_distance();
     test_pictures();
     test_text();
+    test_missing_texts();
+    test_markup();
+    test_language();
     test_copyright_line();
     test_logo();
     test_menudata();

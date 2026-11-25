@@ -23,6 +23,7 @@
 
 #include "title/framedata.h"
 #include "title/gauge.h"
+#include "title/language.h"
 #include "title/warp.h"
 
 #include "cafe/input.h"
@@ -35,6 +36,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -110,10 +112,13 @@ uint32_t call(PPCContext& ctx, uint8_t* base, void (*f)(PPCContext&, uint8_t*), 
 // ULTIMATE SETTINGS row in place of TOUCH SELECT (menu texts, which other menus
 // may show too) while Practice runs, and the ULTIMATE SETTINGS submenu's texts in
 // the HUD Information submenu it borrows while it does. Found once, by a
-// scan of MEM2 for the menu bank's key, then near the practice bank's.
+// scan of MEM2 for the menu bank's key, then near the practice bank's: the
+// title has every language's banks loaded, and shows the console's
+// language's (title/language.h); each record found gets the texts in that
+// language, those that fit its space.
 struct TextPatch {
     const char* key;
-    const char* text;
+    title::language::Text text;
 };
 
 struct TextRecord {
@@ -188,76 +193,147 @@ void find_texts(uint8_t* base, std::initializer_list<TextGroup> groups) {
     }
 }
 
-// Writes the record's text (ASCII) if it fits its space; null: as loaded.
-void write_text(uint8_t* base, TextRecord& t, const char* text) {
+// Writes the record's text (UTF-8) if it fits its space (its bytes and two
+// zero bytes); none: as loaded. Returns whether it is written.
+bool write_text(uint8_t* base, TextRecord& t, std::optional<std::string_view> text) {
     uint8_t* header = base + t.at + ((static_cast<uint32_t>(t.key.size()) + 1 + 3) & ~3u);
     if (!text) {
         std::memcpy(header, t.original.data(), t.original.size());
         t.patched = false;
-        return;
+        return true;
     }
-    const size_t space = t.original.size() - 4, bytes = std::strlen(text);
-    if (bytes + 2 > space) return;
-    header[2] = static_cast<uint8_t>(bytes >> 8);
-    header[3] = static_cast<uint8_t>(bytes);
+    const size_t space = t.original.size() - 4, bytes = text->size();
+    if (bytes + 2 > space) return false;
+    const size_t characters = title::language::characters(*text);
+    header[2] = static_cast<uint8_t>(characters >> 8);
+    header[3] = static_cast<uint8_t>(characters);
     std::memset(header + 4, 0, space);
-    std::memcpy(header + 4, text, bytes);
+    std::memcpy(header + 4, text->data(), bytes);
     t.patched = true;
+    return true;
 }
 
-// Changes the group's texts, or puts them back.
+// Changes the group's texts, or puts them back. A text in the language
+// that does not fit its record's space is English's.
 void patch_texts(uint8_t* base, std::span<const TextPatch> patches, bool on) {
     for (const TextPatch& t : patches) {
         for (TextRecord& r : g_texts) {
             if (r.key != t.key || !key_at(base + r.at, r.key) || r.patched == on) continue;
-            write_text(base, r, on ? t.text : nullptr);
+            if (!on) write_text(base, r, std::nullopt);
+            else if (!write_text(base, r, title::language::in_current(t.text))) write_text(base, r, t.text.en);
         }
     }
 }
 
 // The ULTIMATE SETTINGS row, in Practice (its label, longer than the
 // text's space, is set on the row itself as the pause menu comes: see
-// MenuEntitySetText below).
+// MenuEntitySetText below). In each language as {en, fr, de, it, es, ru},
+// within that language's spaces (the game's own words where it has them).
 constexpr TextPatch kRowTexts[] = {
-    {"Manu_1668", "ULTIMATE"},
-    {"Manu_1669", "Frame data, hitboxes and camera settings."},
+    {"Manu_1668", {"ULTIMATE"}},
+    {"Manu_1669", {"Frame data, hitboxes and camera settings.", "Donn\xC3\xA9" "es de frames, hitbox et cam\xC3\xA9ra.",
+                   "Frame-Daten, Hitboxen und Kamera einstellen.", "Impostazioni di dati frame, hitbox e telecamera.",
+                   "Datos de frames, hitboxes y c\xC3\xA1mara.",
+                   "\xD0\xA4\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB4\xD0\xB0\xD1\x82\xD0\xB0, "
+                   "\xD1\x85\xD0\xB8\xD1\x82\xD0\xB1\xD0\xBE\xD0\xBA\xD1\x81\xD1\x8B \xD0\xB8 "
+                   "\xD0\xBA\xD0\xB0\xD0\xBC\xD0\xB5\xD1\x80\xD0\xB0."}},
 };
-constexpr const char* kRowLabel = "ULTIMATE SETTINGS";
+constexpr title::language::Text kRowLabel = {"ULTIMATE SETTINGS", "R\xC3\x89GLAGES ULTIMATE", "ULTIMATE-OPTIONEN",
+    "IMPOSTAZIONI ULTIMATE", "AJUSTES ULTIMATE",
+    "\xD0\x9D\xD0\x90\xD0\xA1\xD0\xA2\xD0\xA0\xD0\x9E\xD0\x99\xD0\x9A\xD0\x98 ULTIMATE"};
 
 // The ULTIMATE SETTINGS submenu: HUD Information's frame (FramePracticeMenu01-09-04)
 // with its header, its first rows' labels and their descriptions (the
 // focused row's, and the value's, one for either value; each within the
-// space of the text it replaces).
+// space of the text it replaces, in each language).
 constexpr TextPatch kSubmenuTexts[] = {
-    {"practice_1039", "ULTIMATE SETTINGS"},
-    {"practice_669", "FRAME DATA"},
-    {"practice_824", "Show or hide the frame data panels."},
-    {"practice_825", "Show the frame data."},
-    {"practice_826", "Show the frame data."},
-    {"practice_670", "1P PANEL"},
-    {"practice_827", "Show or hide the 1P panel."},
-    {"practice_828", "Show the 1P panel."},
-    {"practice_829", "Show the 1P panel."},
-    {"practice_674", "2P PANEL"},
-    {"practice_830", "Show or hide the 2P panel."},
-    {"practice_831", "Show the 2P panel."},
-    {"practice_832", "Show the 2P panel."},
-    {"practice_675", "ADV. COLORS"},
-    {"practice_833", "Color the fighters by frame advantage."},
-    {"practice_834", "Blue: plus, red: minus"},
-    {"practice_835", "Blue: plus, red: minus"},
-    {"practice_676", "HITBOXES"},
-    {"practice_836", "Show hitboxes and hurtboxes in 3D."},
-    {"practice_837", "Red: attacks and hits"},
-    {"practice_838", "Red: attacks and hits"},
-    {"practice_677", "TOP CAMERA"},
-    {"practice_839", "Show the fight from above too."},
-    {"practice_840", "Window from above"},
-    {"practice_841", "Window from above"},
-    {"practice_678", "SLOW MOTION"},
-    {"practice_842", "Slow the fighters down to learn moves."},
-    {"practice_843", "Half or quarter speed"},
-    {"practice_844", "Half or quarter speed"},
+    {"practice_1039", {"ULTIMATE SETTINGS", "R\xC3\x89GLAGES ULTIMATE", "ULTIMATE-OPTIONEN", "IMPOSTAZIONI ULTIMATE",
+                       "AJUSTES ULTIMATE", "\xD0\x9D\xD0\x90\xD0\xA1\xD0\xA2\xD0\xA0\xD0\x9E\xD0\x99\xD0\x9A\xD0\x98"}},
+    {"practice_669", {"FRAME DATA", "DONN\xC3\x89" "ES DE FRAMES", "FRAME-DATEN", "DATI FRAME", "DATOS DE FRAMES",
+                      "\xD0\xA4\xD0\xA0\xD0\x95\xD0\x99\xD0\x9C\xD0\x94\xD0\x90\xD0\xA2\xD0\x90"}},
+    {"practice_824", {"Show or hide the frame data panels.", "Afficher/Masquer les donn\xC3\xA9" "es.",
+                      "Frame-Daten ein-/ausblenden.", "Visualizza/Nascondi i dati frame.",
+                      "Ocultar/mostrar datos de frames.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD0\xB0\xD1\x82\xD1\x8C \xD0\xB8\xD0\xBB\xD0\xB8 \xD1\x81\xD0\xBA\xD1\x80\xD1\x8B\xD1\x82\xD1\x8C \xD0\xBF\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD0\xB8 \xD1\x84\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB4\xD0\xB0\xD1\x82\xD1\x8B."}},
+    {"practice_825", {"Show the frame data.", "Afficher les donn\xC3\xA9" "es de frames.", "Frame-Daten einblenden.",
+                      "Visualizza i dati frame.", "Mostrar datos de frames.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD0\xB0\xD1\x82\xD1\x8C \xD1\x84\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB4\xD0\xB0\xD1\x82\xD1\x83."}},
+    {"practice_826", {"Show the frame data.", "Afficher les donn\xC3\xA9" "es de frames.", "Frame-Daten einblenden.",
+                      "Visualizza i dati frame.", "Mostrar datos de frames.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD0\xB0\xD1\x82\xD1\x8C \xD1\x84\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB4\xD0\xB0\xD1\x82\xD1\x83."}},
+    {"practice_670", {"1P PANEL", "PANNEAU 1P", "1P-ANZEIGE", "PANNELLO 1P", "PANEL 1P",
+                      "\xD0\x9F\xD0\x90\xD0\x9D\xD0\x95\xD0\x9B\xD0\xAC \xD0\x98" "1"}},
+    {"practice_827", {"Show or hide the 1P panel.", "Afficher ou non le panneau 1P.", "1P-Anzeige ein-/ausblenden.",
+                      "Visualizza/Nascondi il pannello 1P.", "Ocultar/mostrar el panel 1P.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7 \xD0\xBF\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD0\xB8 \xD0\x98" "1."}},
+    {"practice_828", {"Show the 1P panel.", "Voir le panneau 1P.", "1P-Anzeige einblenden.",
+                      "Visualizza il pannello 1P.", "Ver panel 1P.",
+                      "\xD0\x9F\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C \xD0\x98" "1."}},
+    {"practice_829", {"Show the 1P panel.", "Voir le panneau 1P.", "1P-Anzeige einblenden.",
+                      "Visualizza il pannello 1P.", "Ver panel 1P.",
+                      "\xD0\x9F\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C \xD0\x98" "1."}},
+    {"practice_674", {"2P PANEL", "PANNEAU 2P", "2P-ANZEIGE", "PANNELLO 2P", "PANEL 2P",
+                      "\xD0\x9F\xD0\x90\xD0\x9D\xD0\x95\xD0\x9B\xD0\xAC \xD0\x98" "2"}},
+    {"practice_830", {"Show or hide the 2P panel.", "Afficher ou non le panneau 2P.", "2P-Anzeige ein-/ausblenden.",
+                      "Visualizza/Nascondi il pannello 2P.", "Ocultar/mostrar el panel 2P.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7 \xD0\xBF\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD0\xB8 \xD0\x98" "2."}},
+    {"practice_831", {"Show the 2P panel.", "Voir le panneau 2P.", "2P-Anzeige einblenden.",
+                      "Visualizza il pannello 2P.", "Ver panel 2P.",
+                      "\xD0\x9F\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C \xD0\x98" "2."}},
+    {"practice_832", {"Show the 2P panel.", "Voir le panneau 2P.", "2P-Anzeige einblenden.",
+                      "Visualizza il pannello 2P.", "Ver panel 2P.",
+                      "\xD0\x9F\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C \xD0\x98" "2."}},
+    {"practice_675", {"ADV. COLORS", "COULEURS D'AVANTAGE", "VORTEILSFARBEN", "COLORI VANT.", "COLORES DE VENTAJA",
+                      "\xD0\xA6\xD0\x92\xD0\x95\xD0\xA2 +/-"}},
+    {"practice_833", {"Color the fighters by frame advantage.", "Colorer selon l'avantage.",
+                      "Nach Frame-Vorteil f\xC3\xA4rben.", "Colora i personaggi in base al vantaggio.",
+                      "Colorear seg\xC3\xBAn la ventaja de frames.",
+                      "\xD0\x9E\xD0\xBA\xD1\x80\xD0\xB0\xD1\x81\xD0\xBA\xD0\xB0 \xD0\xBF\xD0\xBE "
+                      "\xD1\x84\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB0\xD0\xBC."}},
+    {"practice_834", {"Blue: plus, red: minus", "Bleu : plus, rouge : moins", "Blau: Plus, Rot: Minus",
+                      "Blu: vantaggio, rosso: svantaggio", "Azul: +, rojo: -",
+                      "\xD0\xA1\xD0\xB8\xD0\xBD\xD0\xB8\xD0\xB9: +, \xD0\xBA\xD1\x80\xD0\xB0\xD1\x81\xD0\xBD\xD1\x8B\xD0\xB9: -"}},
+    {"practice_835", {"Blue: plus, red: minus", "Bleu : plus, rouge : moins", "Blau: Plus, Rot: Minus",
+                      "Blu: vantaggio, rosso: svantaggio", "Azul: +, rojo: -",
+                      "\xD0\xA1\xD0\xB8\xD0\xBD\xD0\xB8\xD0\xB9: +, \xD0\xBA\xD1\x80\xD0\xB0\xD1\x81\xD0\xBD\xD1\x8B\xD0\xB9: -"}},
+    {"practice_676", {"HITBOXES", "HITBOXES", "HITBOXEN", "HITBOX", "HITBOXES",
+                      "\xD0\xA5\xD0\x98\xD0\xA2\xD0\x91\xD0\x9E\xD0\x9A\xD0\xA1\xD0\xAB"}},
+    {"practice_836", {"Show hitboxes and hurtboxes in 3D.", "Afficher hitbox et hurtbox en 3D.",
+                      "Hit- und Hurtboxen in 3D zeigen.", "Visualizza hitbox e hurtbox in 3D.",
+                      "Mostrar hitboxes y hurtboxes en 3D.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD0\xB0\xD1\x82\xD1\x8C \xD1\x85\xD0\xB8\xD1\x82\xD0\xB1\xD0\xBE\xD0\xBA\xD1\x81\xD1\x8B \xD0\xB2 3D."}},
+    {"practice_837", {"Red: attacks and hits", "Rouge : attaques et impacts", "Rot: Angriffe, Treffer",
+                      "Rosso: attacchi e colpi subiti", "Rojo: ataques y golpes",
+                      "\xD0\x9A\xD1\x80\xD0\xB0\xD1\x81\xD0\xBD\xD1\x8B\xD0\xB9: \xD0\xB0\xD1\x82\xD0\xB0\xD0\xBA\xD0\xB8, \xD0\xBF\xD0\xBE\xD0\xBF\xD0\xB0\xD0\xB4\xD0\xB0\xD0\xBD\xD0\xB8\xD1\x8F"}},
+    {"practice_838", {"Red: attacks and hits", "Rouge : attaques et impacts", "Rot: Angriffe, Treffer",
+                      "Rosso: attacchi e colpi subiti", "Rojo: ataques y golpes",
+                      "\xD0\x9A\xD1\x80\xD0\xB0\xD1\x81\xD0\xBD\xD1\x8B\xD0\xB9: \xD0\xB0\xD1\x82\xD0\xB0\xD0\xBA\xD0\xB8, \xD0\xBF\xD0\xBE\xD0\xBF\xD0\xB0\xD0\xB4\xD0\xB0\xD0\xBD\xD0\xB8\xD1\x8F"}},
+    {"practice_677", {"TOP CAMERA", "VUE DE DESSUS", "DRAUFSICHT", "DALL'ALTO", "C\xC3\x81MARA CENITAL",
+                      "\xD0\x92\xD0\x98\xD0\x94 \xD0\xA1\xD0\x92\xD0\x95\xD0\xA0\xD0\xA5\xD0\xA3"}},
+    {"practice_839", {"Show the fight from above too.", "Voir aussi le combat vu de dessus.",
+                      "Den Kampf auch von oben zeigen.", "Visualizza anche lo scontro dall'alto.",
+                      "Ver tambi\xC3\xA9n el combate desde arriba.",
+                      "\xD0\x9F\xD0\xBE\xD0\xBA\xD0\xB0\xD0\xB7\xD0\xB0\xD1\x82\xD1\x8C \xD0\xB1\xD0\xBE\xD0\xB9 \xD0\xB5\xD1\x89\xD0\xB5 \xD0\xB8 \xD1\x81\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83."}},
+    {"practice_840", {"Window from above", "Fen\xC3\xAAtre vue de dessus", "Fenster mit Draufsicht",
+                      "Finestra con vista dall'alto", "Ventana con vista cenital",
+                      "\xD0\x9E\xD0\xBA\xD0\xBD\xD0\xBE \xD1\x81 \xD0\xB2\xD0\xB8\xD0\xB4\xD0\xBE\xD0\xBC \xD1\x81\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83"}},
+    {"practice_841", {"Window from above", "Fen\xC3\xAAtre vue de dessus", "Fenster mit Draufsicht",
+                      "Finestra con vista dall'alto", "Ventana con vista cenital",
+                      "\xD0\x9E\xD0\xBA\xD0\xBD\xD0\xBE \xD1\x81 \xD0\xB2\xD0\xB8\xD0\xB4\xD0\xBE\xD0\xBC \xD1\x81\xD0\xB2\xD0\xB5\xD1\x80\xD1\x85\xD1\x83"}},
+    {"practice_678", {"SLOW MOTION", "RALENTI", "ZEITLUPE", "RALLENTATORE", "C\xC3\x81MARA LENTA",
+                      "\xD0\xA1\xD0\x9A\xD0\x9E\xD0\xA0\xD0\x9E\xD0\xA1\xD0\xA2\xD0\xAC"}},
+    {"practice_842", {"Slow the fighters down to learn moves.", "Ralentir le combat pour apprendre les coups.",
+                      "K\xC3\xA4mpfer verlangsamen, um Techniken zu lernen.",
+                      "Rallenta i personaggi per imparare le mosse.",
+                      "Ralentizar el combate para aprender movimientos.",
+                      "\xD0\x97\xD0\xB0\xD0\xBC\xD0\xB5\xD0\xB4\xD0\xBB\xD0\xB8\xD1\x82\xD1\x8C "
+                      "\xD0\xB1\xD0\xBE\xD0\xB9."}},
+    {"practice_843", {"Half or quarter speed", "Demi-vitesse ou quart de vitesse", "Halbe oder Viertelgeschwindigkeit",
+                      "Velocit\xC3\xA0 dimezzata o a un quarto", "Mitad o cuarto de velocidad",
+                      "\xD0\xA1\xD0\xBA\xD0\xBE\xD1\x80\xD0\xBE\xD1\x81\xD1\x82\xD1\x8C 1/2 \xD0\xB8\xD0\xBB\xD0\xB8 1/4"}},
+    {"practice_844", {"Half or quarter speed", "Demi-vitesse ou quart de vitesse", "Halbe oder Viertelgeschwindigkeit",
+                      "Velocit\xC3\xA0 dimezzata o a un quarto", "Mitad o cuarto de velocidad",
+                      "\xD0\xA1\xD0\xBA\xD0\xBE\xD1\x80\xD0\xBE\xD1\x81\xD1\x82\xD1\x8C 1/2 \xD0\xB8\xD0\xBB\xD0\xB8 1/4"}},
 };
 
 // HUD Information's rows show the practice settings' HUD words (1 on, from
@@ -370,11 +446,15 @@ void entry_styles(uint8_t* base, uint32_t value, uint32_t styles[2], bool write)
 // bytes, else at the pointer at +20; its length at +24, room at +28), read
 // through sub_045590E0. OFF is the row's own green OFF (its default, once
 // it has the looks of a row whose default is OFF); 1/2 and 1/4 are its
-// yellow ON's text with the word changed.
+// yellow ON's text with the word changed (the word in each language: the
+// game's own, kOnWords).
 constexpr uint32_t kValueEntriesEnd = 352, kValueEntriesCapacity = 356;
 constexpr uint32_t kEntryHeapText = 20, kEntryTextLength = 24, kEntryTextRoom = 28, kEntryTextKind = 32, kEntryTextId = 36;
 constexpr uint32_t kSlowTextRoom = 128;
 constexpr const char* kSlowSpeeds[] = {" 1/2 ", " 1/4 "};
+constexpr std::string_view kOnWords[] = {" ON ",          " OUI ",         " EIN ",
+                                         " S\xC3\x8C ", " S\xC3\x8D ", " \xD0\x92\xD0\x9A\xD0\x9B ",
+                                         " \xD0\x92\xD0\x9A\xD0\x9B. "}; // (Russian's own ON, with a stop)
 
 struct OwnEntries {
     bool swapped = false;
@@ -391,14 +471,21 @@ void slow_motion_entries(PPCContext& ctx, uint8_t* base, size_t row) {
     const uint32_t on = call(ctx, base, sub_045590E0, {begin});
     if (!on || !guest_memory_committed(on, kSlowTextRoom)) return;
     const std::string on_text(reinterpret_cast<const char*>(base + on), strnlen(reinterpret_cast<const char*>(base + on), kSlowTextRoom));
-    const size_t word = on_text.find(" ON ");
+    size_t word = std::string::npos, word_size = 0;
+    for (const std::string_view w : kOnWords) {
+        if (const size_t at = on_text.find(w); at != std::string::npos) {
+            word = at;
+            word_size = w.size();
+            break;
+        }
+    }
     if (word == std::string::npos) return;
     static const uint32_t entries = system_alloc(3 * kEntrySize);
     static const uint32_t texts = system_alloc(2 * kSlowTextRoom);
     std::memcpy(guest_pointer(entries), guest_pointer(begin + kEntrySize), kEntrySize); // OFF
     for (uint32_t e = 0; e < 2; ++e) {
         const uint32_t at = entries + (e + 1) * kEntrySize, text = texts + e * kSlowTextRoom;
-        const std::string t = on_text.substr(0, word) + kSlowSpeeds[e] + on_text.substr(word + 4);
+        const std::string t = on_text.substr(0, word) + kSlowSpeeds[e] + on_text.substr(word + word_size);
         if (t.size() + 1 > kSlowTextRoom) return;
         std::memcpy(guest_pointer(at), guest_pointer(begin), kEntrySize);
         std::memcpy(guest_pointer(text), t.c_str(), t.size() + 1);
@@ -512,15 +599,16 @@ struct MenuNames {
 const MenuNames& names() {
     static const MenuNames n = [] {
         MenuNames m{};
-        const auto put = [](const char* text) {
-            const uint32_t at = system_alloc(static_cast<uint32_t>(std::strlen(text)) + 1);
-            std::memcpy(guest_pointer(at), text, std::strlen(text) + 1);
+        const auto put = [](std::string_view text) {
+            const uint32_t at = system_alloc(static_cast<uint32_t>(text.size()) + 1);
+            std::memcpy(guest_pointer(at), text.data(), text.size());
+            guest_pointer(at)[text.size()] = 0;
             return at;
         };
         m.hud_frame = put("FramePracticeMenu01-09-04");
         m.menu_frame = put("FramePracticeMenu01");
         m.row = put("MenuItemPracticeMenu01-13"); // TOUCH SELECT's
-        m.row_label = put(kRowLabel);
+        m.row_label = put(title::language::in_current(kRowLabel));
         for (uint32_t i = 0; i < kHudRows; ++i) {
             char name[40];
             std::snprintf(name, sizeof(name), "MenuItemPracticeMenu01-09-04-%02u", i + 1);

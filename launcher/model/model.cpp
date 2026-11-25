@@ -6,6 +6,8 @@
 #include "json.h"
 #include "rules.h"
 
+#include "host/game_settings.h"
+
 #include <algorithm>
 
 namespace launcher::model {
@@ -1026,8 +1028,21 @@ std::vector<Effect> LauncherModel::request_close(double now) {
 
 std::vector<Effect> LauncherModel::choose(const std::string& id, int index, double now) {
     (void)now;
+    said_.clear(); // (as activate: what is said is about this choice)
     if (id == "resolution") {
         if (!display_.set(id, index)) said_ = display_.error();
+    } else if (id == "language") {
+        // (Only while Settings > Game has the row to use: not before the install on Linux, nor while Windows' data
+        // folder is misnamed.)
+        const SettingsView v = settings_view(facts_, settings_input());
+        const auto row =
+            std::find_if(v.game.begin(), v.game.end(), [](const SettingRow& r) { return r.control.id == "language"; });
+        if (row == v.game.end() || !row->control.enabled)
+            said_ = row == v.game.end() ? "no language to choose" : row->control.why;
+        else if (index < 0 || static_cast<size_t>(index) >= std::size(cafe::host::game::kLanguages))
+            said_ = "no language " + std::to_string(index);
+        else if (!game_.set_language(cafe::host::game::kLanguages[index].code))
+            said_ = game_.error();
     } else if (id == "text-size" && index >= 0 && static_cast<size_t>(index) < std::size(kTextSizes)) {
         launcher_.text_size = kTextSizes[index];
     } else if (id == "prompts" && index >= 0 && static_cast<size_t>(index) < std::size(kPrompts)) {
@@ -1285,6 +1300,10 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
                         : id == "async-shaders" ? s.async_shaders
                                                 : s.precompile_shaders;
         if (!display_.set(id, !on)) said_ = display_.error();
+    } else if (id == "language") {
+        const cafe::host::game::Language* now_shown = cafe::host::game::find_language(game_.language());
+        const int at = now_shown ? static_cast<int>(now_shown - std::begin(cafe::host::game::kLanguages)) : 0;
+        return choose(id, (at + 1) % static_cast<int>(std::size(cafe::host::game::kLanguages)), now);
     } else if (id == "resolution") {
         const auto& all = display::kResolutions;
         const int at = static_cast<int>(std::find(std::begin(all), std::end(all), display_.settings().resolution) -

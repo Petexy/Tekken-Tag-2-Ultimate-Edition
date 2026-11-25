@@ -107,6 +107,7 @@ add_library(cafe_title STATIC
     src/title/draw.cpp
     src/title/font.cpp
     src/title/image.cpp
+    src/title/language.cpp
     src/title/menudata.cpp
     src/title/pictures.cpp
     src/title/text.cpp

@@ -270,8 +270,8 @@ three screens: **Home** (Play, or UPDATE while the launcher, the game program or
 an added fighter can be updated), **Fighters** (the characters as the shared
 importer finds them: Tekken 7, Tekken 8 and Steam; Add, Update and Remove per
 fighter, Add All, the DLC with what Steam says you own) and **Settings**
-(the name the game shows for you, fullscreen, resolution, 120 fps, input delay, shaders, and the keyboard's keys
-chosen by pressing them, as the Linux launcher writes keyboard.ini). A task shows
+(the name the game shows for you, the language of its texts, fullscreen, resolution, 120 fps, input delay, shaders,
+and the keyboard's keys chosen by pressing them, as the Linux launcher writes keyboard.ini). A task shows
 its progress and Cancel at the bottom of the window, an update on Home. Windows'
 own parts stay: Set Up, **More** on Home (Build / Rebuild, Install from Wii U
 Source, Update Installed Game, Set Up Again…, the logs) and **Folders** in
@@ -318,7 +318,8 @@ to `~/.cache/ttt2/game.log` (of its last start); when it stops with an error,
 its last lines are shown on Home: attach that file to a report.
 **Settings** has
 the name the game shows for you in place of Player (typed on the keyboard, or with a controller on keys the
-launcher shows), whether the game starts fullscreen, the resolution it draws at, its 120
+launcher shows), the language the game shows its texts and menus in (English, French, German, Italian, Spanish or
+Russian: those the European Wii U game has), whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
 its keyboard keys ([Playing](#playing)), and the launcher's own sounds, motion, button prompts and text size.
@@ -574,12 +575,13 @@ otherwise smaller (the picture is scaled to the window or the screen).
 Uninstalling keeps it, as it keeps `keyboard.ini`. The environment
 variables below win over it.
 
-The name the game shows for you, in place of its own (Player in English), is
-kept beside it in `game.ini`, which the launcher's **Settings** > **Game**
-write; by hand:
+The name the game shows for you, in place of its own (Player in English),
+and the language of the game's texts and menus are kept beside it in
+`game.ini`, which the launcher's **Settings** > **Game** write; by hand:
 
 ```ini
 player_name = Mira Q        # up to 16 characters; empty or missing: the game's own name
+language = fr               # en, fr, de, it, es or ru (any case); empty, missing or another: English
 ```
 
 The game reads it when it starts too. A character it cannot show (anything

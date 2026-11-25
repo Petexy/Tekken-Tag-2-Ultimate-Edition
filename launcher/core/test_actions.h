@@ -34,9 +34,11 @@
 // 5120x2880>, interpolation:yes|no, input-delay:yes|no, async-shaders:yes|no and precompile-shaders:yes|no (that display.ini
 // setting's switch or list set, which saves the file, then the file read
 // back), player-name:<name> (Settings > Game's player name set, "player-name:"
-// none, which saves game.ini, then the file read back) and type:<text> (the
-// SDL launcher: text as the keyboard's text input gives it, to the name being
-// edited).
+// none, which saves game.ini, then the file read back), language:<code>
+// (Settings > Game's Language set to that one of the game's languages, en, fr,
+// ... in any case, which saves game.ini, then the file read back) and
+// type:<text> (the SDL launcher: text as the keyboard's text input gives it,
+// to the name being edited).
 
 #include <optional>
 #include <string>
@@ -51,7 +53,7 @@ struct TestAction {
                                    // wait: the seconds; focus, toggle: the widget's id; bind: the input, the keycode;
                                    // fullscreen, interpolation, input-delay, async-shaders, precompile-shaders: yes/no;
                                    // resolution: as
-                                   // display.ini names it
+                                   // display.ini names it; language: the code, as the game's list has it
     std::string text;              // as given
 
     // For the picture's file name: the name and short arguments
