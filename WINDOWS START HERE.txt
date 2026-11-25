@@ -1,7 +1,7 @@
-TTT2 ULTIMATE - WINDOWS SETUP
+GOLDEN FIST LAUNCHER - WINDOWS SETUP
 
 1. Extract the whole project ZIP into a writable folder (a short path is best).
-2. Double-click "Start Ultimate Launcher.cmd".
+2. Double-click "Start Golden Fist Launcher.cmd".
 3. In the launcher, click "Set Up Game".
 4. Select your own European Wii U TTT2 .wua with update v16, then an install folder.
 5. Leave setup running. When it finishes, click "Play".
@@ -16,6 +16,6 @@ For extra fighters: open Steam, close Tekken 7/8, select fighters in the launche
 and click "Import / Update selected". You need your own installed source games;
 Reina comes from Tekken 8. An old pack can still work when an update is offered.
 
-On later starts use the same "Start Ultimate Launcher.cmd". Ready tools are reused.
+On later starts use the same "Start Golden Fist Launcher.cmd". Ready tools are reused.
 The game files, saves and fighter packs are never included in the project ZIP.
 Use the launcher's "Open logs folder" button if setup reports an error.

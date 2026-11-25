@@ -20,6 +20,7 @@ inline constexpr const char* kTekken8 = "tekken8";
 struct Fighter {
     std::string name;            // the importer's name: "kazumi"
     std::string display;         // "Kazumi Mishima"
+    std::string code;            // their pack's code ("kzm"; empty from an importer before 0.9)
     std::string game = kTekken7; // the game they come from
     int64_t dlc = 0;             // the Steam app id of their game's DLC that has them, 0 for the game's own
     bool installed = false; // their pack is there

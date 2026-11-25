@@ -1,0 +1,4 @@
+@test add:kazumi started
+@test add:kazumi ok Added Kazumi Mishima
+@test quit started
+@test quit ok

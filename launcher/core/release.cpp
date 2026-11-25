@@ -1,11 +1,9 @@
 // The launcher's own updates (see release.h).
 
 #include "release.h"
+#include "utf8_path.h"
 
 #include "json.h"
-
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -125,44 +123,24 @@ ReleaseAnswer parse_release(std::string_view text) {
     return answer;
 }
 
-std::optional<fs::path> running_appimage(const fs::path& program, const char* appimage, const char* appdir) {
-    if (!appimage || !*appimage || !appdir || !*appdir || program.empty()) return std::nullopt;
-    const fs::path file = appimage;
-    std::error_code ec;
-    if (!file.is_absolute() || !fs::is_regular_file(file, ec) || !inside(program, appdir)) return std::nullopt;
-    return normal(file);
-}
-
-std::string cannot_replace(const fs::path& appimage) {
-    const fs::path folder = appimage.parent_path();
-    if (::access(folder.c_str(), W_OK | X_OK) != 0) return std::strerror(errno);
-    return {};
-}
-
-std::optional<Downloader> find_downloader() {
-    if (const auto curl = find_in_path("curl")) return Downloader{*curl, true};
-    if (const auto wget = find_in_path("wget")) return Downloader{*wget, false};
-    return std::nullopt;
-}
-
 std::vector<std::string> download_command(const Downloader& d, const std::string& url, bool api, const fs::path& file,
                                           const std::string& user_agent) {
     static const char* const kAccept = "Accept: application/vnd.github+json";
     static const char* const kApiVersion = "X-GitHub-Api-Version: 2022-11-28";
-    std::vector<std::string> argv = {d.program.string()};
+    std::vector<std::string> argv = {path_utf8(d.program)};
     if (d.curl) {
         // (Without -f for the API: its error answers say why. A download
         // that stalls for a minute stops.)
         argv.insert(argv.end(), {"-sS", "-L", "--connect-timeout", "20", "-A", user_agent});
         if (api) argv.insert(argv.end(), {"--max-time", "60", "-H", kAccept, "-H", kApiVersion});
-        else argv.insert(argv.end(), {"-f", "--speed-limit", "1", "--speed-time", "60", "-o", file.string()});
+        else argv.insert(argv.end(), {"-f", "--speed-limit", "1", "--speed-time", "60", "-o", path_utf8(file)});
     } else {
         argv.insert(argv.end(), {"-nv", "--timeout=60", "-U", user_agent});
         if (api) {
             argv.insert(argv.end(), {"--tries=2", "--content-on-error", std::string("--header=") + kAccept,
                                      std::string("--header=") + kApiVersion, "-O", "-"});
         } else {
-            argv.insert(argv.end(), {"--tries=3", "-O", file.string()});
+            argv.insert(argv.end(), {"--tries=3", "-O", path_utf8(file)});
         }
     }
     argv.push_back(url);
@@ -170,7 +148,25 @@ std::vector<std::string> download_command(const Downloader& d, const std::string
 }
 
 fs::path update_file(const fs::path& appimage) {
-    return appimage.parent_path() / ("." + appimage.filename().string() + ".update");
+    return appimage.parent_path() / utf8_path("." + path_utf8(appimage.filename()) + ".update");
+}
+
+fs::path previous_file(const fs::path& appimage) {
+    return appimage.parent_path() / utf8_path("." + path_utf8(appimage.filename()) + ".previous");
+}
+
+std::vector<std::string> open_with_rollback(const fs::path& appimage, const std::string& version) {
+    // ($1 the AppImage, $2 its previous one, $3 the version opened. 128 + N: ended by signal N.)
+    static const char* const script =
+        "\"$1\"; c=$?\n"
+        "if [ \"$c\" -gt 128 ] && [ -e \"$2\" ] && mv -f \"$2\" \"$1\"; then\n"
+        "  echo \"ttt2-launcher: version $3 ended (code $c) before its first frame: the version before is back\" >&2\n"
+        "  unset TTT2_LAUNCHER_CONTINUE\n" // (the update stops there: never again by itself)
+        "  TTT2_LAUNCHER_ROLLED_BACK=\"$3\" exec \"$1\"\n"
+        "fi\n"
+        "exit \"$c\"\n";
+    return {"/bin/sh", "-c", script, "ttt2-launcher-update", path_utf8(appimage), path_utf8(previous_file(appimage)),
+            version};
 }
 
 bool is_appimage(const fs::path& file) {
@@ -191,30 +187,6 @@ std::string version_in(std::string_view output) {
         output.remove_prefix(std::min(end + 1, output.size()));
     }
     return {};
-}
-
-std::string make_executable(const fs::path& update, const fs::path& appimage) {
-    struct stat old = {};
-    const mode_t mode = ::stat(appimage.c_str(), &old) == 0 ? (old.st_mode & 07777) : 0755;
-    if (::chmod(update.c_str(), mode | S_IRUSR | S_IWUSR | S_IXUSR) != 0) return std::strerror(errno);
-    return {};
-}
-
-std::string replace_appimage(const fs::path& update, const fs::path& appimage) {
-    if (::rename(update.c_str(), appimage.c_str()) != 0) return std::strerror(errno);
-    return {};
-}
-
-bool process_alive(int pid) {
-    if (pid <= 0) return false;
-    std::ifstream in("/proc/" + std::to_string(pid) + "/stat");
-    std::string stat;
-    if (!std::getline(in, stat)) return false;
-    // "<pid> (<name>) <state> ...": the name may hold anything, ')' too.
-    const size_t close = stat.rfind(')');
-    if (close == std::string::npos || close + 2 >= stat.size()) return false;
-    const char state = stat[close + 2];
-    return state != 'Z' && state != 'X' && state != 'x';
 }
 
 } // namespace launcher

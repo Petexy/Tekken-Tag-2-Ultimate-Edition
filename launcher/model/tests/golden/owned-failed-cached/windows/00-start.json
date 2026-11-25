@@ -1,0 +1,72 @@
+{
+  "header": [
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Check again", "cls": "flat", "s": true}
+  ],
+  "notice": [
+  ],
+  "game": [
+    {"k": "label", "t": "Game", "tone": "heading"},
+    {"k": "label", "t": "Tekken Tag Tournament 2", "tone": "heading"},
+    {"k": "pill", "t": "Installed", "pill": "ok"},
+    {"k": "label", "t": "/home/player/Games/Tekken Tag Tournament 2", "tone": "dim"},
+    {"k": "button", "t": "Play", "icon": "yes", "cls": "primary", "s": true},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Settings", "s": true},
+    {"k": "button", "t": "More", "tip": "Build, install and the logs", "s": true},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Open the game's folder", "s": true}
+  ],
+  "characters": [
+    {"k": "label", "t": "Tekken 7", "tone": "dim"},
+    {"k": "label", "t": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 7", "tone": "dim"},
+    {"k": "label", "t": "Tekken 8", "tone": "dim"},
+    {"k": "label", "t": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 8", "tone": "dim"},
+    {"k": "label", "t": "Steam", "tone": "dim"},
+    {"k": "label", "t": "Running", "tone": "ok"},
+    {"k": "check", "t": "Import outfits for every character", "tip": "Outfits are complete bodies for the in-game costume chooser. Without them, a character has their default costume.", "on": false, "s": true},
+    {"k": "button", "t": "Add All", "s": true},
+    {"k": "label", "t": "Tekken 7's characters", "tone": "heading"},
+    {"k": "label", "t": "They join the roster beside the game's own fighters. Each takes a few minutes; the first time, Tekken 7 runs hidden in the background to save their moves.", "tone": "dim"},
+    {"k": "label", "t": "Josie Rizal was made by an older version: update them to get what this one adds."},
+    {"k": "button", "t": "Update", "s": true},
+    {"k": "label", "t": "Kazumi Mishima"},
+    {"k": "check", "t": "Outfits", "tip": "Also make their 4 outfits for the costume chooser: adding them takes much longer", "on": false, "s": true},
+    {"k": "button", "t": "Add", "s": true},
+    {"k": "label", "t": "Lucky Chloe"},
+    {"k": "check", "t": "Outfits", "tip": "Their pack has their outfits: untick, then Update, to remove them", "on": true, "s": true},
+    {"k": "button", "t": "Remove", "cls": "flat", "s": true},
+    {"k": "pill", "t": "Added", "pill": "ok"},
+    {"k": "label", "t": "Josie Rizal"},
+    {"k": "button", "t": "Remove", "cls": "flat", "s": true},
+    {"k": "button", "t": "Update", "s": true},
+    {"k": "pill", "t": "Update ready", "pill": "warn", "tip": "Made by an older version: they are in the game, and updating them gives them what this version adds."},
+    {"k": "label", "t": "Shaheen"},
+    {"k": "button", "t": "Add", "s": true},
+    {"k": "button", "t": "DLC characters", "icon": "yes", "cls": "flat", "s": true},
+    {"k": "button", "t": "Add All Owned", "s": true},
+    {"k": "label", "t": "Steam could not tell which you own (Steam did not answer): adding one asks it again.", "tone": "dim"},
+    {"k": "label", "t": "Geese Howard"},
+    {"k": "check", "t": "Outfits", "tip": "Also make their 2 outfits for the costume chooser: adding them takes much longer", "on": false, "s": true},
+    {"k": "button", "t": "Add", "s": true},
+    {"k": "label", "t": "Noctis Lucis Caelum"},
+    {"k": "button", "t": "Remove", "cls": "flat", "s": true},
+    {"k": "pill", "t": "Added", "pill": "ok"},
+    {"k": "label", "t": "Fahkumram"},
+    {"k": "button", "t": "Add", "s": true},
+    {"k": "button", "t": "Add All", "s": true},
+    {"k": "label", "t": "Tekken 8's characters", "tone": "heading"},
+    {"k": "label", "t": "They join the roster beside the game's own fighters. Each takes a few minutes; the first time, Tekken 8 runs hidden in the background to save their moves.", "tone": "dim"},
+    {"k": "label", "t": "Reina"},
+    {"k": "button", "t": "Remove", "cls": "flat", "s": true},
+    {"k": "pill", "t": "Added", "pill": "ok"},
+    {"k": "label", "t": "Azucena"},
+    {"k": "button", "t": "Add", "s": true},
+    {"k": "label", "t": "Victor Chevalier"},
+    {"k": "button", "t": "Add", "s": true}
+  ],
+  "settings": [
+  ],
+  "task": [
+  ],
+  "dialog": [
+  ]
+}

@@ -1,0 +1,4 @@
+@test add:josie started
+@test add:josie ok Updated Josie Rizal
+@test quit started
+@test quit ok

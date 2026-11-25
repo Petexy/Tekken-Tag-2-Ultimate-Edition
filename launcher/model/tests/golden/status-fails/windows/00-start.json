@@ -1,0 +1,27 @@
+{
+  "header": [
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Check again", "cls": "flat", "s": true}
+  ],
+  "notice": [
+  ],
+  "game": [
+    {"k": "label", "t": "Game", "tone": "heading"},
+    {"k": "label", "t": "Tekken Tag Tournament 2", "tone": "heading"},
+    {"k": "pill", "t": "Installed", "pill": "ok"},
+    {"k": "label", "t": "/home/player/Games/Tekken Tag Tournament 2", "tone": "dim"},
+    {"k": "button", "t": "Play", "icon": "yes", "cls": "primary", "s": true},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Settings", "s": true},
+    {"k": "button", "t": "More", "tip": "Build, install and the logs", "s": true},
+    {"k": "button", "t": "", "icon": "yes", "tip": "Open the game's folder", "s": true}
+  ],
+  "characters": [
+    {"k": "label", "t": "The importer cannot tell what this PC has: RuntimeError: the importer broke"}
+  ],
+  "settings": [
+  ],
+  "task": [
+  ],
+  "dialog": [
+  ]
+}

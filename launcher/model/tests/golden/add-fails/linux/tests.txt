@@ -1,0 +1,4 @@
+@test add:kazumi started
+@test add:kazumi failed Adding Kazumi Mishima failed: The pack could not be written
+@test quit started
+@test quit ok

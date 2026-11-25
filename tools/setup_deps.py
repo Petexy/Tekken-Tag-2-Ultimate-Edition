@@ -64,9 +64,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("names", nargs="*", help="Default: all of dependencies.lock.json")
     parser.add_argument("--windows", action="store_true", help="Include native Windows build dependencies")
+    parser.add_argument("--launcher", action="store_true",
+                        help="Include the launcher's own (SDL 3's source, built into its release programs); "
+                             "a player's game setup does not need them")
     args = parser.parse_args()
-    if args.windows:
-        dependencies.update(json.loads((ROOT / "dependencies.windows.lock.json").read_text()))
+    for wanted, lock in ((args.windows, "dependencies.windows.lock.json"),
+                         (args.launcher, "dependencies.launcher.lock.json")):
+        if wanted:
+            dependencies.update(json.loads((ROOT / lock).read_text()))
     selected = args.names or list(dependencies)
     for name in selected:
         if name not in dependencies:

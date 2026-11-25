@@ -1,0 +1,20 @@
+@test settings started
+@test settings ok Settings
+@test fullscreen:yes started
+@test fullscreen:yes ok display.ini: fullscreen yes, resolution auto, interpolation yes, input delay no, shaders in the background no, shaders prepared no
+@test resolution:1920x1080 started
+@test resolution:1920x1080 ok display.ini: fullscreen yes, resolution 1920x1080, interpolation yes, input delay no, shaders in the background no, shaders prepared no
+@test interpolation:no started
+@test interpolation:no ok display.ini: fullscreen yes, resolution 1920x1080, interpolation no, input delay no, shaders in the background no, shaders prepared no
+@test bind:face_bottom:38 started
+@test bind:face_bottom:38 ok Bottom button is A, swapped with D-pad Left
+@test bind:face_right:38 started
+@test bind:face_right:38 ok Right button is A, swapped with Bottom button
+@test bind:zl:64 started
+@test bind:zl:64 ok ZL is Left Alt
+@test reset-keys started
+@test reset-keys ok the default keys
+@test back started
+@test back ok the main page
+@test quit started
+@test quit ok

@@ -13,6 +13,8 @@
 #include "test_actions.h"
 #include "uninstall.h"
 
+#include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -530,6 +532,26 @@ void test_system() {
 
     check(run_output({"sh", "-c", "echo hello"}) == std::optional<std::string>("hello\n"), "run: output");
     check(!run_output({"sh", "-c", "exit 3"}) && !run_output({"no-such-program-ttt2"}), "run: failures");
+    // REVIEW2_app #8: the preflight probes from a worker thread; a file the launcher has open without O_CLOEXEC
+    // (another thread's, a library's) is not the probe's, and the probe runs with no signal blocked.
+    {
+        const int leaky = ::open("/dev/null", O_RDONLY); // (no O_CLOEXEC on purpose)
+        sigset_t block, old;
+        sigemptyset(&block);
+        sigaddset(&block, SIGTERM);
+        std::optional<std::string> fds, blocked;
+        std::thread worker([&] {
+            ::pthread_sigmask(SIG_BLOCK, &block, &old); // (as a thread may have them)
+            fds = run_output({"sh", "-c", "test -e /proc/self/fd/" + std::to_string(leaky) + " && echo open || echo closed"});
+            blocked = run_output({"sh", "-c", "grep SigBlk /proc/self/status"});
+        });
+        worker.join();
+        check(leaky > 2 && fds == std::optional<std::string>("closed\n"),
+              "run: the launcher's files are closed in the probe (" + fds.value_or("none") + ")");
+        check(blocked && blocked->find("SigBlk:\t0000000000000000") != std::string::npos,
+              "run: no signal blocked in the probe (" + blocked.value_or("none") + ")");
+        ::close(leaky);
+    }
 }
 
 // The compiler as the builder chooses it, with compilers that only say their
@@ -601,6 +623,17 @@ void test_actions() {
         check((*settings)[0].name == "settings" && (*settings)[3].name == "reset-keys" && (*settings)[4].name == "back",
               "actions: settings, reset-keys, back");
     }
+    const auto input =
+        parse_test_actions("press:Return;pad:south;steam:south;click:play;hover:fighters;tab:next", &error);
+    check(input && input->size() == 6 && (*input)[0].args == std::vector<std::string>{"Return"} &&
+              (*input)[5].label() == "tab-next",
+          "actions: input as the devices give it (" + error + ")");
+    check(!parse_test_actions("tab:sideways", &error) && !parse_test_actions("press", &error),
+          "actions: input needs what to press");
+    const auto rows = parse_test_actions("rows:pe::300;rows:pp::0.5", &error);
+    check(rows && rows->size() == 2 && (*rows)[0].args == std::vector<std::string>{"pe:", "300"} &&
+              (*rows)[1].args == std::vector<std::string>{"pp:", "0.5"},
+          "actions: rows of a list in view (" + error + ")");
     const auto shown = parse_test_actions(
         "fullscreen:yes;fullscreen:no;resolution:1920x1080;resolution:AUTO;interpolation:no;interpolation:yes;"
         "input-delay:yes",
@@ -632,7 +665,8 @@ void test_actions() {
                             "async-shaders:1", "async_shaders:yes", "precompile-shaders", "precompile-shaders:on", "resolution",
                             "resolution:", "resolution:1920", "resolution:1366x768",
                             "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all",
-                            "get-packages:numpy"}) {
+                            "get-packages:numpy", "rows", "rows:", "rows:pe:", "rows::300", "rows:pe::x",
+                            "rows:pe::-1"}) {
         check(!parse_test_actions(bad), std::string("actions: rejects ") + bad);
     }
 }
@@ -956,6 +990,98 @@ void test_uninstall(const fs::path& root) {
     check(r.refused.empty() && !there(folder / "game"), "uninstall: once the game has ended");
 }
 
+// The output of `argv` run by /bin/sh (stdout and stderr) and its code; `env` set over this one's.
+std::string run_shell(const std::vector<std::string>& argv, const std::vector<std::pair<std::string, std::string>>& env,
+                      int* code) {
+    int out[2];
+    if (::pipe(out) != 0) return {};
+    const pid_t pid = ::fork();
+    if (pid == 0) {
+        ::dup2(out[1], 1);
+        ::dup2(out[1], 2);
+        ::close(out[0]);
+        ::close(out[1]);
+        for (const auto& [name, value] : env) ::setenv(name.c_str(), value.c_str(), 1);
+        std::vector<char*> args;
+        for (const std::string& a : argv) args.push_back(const_cast<char*>(a.c_str()));
+        args.push_back(nullptr);
+        ::execv(args[0], args.data());
+        ::_exit(127);
+    }
+    ::close(out[1]);
+    std::string text;
+    char buffer[4096];
+    for (ssize_t n; (n = ::read(out[0], buffer, sizeof buffer)) > 0;) text.append(buffer, static_cast<size_t>(n));
+    ::close(out[0]);
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    *code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+    return text;
+}
+
+std::string read_all(const fs::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), {}};
+}
+
+// C2's way back (compat review #4): the AppImage an update replaces kept until the new one drew its first frame.
+void test_way_back(const fs::path& root) {
+    const fs::path folder = root / "way back";
+    fs::create_directories(folder);
+    const fs::path image = folder / "Golden_Fist_Launcher-x86_64.AppImage", previous = previous_file(image);
+    check(previous == folder / ".Golden_Fist_Launcher-x86_64.AppImage.previous", "way back: its name");
+    // The versions are scripts here: the old one says who it is and why it was opened.
+    const std::string old_one = "#!/bin/sh\necho \"old one: rolled back from [$TTT2_LAUNCHER_ROLLED_BACK] after [$TTT2_LAUNCHER_AFTER]\"\n";
+    const auto install = [&](const std::string& script) {
+        write(image, script);
+        ::chmod(image.c_str(), 0755);
+    };
+    install(old_one);
+    check(keep_previous(image).empty() && read_all(previous) == old_one, "way back: kept");
+    struct stat a = {}, b = {};
+    check(::stat(image.c_str(), &a) == 0 && ::stat(previous.c_str(), &b) == 0 && a.st_ino == b.st_ino &&
+              (b.st_mode & 0777) == 0755,
+          "way back: a hard link, executable");
+    check(keep_previous(image).empty(), "way back: kept again over an earlier one");
+    const auto update = [&](const std::string& new_one) {
+        install(old_one);
+        check(keep_previous(image).empty(), "way back: kept before the update");
+        write(update_file(image), new_one);
+        ::chmod(update_file(image).c_str(), 0755);
+        check(replace_appimage(update_file(image), image).empty() && read_all(previous) == old_one,
+              "way back: the old one stays when the new one is put in place");
+    };
+    const std::vector<std::pair<std::string, std::string>> env = {{"TTT2_LAUNCHER_AFTER", "42"}};
+    int code = -1;
+    // A new version that crashes before its first frame: the old one is put back and opened, told which.
+    update("#!/bin/sh\necho new one\nkill -SEGV $$\n");
+    std::string said = run_shell(open_with_rollback(image, "9.9.9"), env, &code);
+    check(code == 0 && said.find("new one") != std::string::npos &&
+              said.find("version 9.9.9 ended (code 139) before its first frame") != std::string::npos &&
+              said.find("old one: rolled back from [9.9.9] after [42]") != std::string::npos,
+          "way back: a crash before the first frame puts the old one back and opens it: " + said);
+    check(read_all(image) == old_one && !there(previous), "way back: the old one is back in place");
+    // One that drew its first frame (it forgets the previous one) and crashes later: it stays.
+    update("#!/bin/sh\nrm -f \"$(dirname \"$0\")/.$(basename \"$0\").previous\"\nkill -SEGV $$\n");
+    said = run_shell(open_with_rollback(image, "9.9.9"), env, &code);
+    check(code == 139 && said.find("old one") == std::string::npos && read_all(image) != old_one,
+          "way back: after its first frame a crash changes nothing: " + said);
+    // One that ends normally (handed over to a running launcher) or says no: it stays, the copy waits.
+    for (const int exit : {0, 1}) {
+        update("#!/bin/sh\necho new one; exit " + std::to_string(exit) + "\n");
+        said = run_shell(open_with_rollback(image, "9.9.9"), env, &code);
+        check(code == exit && said == "new one\n" && read_all(image) != old_one && there(previous),
+              "way back: code " + std::to_string(exit) + " changes nothing: " + said);
+    }
+    // forget_previous (the new one after its first frame) and restore_previous (the new one without a window).
+    forget_previous(image);
+    check(!there(previous) && read_all(image) != old_one, "way back: forgotten");
+    check(!restore_previous(image).empty(), "way back: nothing to put back");
+    update("new");
+    check(restore_previous(image).empty() && read_all(image) == old_one && !there(previous), "way back: put back");
+    fs::remove_all(folder);
+}
+
 void test_release(const fs::path& root) {
     using V = std::vector<unsigned>;
     check(version_numbers("0.1.0") == V{0, 1, 0} && version_numbers("v0.2") == V{0, 2} &&
@@ -1023,7 +1149,7 @@ void test_release(const fs::path& root) {
     check(!a.none && !a.release && a.error.starts_with("GitHub's answer is not readable"), "release: not JSON");
 
     // The AppImage it runs from: only with the program inside $APPDIR.
-    const fs::path image = root / "Ultimate_Launcher-x86_64.AppImage", mount = root / "mount";
+    const fs::path image = root / "Golden_Fist_Launcher-x86_64.AppImage", mount = root / "mount";
     write(image, "old");
     const fs::path program = mount / "usr/bin/ttt2-launcher";
     check(running_appimage(program, image.c_str(), mount.c_str()) == image, "release: running AppImage");
@@ -1033,7 +1159,7 @@ void test_release(const fs::path& root) {
               !running_appimage(program, "relative.AppImage", mount.c_str()) &&
               !running_appimage(program, (root / "gone.AppImage").c_str(), mount.c_str()),
           "release: no AppImage");
-    check(update_file(image) == root / ".Ultimate_Launcher-x86_64.AppImage.update", "release: update file");
+    check(update_file(image) == root / ".Golden_Fist_Launcher-x86_64.AppImage.update", "release: update file");
     check(cannot_replace(image).empty() && !cannot_replace(root / "missing/x.AppImage").empty(),
           "release: folder writable");
 
@@ -1058,6 +1184,7 @@ void test_release(const fs::path& root) {
     const std::string now((std::istreambuf_iterator<char>(in)), {});
     check(now == written, "release: the new one's bytes");
     check(!replace_appimage(update, image).empty(), "release: nothing to replace with");
+    test_way_back(root);
 
     check(version_in("ttt2-launcher 0.2.0\n") == "0.2.0" && version_in("ttt2-launcher v1.0\n") == "1.0" &&
               version_in("Gtk-WARNING\nttt2-launcher 0.3.1") == "0.3.1" && version_in("usage: ttt2-launcher").empty(),

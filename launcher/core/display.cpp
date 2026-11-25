@@ -1,6 +1,7 @@
 // The game's display settings (see display.h).
 
 #include "display.h"
+#include "utf8_path.h"
 
 #include "files.h"
 
@@ -63,7 +64,7 @@ std::string hertz_text(int millihertz) {
 }
 
 std::string unreadable_reason(const std::string& error, const fs::path& file) {
-    const std::string name = file.string(), unread = "cannot read " + name + ": ";
+    const std::string name = path_utf8(file), unread = "cannot read " + name + ": ";
     if (error.starts_with(unread)) return error.substr(unread.size());
     if (error.starts_with(name + " ")) return "it" + error.substr(name.size());
     return error;

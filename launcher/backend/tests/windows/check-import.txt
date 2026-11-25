@@ -1,0 +1,2 @@
+Some line a module printed first
+{"problem": {"code": "no_fighters", "what": "", "letters": "", "path": ""}, "protocol": 1}

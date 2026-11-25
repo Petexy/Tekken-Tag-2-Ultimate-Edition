@@ -1,10 +1,12 @@
-# Tekken Tag 2 Ultimate Edition
+# Golden Fist Launcher
 
 <img width="1593" height="888" alt="image" src="https://github.com/user-attachments/assets/3bd58409-1442-4ce7-b9a6-8f036f38f4f8" />
 
 
-An unofficial native Linux port of **Tekken Tag Tournament 2 Wii U Edition**,
-made by static recompilation: the game's PowerPC code is translated to C++
+Golden Fist Launcher (called Ultimate Launcher up to 0.8.0) installs, updates
+and starts an unofficial native Linux port of **Tekken Tag Tournament 2 Wii U
+Edition**, and adds Tekken 7's and Tekken 8's fighters to it. The port is made
+by static recompilation: the game's PowerPC code is translated to C++
 ahead of time and runs as native x86-64 code on a reimplementation of the
 Wii U's system libraries. There is no CPU emulation; the game's GPU commands
 and shaders are translated to Vulkan as it runs.
@@ -123,14 +125,23 @@ refuse a game whose executable is not the one they were built from.
 - To build: Git, CMake 3.20+, Ninja, Clang (or GCC 15+), Python 3, and the
   development files of SDL 3.2 or newer, shaderc, the Vulkan loader, Vulkan
   headers recent enough to define `VK_KHR_present_wait2` (mid-2025 or
-  newer), OpenSSL 3, zstd and zlib; for the launcher also GTK 4.10 or newer
-  (without it the launcher is left out) and MinGW (optional: the Tekken 7
-  and Tekken 8 helpers are then built in).
+  newer), OpenSSL 3, zstd and zlib; for the launcher MinGW too (optional: the
+  Tekken 7 and Tekken 8 helpers are then built in). The launcher draws its own
+  window with SDL 3, without GTK.
+- For the launcher's release programs (the AppImage, the Windows `.exe`):
+  SDL 3's own source at its pinned revision, built into them
+  (`python3 tools/setup_deps.py --launcher`), with the development files of
+  what SDL can use on a player's PC (X11, Wayland, libdecor, PipeWire,
+  PulseAudio, ALSA, udev, D-Bus: opened when the launcher starts, never
+  linked), LLD and `mksquashfs` for the AppImage, and MinGW-w64 for the
+  `.exe`.
 
 On Arch Linux:
 
 ```bash
-sudo pacman -S --needed base-devel git cmake ninja clang python zstd zlib openssl vulkan-headers vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+sudo pacman -S --needed base-devel git cmake ninja clang python zstd zlib openssl vulkan-headers vulkan-icd-loader sdl3 shaderc mingw-w64-gcc
+# and for the launcher's release programs (openssl-3: the OpenSSL the players' systems have, for the AppImage's kit)
+sudo pacman -S --needed lld squashfs-tools openssl-3 libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst libxkbcommon wayland wayland-protocols libdecor libpulse pipewire alsa-lib systemd-libs dbus mesa
 ```
 
 Other distributions package the same libraries under similar names; older
@@ -140,8 +151,9 @@ are too old.
 ## Building
 
 ```bash
-git clone https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition.git && cd Tekken-Tag-2-Ultimate-Edition
+git clone https://github.com/Petexy/Golden-Fist-Launcher.git && cd Golden-Fist-Launcher
 python3 tools/setup_deps.py                      # ZArchive and AMD's addrlib, at pinned revisions
+# (python3 tools/setup_deps.py --launcher: SDL 3's source too, for the launcher's release programs only)
 
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
@@ -168,7 +180,7 @@ dumps from the debugging options under `local/` too.
 
 **Starting from a release (Windows 10/11, x64):**
 
-1. Download `Ultimate_Launcher-x86_64.exe` from the newest release and put it
+1. Download `Golden_Fist_Launcher-x86_64.exe` from the newest release and put it
    in a folder of yours (not Program Files: it replaces itself when it updates).
 2. Double-click it. The first start unpacks the launcher's files into
    `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
@@ -207,12 +219,21 @@ the build's first error; **Open Log** there opens the whole log.
 
 1. Download this branch as a ZIP and **Extract All** into a writable folder
    whose path has only plain letters and is short, such as `C:\TTT2`: not in
-   OneDrive (30 GB would be synced). Set Up Game refuses a path with letters
-   such as à: CMake runs some build steps through batch files it writes in
-   UTF-8, which `cmd.exe` reads in the console's code page, so such a letter
-   turns into others and the step finds no folder.
-2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
-   downloads and verifies a private Python/Tk runtime. No Python installation,
+   OneDrive (30 GB would be synced). The first start and Set Up Game refuse
+   a path with letters such as à: CMake runs some build steps through batch
+   files it writes in UTF-8, which `cmd.exe` reads in the console's code
+   page, so such a letter turns into others and the step finds no folder.
+2. Double-click **Start Golden Fist Launcher.cmd** in that folder. The first start
+   downloads and verifies a private Python runtime, then builds the launcher
+   from the folder's files, once (a few minutes; a small window shows how far
+   it is): with the C compiler, CMake, Ninja and SDL 3 that Set Up Game uses
+   (SHA-256 or version pinned, downloaded where missing into `local\` and
+   `third_party\windows\` as Set Up Game does, and shared with it), in
+   `%LOCALAPPDATA%\TTT2Ultimate\launcher-build`. Later
+   starts open the launcher at once; it is built again only when its files
+   change. When it cannot be built, that window says why, with **Open log**
+   (`local\launcher-build.log`) and **Try again**; the release's
+   `Golden_Fist_Launcher-x86_64.exe` needs no build. No Python installation,
    Git installation, terminal commands or second project download are needed.
 3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
    update v16, and choose an installation folder.
@@ -230,11 +251,16 @@ project files are reused; the game and its assets are never downloaded.
 Setup logs remain under the selected data folder. The game archive is kept.
 
 
-The Windows build also produces `build-windows-tools/ttt2-launcher.exe`.
-This opens a separate Windows interface; the GTK launcher and Linux build/import
-paths are unchanged. The ZIP startup path obtains private Python/Tk automatically; developer launches
-can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
-to a Python executable to override automatic discovery.
+Set Up Game also builds the launcher there: `build-windows-tools/launcher/ttt2-launcher.exe`
+(SDL3.dll beside it), from the same sources as the release `.exe` and the program
+the ZIP's first start makes (those are built with other compilers and C++ libraries:
+the release `.exe` with MinGW-w64's GCC, Set Up Game and the ZIP with LLVM-MinGW).
+The launcher of releases up to 0.8.0 that an older Set Up Game left at
+`build-windows-tools/ttt2-launcher.exe` is removed by the next Set Up Game. The ZIP startup path obtains a private Python automatically (its Tk
+draws only the first start's progress window); developer launches can also use an
+installed Python 3 (`python launcher/windows/main.py` builds and starts the
+launcher as the ZIP's first start does). Setup obtains numpy and Pillow. Set
+`TTT2_PYTHON` to a Python executable to override automatic discovery.
 
 The Windows interface looks and behaves as the Linux launcher: one page with the
 game (Play, Settings, Update when the launcher's version is newer than the game's)
@@ -264,11 +290,11 @@ startup errors are saved beside the executable in `launcher.log` (the release
 `.exe`'s in `local/launcher.log` of its folder in `%LOCALAPPDATA%`). Build/install
 tasks finish before the window closes. Import cancellation requests cleanup and
 keeps completed extraction data. Only the release `.exe` updates itself (a
-project ZIP is updated as a whole); this frontend does not implement the GTK
-key-capture screen or the Linux uninstall interface.
+project ZIP is updated as a whole); the Linux uninstall is not part of the
+Windows launcher.
 
 
-`ttt2-launcher` (**Ultimate Launcher**) does the installing and
+`ttt2-launcher` (**Golden Fist Launcher**) does the installing and
 the adding of fighters in a window, without a terminal. **Install…** asks for
 your `.wua` and a folder, checks the PC, builds the game program for it from
 the archive and installs the game with its menu entry, as `ttt2 --install`
@@ -317,15 +343,17 @@ To make an AppImage of the launcher (the launcher, its kit and the character
 importer; nothing of the game):
 
 ```bash
-launcher/appimage/make_appimage.sh Ultimate_Launcher-x86_64.AppImage build-appimage
+python3 tools/setup_deps.py --launcher           # SDL 3's source, built into the launcher
+launcher/appimage/make_appimage.sh Golden_Fist_Launcher-x86_64.AppImage build-appimage
 ```
 
 It builds in a folder of its own (here `build-appimage`; Git ignores it and
 the AppImage), needs LLD and `mksquashfs`,
 and downloads the AppImage runtime once (`--runtime-cache DIR` says where).
-The AppImage uses the system's GTK 4 (4.10 or newer) and needs glibc 2.38
-and GCC 13's libstdc++ or newer (Ubuntu 24.04, Debian 13, Fedora 39 and
-newer releases, and rolling distributions), on any x86-64 processor. The
+The launcher in it has SDL 3 built in and needs nothing of the system but
+glibc 2.39 and GCC 14's libstdc++ or newer (Ubuntu 24.04, Debian 13, Fedora
+40 and newer releases, and rolling distributions), on any x86-64 processor;
+it opens the display's and sound's libraries when it starts. The
 game program it builds needs SDL 3.2 or newer from the system, which
 Ubuntu 24.04 does not have yet.
 
@@ -351,14 +379,17 @@ pushed shows nothing.
 The Windows launcher of a release is made on Linux too, from a commit:
 
 ```bash
-python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
+python3 launcher/windows/make_launcher_exe.py Golden_Fist_Launcher-x86_64.exe
 ```
 
-It is `launcher/windows/entry.cpp` compiled with MinGW-w64
-(`x86_64-w64-mingw32-g++` and its `windres`; `--cxx` names another), with the
+It is the launcher's own program cross-built for Windows by CMake with
+MinGW-w64 (`cmake/toolchain-mingw64.cmake`; it needs CMake, Ninja and SDL 3's
+source: `python3 tools/setup_deps.py --launcher`), SDL 3 built in, with the
 project's tracked files (nothing of the game) as a resource of the program, and
-its icon and version details (the icon needs `rsvg-convert`). `--stub` takes a
-launcher CMake built for Windows instead and appends the files to it (tests).
+its icon and version details (the icon needs `rsvg-convert`); the same commit
+makes the same bytes. `--cxx COMPILER` makes the Python launcher's `.exe` of
+0.4.0 to 0.8.0 instead (`launcher/windows/entry.cpp`), and `--stub` appends the
+files to a launcher CMake built for Windows already (tests).
 Made on a branch other than `main`, it is a test build, which updates its files
 from that branch (above); a release is made on `main`.
 The files are a resource rather than data after the program because virus
@@ -507,7 +538,7 @@ graphics driver update): "Shaders in the background" lets the game go on
 meanwhile, so the new thing may appear a few frames late instead, and
 "Prepare shaders before playing" makes Play first prepare every shader the
 game has already used on this PC (it cannot know the ones it has never
-shown). Both are off by default. They
+shown). The first is off by default, the second on. They
 are kept in `~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which
 can be edited by hand too:
 
@@ -771,6 +802,13 @@ built into the `ttt2` program). The port also links SDL3 (zlib), shaderc
 (Apache-2.0), the Vulkan loader (Apache-2.0), OpenSSL (Apache-2.0), zstd
 (BSD) and zlib.
 
+The launcher's new interface is made with SDL 3 (zlib; fetched by
+`tools/setup_deps.py --launcher` and built into its release programs),
+stb_truetype and stb_image_write (public domain or MIT), nanosvg (zlib) and
+the Barlow, Barlow Condensed and JetBrains Mono fonts (SIL Open Font License
+1.1), which are in `launcher/ui` with their licenses: see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Acknowledgements
 
 - [Cemu](https://github.com/cemu-project/Cemu) and
@@ -797,6 +835,6 @@ built into the `ttt2` program). The port also links SDL3 (zlib), shaderc
   Engine 4.14 packages. The importer's code is its own.
 - [Excentrian](https://github.com/Excentrian), who designed the title
   screen's "ULTIMATE EDITION" subtitle
-  ([#9](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/9)):
+  ([#9](https://github.com/Petexy/Golden-Fist-Launcher/issues/9)):
   the port letters it after that design, its M and A from Excentrian's
   outlines.

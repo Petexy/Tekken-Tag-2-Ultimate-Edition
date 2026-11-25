@@ -87,7 +87,7 @@ class Status(unittest.TestCase):
             self.assertIsNone(s['game']['path'])
             fighters = {f['name']: f for f in s['fighters']}
             self.assertEqual(list(fighters), list(importer.CHARACTERS))
-            self.assertEqual(fighters['kazumi'], {'name': 'kazumi', 'display': 'Kazumi Mishima', 'dlc': None,
+            self.assertEqual(fighters['kazumi'], {'name': 'kazumi', 'display': 'Kazumi Mishima', 'code': 'kzm', 'dlc': None,
                                                   'installed': False, 'outdated': False, 'newer': False,
                                                   'update': False, 'moveset_saved': False, 'outfits': 9,
                                                   'outfits_added': False, 'needs_game': False})

@@ -63,6 +63,7 @@ class Settings:
         self.values = dict(source=first(self.build / 'ttt2-game.txt'), title=str(title) if title.exists() else '',
                            install=recorded, data=str(data), packs=str(data / 'characters'),
                            saves=str(saves if saves.exists() else data / 'save'), tools=tools or str(self.root / 'local/windows-tools'))
+        self.defaults = dict(self.values)  # (Settings > Folders' Default in the new launcher)
         if self.file.exists(): self.values.update(json.loads(self.file.read_text(encoding='utf-8')))
         if not self.installed(): self.values['install'] = self.found_install(recorded) or self.values['install']
 
@@ -204,8 +205,8 @@ def older_game(settings, files):
 def older_game_note(game, files):
     """What the launcher says while the game is older (older_game gave `game`): Play, adding and updating characters
     wait for its Update."""
-    return ('The game is from an older Ultimate Launcher (%s; this one is %s): update it to play and to add or update '
-            'characters, which need the newer game.' % (game, files.partition(' ')[0]))
+    return ('The game is from an older version of the launcher (%s; this one is %s): update it to play and to add or '
+            'update characters, which need the newer game.' % (game, files.partition(' ')[0]))
 
 
 def importer(settings, *args, timeout=None):
@@ -256,7 +257,8 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         branch = self_update.test_branch(settings.root)
         if not self_update.running_exe() or not branch:
             raise ValueError('Only a test build\'s .exe updates its files from its branch, and this launcher is not one.')
-        self_update.update_files(settings.root, branch, cancelled)
+        self_update.update_files(settings.root, branch, cancelled,
+                                 program_in_exe=os.environ.get(self_update.PROGRAM_IN_EXE_VARIABLE) == '1')
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action == 'shaders':

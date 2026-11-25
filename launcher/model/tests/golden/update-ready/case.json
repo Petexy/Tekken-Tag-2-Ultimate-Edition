@@ -1,0 +1,212 @@
+{
+ "name": "update-ready",
+ "about": "another build of this version",
+ "install": "installed",
+ "built": "0.8.0-fedcba987654",
+ "kit_version": "0.8.0-1cab8c68f39b",
+ "status": {
+  "python": {
+   "version": "3.13.1",
+   "numpy": true,
+   "pillow": true,
+   "packages": {
+    "error": null,
+    "size": 0
+   }
+  },
+  "tools": {
+   "gamescope": "/usr/bin/gamescope",
+   "pactl": "/usr/bin/pactl",
+   "helper": "/kit/t7helper.exe",
+   "tekken8_helper": "/kit/t8helper.exe",
+   "cc": "/usr/bin/cc"
+  },
+  "steam": {
+   "installed": true,
+   "running": true
+  },
+  "tekken7": {
+   "found": true,
+   "path": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 7",
+   "error": "",
+   "readable": true
+  },
+  "tekken8": {
+   "found": true,
+   "path": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 8",
+   "error": "",
+   "build_known": true,
+   "run_error": ""
+  },
+  "packs_folder": "/home/player/.local/share/ttt2/characters",
+  "movesets": {
+   "heihachi": true
+  },
+  "game": {
+   "error": ""
+  },
+  "fighters": [
+   {
+    "name": "kazumi",
+    "display": "Kazumi Mishima",
+    "game": "tekken7",
+    "dlc": 0,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 4,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "lucky_chloe",
+    "display": "Lucky Chloe",
+    "game": "tekken7",
+    "dlc": 0,
+    "installed": true,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 3,
+    "outfits_added": true,
+    "needs_game": true
+   },
+   {
+    "name": "josie",
+    "display": "Josie Rizal",
+    "game": "tekken7",
+    "dlc": 0,
+    "installed": true,
+    "outdated": false,
+    "newer": false,
+    "update": true,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "shaheen",
+    "display": "Shaheen",
+    "game": "tekken7",
+    "dlc": 0,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": false,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "geese",
+    "display": "Geese Howard",
+    "game": "tekken7",
+    "dlc": 1,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 2,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "noctis",
+    "display": "Noctis Lucis Caelum",
+    "game": "tekken7",
+    "dlc": 2,
+    "installed": true,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "fahkumram",
+    "display": "Fahkumram",
+    "game": "tekken7",
+    "dlc": 3,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "reina",
+    "display": "Reina",
+    "game": "tekken8",
+    "dlc": 0,
+    "installed": true,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": true,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "azucena",
+    "display": "Azucena",
+    "game": "tekken8",
+    "dlc": 0,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": false,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   },
+   {
+    "name": "victor",
+    "display": "Victor Chevalier",
+    "game": "tekken8",
+    "dlc": 0,
+    "installed": false,
+    "outdated": false,
+    "newer": false,
+    "update": false,
+    "moveset_saved": false,
+    "stand_in": false,
+    "outfits": 0,
+    "outfits_added": false,
+    "needs_game": true
+   }
+  ]
+ },
+ "owned": {
+  "owned": {
+   "geese": true,
+   "noctis": true,
+   "fahkumram": false
+  }
+ },
+ "owned_cache": null,
+ "main": null,
+ "steps": "expand-dlc",
+ "import_script": {}
+}

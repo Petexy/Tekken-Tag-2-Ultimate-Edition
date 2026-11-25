@@ -20,9 +20,13 @@ jobs:
         run: >-
           pacman -Syu --noconfirm --needed git cmake ninja clang gcc python
           python-numpy python-pillow zstd zlib openssl vulkan-headers
-          vulkan-icd-loader sdl3 shaderc gtk4 mingw-w64-gcc
+          vulkan-icd-loader sdl3 shaderc mingw-w64-gcc
+          libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
+          libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
+          alsa-lib systemd-libs dbus mesa
       - uses: actions/checkout@v6
-      - run: python tools/setup_deps.py
+      # (--launcher: SDL's source too, built into the new launcher's release programs)
+      - run: python tools/setup_deps.py --launcher
       - name: Configure Linux build
         shell: bash
         run: |
@@ -33,12 +37,78 @@ jobs:
       - run: python launcher/windows/test_backend.py
       - run: python launcher/windows/test_setup.py
       - run: python launcher/windows/test_self_update.py
-      - run: python launcher/windows/test_keys.py
-      - name: Windows release launcher
+      - run: python launcher/windows/test_query.py
+      - run: python launcher/windows/test_build_launcher.py
+      - name: Launcher with SDL built in (as its release programs)
+        shell: bash
+        run: |
+          if [[ "${{ matrix.compiler }}" == clang ]]; then cc=clang; cxx=clang++; else cc=gcc; cxx=g++; fi
+          cmake -S . -B build-launcher -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx" \
+            -DTTT2_LAUNCHER_ONLY=ON -DTTT2_LAUNCHER_SDL=static
+          cmake --build build-launcher --parallel 2
+          ctest --test-dir build-launcher -L launcher --output-on-failure --timeout 180
+  launcher:
+    # The launcher's release programs as they are released (ARCHITECTURE C11): the AppImage with SDL built in and its
+    # checks, the Windows .exe cross-built with MinGW-w64 and tested under Wine (no display) as old launchers check it
+    # and as a player starts it.
+    name: Launcher release programs (AppImage, Windows .exe under Wine)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        # (openssl-3: the kit's OpenSSL, which the players' systems have; lld, squashfs-tools: make_appimage.sh;
+        # wine: the .exe's tests)
+        run: >-
+          pacman -Syu --noconfirm --needed git cmake ninja clang lld gcc python
+          python-numpy python-pillow zstd zlib openssl openssl-3 vulkan-headers
+          vulkan-icd-loader sdl3 shaderc mingw-w64-gcc squashfs-tools wine curl
+          libx11 libxext libxrandr libxcursor libxfixes libxi libxss libxtst
+          libxkbcommon wayland wayland-protocols libdecor libpulse pipewire
+          alsa-lib systemd-libs dbus mesa
+      - uses: actions/checkout@v6
+      - run: python tools/setup_deps.py --launcher
+      - name: AppImage of the new launcher
         # (Git refuses a repository another user owns: the checkout's, here in a container run as root.)
+        shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
+          mkdir -p build-release
+          launcher/appimage/make_appimage.sh build-release/Golden_Fist_Launcher-x86_64.AppImage build-appimage
+          launcher/appimage/release_checks.sh --launcher build-appimage/AppDir/usr/bin/ttt2-launcher
+          # What an old launcher asks the new AppImage before it switches to it (here without FUSE).
+          version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
+          said=$(env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS APPIMAGE_EXTRACT_AND_RUN=1 \
+            build-release/Golden_Fist_Launcher-x86_64.AppImage --version)
+          test "$said" = "ttt2-launcher $version"
+      - name: Windows program of the new launcher (cross-built, SDL built in), its tests under Wine
+        shell: bash
+        env:
+          WINEDEBUG: -all
+          WINEDLLOVERRIDES: winemenubuilder.exe=d
+        run: |
+          # (Wine wants its prefix's parent to be this user's: the runner's temporary folder is another's here.)
+          mkdir -p "$RUNNER_TEMP/wine"
+          export WINEPREFIX="$RUNNER_TEMP/wine/prefix"
+          unset DISPLAY WAYLAND_DISPLAY
+          wineboot --init && wineserver -w
+          cmake -S . -B build-launcher-windows -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-mingw64.cmake -DTTT2_LAUNCHER_ONLY=ON -DTTT2_LAUNCHER_SDL=static
+          cmake --build build-launcher-windows --parallel 2
+          ctest --test-dir build-launcher-windows -L launcher --output-on-failure --timeout 900
+      - name: Windows release launcher, tested under Wine as old launchers check it and as a player starts it
+        shell: bash
+        env:
+          WINEDEBUG: -all
+          WINEDLLOVERRIDES: winemenubuilder.exe=d
+        run: |
+          export WINEPREFIX="$RUNNER_TEMP/wine/prefix"
+          unset DISPLAY WAYLAND_DISPLAY
+          python launcher/windows/make_launcher_exe.py build-release/Golden_Fist_Launcher-x86_64.exe
+          version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
+          # (the program as built, without files: launcher/CMakeLists.txt's TTT2_LAUNCHER_RELEASE_TARGET)
+          program=$(ls build-launcher-windows/launcher/ttt2-launcher.exe)
+          cd launcher/windows && python test_launcher_exe.py "../../$program" "$version" \
+            ../../build-release/Golden_Fist_Launcher-x86_64.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
@@ -55,8 +125,24 @@ jobs:
             git mingw-w64-clang-x86_64-toolchain
             mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja
             mingw-w64-clang-x86_64-python mingw-w64-clang-x86_64-python-numpy
-            mingw-w64-clang-x86_64-python-pillow mingw-w64-clang-x86_64-sdl3
+            mingw-w64-clang-x86_64-python-pillow
       - run: python tools/setup_deps.py
+      # (The pinned downloads of tools/windows-bootstrap.lock.json, checked against their SHA-256 when used: SDL 3 and
+      # the bridge's compiler, about 200 MB, kept between runs.)
+      - uses: actions/cache@v6
+        with:
+          path: |
+            local/windows-downloads
+            third_party/windows/SDL3.zip
+          key: windows-downloads-${{ hashFiles('tools/windows-bootstrap.lock.json') }}
+      - name: The players' SDL 3 (the pinned mingw build Set Up Game uses, not msys2's)
+        # (The launcher's pictures are held to references drawn with that SDL 3; CMakeLists.txt takes it from
+        # third_party/windows as tools/setup_windows_runtime.ps1 puts it there.)
+        run: >-
+          python -c "import json, sys; from pathlib import Path; sys.path.insert(0, 'launcher/windows');
+          import setup_game; lock = json.loads(Path('tools/windows-bootstrap.lock.json').read_text());
+          native = Path('third_party/windows');
+          setup_game.unzip(setup_game.download(lock['sdl'], native / 'SDL3.zip'), native)"
       - name: Configure native Windows tools without game files
         run: cmake -S . -B build-windows-ci -G Ninja -DTTT2_TOOLS_ONLY=ON -DTTT2_WINDOWS_RUNTIME=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
       - run: cmake --build build-windows-ci --parallel 2
@@ -65,12 +151,21 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Windows launcher window smoke test
+      - name: Source ZIP's first start builds the new launcher, which starts (smoke test)
+        # (main.py without --worker: build_launcher.py gets the pinned compiler, CMake, Ninja and SDL 3 as a
+        # player's PC does, builds the launcher, runs it with --ui-smoke-test and waits; its own build folder, so
+        # that its tools are the pinned ones, not this job's)
         shell: pwsh
-        run: >-
-          python launcher/windows/main.py --build-dir build-windows-ci
-          --config "$env:RUNNER_TEMP/ttt2-launcher-test.json"
-          --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
+        run: |
+          python launcher/windows/main.py --build-dir build-windows-bridge `
+            --config "$env:RUNNER_TEMP/ttt2-launcher-test.json" `
+            --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
+          if ($LASTEXITCODE -ne 0) { Get-Content local/launcher-build.log -Tail 40; exit 1 }
+          $said = Get-Content "$env:RUNNER_TEMP/ttt2-launcher-ui.json" -Raw | ConvertFrom-Json
+          # (the launcher's answer: its first frame was drawn with this PC's display)
+          if ($said.program -ne 'ttt2-launcher' -or -not $said.frame) { $said; exit 1 }
       - name: Source ZIP first-run runtime check
         shell: cmd
-        run: call "Start Ultimate Launcher.cmd" --check
+        run: |
+          call "Start Golden Fist Launcher.cmd" --check || exit /b 1
+          call "Start Ultimate Launcher.cmd" --check

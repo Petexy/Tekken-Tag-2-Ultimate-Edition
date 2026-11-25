@@ -1,0 +1,4 @@
+@test expand-dlc started
+@test expand-dlc ok
+@test quit started
+@test quit ok

@@ -1,15 +1,15 @@
 # Changelog
 
-What changed for players in each release of Tekken Tag 2 Ultimate Edition: the game program, the added fighters and Ultimate Launcher. Downloads, checksums and install notes are on the [Releases](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases) page.
+What changed for players in each release: the game program, the added fighters and Golden Fist Launcher (called Ultimate Launcher up to 0.8.0). Downloads, checksums and install notes are on the [Releases](https://github.com/Petexy/Golden-Fist-Launcher/releases) page.
 
-## [0.8.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.8.0) - 2026-11-24
+## [0.8.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.8.0) - 2026-11-24
 
 **CUSTOMIZE for added fighters**: 20 of them can wear Tekken Tag Tournament 2's shop outfits, fitted to their own bodies, with colours, PAINT and five saved slots each. Also **PAINT without a Wii U GamePad**, **added fighters keep their own rank and record**, **much lower memory use**, **Azazel with a crouch and a normal guard**, and the Tekken 8 beta testers' second round of fixes for **Clive** and **Miary Zo**.
 
 ### The game
 
 - **PAINT works without a Wii U GamePad.** Paint with the mouse or a touch screen, or move a cursor with a controller's right stick and paint with ZR. Strokes are kept, saved with the slot and shown in fights, and the eraser erases instead of painting black.
-- **Added fighters keep their own rank, wins and losses** ([#107](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/107)). They shared Paul's record and were written over other parts of the profile, so every added fighter was a Beginner again after the main menu. Records lost before this release don't come back.
+- **Added fighters keep their own rank, wins and losses** ([#107](https://github.com/Petexy/Golden-Fist-Launcher/issues/107)). They shared Paul's record and were written over other parts of the profile, so every added fighter was a Beginner again after the main menu. Records lost before this release don't come back.
 - **Much lower memory use with many added fighters.** The game read and kept every fighter's files at start: 2.4 GB for 23 fighters, more than 7 GB with outfits. It now reads them when they're needed.
 - **Linux: no more stutter on a PC short of free memory.** When Linux took back the memory the graphics driver reads the game from, the game ran at 52-55 frames a second instead of 60. It now keeps that memory in place.
 - **No more crash while an Arcade stage loads** with Eliza, Geese, Reina or Noctis in a team.
@@ -40,28 +40,28 @@ What changed for players in each release of Tekken Tag 2 Ultimate Edition: the g
 
 ### Ultimate Launcher
 
-- **New setting: "Prepare shaders before playing"** (off by default; see [#115](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/115)). Play first prepares every shader the game has already used on this PC, with a progress bar, so the game doesn't stop for them again, for instance after a graphics driver update. What it has never shown is still made the first time.
+- **New setting: "Prepare shaders before playing"** (off by default; see [#115](https://github.com/Petexy/Golden-Fist-Launcher/issues/115)). Play first prepares every shader the game has already used on this PC, with a progress bar, so the game doesn't stop for them again, for instance after a graphics driver update. What it has never shown is still made the first time.
 - **New setting: "Shaders in the background"** (off by default). Some things shown for the first time may appear a few frames late instead of the game pausing while their shader is made.
 
-## [0.7.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.7.1) - 2026-11-21
+## [0.7.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.7.1) - 2026-11-21
 
 A hotfix for **Tekken 8's update**: Reina, Azucena, Miary Zo, Victor Chevalier, Clive Rosfield and Azazel can be added again.
 
 ### The added fighters
 
-- **Tekken 8 fighters can be added and updated again after Tekken 8's latest update** ([#112](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/112)). Adding one stopped with "this Tekken 8 build (Steam build 26651490, a game update) is not the one the helper knows". The update moved one function the launcher's Tekken 8 helper uses; the helper now knows the new build and still knows the earlier ones. The fighters themselves are unchanged: the update changed none of their moves, so fighters you already added don't need an update.
+- **Tekken 8 fighters can be added and updated again after Tekken 8's latest update** ([#112](https://github.com/Petexy/Golden-Fist-Launcher/issues/112)). Adding one stopped with "this Tekken 8 build (Steam build 26651490, a game update) is not the one the helper knows". The update moved one function the launcher's Tekken 8 helper uses; the helper now knows the new build and still knows the earlier ones. The fighters themselves are unchanged: the update changed none of their moves, so fighters you already added don't need an update.
 
 ### The game
 
 - No changes.
 
-## [0.7.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.7.0) - 2026-11-18
+## [0.7.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.7.0) - 2026-11-18
 
 **A new fighter from Tekken 8: Azazel**, at his full giant size, with a fight camera that keeps him in the picture. **Clive Rosfield, Miary Zo and Victor Chevalier play much closer to Tekken 8**: beta testers' bug reports fixed, and all Tekken 8 fighters now take hits with Tekken 8's own reactions. Plus **Leroy's parries**, **Gigas's Claw Hammer** and **Tag Assault no longer tags out the fighter who started it**.
 
 ### The game
 
-- **A Tag Assault no longer tags out the fighter who started it** ([#32](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/32), [#96](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/96)). When Eliza, Geese, Reina or Noctis started a Tag Assault, their next string (Eliza's 1 or b+4, Geese's 1 or 2, almost any Reina move) could tag them out without a Tag press.
+- **A Tag Assault no longer tags out the fighter who started it** ([#32](https://github.com/Petexy/Golden-Fist-Launcher/issues/32), [#96](https://github.com/Petexy/Golden-Fist-Launcher/issues/96)). When Eliza, Geese, Reina or Noctis started a Tag Assault, their next string (Eliza's 1 or b+4, Geese's 1 or 2, almost any Reina move) could tag them out without a Tag press.
 - **The fight camera frames a giant**: it pulls back while Azazel is on screen, for his throws and KOs too.
 
 ### The added fighters
@@ -72,35 +72,35 @@ A hotfix for **Tekken 8's update**: Reina, Azucena, Miary Zo, Victor Chevalier, 
 - **Miary Zo:** 3,1,2's last hit can be blocked and hits on counter hit; u/f+4,4 launches; Baobab 4 launches on counter hit; f,f+2,2's second hit comes out after a blocked first; b+1,4, f+1+2,1+2,3+4, FC d/f+4 and Morengy 2 react as in Tekken 8; Tag in a juggle after d+2 or d/f+1,1,2 bounds and brings the partner in.
 - **Victor Chevalier:** u/f+4 launches; b+2 and the pistol of d/f+4,2 hit; d/b+4 counter hit leads into its follow-up; 1,2,1, 1+2, d/b+3, ws+1 and Iai 1+2 react as in Tekken 8; Iai 1,2,2 + Tag bounds instead of vanishing.
 - **Tekken 8 fighters' power crushes no longer sound armoured.** TTT2 has no armour, so the armour sounds are left out (Clive's b+1+2 and the others).
-- **Leroy's b+2 parries highs and mids, and Geese's counters counter** ([#105](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/105)). Every Tekken 7 parry and counter was lost when a fighter was added. Negan's bat-stance parries get their missing rows too.
-- **Gigas's Claw Hammer (his air throw) deals 20 when it ends a juggle** ([#101](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/101)). TTT2 doesn't reduce throw damage in a combo, so Tekken 7's 60 came on top of a full juggle. A jumping opponent still takes 60.
+- **Leroy's b+2 parries highs and mids, and Geese's counters counter** ([#105](https://github.com/Petexy/Golden-Fist-Launcher/issues/105)). Every Tekken 7 parry and counter was lost when a fighter was added. Negan's bat-stance parries get their missing rows too.
+- **Gigas's Claw Hammer (his air throw) deals 20 when it ends a juggle** ([#101](https://github.com/Petexy/Golden-Fist-Launcher/issues/101)). TTT2 doesn't reduce throw damage in a combo, so Tekken 7's 60 came on top of a full juggle. A jumping opponent still takes 60.
 - **Master Raven's Tag Assault strings** (3+4,4, the meteor and the roll kick) no longer start hidden.
 
 ### Ultimate Launcher
 
 - **Play waits for Update when the game is older than the launcher.** After the launcher updated itself, Play stayed on with a game built by an older launcher, which plays newer fighters wrong (missing summons and effects, other hit reactions). The game card now shows Update in Play's place, and adding or updating fighters waits for it too.
-- **Windows: Set Up Game no longer stops at "Preparing graphics libraries"** with "error adding trust anchors from file" ([#102](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/102)). Git settings left by an earlier Git for Windows could name a certificate file that no longer exists; the downloads now use Windows' own certificates.
+- **Windows: Set Up Game no longer stops at "Preparing graphics libraries"** with "error adding trust anchors from file" ([#102](https://github.com/Petexy/Golden-Fist-Launcher/issues/102)). Git settings left by an earlier Git for Windows could name a certificate file that no longer exists; the downloads now use Windows' own certificates.
 
-## [0.6.2](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.6.2) - 2026-11-12
+## [0.6.2](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.6.2) - 2026-11-12
 
 A hotfix for 0.6.1: **Set Up Game works again on Linux, and Tekken 8's fighters can be added again after Tekken 8's update of 12 November.**
 
-- **Linux: Set Up Game and the game's updates stopped at once with code 127** (`libcrypto.so.4: cannot open shared object file`) since 0.6.0, on SteamOS, Ubuntu, Fedora, Debian and most other systems ([#91](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/91)). The launcher's build tools needed OpenSSL 4, which only a few rolling distributions have yet. They need OpenSSL 3 again, as up to 0.5.1, and every release is now checked to need no library those systems lack.
-- **Tekken 8's fighters couldn't be added or updated after Tekken 8's update of 12 November** (Steam build 26155785): "this Tekken 8 build … is not the one the helper knows" ([#93](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/issues/93)). The launcher knows the new build, and still the one before it. The update also renumbered moves, which broke adding Clive Rosfield and would have put Azucena's, Victor Chevalier's and Miary Zo's bounds on the wrong moves; their moves are now found the same way in every build. Fighters you added before keep working either way.
+- **Linux: Set Up Game and the game's updates stopped at once with code 127** (`libcrypto.so.4: cannot open shared object file`) since 0.6.0, on SteamOS, Ubuntu, Fedora, Debian and most other systems ([#91](https://github.com/Petexy/Golden-Fist-Launcher/issues/91)). The launcher's build tools needed OpenSSL 4, which only a few rolling distributions have yet. They need OpenSSL 3 again, as up to 0.5.1, and every release is now checked to need no library those systems lack.
+- **Tekken 8's fighters couldn't be added or updated after Tekken 8's update of 12 November** (Steam build 26155785): "this Tekken 8 build … is not the one the helper knows" ([#93](https://github.com/Petexy/Golden-Fist-Launcher/issues/93)). The launcher knows the new build, and still the one before it. The update also renumbered moves, which broke adding Clive Rosfield and would have put Azucena's, Victor Chevalier's and Miary Zo's bounds on the wrong moves; their moves are now found the same way in every build. Fighters you added before keep working either way.
 - **Windows: when adding a fighter failed, a box said only `'import'`** and the launcher's bar stayed at "Starting…". It now says "Could not add …" and why.
 
-The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brought (Miary Zo, Victor Chevalier and Clive Rosfield, floor breaks and move sounds for all Tekken 8 fighters, Noctis's warps), see [0.6.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.6.0); 0.6.1 made Miary Zo and Clive Rosfield addable with their DLC owned.
+The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brought (Miary Zo, Victor Chevalier and Clive Rosfield, floor breaks and move sounds for all Tekken 8 fighters, Noctis's warps), see [0.6.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.6.0); 0.6.1 made Miary Zo and Clive Rosfield addable with their DLC owned.
 
-## [0.6.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.6.1) - 2026-11-12
+## [0.6.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.6.1) - 2026-11-12
 
 A hotfix for 0.6.0: **Miary Zo and Clive Rosfield can be added again when you own their DLC.**
 
 - **Miary Zo's and Clive Rosfield's Add stayed greyed out** in 0.6.0, even with their Tekken 8 DLC owned: the launcher asked Steam which DLC you own only through Tekken 7, so their ownership was never known. Both launchers now ask through Tekken 8 too, with Steam running and Tekken 8 installed, and show **Add** for the Tekken 8 DLC fighters you own.
 - If Steam can't be asked through one of the games (for example while it is running), the other game's DLC fighters stay addable, and the launcher says why.
 
-The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brought (Miary Zo, Victor Chevalier and Clive Rosfield, floor breaks and move sounds for all Tekken 8 fighters, Noctis's warps), see [0.6.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.6.0).
+The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brought (Miary Zo, Victor Chevalier and Clive Rosfield, floor breaks and move sounds for all Tekken 8 fighters, Noctis's warps), see [0.6.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.6.0).
 
-## [0.6.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.6.0) - 2026-11-12
+## [0.6.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.6.0) - 2026-11-12
 
 **Three new fighters from Tekken 8: Miary Zo, Victor Chevalier and Clive Rosfield**, made from your own Tekken 8 like Reina and Azucena, with their own moves, voices, move sounds, weapons and creatures. **All Tekken 8 fighters break floors, play their move sounds, and their moves are as minus on block as in Tekken 8.** And **Noctis's warps show**: he fades into blue light and back instead of popping from place to place.
 
@@ -133,7 +133,7 @@ The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brough
 
 - **Windows: Update All updates the DLC fighters too** (#80). It took only the base game's, so DLC fighters had to be updated one by one.
 
-## [0.5.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.5.1) - 2026-11-03
+## [0.5.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.5.1) - 2026-11-03
 
 **Update and Remove work again after Tekken 7 or Tekken 8 is uninstalled.** On **SteamOS, the launcher fetches what adding fighters needs** itself, with no terminal or container. And many **fixes to the added fighters' moves**, from the beta testers and your reports.
 
@@ -170,7 +170,7 @@ The game and the fighters are unchanged since 0.6.0. For everything 0.6.0 brough
 - **Linux: adding fighters needs no C compiler.** The launcher brings the importer's compiled parts with it.
 - **Linux: when Tekken 7 or 8 can't start in the background**, for example inside a distrobox container, the launcher says why at once instead of after 90 seconds (#67).
 
-## [0.5.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.5.0) - 2026-11-01
+## [0.5.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.5.0) - 2026-11-01
 
 A new Offline mode, **Solo Ghost Battle**. **CPU-controlled added fighters now fight back** instead of standing and crouching. **Noctis is much lighter on the GPU**, and the game uses **less CPU on Linux and Windows**. On NVIDIA and Intel GPUs, **Armor King's green mist** shows again.
 
@@ -203,15 +203,15 @@ A new Offline mode, **Solo Ghost Battle**. **CPU-controlled added fighters now f
 - **Windows: the page has a scroll bar you can drag** (#46). Page Up, Page Down, Home, End and the arrow keys scroll it, and Tab brings the focused control into view. Ticking Outfits or coming back to the window no longer jumps to the top.
 - **Windows: updating the launcher no longer starts the downloaded file to check its version.** That start is where virus scanners can hold a new program. The window also stays responsive while the new version opens.
 
-## [0.4.2](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.4.2) - 2026-10-30
+## [0.4.2](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.4.2) - 2026-10-30
 
 A hotfix for 0.4.1: **fighters with their Outfits box ticked can be added and updated again.**
 
 - **Adding or updating a fighter with Outfits ticked failed** in 0.4.1 with "The importer failed: AttributeError: 'bool' object has no attribute 'build'". Fighters with Outfits unticked weren't affected, and a failed update left the fighter's pack as it was: update them again now.
 
-The game itself is unchanged since 0.4.1. For everything 0.4.1 brought (Tekken 7 power gauges for Akuma, Eliza and Geese, optional outfits, the Windows importer fix), see [0.4.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.4.1).
+The game itself is unchanged since 0.4.1. For everything 0.4.1 brought (Tekken 7 power gauges for Akuma, Eliza and Geese, optional outfits, the Windows importer fix), see [0.4.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.4.1).
 
-## [0.4.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.4.1) - 2026-10-30
+## [0.4.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.4.1) - 2026-10-30
 
 **Akuma, Eliza and Geese now have Tekken 7's power gauge**: their EX moves, supers and cancels cost gauge again, and each one has their own bar from Tekken 7. **Outfits are now your choice**: without them, adding and updating fighters is much faster. On Windows, adding and updating fighters no longer asks you to set up the game again.
 
@@ -233,7 +233,7 @@ The game itself is unchanged since 0.4.1. For everything 0.4.1 brought (Tekken 7
 - **Outfits are optional.** Each fighter has an **Outfits** box, and **Import outfits for every character** ticks them all. Outfits are the extra costumes in the costume chooser, and they make adding or updating a fighter take much longer, so new fighters start without them. Fighters whose outfits you already have keep them when updated: their box starts ticked. To add or remove a fighter's outfits later, change their box and click **Update**.
 - **Windows: adding fighters no longer asks you to set up the game again.** If the launcher's folder lacks numpy, Pillow or the C compiler, Add, Update and Remove download them first. This happens when Set Up Game ran from another copy, such as the project ZIP.
 
-## [0.4.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.4.0) - 2026-10-29
+## [0.4.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.4.0) - 2026-10-29
 
 Ultimate Launcher now adds experimental support for **Windows**. Practice mode gets **frame data, hitboxes and slow motion**, **local multiplayer** works with every keyboard and controller, **Azucena** joins from Tekken 8, and **bounds follow the Tekken 7 Bound Mod**.
 
@@ -258,7 +258,7 @@ Ultimate Launcher now adds experimental support for **Windows**. Practice mode g
 
 ### The added fighters
 
-- **Bounds as in the Tekken 7 Bound Mod.** Screws, Tekken 8's tornados and Tekken 7's slams no longer become bounds. Each fighter bounds only with its own list of moves, once per juggle: for Tekken 7's fighters, the moves the Tekken 7 Bound Mod makes bounds. A screw no longer uses up the juggle's bound. The [README](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition#bound-moves) lists every fighter's bound moves.
+- **Bounds as in the Tekken 7 Bound Mod.** Screws, Tekken 8's tornados and Tekken 7's slams no longer become bounds. Each fighter bounds only with its own list of moves, once per juggle: for Tekken 7's fighters, the moves the Tekken 7 Bound Mod makes bounds. A screw no longer uses up the juggle's bound. The [README](https://github.com/Petexy/Golden-Fist-Launcher#bound-moves) lists every fighter's bound moves.
 - **Azucena from Tekken 8.** She has her own moves, voice, pictures, command list and bounds. Libertador evades highs and lows on its own, as in Tekken 8. Needs Tekken 8.
 - **Tekken 8 clothes swing:** Reina's jacket, Azucena's sleeves.
 - **Tekken 7 fighters' eyelids** close as in Tekken 7, instead of hanging down the cheeks.
@@ -284,7 +284,7 @@ Validation (2026-10-26): BT 1's restored animation was confirmed working in-game
 
 Outstanding: Kunimitsu's open-hand weapon grip is a separate issue and is not fixed by these changes.
 
-## [0.3.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.3.1) - 2026-10-26
+## [0.3.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.3.1) - 2026-10-26
 
 Adding **Tekken 7 fighters works with Proton-GE**, and **Reina's d/f+1,2 is a bound**.
 
@@ -301,7 +301,7 @@ Adding **Tekken 7 fighters works with Proton-GE**, and **Reina's d/f+1,2 is a bo
 
 - No changes besides the fighters above.
 
-## [0.3.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.3.0) - 2026-10-26
+## [0.3.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.3.0) - 2026-10-26
 
 **Tekken 8's Reina** joins from your own Tekken 8, every added fighter gets **tag combos**, and the game drops the Wii U version's **forced input delay**.
 
@@ -322,7 +322,7 @@ Adding **Tekken 7 fighters works with Proton-GE**, and **Reina's d/f+1,2 is a bo
 - **Tekken 8.** The fighters list has a part for each game. Reina is added without Tekken 7 or any of its fighters. If one of the games is uninstalled, the launcher says so and offers to remove that game's fighters all at once.
 - **Input delay** in Settings, which now has a **Game** section: off by default, on for the Wii U version's two frames.
 
-## [0.2.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.2.0) - 2026-10-24
+## [0.2.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.2.0) - 2026-10-24
 
 The added Tekken 7 fighters get their **preset outfits**, **cloth that swings** and many **move fixes**. **Ultimate Launcher** now tells you which fighters need an update to get them.
 
@@ -341,13 +341,13 @@ The added Tekken 7 fighters get their **preset outfits**, **cloth that swings** 
 - **Fighters to update.** Fighters added with an older version show **Update ready**, with **Update** next to **Remove**. **Update All** above the list updates them all at once. If you cancel, the fighters not yet updated keep their old version.
 - Adding a fighter takes a few minutes, because its outfits are made along with it.
 
-## [0.1.1](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.1.1) - 2026-10-23
+## [0.1.1](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.1.1) - 2026-10-23
 
 A fix release of **Ultimate Launcher**: installing the game now works on processors without AVX-512, such as the **Steam Deck**.
 
 - **Install works on the Steam Deck and other processors without AVX-512.** In 0.1.0, building the game stopped right away with "Exit code 132" on many processors (the Steam Deck's Zen 2, AMD Ryzen before the 7000 series, most Intel desktop processors): the launcher's build tools contained instructions those processors do not have. They no longer do, and every release is now checked for them.
 - **Clearer errors.** When something the launcher runs crashes, the message now says why (for example "Illegal instruction") instead of only a code.
 
-## [0.1.0](https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/tag/v0.1.0) - 2026-10-23
+## [0.1.0](https://github.com/Petexy/Golden-Fist-Launcher/releases/tag/v0.1.0) - 2026-10-23
 
 The first release of **Ultimate Launcher**. It allows to install **Tekken Tag Tournament 2** from your own copy of the Wii U game (EU rev 1) and run it natively on Linux, with 120 frames per second, higher resolutions and the Tekken 7 fighters the game lacks.

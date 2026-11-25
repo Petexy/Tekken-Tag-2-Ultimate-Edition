@@ -12,13 +12,19 @@
 // the last ':'.) For looking at the window in tests there are also
 // expand-dlc (opens the DLC list), expand-log (the last task's log),
 // show-uninstall (the uninstall dialog, closed again after its picture),
-// wait:<seconds>, focus:<id> (the keyboard focus on a button: "play",
+// wait:<seconds>, rows:<id prefix>:<points> (the SDL launcher: the rows of a list
+// whose ids start so, those in view each at least that wide: "rows:pe::300"),
+// focus:<id> (the keyboard focus on a button: "play",
 // "add:kazumi", ...), toggle:<id> (a check box clicked: "outfits:kazumi",
 // "outfits-all"), add-all:<game> and remove-all:<game> (a game's section's
 // Add All and Remove All: tekken7 or tekken8) and refresh (as the window's Check Again button; the
 // widget focused once it is done is logged). update-launcher is the header
 // bar's Update (the AppImage replaced by the newest release's and opened:
-// its test actions run again there). For the Settings page:
+// its test actions run again there). update-everything is Home's Update (the
+// launcher, the game program and the characters, one part after another: done
+// when the last part is), update-continued waits for the rest of one that the
+// launcher before this one began (TTT2_LAUNCHER_CONTINUE=update) and says how
+// it ended. For the Settings page:
 // settings (opens it), back, bind:<input>:<keycode>[+<keycode>...] (that
 // input's key clicked, unless it waits for a key already, then those XKB
 // keycodes pressed one after another and let go the other way round,

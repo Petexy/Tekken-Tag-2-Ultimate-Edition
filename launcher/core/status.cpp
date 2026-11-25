@@ -51,6 +51,7 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
         fighter.name = f["name"].string();
         if (fighter.name.empty()) continue;
         fighter.display = f["display"].string(fighter.name);
+        fighter.code = f["code"].string();
         fighter.game = f["game"].string(kTekken7);
         fighter.dlc = static_cast<int64_t>(f["dlc"].number(0));
         fighter.installed = f["installed"].boolean();

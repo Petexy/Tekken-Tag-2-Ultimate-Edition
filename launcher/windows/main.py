@@ -1,5 +1,6 @@
-"""Windows Ultimate Launcher. Run through ttt2-launcher.exe or Python 3 + Tk: the window
-(window.py), or with --worker one of its tasks, which the window runs as a program of its own."""
+"""Windows Golden Fist Launcher's Python side. With --worker one of the launcher's tasks, which it runs as a program of
+its own; with --query one of its questions (query.py: one JSON answer); else (the project ZIP's Start Golden Fist
+Launcher.cmd, old test builds' .exe) the native launcher built from these files and started (build_launcher.py)."""
 from pathlib import Path
 import argparse
 import sys
@@ -7,6 +8,7 @@ import threading
 import traceback
 
 from backend import Settings, worker
+import query
 import self_update
 
 
@@ -20,9 +22,12 @@ def main():
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--outfits', default='none')     # (an import: whose outfits, as import_character.py)
+    parser.add_argument('--query', choices=query.NAMES)
+    parser.add_argument('--action', choices=query.ACTIONS) # (--query check: before which task)
     parser.add_argument('fighters', nargs='*')
     args = parser.parse_args()
     settings = Settings(args.build_dir, args.config)
+    if args.query: return query.main(args.query, settings, args.fighters, args.action)
     if args.worker:
         cancelled = lambda: bool(args.cancel_file and args.cancel_file.exists())
         # (The launcher's update stops only where it can: never half-way through replacing the .exe or its files.)
@@ -45,14 +50,8 @@ def main():
             print('@error ' + str(error), flush=True)
             return 1
         return 0
-    if args.check:
-        import tkinter  # noqa: F401  (the window needs Tk)
-        print('Windows Ultimate Launcher: Python/Tk and backend available')
-        return 0
-    from window import Window
-    error = Window(args, settings).run()
-    if error: raise error
-    return 0
+    import build_launcher
+    return build_launcher.main(args, settings)
 
 if __name__ == '__main__':
     try: raise SystemExit(main())
@@ -64,5 +63,5 @@ if __name__ == '__main__':
         if sys.stderr: sys.stderr.write(text)
         if sys.platform == 'win32' and not sys.stderr:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None, 'The launcher could not start. See local/windows-launcher-errors.log.', 'Ultimate Launcher', 16)
+            ctypes.windll.user32.MessageBoxW(None, 'The launcher could not start. See local/windows-launcher-errors.log.', 'Golden Fist Launcher', 16)
         raise SystemExit(1)

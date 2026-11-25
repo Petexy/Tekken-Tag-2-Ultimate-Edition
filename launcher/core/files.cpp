@@ -1,11 +1,21 @@
 // Writing the settings files (see files.h).
 
 #include "files.h"
+#include "utf8_path.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <system_error>
@@ -24,10 +34,10 @@ bool replace_file(const fs::path& file, std::string_view text, std::string* erro
         std::error_code ec;
         if (!fs::is_symlink(target, ec)) break;
         const fs::path to = fs::read_symlink(target, ec);
-        if (ec) return fail("cannot follow the link " + file.string() + ": " + ec.message());
+        if (ec) return fail("cannot follow the link " + path_utf8(file) + ": " + ec.message());
         // A loop: every link in it reads fine, so ec has no reason to give.
         if (links == 40) {
-            return fail("cannot follow the link " + file.string() + ": " +
+            return fail("cannot follow the link " + path_utf8(file) + ": " +
                         std::make_error_code(std::errc::too_many_symbolic_link_levels).message());
         }
         target = to.is_absolute() ? to : target.parent_path() / to;
@@ -35,7 +45,40 @@ bool replace_file(const fs::path& file, std::string_view text, std::string* erro
     const fs::path folder = target.parent_path();
     std::error_code ec;
     fs::create_directories(folder, ec);
-    if (ec) return fail("cannot make " + folder.string() + ": " + ec.message());
+    if (ec) return fail("cannot make " + path_utf8(folder) + ": " + ec.message());
+#ifdef _WIN32
+    // (Windows: a new file beside it, flushed, then moved over it in one step; the folder's permissions apply.)
+    const auto said = [](DWORD code) { return std::system_category().message(static_cast<int>(code)); };
+    fs::path temporary;
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    DWORD code = 0;
+    for (int n = 0; handle == INVALID_HANDLE_VALUE && n < 100; ++n) {
+        temporary = folder / (L"." + target.filename().wstring() + L"." + std::to_wstring(GetCurrentProcessId()) +
+                              L"." + std::to_wstring(n));
+        handle = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        code = handle == INVALID_HANDLE_VALUE ? GetLastError() : 0;
+        if (handle == INVALID_HANDLE_VALUE && code != ERROR_FILE_EXISTS) break;
+    }
+    if (handle == INVALID_HANDLE_VALUE) return fail("cannot write in " + path_utf8(folder) + ": " + said(code));
+    std::string why;
+    for (size_t written = 0; written < text.size() && why.empty();) {
+        const DWORD chunk = static_cast<DWORD>(std::min<size_t>(text.size() - written, 1u << 20));
+        DWORD n = 0;
+        if (!WriteFile(handle, text.data() + written, chunk, &n, nullptr)) why = said(GetLastError());
+        else if (n == 0) why = "nothing could be written";
+        else written += n;
+    }
+    if (why.empty() && !FlushFileBuffers(handle)) why = said(GetLastError());
+    if (!CloseHandle(handle) && why.empty()) why = said(GetLastError());
+    if (why.empty() &&
+        !MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        why = said(GetLastError());
+    }
+    if (!why.empty()) {
+        DeleteFileW(temporary.c_str());
+        return fail("cannot write " + path_utf8(target) + ": " + why);
+    }
+#else
     // A new file gets the mode the umask gives (as any program's), the file
     // replaced keeps its own (its owner can still read and write it).
     struct stat old{};
@@ -66,6 +109,7 @@ bool replace_file(const fs::path& file, std::string_view text, std::string* erro
         ::unlink(temporary.c_str());
         return fail("cannot write " + target.string() + ": " + why);
     }
+#endif
     return true;
 }
 

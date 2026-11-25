@@ -1,0 +1,4 @@
+@test add:kazumi started
+@test add:kazumi failed Cannot add characters: The game is from an older version of the launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game.
+@test quit started
+@test quit ok

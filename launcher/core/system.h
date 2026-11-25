@@ -67,7 +67,9 @@ enum class Package { kCompiler, kPython, kNumpy, kPillow, kGamescope, kPactl, kM
 // one this launcher knows, or cannot add to the system (image_based).
 std::string install_command(const Distro& distro, const std::vector<Package>& packages);
 
-// A program's standard output; none when it could not start or failed.
+// A program's standard output; none when it could not start or failed. It may run off the UI thread (the
+// preflight's compiler probe): posix_spawn, with every file of the launcher's beyond 0-2 closed in the child and
+// signals as ProcessHost's children have them (C5's rules for the child), waited for before it returns.
 std::optional<std::string> run_output(const std::vector<std::string>& argv);
 
 } // namespace launcher

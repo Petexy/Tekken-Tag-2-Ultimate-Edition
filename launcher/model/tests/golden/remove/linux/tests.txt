@@ -1,0 +1,4 @@
+@test remove:lucky_chloe started
+@test remove:lucky_chloe ok Removed Lucky Chloe
+@test quit started
+@test quit ok

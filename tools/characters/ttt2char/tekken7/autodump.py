@@ -384,7 +384,7 @@ def not_started(run, gamescope, game):
     if os.path.exists('/run/.containerenv') or os.path.exists('/.dockerenv'):
         # (in a rootless distrobox or toolbox, gamescope's Xwayland refuses the host's /tmp/.X11-unix, which the
         # container sees owned by nobody, and ends at once)
-        said.append('this runs inside a container (distrobox, toolbox), where gamescope cannot start: start Ultimate '
+        said.append('this runs inside a container (distrobox, toolbox), where gamescope cannot start: start Golden Fist '
                     'Launcher outside it')
     return DumpError('the helper did not start in %s\'s hidden session (%s; the logs are in %s)'
                      % (game, '; '.join(said), run))

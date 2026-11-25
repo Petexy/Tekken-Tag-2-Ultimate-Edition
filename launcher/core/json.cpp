@@ -237,4 +237,56 @@ private:
 
 std::optional<Value> parse(std::string_view text, std::string* error) { return Parser(text).document(error); }
 
+std::string quote(std::string_view text) {
+    static const char digits[] = "0123456789abcdef";
+    std::string out = "\"";
+    const auto unit = [&](uint32_t u) {
+        out += "\\u";
+        for (int shift = 12; shift >= 0; shift -= 4) out += digits[(u >> shift) & 15];
+    };
+    for (size_t i = 0; i < text.size();) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        if (c == '"' || c == '\\') {
+            out += '\\';
+            out += static_cast<char>(c);
+            ++i;
+            continue;
+        }
+        if (c >= 0x20 && c < 0x7f) {
+            out += static_cast<char>(c);
+            ++i;
+            continue;
+        }
+        if (c < 0x80) {
+            unit(c);
+            ++i;
+            continue;
+        }
+        // A UTF-8 sequence: its length from the first byte, each next byte 10xxxxxx, no overlong form.
+        const int length = c >= 0xf0 && c < 0xf5 ? 4 : c >= 0xe0 ? 3 : c >= 0xc2 && c < 0xe0 ? 2 : 0;
+        uint32_t code = length == 4 ? c & 7 : length == 3 ? c & 15 : c & 31;
+        bool ok = length > 0 && i + length <= text.size();
+        for (int k = 1; ok && k < length; ++k) {
+            const auto next = static_cast<unsigned char>(text[i + k]);
+            ok = (next & 0xc0) == 0x80;
+            code = code << 6 | (next & 0x3f);
+        }
+        ok = ok && !(length == 3 && code < 0x800) && !(length == 4 && (code < 0x10000 || code > 0x10ffff)) &&
+             !(code >= 0xd800 && code < 0xe000);
+        if (!ok) {
+            unit(0xfffd);
+            ++i;
+            continue;
+        }
+        if (code >= 0x10000) {
+            unit(0xd800 + ((code - 0x10000) >> 10));
+            unit(0xdc00 + ((code - 0x10000) & 0x3ff));
+        } else {
+            unit(code);
+        }
+        i += static_cast<size_t>(length);
+    }
+    return out + "\"";
+}
+
 } // namespace launcher::json

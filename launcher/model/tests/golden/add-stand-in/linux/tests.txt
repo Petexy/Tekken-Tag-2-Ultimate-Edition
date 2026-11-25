@@ -1,0 +1,4 @@
+@test add:azucena started
+@test add:azucena ok Added Azucena
+@test quit started
+@test quit ok

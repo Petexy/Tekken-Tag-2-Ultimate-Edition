@@ -1,8 +1,40 @@
 # The launcher players start (later shipped as an AppImage): it builds the
 # game program from the player's own .wua on their PC (builder/: ttt2-build
 # and the kit it uses), installs and uninstalls the game, starts it, and adds
-# Tekken 7's and Tekken 8's characters through tools/characters (app/: GTK 4;
-# core/: its logic without GTK).
-add_subdirectory(builder)
+# Tekken 7's and Tekken 8's characters through tools/characters (app/: the
+# program, in the Tag Split look; core/: its logic without any toolkit;
+# model/: what the window shows and does; backend/: how the model's programs
+# run; ui/: the toolkit of the interface, on SDL 3).
+#
+# With TTT2_LAUNCHER_ONLY (no game tools, no kit) only the new interface is
+# built: the Windows release .exe cross-built on Linux
+# (windows/make_launcher_exe.py) and the source ZIP's first start.
+# (core/ and model/ build on any OS, also launcher-only and with MinGW: the new interface's logic.)
+if(NOT TTT2_LAUNCHER_ONLY)
+    add_subdirectory(builder)
+endif()
 add_subdirectory(core)
-add_subdirectory(app)
+add_subdirectory(model)
+add_subdirectory(backend)
+add_subdirectory(ui)
+# (Windows' launcher-only build is the release .exe's: the app itself. Linux's app needs builder/'s kit.)
+if(NOT TTT2_LAUNCHER_ONLY OR WIN32)
+    add_subdirectory(app)
+endif()
+add_subdirectory(appimage)
+
+# The Windows release program, as make_launcher_exe.py makes the release .exe of it (its DEFAULT_CMAKE_TARGET):
+# windows/test_launcher_exe.py, its version and its files appended as the release has them (only in a build without
+# TTT2_LAUNCHER_PAYLOAD: one with it has its files in it already). Built on Linux, through Wine when there is one (the
+# start as a player's only with WINEPREFIX set to a prefix of the tests' own).
+set(TTT2_LAUNCHER_RELEASE_TARGET ttt2-launcher)
+if(WIN32 AND TARGET ${TTT2_LAUNCHER_RELEASE_TARGET} AND NOT TTT2_LAUNCHER_PAYLOAD)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME launcher_release_exe_test
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/windows/test_launcher_exe.py
+                    $<TARGET_FILE:${TTT2_LAUNCHER_RELEASE_TARGET}> ${TTT2_LAUNCHER_VERSION}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/windows)
+        set_tests_properties(launcher_release_exe_test PROPERTIES LABELS launcher TIMEOUT 900)
+    endif()
+endif()

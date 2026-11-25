@@ -56,4 +56,8 @@ private:
 // valid JSON, with where and why in `error`.
 std::optional<Value> parse(std::string_view text, std::string* error = nullptr);
 
+// `text` (UTF-8) as a JSON string, quotes included, in ASCII only: every other letter as a \u escape (a surrogate
+// pair past U+FFFF), so that no code page on the way can change it. Bytes that are not UTF-8 become U+FFFD.
+std::string quote(std::string_view text);
+
 } // namespace launcher::json

@@ -92,6 +92,24 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
             const auto resolution = display::resolution_named(rest);
             ok = resolution.has_value();
             if (ok) a.args = {std::string(display::name_of(*resolution))};
+        } else if (a.name == "press" || a.name == "pad" || a.name == "steam" || a.name == "steam-key" ||
+                   a.name == "click" || a.name == "hover" || a.name == "tab") {
+            // Input as the devices give it (the SDL launcher): press:<SDL key name>, pad:<button>, steam:<button>
+            // (the pad's button and the key Steam types for it at once), steam-key:<button> (the same, the key
+            // arriving first and the pad's report after the key's frame), click:<id>, hover:<id>, tab:<next|prev|
+            // home|fighters|settings>.
+            a.args = {rest};
+            ok = !rest.empty();
+            if (a.name == "tab")
+                ok = rest == "next" || rest == "prev" || rest == "home" || rest == "fighters" || rest == "settings";
+        } else if (a.name == "rows") {
+            // rows:<id prefix>:<points>: the rows of a list (ids with that prefix) in view, each at least that wide.
+            const size_t last = rest.rfind(':');
+            char* end = nullptr;
+            const std::string width = last == std::string::npos ? "" : rest.substr(last + 1);
+            const double points = std::strtod(width.c_str(), &end);
+            ok = last != std::string::npos && last > 0 && !width.empty() && end && *end == '\0' && points >= 0;
+            if (ok) a.args = {rest.substr(0, last), width};
         } else if (a.name == "wait") {
             char* end = nullptr;
             const double seconds = std::strtod(rest.c_str(), &end);
@@ -102,7 +120,8 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
                  (a.name == "update" || a.name == "add-all-base" || a.name == "add-all-owned" || a.name == "play" ||
                   a.name == "quit" || a.name == "expand-dlc" || a.name == "expand-log" || a.name == "show-uninstall" ||
                   a.name == "refresh" || a.name == "settings" || a.name == "back" || a.name == "reset-keys" ||
-                  a.name == "update-launcher" || a.name == "get-packages");
+                  a.name == "update-launcher" || a.name == "get-packages" || a.name == "update-everything" ||
+                  a.name == "update-continued");
         }
         if (!ok) {
             if (error) *error = "not a test action: " + item;

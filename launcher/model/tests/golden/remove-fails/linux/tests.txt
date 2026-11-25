@@ -1,0 +1,4 @@
+@test remove:lucky_chloe started
+@test remove:lucky_chloe failed Removing Lucky Chloe failed: It stopped with code 2 (see Details)
+@test quit started
+@test quit ok
