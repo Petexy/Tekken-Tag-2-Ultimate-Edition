@@ -93,6 +93,11 @@ constexpr Rewrite kNames[] = {
     {"Bot\xC3\xB3n X", "\x03"},
     {"bot\xC3\xB3n Y", "\x04"},
     {"Bot\xC3\xB3n Y", "\x04"},
+    // Russian (the PlayStation 3's and Xbox 360's texts: START is the + Button, SELECT and BACK the - Button)
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 START", "\x05"},
+    {"\xD0\x9D\xD0\xB0\xD0\xB6\xD0\xB0\xD1\x82\xD1\x8C START", "\xD0\x9D\xD0\xB0\xD0\xB6\xD0\xB0\xD1\x82\xD1\x8C \x05"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 SELECT", "\x06"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 BACK", "\x06"},
 };
 
 // A text's space: its bytes and at least two zero bytes, to four. A key's:
@@ -222,6 +227,35 @@ int show_button_icons(std::vector<uint8_t>& bank) {
         return start + room; // past the text
     });
     return changed;
+}
+
+uint8_t bank_language(const std::vector<uint8_t>& bank) { return is_bank(bank) ? bank[6] : 0; }
+
+size_t text_count(const std::vector<uint8_t>& bank) {
+    size_t n = 0;
+    each_text(bank, [&](size_t, size_t, std::string_view) -> size_t {
+        ++n;
+        return 0;
+    });
+    return n;
+}
+
+std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks) {
+    std::vector<size_t> filled;
+    constexpr size_t kLanguages = kBankRussian;
+    for (size_t i = kLanguages - 1; i < banks.size(); ++i) {
+        // a part's banks, Japanese to Russian
+        bool part = true;
+        for (size_t l = 0; l < kLanguages && part; ++l) part = bank_language(*banks[i + 1 - kLanguages + l]) == l + 1;
+        if (!part) continue;
+        std::vector<uint8_t>& russian = *banks[i];
+        const std::vector<uint8_t>& english = *banks[i + kBankEnglish - kLanguages];
+        if (text_count(russian) != 0 || text_count(english) == 0) continue;
+        russian = english;
+        russian[6] = kBankRussian;
+        filled.push_back(i);
+    }
+    return filled;
 }
 
 void code_points(const std::vector<uint8_t>& bank, std::set<char32_t>& used) {

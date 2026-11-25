@@ -8,6 +8,7 @@
 #include "title/archive.h"
 #include "title/font.h"
 #include "title/image.h"
+#include "title/language.h"
 #include "title/text.h"
 #include "title/title_screen.h"
 
@@ -73,6 +74,20 @@ std::atomic<host::Controller> g_controller{host::Controller::kOther};
 // The object the title keeps its system settings in; its word at +8 is 1
 // when menus confirm with the right face button (the Wii U's A).
 std::atomic<uint32_t> g_system_info{0};
+
+// Its word at +4 is the language the title shows its texts in: its own
+// numbers (1 Japanese, 2 English, 3 French, 4 Italian, 5 German, 6
+// Spanish, 7 Russian), set from the console's language. The title has the
+// Russian texts of the PlayStation 3 and Xbox 360 versions, but takes the
+// Wii U's Russian (cafe.language 10) for English: with game.ini's Russian
+// they are chosen here.
+constexpr uint32_t kTitleRussian = 7;
+
+void apply_text_language(uint32_t info) {
+    if (language::place() != language::kRussian) return;
+    const uint32_t big_endian = __builtin_bswap32(kTitleRussian);
+    std::memcpy(guest_pointer(info + 4), &big_endian, 4);
+}
 
 void apply_confirm_button() {
     const uint32_t info = g_system_info;
@@ -476,6 +491,7 @@ void prepare_title_screen() {
 
 void system_info_created(uint32_t info) {
     g_system_info = info;
+    apply_text_language(info);
     apply_confirm_button();
 }
 
@@ -502,22 +518,35 @@ void prepare_presentation() {
     for (const Bank& b : banks) text::code_points(b.contents, used);
     std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> changed;
     changed[kFontArchive] = prepare_icons(used);
-    if (!changed[kFontArchive].empty()) {
-        size_t rewritten = 0;
-        for (Bank& b : banks) {
-            if (text::show_button_icons(b.contents) == 0) continue;
-            changed[b.archive][b.hash] = archive::pack(b.contents, b.hash, b.flags);
-            ++rewritten;
+    const bool icons = !changed[kFontArchive].empty();
+    // (Russian has no Practice texts: English's stand in; they are rewritten as English's are.)
+    std::vector<bool> filled(banks.size());
+    for (const char* archive_name : {kFontArchive, kPatchArchive}) {
+        std::vector<std::vector<uint8_t>*> of_archive;
+        std::vector<size_t> at;
+        for (size_t i = 0; i < banks.size(); ++i) {
+            if (std::strcmp(banks[i].archive, archive_name) != 0) continue;
+            of_archive.push_back(&banks[i].contents);
+            at.push_back(i);
         }
-        for (const auto& [archive_name, entries] : changed) {
-            if (!vfs::set_archive_entries(archive_name, entries)) {
-                std::fprintf(stderr, "ttt2: warning: cannot change %s; texts may name the Wii U's buttons\n",
-                             archive_name.c_str());
-            }
+        for (const size_t i : text::fill_missing_texts(of_archive)) filled[at[i]] = true;
+    }
+    size_t rewritten = 0;
+    for (size_t i = 0; i < banks.size(); ++i) {
+        Bank& b = banks[i];
+        const bool renamed = icons && text::show_button_icons(b.contents) != 0;
+        rewritten += renamed;
+        if (renamed || filled[i]) changed[b.archive][b.hash] = archive::pack(b.contents, b.hash, b.flags);
+    }
+    for (const auto& [archive_name, entries] : changed) {
+        if (!entries.empty() && !vfs::set_archive_entries(archive_name, entries)) {
+            std::fprintf(stderr, "ttt2: warning: cannot change %s; texts may name the Wii U's buttons\n",
+                         archive_name.c_str());
         }
-        if (std::getenv("TTT2_TRACE_PRESENTATION")) {
-            std::fprintf(stderr, "ttt2: %zu text banks, %zu with button names changed\n", banks.size(), rewritten);
-        }
+    }
+    if (std::getenv("TTT2_TRACE_PRESENTATION")) {
+        std::fprintf(stderr, "ttt2: %zu text banks, %zu with button names changed, %zu filled with English texts\n",
+                     banks.size(), rewritten, static_cast<size_t>(std::count(filled.begin(), filled.end(), true)));
     }
     prepare_title_screen();
     if (std::getenv("TTT2_TRACE_PRESENTATION")) {

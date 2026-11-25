@@ -8,6 +8,7 @@
 // least two zero bytes. The bank's index points at the records, so a text
 // can change in place within its space.
 
+#include <cstddef>
 #include <cstdint>
 #include <set>
 #include <vector>
@@ -25,11 +26,30 @@ bool is_bank(const std::vector<uint8_t>& contents);
 
 // Rewrites the Wii U's button names in the bank's texts (the + and -
 // buttons, A B X Y, the +Control Pad; in English, French, Italian, German
-// and Spanish) to the buttons' icons, which follow the controller. Returns
-// how many texts changed.
+// and Spanish; in Russian, whose texts are the PlayStation 3's and Xbox
+// 360's, START, SELECT and BACK) to the buttons' icons, which follow the
+// controller. Returns how many texts changed.
 int show_button_icons(std::vector<uint8_t>& bank);
 
 // Adds the code points of the bank's texts to `used`.
 void code_points(const std::vector<uint8_t>& bank, std::set<char32_t>& used);
+
+// A bank's language (its byte 6): data003 has each part's banks in this
+// order, one per language.
+enum BankLanguage : uint8_t {
+    kBankJapanese = 1, kBankEnglish, kBankEnglishAgain, kBankFrench, kBankItalian, kBankGerman, kBankSpanish,
+    kBankKorean, kBankChinese, kBankRussian
+};
+uint8_t bank_language(const std::vector<uint8_t>& bank); // 0: not a bank
+
+// The number of texts (records with a key) of the bank.
+size_t text_count(const std::vector<uint8_t>& bank);
+
+// The banks the title reads for a language it has no texts of in a part of
+// the game (the Wii U's Russian Practice texts are missing: their bank has
+// none) take that part's English bank's texts: `banks` in an archive's
+// order, each part's in the languages' order. Returns the indices of the
+// banks changed (their language byte kept).
+std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks);
 
 } // namespace cafe::title::text

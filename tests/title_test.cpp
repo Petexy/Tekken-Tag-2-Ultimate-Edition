@@ -9,6 +9,7 @@
 #include "title/draw.h"
 #include "title/font.h"
 #include "title/image.h"
+#include "title/language.h"
 #include "title/menudata.h"
 #include "title/pictures.h"
 #include "title/text.h"
@@ -453,10 +454,86 @@ void test_text() {
     auto wrong = make_bank({{"common_4", "PRESS THE + BUTTON", "PRESS THE + BUTTON"}}, true);
     check(text::show_button_icons(wrong) == 0, "text: a record whose length does not match is left alone");
 
+    // Russian: the PlayStation 3's and Xbox 360's names (START, SELECT, BACK; made-up texts)
+    auto russian = make_bank({
+        {"common_193", "Жмите кнопку START дважды.", "Push plus twice."},
+        {"common_1319", "Нажать START и ждать.", "Push plus, wait."},
+        {"Manu_635", "Держите кнопку BACK, чтобы закрыть.", "Hold minus to close."},
+        {"common_1307", "НАЖАТЬ START", "PUSH"},
+        {"common_1380", "Только не кнопку PS.", "Leave HOME be."},
+        {"common_2", "РЕЖИМ START", "MODE"},
+    });
+    check(text::show_button_icons(russian) == 4, "text: four Russian texts name buttons");
+    const auto r = texts(russian);
+    check(r.size() == 6 && r[0].first == "Жмите " + start + " дважды." && r[0].second == 15, "text: Russian START");
+    check(r.size() == 6 && r[1].first == "Нажать " + start + " и ждать.", "text: Russian press START");
+    check(r.size() == 6 && r[2].first == "Держите " + select + ", чтобы закрыть.", "text: Russian BACK");
+    check(r.size() == 6 && r[3].first == "НАЖАТЬ " + start, "text: the Russian prompt");
+    check(r.size() == 6 && r[4].first == "Только не кнопку PS." && r[5].first == "РЕЖИМ START",
+          "text: no other START or PS");
+
     std::set<char32_t> used;
     text::code_points(make_bank({{"common_5", "Drücke \xE2\x94\xBC!", "Press the pad!"}}), used);
     check(used == std::set<char32_t>{U'D', U'r', U'\u00FC', U'c', U'k', U'e', U' ', U'\u253C', U'!'},
           "text: the code points texts use (not the English originals')");
+}
+
+// A part's banks, Japanese (1) to Russian (10), Russian's with no texts unless `russian`.
+std::vector<std::vector<uint8_t>> part(bool russian) {
+    std::vector<std::vector<uint8_t>> banks;
+    for (uint8_t language = 1; language <= 10; ++language) {
+        std::vector<Record> records;
+        if (language != 10 || russian) records.push_back({"practice_1", "TEXT " + std::to_string(language), "TEXT"});
+        if (language == 2) records.push_back({"practice_2", "ENGLISH", "ENGLISH"});
+        banks.push_back(make_bank(records));
+        banks.back()[6] = language;
+    }
+    return banks;
+}
+
+void test_missing_texts() {
+    auto banks = part(false);
+    auto more = part(true);
+    banks.insert(banks.end(), more.begin(), more.end());
+    const std::vector<uint8_t> english = banks[1];
+    std::vector<std::vector<uint8_t>*> pointers;
+    for (auto& b : banks) pointers.push_back(&b);
+    check(text::bank_language(banks[9]) == text::kBankRussian && text::text_count(banks[9]) == 0 &&
+              text::text_count(banks[1]) == 2,
+          "text: a bank's language and texts");
+    const std::vector<size_t> filled = text::fill_missing_texts(pointers);
+    check(filled == std::vector<size_t>{9}, "text: the Russian bank without texts, only");
+    check(banks[9][6] == text::kBankRussian && std::equal(banks[9].begin() + 7, banks[9].end(), english.begin() + 7) &&
+              banks[9].size() == english.size(),
+          "text: it gets the English bank's texts, its language kept");
+    check(texts(banks[19]).size() == 1 && texts(banks[19])[0].first == "TEXT 10", "text: a Russian bank with texts stays");
+    auto shuffled = part(false);
+    std::swap(shuffled[2], shuffled[3]);
+    std::vector<std::vector<uint8_t>*> shuffled_pointers;
+    for (auto& b : shuffled) shuffled_pointers.push_back(&b);
+    check(text::fill_missing_texts(shuffled_pointers).empty(), "text: banks not in the languages' order stay");
+}
+
+void test_language() {
+    const language::Text t = {"English", "Fran\xC3\xA7" "ais", nullptr, "", "Espa\xC3\xB1ol", "\xD0\xA0\xD1\x83\xD1\x81"};
+    check(language::in(t, language::kEnglish) == "English" && language::in(t, language::kFrench) == "Français" &&
+              language::in(t, language::kSpanish) == "Español" && language::in(t, language::kRussian) == "Рус",
+          "language: a text in each language");
+    check(language::in(t, language::kGerman) == "English" && language::in(t, language::kItalian) == "English" &&
+              language::in(t, language::kPlaces) == "English",
+          "language: English where one has none");
+    check(language::place_of("ru") == language::kRussian && language::place_of("de") == language::kGerman &&
+              language::place_of("en") == language::kEnglish && language::place_of("ja") == language::kPlaces &&
+              language::place_of("") == language::kPlaces,
+          "language: the places of the launcher's codes");
+    check(language::place() == language::kEnglish && language::in_current(t) == "English", "language: English until set");
+    language::set(cafe::host::game::kLanguages[language::kFrench]);
+    check(language::place() == language::kFrench && language::current().code == "fr" &&
+              language::in_current(t) == "Français",
+          "language: the language set");
+    language::set(cafe::host::game::Language{"xx", "None", 99});
+    check(language::place() == language::kEnglish, "language: one the game does not have is English");
+    check(language::characters("Рус ok") == 6 && language::characters("") == 0, "language: characters of UTF-8");
 }
 
 // ------------------------------------------------------------------ the copyright line
@@ -659,6 +736,8 @@ int main() {
     test_distance();
     test_pictures();
     test_text();
+    test_missing_texts();
+    test_language();
     test_copyright_line();
     test_logo();
     test_menudata();
