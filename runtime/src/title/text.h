@@ -46,12 +46,13 @@ enum BankLanguage : uint8_t {
 };
 uint8_t bank_language(const std::vector<uint8_t>& bank); // 0: not a bank
 
-// A text's markup, in order: its control codes (a code of U+FFF0 on with the
-// code point after it, its argument), line breaks and other codes below
-// U+0020, the private-use code points the fonts draw as icons, the button
-// names show_button_icons turns into icons (as those icons) and the
-// symbols that stand for inputs (☆【】↑↓). A translation keeps its
-// original's.
+// A text's markup, in order: its control codes (a code of U+FFF0 on with
+// its arguments, the code points after it: the title's table of them has
+// two for U+FFF2, a colour, none for U+FFFF and one for the others), line
+// breaks and other codes below U+0020, the private-use code points the
+// fonts draw as icons, the button names show_button_icons turns into icons
+// (as those icons) and the symbols that stand for inputs (☆【】↑↓). A
+// translation keeps its original's.
 std::u32string markup(std::string_view text);
 
 // The hash a record's header holds of its text (in its first two bytes, the

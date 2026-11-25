@@ -710,6 +710,20 @@ void test_markup() {
               text::markup("Жмите \xE2\x98\x86, затем кнопку X.") != text::markup("Press the X Button, then \xE2\x98\x86."),
           "text: markup: button names as their icons, input symbols, in order");
     check(text::markup("Plain words [in brackets].") == U"", "text: markup: none in plain words");
+    // a colour (U+FFF2) has two arguments, U+FFFF none: a translation must keep both halves
+    const std::string colour = "\xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBC\xA0"; // U+FFF2 U+FFFF U+FF20
+    const std::string original = "Hat " + colour + "yellow" + code;
+    check(text::markup(original) == U"\uFFF2\uFFFF\uFF20\uFFF4\u8001" &&
+              text::markup("Шляпа " + colour + "жёлтая" + code) == text::markup(original),
+          "text: markup: a colour with both its halves");
+    check(text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF" "жёлтая" + code) != text::markup(original) &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBF\xBF" "жёлтая" + code) != text::markup(original) &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF\xEF\xBC\xA1" "жёлтая" + code) != text::markup(original),
+          "text: markup: a colour's second half dropped or changed differs");
+    check(text::markup("Hat " + colour) != text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF") &&
+              text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF") == U"\uFFF2\uFFFF",
+          "text: markup: a text ending after a colour's first half differs");
+    check(text::markup("Mug\xEF\xBF\xBF" "a\n") == U"\uFFFF\n", "text: markup: U+FFFF takes no argument");
     // our Russian table: keys of a part's records, each once, texts without the icons' code points
     std::set<std::string_view> keys;
     bool well_formed = !text::russian_texts().empty();

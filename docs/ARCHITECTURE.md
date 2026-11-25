@@ -1097,8 +1097,10 @@ text the bank has for the same English text under another number (SELECT,
 CONFIRM, ON, OFF, COMMAND LIST ...), if any; the rest (song titles, a
 stage's name, texts of icons only) stay English. A text goes in only with
 its English record's markup (`text::markup`: after the button names become
-icons, the control codes with their arguments, the line breaks, the icons
-and the symbols ☆【】↑↓, in order); one that differs (the player's banks
+icons, the control codes with their arguments (as the title's table of
+them at 0x102F619C says: two for U+FFF2, a colour's two halves, none for
+U+FFFF, one for the others), the line breaks, the icons and the symbols
+☆【】↑↓, in order); one that differs (the player's banks
 decide, and another version of the game may differ) leaves the record
 English, and the port logs `ttt2: Russian text <key> left in English: its
 markup is not the English text's`. A bank is its header, three tables and

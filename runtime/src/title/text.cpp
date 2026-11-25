@@ -397,6 +397,12 @@ std::u32string decode(std::string_view utf8) {
 
 bool is_code(char32_t c) { return c < 0x20 || (c >= 0xE000 && c <= 0xF8FF) || (c >= 0xFFF0 && c <= 0xFFFF); }
 
+// How many code points after a control code (U+FFF0 on) are its arguments:
+// the title's table of them (0x102F619C, by the code's low four bits, read
+// by its text functions, sub_04D4866C ...) has two for U+FFF2 (a colour: two
+// halves, U+FF20 or U+FFFF each), none for U+FFFF and one for the others.
+size_t arguments(char32_t code) { return code == 0xFFF2 ? 2 : code == 0xFFFF ? 0 : 1; }
+
 bool is_marked_symbol(char32_t c) {
     switch (c) {
     case kRightButton: case kBottomButton: case kTopButton: case kLeftButton: case kStartButton: case kSelectButton:
@@ -418,7 +424,10 @@ std::u32string markup(std::string_view text) {
         const char32_t c = points[i];
         if (is_code(c)) {
             out += c;
-            if (c >= 0xFFF0 && i + 1 < points.size()) out += points[++i]; // its argument
+            if (c >= 0xFFF0) {
+                // its arguments (as many as the text still has: one cut short differs from a whole one)
+                for (size_t n = arguments(c); n > 0 && i + 1 < points.size(); --n) out += points[++i];
+            }
         } else if (is_marked_symbol(c)) {
             out += c;
         }
