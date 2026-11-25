@@ -383,6 +383,12 @@ bool Window::translate(const SDL_Event& e, RawEvent& out, double now) {
         out.code = e.button.button;
         out.pos = to_points(e.button.x, e.button.y);
         return true;
+    case SDL_EVENT_TEXT_INPUT:
+        if (!e.text.text || !*e.text.text) return false;
+        out.kind = RawEvent::Text;
+        out.device = Device::Keyboard;
+        out.text = e.text.text;
+        return true;
     case SDL_EVENT_MOUSE_WHEEL:
         out.kind = RawEvent::Wheel;
         out.device = Device::Mouse;
@@ -396,6 +402,18 @@ bool Window::translate(const SDL_Event& e, RawEvent& out, double now) {
         return true;
     default:
         return false;
+    }
+}
+
+void Window::text_input(bool on) {
+    if (on == text_input_) return;
+    text_input_ = on;
+    if (!window_) return;
+    if (on) {
+        SDL_SetHint(SDL_HINT_ENABLE_SCREEN_KEYBOARD, "0");
+        SDL_StartTextInput(window_);
+    } else {
+        SDL_StopTextInput(window_);
     }
 }
 

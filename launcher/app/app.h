@@ -242,6 +242,11 @@ private:
     void settings_keys_crimson(const m::SettingsView& view, const std::string& up);
     void settings_blue(const ui::Box& blue, const m::SettingsView& view);
     void setting_view(const m::SettingsView& view, const std::string& id);
+    void name_edit_view(const m::SettingsView& view, const ui::Box& blue);
+    void name_press(const std::string& id, bool click);
+    void name_edit_tick(double now);
+    bool name_edit_sync(double now);
+    bool name_edit_event(const ui::Event& e);
     void key_view(const m::SettingsView& view, const std::string& id);
     void folder_view(const m::SettingsView& view, const std::string& key);
     void settings_change(const std::string& id, int delta);
@@ -416,10 +421,11 @@ private:
     ui::Readout fighters_ro_, settings_ro_;
     std::map<std::string, std::string> group_of_button_;  // a group action's id -> its group's key
     // Settings
-    std::string settings_section_ = "display"; // display / keyboard / launcher / folders
+    std::string settings_section_ = "game";    // game / display / keyboard / launcher / folders
     std::string settings_key_;                 // the row the blue side shows
     int settings_slide_ = 1;                   // the side the last value change came from
     double capture_since_ = 0;                 // choosing a key since
+    std::optional<m::NameEditView> name_edit_shown_; // the name being typed as shown last (its readout fading out)
     m::LauncherSettings applied_{};            // the launcher's settings as applied
     fs::path launcher_ini_;                    // where they are kept (beside display.ini)
     bool forced_glyphs_ = false;               // TTT2_CONTROLLER chose the prompts

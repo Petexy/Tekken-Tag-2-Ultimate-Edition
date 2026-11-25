@@ -165,6 +165,7 @@ struct SettingRowSpec {
     std::string title{}, value{}, detail{};  // detail: a mono line under the title (folders)
     bool value_on = false;             // value shown as "on" (blue)
     bool chevron = false;              // a chevron instead of the selector (opens something)
+    bool value_as_typed = false;       // the value in its own case (a name), not in capitals
     bool disabled = false;
     int slide = 1;
 };
@@ -175,8 +176,13 @@ struct Section {
     bool disabled = false;
 };
 // `focus_group`: the sections' Focus::group (the list's below them: -1, so Up from its first item reaches them).
+// A row too narrow for them shrinks the sections (their names closed up, then smaller); `box.wrap`: on two lines
+// (or more) instead, every section as wide as it likes (for a row narrower than section_tabs_width(..., true)).
 void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box = {},
                   int focus_group = 0);
+// How wide section_tabs is on one line: the prompts, the gaps and every section as it likes, or (`least`) as narrow
+// as it may be shrunk.
+float section_tabs_width(Ui& ui, std::span<const Section> sections, bool least);
 // A key binding row.
 struct KeyRowSpec {
     std::string icon{}, name{}, key{};
@@ -202,11 +208,29 @@ struct FileRowSpec {
 };
 void file_row(Ui& ui, const std::string& id, const FileRowSpec& spec, Focus focus = {}, const Box& box = {});
 
+// ---- text entry ----------------------------------------------------------------------------------------------------
+// A line of text being typed: its words, a caret blinking where the next character goes, the placeholder (dim) when
+// it is empty, a count at its end ("4/16"); `refused`: its frame in the warning colour (a character not taken).
+struct TextFieldSpec {
+    std::string text{}, placeholder{}, count{};
+    std::size_t caret = 0;  // a byte index into text
+    bool refused = false;
+};
+void text_field(Ui& ui, const std::string& id, const TextFieldSpec& spec, const Box& box = {});
+// A key of an on-screen keyboard: its label, or an icon ("stroke:shift"); `primary`: the key that ends it (Done);
+// `on`: a key that stays pressed (Shift). In a row it grows with its Box::w weight (its width in keys).
+struct ScreenKeySpec {
+    std::string label{}, icon{};
+    bool primary = false, on = false, disabled = false;
+};
+void screen_key(Ui& ui, const std::string& id, const ScreenKeySpec& spec, Focus focus = {}, const Box& box = {});
+
 // ---- blue readout ---------------------------------------------------------------------------------------------------
 // The progress bar: the fill eases toward `fraction` (< 0: unknown, a pulse runs).
 void progress_bar(Ui& ui, const std::string& id, float fraction, Tone tone = Tone::Blue, const Box& box = {});
+// `as_typed`: the label in its own case (a name), not in capitals.
 void pill(Ui& ui, const std::string& id, const std::string& label, Tone tone = Tone::Neutral, bool dot = false,
-          const Box& box = {});
+          const Box& box = {}, bool as_typed = false);
 // Choices shown as chips, the current one lit (a picture of a setting's options, not focusable).
 void chips(Ui& ui, const std::string& id, std::span<const std::string> options, int current, const Box& box = {});
 // A described thing: a title in cyan and its text (.xpl).
@@ -269,6 +293,8 @@ struct WhatLine {
 void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, const Box& box = {});
 // Puts text on the clipboard (a log, a command to run); false when the system refused.
 bool copy_text(const std::string& text);
+// What the clipboard holds as text ("" for nothing).
+std::string pasted_text();
 
 // ---- dialog band ---------------------------------------------------------------------------------------------------
 // A split band across the dimmed screen (a modal): the crimson half (options) and the blue half (what happens),

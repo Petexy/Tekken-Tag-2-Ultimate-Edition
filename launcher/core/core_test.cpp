@@ -4,6 +4,8 @@
 // updates (in a folder of its own, made and deleted here).
 
 #include "display.h"
+#include "game_ini.h"
+#include "host/game_settings.h"
 #include "json.h"
 #include "paths.h"
 #include "protocol.h"
@@ -630,6 +632,14 @@ void test_actions() {
     check(input && input->size() == 6 && (*input)[0].args == std::vector<std::string>{"Return"} &&
               (*input)[5].label() == "tab-next",
           "actions: input as the devices give it (" + error + ")");
+    const auto name = parse_test_actions("player-name:Mira Q;player-name:;type:ab c", &error);
+    check(name && name->size() == 3 && (*name)[0].args == std::vector<std::string>{"Mira Q"} &&
+              (*name)[1].args == std::vector<std::string>{""} && (*name)[2].args == std::vector<std::string>{"ab c"} &&
+              (*name)[0].label() == "player-name-_ira__",
+          "actions: player-name and type (" + error + ")");
+    check(!parse_test_actions("player-name", &error) && !parse_test_actions("type:", &error) &&
+              !parse_test_actions("type", &error),
+          "actions: player-name needs its colon, type its text");
     check(!parse_test_actions("tab:sideways", &error) && !parse_test_actions("press", &error),
           "actions: input needs what to press");
     const auto rows = parse_test_actions("rows:pe::300;rows:pp::0.5", &error);
@@ -795,6 +805,105 @@ void test_display(const fs::path& root) {
                   "These displays refresh at up to 75 Hz: the game stays at 60 fps." &&
               note({{1080, 60000}, {1440, 144000}}).empty() && note({{1080, 60000}, {1440, 0}}).empty(),
           "display: the 60 fps note, more monitors");
+}
+
+// game.ini as Settings > Game saves it: the player's name, every other line kept.
+void test_game_ini(const fs::path& root) {
+    Places places;
+    places.config = root / "config";
+    const fs::path file = game_ini::beside(places.display());
+    check(file == root / "config/ttt2/game.ini", "game.ini: beside display.ini");
+    game_ini::Loaded loaded = game_ini::load(file);
+    check(loaded.error.empty() && !loaded.exists && loaded.settings.player_name.empty(), "game.ini: no file, no name");
+
+    // The limits.
+    check(game_ini::name_problem("").empty() && game_ini::name_problem("   ").empty() &&
+              game_ini::name_problem("Mira").empty() && game_ini::name_problem("  Mira Q.  ").empty() &&
+              game_ini::name_problem("A~z!0 9_-'()[]{}").empty() && game_ini::name_problem("a#b").size() > 0,
+          "game.ini: names that can be kept, # cannot");
+    check(game_ini::name_problem("ABCDEFGHIJKLMNOP").empty() &&
+              game_ini::name_problem("ABCDEFGHIJKLMNOPQ") == "It has 17 characters: 16 at most." &&
+              game_ini::name_problem(" ABCDEFGHIJKLMNOP ").empty(),
+          "game.ini: 16 characters at most, the spaces at both ends not counted");
+    check(game_ini::name_problem("Jos\xC3\xA9") == "It has \u201C\xC3\xA9\u201D, which a name cannot have." &&
+              game_ini::name_problem("a\tb") == "It has a control character, which a name cannot have." &&
+              game_ini::name_problem("a\xFF") == "It has \u201C\xFF\u201D, which a name cannot have.",
+          "game.ini: what a name cannot have, said (" + game_ini::name_problem("Jos\xC3\xA9") + ")");
+    check(game_ini::first_refused("ok \xE2\x82\xAC!") == "\xE2\x82\xAC" && game_ini::first_refused("ok").empty() &&
+              game_ini::first_refused("\xE2\x82") == "\xE2",
+          "game.ini: the first character refused, whole");
+    check(game_ini::tidy_name("  Mira Q  ") == "Mira Q" && game_ini::tidy_name(" \t ").empty(), "game.ini: tidied");
+    // An overlong UTF-8 sequence is no letter: refused whole (the game shows "?" for it).
+    check(game_ini::first_refused("\xC1\xA1" "bc") == "\xC1\xA1" && !game_ini::name_problem("\xC1\xA1" "bc").empty(),
+          "game.ini: an overlong sequence refused");
+    // The launcher reads a file's lines as the game does: its name, cleaned as the game cleans it, is the game's.
+    for (const std::string text :
+         {"player_name = Mira\n", "player_name = A #B\n", "player_name = A#B # c\n", "# c\nplayer_name=  Zo\xC3\xAB \n",
+          "\xEF\xBB\xBFplayer_name = X\r\nplayer_name = Y\r\n", "player_name =\n", "other = 1\nplayer_name = Q\n",
+          "player_name = ABCDEFGHIJKLMNOPQRST\n", "player_name\n", "player_name = \t tab\t\n", "#player_name = no\n",
+          "  player_name   =   Spaced Out  \n", "player_name = a\xFF" "b\n", "player_name = \xC1\xA1" "bc\n", ""}) {
+        const std::string mine = cafe::host::game::clean_name(game_ini::parse(text).player_name),
+                          game = cafe::host::game::parse(text).settings.player_name;
+        check(mine == game, "game.ini: read as the game reads it (" + mine + " / " + game + ")");
+    }
+    check(game_ini::name_rule().find("16") != std::string::npos, "game.ini: the rule says the most");
+
+    // A new file: a header, the name.
+    std::string error;
+    check(game_ini::save_name(file, "  Mira Q ", &error), "game.ini: saved (" + error + ")");
+    loaded = game_ini::load(file);
+    check(loaded.exists && loaded.error.empty() && loaded.settings.player_name == "Mira Q",
+          "game.ini: read back (" + loaded.error + ")");
+    check(text_of(file).starts_with("# ") && text_of(file).ends_with("\nplayer_name = Mira Q\n"),
+          "game.ini: a new file's text (" + text_of(file) + ")");
+
+    // Another one's lines kept: comments, settings the launcher does not know, their order, CRLF.
+    const std::string hand = "\xEF\xBB\xBF# mine\r\nvolume = 7  # loud\r\nplayer_name = Old # was\r\n"
+                             "\r\nfuture_thing = yes\r\nplayer_name=Older\r\nlast = 1";
+    write(file, hand);
+    check(game_ini::load(file).settings.player_name == "Older", "game.ini: the later line counts");
+    check(game_ini::save_name(file, "New One", &error), "game.ini: saved over another's (" + error + ")");
+    check(text_of(file) == "\xEF\xBB\xBF# mine\r\nvolume = 7  # loud\r\nplayer_name = New One\r\n\r\n"
+                           "future_thing = yes\r\nlast = 1",
+          "game.ini: every other line kept (" + text_of(file) + ")");
+    check(game_ini::load(file).settings.player_name == "New One", "game.ini: the new name read back");
+    // The key on the first line, after a byte order mark; a name in a comment is no setting.
+    check(game_ini::with_name("\xEF\xBB\xBFplayer_name = A\n# player_name = B\n", "C") ==
+              "\xEF\xBB\xBFplayer_name = C\n# player_name = B\n",
+          "game.ini: the key after a byte order mark");
+    check(game_ini::parse("# player_name = B\nplayer_name = A#1 # comment\n").player_name == "A#1",
+          "game.ini: comments as display.ini's");
+    // None: the key left out, the rest kept.
+    check(game_ini::save_name(file, "   ", &error), "game.ini: no name saved (" + error + ")");
+    check(text_of(file) == "\xEF\xBB\xBF# mine\r\nvolume = 7  # loud\r\n\r\nfuture_thing = yes\r\nlast = 1",
+          "game.ini: no name, no key (" + text_of(file) + ")");
+    check(game_ini::load(file).settings.player_name.empty(), "game.ini: no name read back");
+    check(game_ini::with_name("last = 1", "Z") == "last = 1\nplayer_name = Z\n", "game.ini: added at the end");
+    check(game_ini::with_name("", "") == game_ini::with_name("\n \n", "") &&
+              game_ini::parse(game_ini::with_name("", "")).player_name.empty(),
+          "game.ini: a new file without a name");
+
+    // Files that cannot be read: said, and written anew.
+    std::error_code ec;
+    fs::remove(file, ec);
+    fs::create_directories(file, ec);
+    loaded = game_ini::load(file);
+    check(loaded.error == file.string() + " is not a file" && loaded.settings.player_name.empty(),
+          "game.ini: a folder (" + loaded.error + ")");
+    check(!game_ini::save_name(file, "X", &error) && !error.empty(), "game.ini: a folder is not replaced");
+    fs::remove(file, ec);
+    write(file, std::string(70 * 1024, '#'));
+    check(game_ini::load(file).error == file.string() + " is larger than 64 KiB", "game.ini: too large");
+    check(game_ini::save_name(file, "Mira", &error) && game_ini::load(file).settings.player_name == "Mira" &&
+              text_of(file).size() < 400,
+          "game.ini: one too large written anew");
+    if (::geteuid() != 0) {
+        ::chmod(file.c_str(), 0);
+        loaded = game_ini::load(file);
+        check(loaded.error.starts_with("cannot read " + file.string() + ": "),
+              "game.ini: unreadable (" + loaded.error + ")");
+        ::chmod(file.c_str(), 0600);
+    }
 }
 
 void test_uninstall(const fs::path& root) {
@@ -1238,6 +1347,7 @@ int main(int argc, char** argv) {
     test_compiler(root / "compiler");
     test_actions();
     test_display(root / "display");
+    test_game_ini(root / "game");
     test_uninstall(root / "uninstall");
     test_release(root / "release");
     std::error_code ec;

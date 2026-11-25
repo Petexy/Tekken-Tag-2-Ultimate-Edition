@@ -6,6 +6,10 @@
 // - keyboards named like Valve's are ignored where SDL gives names (X11, Windows raw input);
 // - key capture: raw keys go to the capturer instead; the keyboard is ignored for a while after a pad started it,
 //   key-ups of keys held before it started are dropped, and any pad button or a click cancels it;
+// - text entry: the keyboard types (its text, and its editing keys: Enter, Esc, Backspace, Delete, the arrows,
+//   Home, End, Ctrl+V) while the pad and the mouse go on as ever (an on-screen keyboard); a key Steam types for a
+//   pad's button (Enter, Esc, the arrows) waits kSamePress for that pad's press: such a key is dropped, whichever of
+//   the two arrives first;
 // - the prompt glyph set follows the last device used (or is forced).
 // The router is SDL-free (tests feed RawEvent); Window::translate (window.h) turns SDL events into RawEvents.
 #pragma once
@@ -61,7 +65,10 @@ enum Axis : int { LeftX = 0, LeftY = 1 };
 }  // namespace pad
 
 struct RawEvent {
-    enum Kind : std::uint8_t { KeyDown, KeyUp, ButtonDown, ButtonUp, AxisMotion, MouseMove, MouseDown, MouseUp, Wheel };
+    enum Kind : std::uint8_t {
+        KeyDown, KeyUp, ButtonDown, ButtonUp, AxisMotion, MouseMove, MouseDown, MouseUp, Wheel,
+        Text  // the keyboard's text input (UTF-8 in `text`)
+    };
     Kind kind = KeyDown;
     Device device = Device::Keyboard;
     std::uint32_t device_id = 0;
@@ -74,6 +81,7 @@ struct RawEvent {
     Vec2 delta{};             // mouse motion (points)
     Glyphs pad_kind = Glyphs::Generic;  // gamepad events: what kind of pad it is
     bool filtered = false;    // the SDL side found a Valve keyboard: dropped
+    std::string text{};       // Text: what was typed
 };
 
 struct ActionEvent {
@@ -85,11 +93,13 @@ struct ActionEvent {
 };
 
 struct CaptureEvent {
-    enum Kind : std::uint8_t { Key, KeyUp, CancelByPad, CancelByMouse };
+    enum Kind : std::uint8_t { Key, KeyUp, CancelByPad, CancelByMouse, Text };
     Kind kind = Key;
     int scancode = 0;
     bool shift = false, ctrl = false, alt = false, gui = false;
     double time = 0;
+    bool repeat = false;      // text entry: the system's repeat of a held editing key (Backspace, Delete, arrows)
+    std::string text{};       // Text: what was typed
 };
 
 // The mouse as the interface sees it this frame.
@@ -117,6 +127,11 @@ public:
     void begin_capture(Device started_by, double now);
     void end_capture();
     bool capturing() const { return capturing_; }
+    // Text entry (a name being typed): until end_text the keyboard's text and editing keys come as capture events
+    // (Text, Key), its other keys do nothing; the pad and the mouse give actions as ever.
+    void begin_text(double now);
+    void end_text();
+    bool texting() const { return texting_; }
 
     // The glyph set: from the last device used, or forced (Settings, TTT2_CONTROLLER).
     Glyphs glyphs() const { return forced_ ? forced_glyphs_ : last_glyphs_; }
@@ -157,6 +172,14 @@ private:
 
     std::vector<ActionEvent> actions_;
     std::vector<CaptureEvent> capture_;
+    // Text entry: editing keys that may be Steam's echo of a pad's press, held back kSamePress (their action).
+    struct Pending {
+        CaptureEvent event;
+        Action action;
+        std::uint32_t device_id;
+    };
+    std::vector<Pending> pending_keys_;
+    bool texting_ = false;
     std::vector<Held> held_;
     struct Last {
         Device device = Device::None;

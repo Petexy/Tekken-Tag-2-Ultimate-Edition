@@ -90,6 +90,14 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
                    a.name == "async-shaders" || a.name == "precompile-shaders") {
             a.args = {rest};
             ok = rest == "yes" || rest == "no";
+        } else if (a.name == "player-name") {
+            // player-name:<name> (empty: none): Settings > Game's name set, which saves game.ini, then read back.
+            a.args = {rest};
+            ok = colon != std::string::npos;
+        } else if (a.name == "type") {
+            // type:<text>: typed as the keyboard's text input gives it (the name being edited).
+            a.args = {rest};
+            ok = !rest.empty();
         } else if (a.name == "resolution") {
             // (As the file names it, whatever the case given.)
             const auto resolution = display::resolution_named(rest);

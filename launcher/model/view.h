@@ -56,10 +56,11 @@ struct Pill {
     bool operator==(const Pill&) const = default;
 };
 
-enum class ActionKind { kButton, kCheck, kSwitch, kChoice, kExpander, kKeycap, kMenu, kMenuItem };
+enum class ActionKind { kButton, kCheck, kSwitch, kChoice, kExpander, kKeycap, kMenu, kMenuItem, kEntry };
 
 // A focusable item: a button, a check box, a switch, a list, an expander, a
-// keycap, a menu entry. `id` addresses it (activate(id)).
+// keycap, a menu entry, a text entry (its label: the text it holds).
+// `id` addresses it (activate(id)).
 struct Action {
     std::string id;
     std::string label;
@@ -229,9 +230,37 @@ struct FolderRow { // Windows: Settings > Folders
     bool operator==(const FolderRow&) const = default;
 };
 
+// Typing the player's name (Settings > Game, its row activated): the text as typed so far and the on-screen
+// keyboard for a pad.
+struct NameKey {
+    Action key; // name-key:<character> (letters by their small one), name:shift, name:backspace, name:space,
+                // name:cancel, name:done
+    int span = 1; // how many key widths it takes in its row
+    bool operator==(const NameKey&) const = default;
+};
+
+struct NameEditView {
+    std::string draft;           // the name as typed so far
+    size_t caret = 0;            // where the next character goes (a byte index into draft)
+    std::string placeholder;     // shown when the draft is empty: the game's own name
+    std::string count;           // "4/16"
+    std::string refusal;         // a character or a name refused, for a moment ("" none)
+    std::string rule;            // what a name may be
+    bool shifted = false;        // the keyboard's letters are capitals
+    std::vector<std::vector<NameKey>> keys; // the on-screen keyboard, row by row (each the same width in spans)
+    bool operator==(const NameEditView&) const = default;
+};
+
 struct SettingsView {
-    // Game (display.ini)
-    std::string display_title = "Game", display_about = "The game uses these when it starts.";
+    // Game (game.ini; Input delay: display.ini)
+    std::string game_title = "Game";
+    std::string game_about = "Your name in the game, and how it takes your presses. The game uses these when it "
+                             "starts.";
+    std::vector<Line> game_notes; // error / unreadable note
+    std::vector<SettingRow> game;
+    std::optional<NameEditView> name_edit; // the player's name being typed
+    // Display (display.ini)
+    std::string display_title = "Display", display_about = "The game uses these when it starts.";
     std::vector<Line> display_notes; // error / unreadable note
     std::vector<SettingRow> display;
     // Keyboard (keyboard.ini)

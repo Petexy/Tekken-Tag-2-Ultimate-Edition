@@ -57,6 +57,7 @@ add_library(cafe_runtime OBJECT
     src/gpu/vulkan/textures.cpp
     src/host/audio.cpp
     src/host/display_settings.cpp
+    src/host/game_settings.cpp
     src/host/keymap.cpp
     src/host/window.cpp
     src/gx2/cbpool.cpp
@@ -75,6 +76,7 @@ add_library(cafe_runtime OBJECT
     src/title/gauge.cpp
     src/title/input_delay.cpp
     src/title/paint.cpp
+    src/title/player_name.cpp
     src/title/controllers.cpp
     src/title/practice.cpp
     src/title/presentation.cpp

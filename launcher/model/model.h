@@ -218,6 +218,10 @@ public:
     void key_up(int usage, double now);
     void pick_key(int input, Device device, double now);
     void cancel_key() { keys_.cancel(); }
+    // Settings > Game's player name being typed (activate("player-name") began it; the on-screen keyboard's keys
+    // and the keyboard's editing keys are ids: name-key:<c>, name:space, name:backspace, name:delete, name:left,
+    // name:right, name:home, name:end, name:shift, name:clear, name:cancel, name:done): the keyboard's text.
+    void type_name(std::string_view text, double now);
     void set_monitors(std::vector<Monitor> monitors) { monitors_ = std::move(monitors); }
     void set_launcher_settings(LauncherSettings s) { launcher_ = s; }
     // Windows: what --query state answered (after each task too).
@@ -253,6 +257,8 @@ public:
     TaskRunner& task() { return runner_; }
     const KeyCapture& keys() const { return keys_; }
     const DisplayController& display() const { return display_; }
+    const GameController& game() const { return game_; }
+    const NameEditor& name() const { return name_; }
     Page page() const { return page_; }
     const LauncherSettings& launcher_settings() const { return launcher_; }
     // The test action's answer of the last thing done (refusals, bind: ...), "" when none.
@@ -261,6 +267,8 @@ public:
 private:
     void refresh(double now);
     void check_again(double now);
+    SettingsInput settings_input() const;
+    void name_key(const std::string& id, double now);
     void load_status(double now);
     void check_ownership(double now);
     void check_release(double now);
@@ -289,6 +297,8 @@ private:
     Parts parts_;
     TaskRunner runner_;
     std::unique_ptr<SelfUpdate> self_update_;
+    GameController game_;
+    NameEditor name_;
     DisplayController display_;
     KeyCapture keys_;
     LauncherSettings launcher_;
