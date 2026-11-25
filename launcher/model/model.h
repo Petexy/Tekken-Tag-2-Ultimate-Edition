@@ -32,6 +32,9 @@ struct Commands {
     virtual std::optional<Command> status(const Facts& facts) = 0;
     virtual std::optional<Command> owned(const Facts& facts) = 0;
     virtual std::optional<Command> main_news(const Facts& facts) = 0; // none without a known build commit
+    // Whether a newer release is out, asked by the launcher's files (Windows' release .exe). None: the AppImage
+    // asks GitHub itself (SelfUpdate), the rest never update themselves.
+    virtual std::optional<Command> release(const Facts&) { return std::nullopt; }
     virtual Command import(const Facts& facts, const std::vector<std::string>& names, const std::string& outfits) = 0;
     virtual Command remove(const Facts& facts, const std::vector<std::string>& names) = 0;
     virtual Command packages(const Facts& facts) = 0;
@@ -80,7 +83,7 @@ struct WindowsCommands : Commands {
     Command worker_command(const Facts& facts, const std::string& action, const std::vector<std::string>& names,
                            const std::string& outfits) const;
     // `--query release`: GitHub's newest release, for the release .exe (none from a project ZIP or a build).
-    std::optional<Command> release(const Facts& facts) const;
+    std::optional<Command> release(const Facts& facts) override;
     // `--query check --action ACTION [names]`: what refuses a task before it starts (SetupProblem).
     Command check(const Facts& facts, const std::string& action, const std::vector<std::string>& names) const;
     // `--query save-settings`: Settings > Folders checked and saved; the folders go as a JSON object on its input.

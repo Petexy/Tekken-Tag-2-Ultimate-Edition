@@ -1498,6 +1498,69 @@ void dlc_groups(const fs::path& golden, const fs::path& scratch) {
 }
 
 // Fighters' Add All Owned for every game: each usable game's own and owned DLC characters, in one import.
+// The release .exe asks its files whether a newer release is out (`main.py --query release`): when it opens, and
+// again after hours away, as the AppImage asks GitHub.
+void windows_release(const fs::path& golden, const fs::path& scratch) {
+    const auto with = [&](const std::string& release) {
+        std::string text = read(golden / "installed" / "case.json");
+        const std::string after = "\"name\": \"installed\",";
+        const size_t at = text.find(after);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) text.insert(at + after.size(), "\"release_exe\": true, \"release\": " + release + ",");
+        const auto c = json::parse(text);
+        CHECK(c.has_value());
+        return c.value_or(json::Value());
+    };
+    current = "the release .exe: a newer release";
+    replay(with(R"({"newer": {"version": "0.9.0", "tag": "v0.9.0", "page": "https://example.com/v0.9.0",
+                    "asset": "Golden_Fist_Launcher-x86_64.exe", "url": "https://example.com/a.exe", "size": 1000,
+                    "sha256": ""}, "none": false, "error": "", "protocol": 1})"),
+           Caps::windows_caps(), scratch / "a", {0, [](Harness& h) {
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 1);
+               CHECK(h.model.facts().newer && h.model.facts().newer->version == "0.9.0");
+               const View v = h.model.view();
+               CHECK(v.notice.shown && v.notice.title == "Version 0.9.0 of the launcher is out");
+               const UpdatePlan p = update_plan(h.model.facts());
+               CHECK(p.launcher && p.launcher_to == "0.9.0");
+               // (Its Update is the launcher's worker, not the test build's files.)
+               h.model.activate("update-launcher", h.now);
+               h.settle();
+               const bool worker = std::any_of(h.starter.started.begin(), h.starter.started.end(), [](const Command& c) {
+                   const auto at = std::find(c.argv.begin(), c.argv.end(), "--worker");
+                   return at != c.argv.end() && at + 1 != c.argv.end() && at[1] == "launcher";
+               });
+               CHECK(worker);
+           }});
+    current = "the release .exe: none newer, asked again after hours";
+    replay(with(R"({"newer": null, "none": false, "error": "", "protocol": 1})"), Caps::windows_caps(),
+           scratch / "b", {0, [](Harness& h) {
+               h.settle();
+               CHECK(!h.model.facts().newer);
+               CHECK(!h.model.view().notice.shown);
+               h.now += 1;
+               h.model.activated(h.now);
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 1);
+               h.now += LauncherModel::kReleaseSeconds + 1;
+               h.model.activated(h.now);
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 2);
+           }});
+    current = "the release .exe: GitHub not asked (quietly)";
+    replay(with(R"({"error": "timed out", "protocol": 1})"), Caps::windows_caps(), scratch / "c",
+           {0, [](Harness& h) {
+               h.settle();
+               CHECK(!h.model.facts().newer);
+               CHECK(!h.model.view().notice.shown);
+           }});
+    current = "a project ZIP's launcher: never asked";
+    replay(fixture(golden, "installed"), Caps::windows_caps(), scratch / "d", {0, [](Harness& h) {
+               h.settle();
+               CHECK_EQ(count_started(h.starter, "release"), 0);
+           }});
+}
+
 void add_all_everything(const fs::path& golden, const fs::path& scratch) {
     current = "add all owned, every game";
     std::string text = read(golden / "installed" / "case.json");
@@ -1583,6 +1646,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     update_all(golden, scratch / "update-all");
     dlc_groups(golden, scratch / "dlc-groups");
     add_all_everything(golden, scratch / "add-all-everything");
+    windows_release(golden, scratch / "windows-release");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 
