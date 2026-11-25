@@ -112,6 +112,20 @@ expect PASS "" release_check_static_sdl "$work/build"
 printf 'TTT2_LAUNCHER_SDL:STRING=\nTTT2_LAUNCHER_SDL_MODE:INTERNAL=system\n' >"$work/build/CMakeCache.txt"
 expect FAIL "TTT2_LAUNCHER_SDL=static" release_check_static_sdl "$work/build"
 
+# The license texts: the repository's as a package has them, then each one missing, and one empty.
+for file in "${release_license_files[@]}"; do
+    mkdir -p "$(dirname "$work/licenses/$file")"
+    cp "$here/../../$file" "$work/licenses/$file"
+done
+expect PASS "" release_check_licenses "$work/licenses"
+for file in "${release_license_files[@]}"; do
+    mv "$work/licenses/$file" "$work/license"
+    expect FAIL "the license text $file is missing" release_check_licenses "$work/licenses"
+    mv "$work/license" "$work/licenses/$file"
+done
+: >"$work/licenses/LICENSE"
+expect FAIL "the license text LICENSE is missing (or empty)" release_check_licenses "$work/licenses"
+
 # The command line.
 expect PASS "" "$here/release_checks.sh" --launcher "$work/clean_cxx"
 expect FAIL "the launcher may only need" "$here/release_checks.sh" --launcher "$work/zlib"

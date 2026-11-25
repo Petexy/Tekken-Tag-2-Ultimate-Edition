@@ -186,6 +186,9 @@ unexpected() {
             ./usr/share/ttt2/characters/ttt2char/convert/decimate.c) ;;
             "./usr/share/applications/$app_id.desktop") ;;
             "./usr/share/icons/hicolor/scalable/apps/$app_id.svg") ;;
+            ./usr/share/licenses/ttt2-launcher/*)
+                [[ " ${release_license_files[*]} " == *" ${file#./usr/share/licenses/ttt2-launcher/} "* ]] || echo "$file"
+                ;;
             *) echo "$file" ;;
         esac
     done
@@ -193,6 +196,8 @@ unexpected() {
 found=$(unexpected)
 [ -z "$found" ] || die "the AppDir holds files it must not: $found"
 [ -x "$appdir/usr/lib/ttt2/kit/bin/ttt2-build" ] || die "the kit was not installed"
+# The licenses of all that is built into it (and into the runtime it is packed with).
+release_check_licenses "$appdir/usr/share/licenses/ttt2-launcher"
 # What a Tekken 8 import needs besides Python and a C compiler: the importer
 # with its C parts, and Tekken 8's helper (prebuilt when MinGW was there, as
 # Tekken 7's; else built from its source on the player's PC).
