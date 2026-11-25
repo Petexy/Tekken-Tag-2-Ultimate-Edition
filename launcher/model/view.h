@@ -76,6 +76,7 @@ struct Action {
     bool inconsistent = false;        // check: some of them
     std::vector<std::string> choices; // choice: its entries
     int chosen = -1;
+    std::string placeholder;          // entry: shown while it holds nothing (the game's own name)
     Describe describe;
     bool operator==(const Action&) const = default;
 };

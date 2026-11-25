@@ -747,6 +747,7 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         CHECK(v.settings->game[0].control.kind == ActionKind::kEntry);
         CHECK(v.settings->game[0].control.label.empty());
         CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Player (the game's own)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Player"));
         CHECK(!v.settings->name_edit);
         // The language: the game's, by their English names, English chosen while game.ini has none.
         const Action& lang = v.settings->game[1].control;
@@ -765,10 +766,15 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         CHECK_EQ(v.settings->game[1].control.chosen, 1);
         CHECK_EQ(v.settings->game[1].control.describe.state, std::string("French"));
         // (The empty name: the game's own in that language.)
-        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("The game's own (Player in English)"));
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Joueur (the game's own)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Joueur"));
         h.model.choose("language", 5, h.now);
         CHECK(read(game_ini).ends_with("\nlanguage = ru\n"));
-        CHECK_EQ(h.model.view().settings->game[1].control.describe.state, std::string("Russian"));
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[1].control.describe.state, std::string("Russian"));
+        // (Russian's word is Cyrillic, which the launcher's font has not.)
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("The game's own (Player in English)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Game's own"));
         h.model.choose("language", 99, h.now);
         CHECK_EQ(h.model.said(), std::string("no language 99"));
         CHECK(read(game_ini).ends_with("\nlanguage = ru\n"));

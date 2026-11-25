@@ -841,6 +841,16 @@ void test_game_ini(const fs::path& root) {
               game_ini::first_refused("\xE2\x82") == "\xE2",
           "game.ini: the first character refused, whole");
     check(game_ini::tidy_name("  Mira Q  ") == "Mira Q" && game_ini::tidy_name(" \t ").empty(), "game.ini: tidied");
+    // The game's own name in each of its languages: its own word, or none where the font cannot draw it.
+    for (const cafe::host::game::Language& l : cafe::host::game::kLanguages) {
+        const std::string_view own = game_ini::own_name(l.code);
+        check(l.code == "en" ? own == "Player" : own != "Player",
+              "game.ini: the game's own name in " + std::string(l.name) + " (\"" + std::string(own) + "\")");
+        for (const char c : own) check(static_cast<unsigned char>(c) < 0x80 || l.code != "ru", "game.ini: drawable");
+    }
+    check(game_ini::own_name("") == "Player" && game_ini::own_name("Klingon") == "Player" &&
+              game_ini::own_name("FR") == "Joueur" && game_ini::own_name("ru").empty(),
+          "game.ini: the game's own name, by code");
     // An overlong UTF-8 sequence is no letter: refused whole (the game shows "?" for it).
     check(game_ini::first_refused("\xC1\xA1" "bc") == "\xC1\xA1" && !game_ini::name_problem("\xC1\xA1" "bc").empty(),
           "game.ini: an overlong sequence refused");

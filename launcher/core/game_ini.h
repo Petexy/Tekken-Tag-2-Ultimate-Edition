@@ -33,8 +33,11 @@ fs::path beside(const fs::path& display_file);
 
 inline constexpr std::string_view kNameKey = "player_name";
 inline constexpr std::string_view kLanguageKey = "language";
-// What the game calls the player without a name of their own.
+// What the game calls the player without a name of their own (in English).
 inline constexpr const char* kDefaultName = "Player";
+// That word in the game's language (`language`: a code of cafe::host::game::kLanguages, "" or one it does not have:
+// English), as the launcher's font can draw it: "" for a language whose word it cannot (Russian's is Cyrillic).
+std::string_view own_name(std::string_view language);
 
 // ---- what a name may be (the one place to change when the game's limits are known better)
 

@@ -495,13 +495,15 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         if (!g.note().empty()) v.game_notes.push_back(warning_note(g.note()));
         if (!g.language_note().empty()) v.game_notes.push_back(warning_note(g.language_note()));
         const std::string& name = g.shown();
-        const bool english = g.language() == cafe::host::game::kLanguages[0].code;
+        // The game's own name in its language, where the launcher's font can draw it.
+        const std::string own(game_ini::own_name(g.language()));
         SettingRow player = setting("player-name", ActionKind::kEntry, "Player name",
                                     "The name the game shows for you, in place of Player.", false);
         player.control.label = name;
+        player.control.placeholder = own.empty() ? std::string("Game's own") : own;
         player.control.describe.state = !name.empty() ? name
-                                        : english     ? std::string("Player (the game's own)")
-                                                      : std::string("The game's own (Player in English)");
+                                        : own.empty() ? std::string("The game's own (Player in English)")
+                                                      : own + " (the game's own)";
         const std::string rule =
             game_ini::name_rule() + " Left empty, the game's own name in its language (Player in English).";
         player.notes.push_back(text_line(rule, Tone::kDim, true));
@@ -532,7 +534,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
             NameEditView edit;
             edit.draft = e.draft();
             edit.caret = e.caret();
-            edit.placeholder = game_ini::kDefaultName;
+            edit.placeholder = player.control.placeholder;
             edit.count = std::to_string(char_count(e.draft())) + "/" + std::to_string(game_ini::kNameMost);
             edit.refusal = e.refusal();
             edit.rule = rule;
