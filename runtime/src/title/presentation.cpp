@@ -519,7 +519,8 @@ void prepare_presentation() {
     std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> changed;
     changed[kFontArchive] = prepare_icons(used);
     const bool icons = !changed[kFontArchive].empty();
-    // (Russian has no Practice texts: English's stand in; they are rewritten as English's are.)
+    // (Russian lacks the Wii U's own texts: English's stand in, or Russian ones of the same English text; they
+    // are rewritten as the others are.)
     std::vector<bool> filled(banks.size());
     for (const char* archive_name : {kFontArchive, kPatchArchive}) {
         std::vector<std::vector<uint8_t>*> of_archive;
@@ -545,7 +546,7 @@ void prepare_presentation() {
         }
     }
     if (std::getenv("TTT2_TRACE_PRESENTATION")) {
-        std::fprintf(stderr, "ttt2: %zu text banks, %zu with button names changed, %zu filled with English texts\n",
+        std::fprintf(stderr, "ttt2: %zu text banks, %zu with button names changed, %zu given the texts they lack\n",
                      banks.size(), rewritten, static_cast<size_t>(std::count(filled.begin(), filled.end(), true)));
     }
     prepare_title_screen();

@@ -478,40 +478,184 @@ void test_text() {
           "text: the code points texts use (not the English originals')");
 }
 
-// A part's banks, Japanese (1) to Russian (10), Russian's with no texts unless `russian`.
-std::vector<std::vector<uint8_t>> part(bool russian) {
+// A text bank as the title's are (text.cpp's read_index): table 1 by
+// number, tables 2 and 3 (texts' and keys' hashes) by hash, the records
+// after them.
+struct Numbered {
+    uint32_t number;
+    std::string key, text, english;
+};
+
+uint32_t get32(const std::vector<uint8_t>& b, size_t at) {
+    return uint32_t{b[at]} << 24 | uint32_t{b[at + 1]} << 16 | uint32_t{b[at + 2]} << 8 | b[at + 3];
+}
+
+void put32(std::vector<uint8_t>& b, size_t at, uint32_t v) {
+    for (int k = 0; k < 4; ++k) b[at + k] = static_cast<uint8_t>(v >> (24 - 8 * k));
+}
+
+uint32_t hash_of(const std::string& s) {
+    uint32_t h = 2166136261u;
+    for (const char c : s) h = (h ^ static_cast<uint8_t>(c)) * 16777619u;
+    return h;
+}
+
+size_t to16(size_t v) { return (v + 15) & ~size_t{15}; }
+
+std::vector<uint8_t> make_indexed(uint8_t language, std::vector<Numbered> records) {
+    std::stable_sort(records.begin(), records.end(), [](const auto& a, const auto& b) { return a.number < b.number; });
+    const size_t n = records.size();
+    std::vector<std::pair<uint32_t, size_t>> tables[2];
+    std::vector<uint8_t> area(4, 0);
+    std::vector<uint32_t> at(n), english(n), key(n);
+    for (size_t i = 0; i < n; ++i) {
+        const Numbered& r = records[i];
+        at[i] = static_cast<uint32_t>(area.size());
+        const size_t count = language::characters(r.text);
+        area.insert(area.end(), {0x12, 0x34, static_cast<uint8_t>(count >> 8), static_cast<uint8_t>(count)});
+        for (const std::string* t : {&r.text, &r.english, &r.key}) {
+            if (t == &r.english) english[i] = static_cast<uint32_t>(area.size());
+            if (t == &r.key) key[i] = static_cast<uint32_t>(area.size());
+            std::vector<uint8_t> bytes(t->begin(), t->end());
+            bytes.resize(pad(bytes.size(), t == &r.key ? 1 : 2), 0);
+            area.insert(area.end(), bytes.begin(), bytes.end());
+        }
+        tables[0].push_back({(hash_of(r.text) & 0xFFFF0000) | static_cast<uint32_t>(r.text.size()), i});
+        if (!r.key.empty()) tables[1].push_back({hash_of(r.key), i});
+    }
+    put32(area, 0, static_cast<uint32_t>(area.size() + 4));
+    for (auto& t : tables) {
+        std::stable_sort(t.begin(), t.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    }
+    const size_t t2 = to16(0x30 + 4 + 16 * n), t3 = to16(t2 + 4 + 8 * tables[0].size()),
+                 rec = to16(t3 + 4 + 8 * tables[1].size());
+    std::vector<uint8_t> bank(to16(rec + area.size() + 4 + 1), 0xFF);
+    std::memcpy(bank.data(), "NTXB", 4);
+    put32(bank, 4, 0x00020000u | uint32_t{language} << 8);
+    put32(bank, 8, static_cast<uint32_t>(bank.size()));
+    put32(bank, 12, 0x30);
+    put32(bank, 16, 0x30);
+    put32(bank, 20, static_cast<uint32_t>(t2));
+    put32(bank, 24, static_cast<uint32_t>(t3));
+    put32(bank, 28, static_cast<uint32_t>(rec));
+    put32(bank, 0x30, static_cast<uint32_t>(n));
+    for (size_t i = 0; i < n; ++i) {
+        put32(bank, 0x34 + 16 * i, at[i]);
+        put32(bank, 0x38 + 16 * i, english[i]);
+        put32(bank, 0x3C + 16 * i, key[i]);
+        put32(bank, 0x40 + 16 * i, records[i].number << 16 | 0x12);
+    }
+    for (int k = 0; k < 2; ++k) {
+        const size_t t = k == 0 ? t2 : t3;
+        put32(bank, t, static_cast<uint32_t>(tables[k].size()));
+        for (size_t j = 0; j < tables[k].size(); ++j) {
+            put32(bank, t + 4 + 8 * j, tables[k][j].first);
+            put32(bank, t + 8 + 8 * j, static_cast<uint32_t>(4 + 16 * tables[k][j].second));
+        }
+    }
+    std::copy(area.begin(), area.end(), bank.begin() + static_cast<ptrdiff_t>(rec));
+    return bank;
+}
+
+// The bank's records through its index, in table 1's order; empty if the
+// index is not one the title can read (tables in order, each record found
+// once by its text and, with a key, once by its key; the size its header's).
+std::vector<Numbered> indexed(const std::vector<uint8_t>& bank) {
+    if (bank.size() < 0x30 || get32(bank, 8) != bank.size()) return {};
+    const size_t rec = get32(bank, 28), n = get32(bank, 0x30);
+    std::vector<Numbered> out;
+    const auto string = [&](size_t at) { return std::string(reinterpret_cast<const char*>(&bank[rec + at])); };
+    size_t keyed = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const size_t e = 0x34 + 16 * i;
+        out.push_back({get32(bank, e + 12) >> 16, string(get32(bank, e + 8)), string(get32(bank, e) + 4),
+                       string(get32(bank, e + 4))});
+        keyed += !out.back().key.empty();
+        if (i > 0 && out[i].number < out[i - 1].number) return {};
+    }
+    for (int k = 0; k < 2; ++k) {
+        const size_t t = get32(bank, k == 0 ? 20 : 24), entries = get32(bank, t);
+        if (entries != (k == 0 ? n : keyed)) return {};
+        std::set<size_t> seen;
+        for (size_t j = 0; j < entries; ++j) {
+            const uint32_t hash = get32(bank, t + 4 + 8 * j), entry = get32(bank, t + 8 + 8 * j);
+            const size_t i = (entry - 4) / 16;
+            if ((entry - 4) % 16 != 0 || i >= n || !seen.insert(i).second) return {};
+            const Numbered& r = out[i];
+            const uint32_t want =
+                k == 0 ? (hash_of(r.text) & 0xFFFF0000) | static_cast<uint32_t>(r.text.size()) : hash_of(r.key);
+            if (hash != want || (j > 0 && (get32(bank, t - 4 + 8 * j) & 0xFFFF0000) > (hash & 0xFFFF0000))) return {};
+        }
+    }
+    return out;
+}
+
+// A part's banks, Japanese (1) to Russian (10): texts 1, 2, 3 and 5, and one
+// without a number (found by its key). English's 3 is its 1 again, its 2
+// "ENGLISH", its 5 "FIVE" or, in a part whose Russian has none of its own
+// (a stand-in record), "ENGLISH ONLY"; Russian has text 1 or all.
+enum class Russian { kStandIn, kSome, kAll };
+std::vector<std::vector<uint8_t>> part(Russian russian) {
     std::vector<std::vector<uint8_t>> banks;
-    for (uint8_t language = 1; language <= 10; ++language) {
-        std::vector<Record> records;
-        if (language != 10 || russian) records.push_back({"practice_1", "TEXT " + std::to_string(language), "TEXT"});
-        if (language == 2) records.push_back({"practice_2", "ENGLISH", "ENGLISH"});
-        banks.push_back(make_bank(records));
-        banks.back()[6] = language;
+    for (uint8_t l = 1; l <= text::kBankRussian; ++l) {
+        const std::string own = "TEXT " + std::to_string(l);
+        std::vector<Numbered> records = {{1, "practice_1", own, "TEXT"},
+                                         {2, "practice_2", "TWO " + own, "TWO"},
+                                         {3, "practice_3", "THREE " + own, "THREE"},
+                                         {5, "practice_5", "FIVE " + own, "FIVE"},
+                                         {0xFFFF, "practice_9_2", "BY KEY " + own, "BY KEY"}};
+        if (l == text::kBankEnglish) {
+            records[1].text = "ENGLISH";
+            records[2].text = own;
+            records[3].text = russian == Russian::kStandIn ? "ENGLISH ONLY" : "FIVE";
+        }
+        if (l == text::kBankRussian && russian == Russian::kStandIn) records = {{0xFFFF, "", " ", "@_@"}};
+        if (l == text::kBankRussian && russian == Russian::kSome) records.resize(1);
+        banks.push_back(make_indexed(l, records));
     }
     return banks;
 }
 
 void test_missing_texts() {
-    auto banks = part(false);
-    auto more = part(true);
-    banks.insert(banks.end(), more.begin(), more.end());
-    const std::vector<uint8_t> english = banks[1];
+    std::vector<std::vector<uint8_t>> banks;
+    for (const Russian r : {Russian::kStandIn, Russian::kSome, Russian::kAll}) {
+        auto more = part(r);
+        banks.insert(banks.end(), more.begin(), more.end());
+    }
+    check(indexed(banks[1]).size() == 5 && indexed(banks[9]).size() == 1, "text: the test's banks read");
+    const std::vector<std::vector<uint8_t>> before = banks;
     std::vector<std::vector<uint8_t>*> pointers;
     for (auto& b : banks) pointers.push_back(&b);
-    check(text::bank_language(banks[9]) == text::kBankRussian && text::text_count(banks[9]) == 0 &&
-              text::text_count(banks[1]) == 2,
-          "text: a bank's language and texts");
+    check(text::bank_language(banks[9]) == text::kBankRussian && text::bank_language(banks[1]) == text::kBankEnglish,
+          "text: a bank's language");
     const std::vector<size_t> filled = text::fill_missing_texts(pointers);
-    check(filled == std::vector<size_t>{9}, "text: the Russian bank without texts, only");
-    check(banks[9][6] == text::kBankRussian && std::equal(banks[9].begin() + 7, banks[9].end(), english.begin() + 7) &&
-              banks[9].size() == english.size(),
-          "text: it gets the English bank's texts, its language kept");
-    check(texts(banks[19]).size() == 1 && texts(banks[19])[0].first == "TEXT 10", "text: a Russian bank with texts stays");
-    auto shuffled = part(false);
+    check(filled == (std::vector<size_t>{9, 19}), "text: the Russian banks lacking texts, only");
+    // English's texts by number; in Russian where Russian has the same English text (TEXT 2: twice TEXT 10, once
+    // THREE TEXT 10) in any part; the keys English's
+    const auto stand_in = indexed(banks[9]), some = indexed(banks[19]);
+    check(banks[9][6] == text::kBankRussian && stand_in.size() == 5 && stand_in[0].text == "TEXT 10" &&
+              stand_in[0].key == "practice_1" && stand_in[1].text == "TWO TEXT 10" && stand_in[2].text == "TEXT 10" &&
+              stand_in[2].key == "practice_3" && stand_in[3].text == "ENGLISH ONLY" && stand_in[3].english == "FIVE" &&
+              stand_in[4].number == 0xFFFF && stand_in[4].key.empty(),
+          "text: a Russian bank without texts gets English's, in Russian where another has them, its stand-in kept");
+    check(some.size() == 4 && some[0].text == "TEXT 10" && some[1].number == 2 && some[1].text == "TWO TEXT 10" &&
+              some[2].text == "TEXT 10" && some[3].text == "FIVE TEXT 10" && some[3].key == "practice_5",
+          "text: a Russian bank keeps its texts and gets those of the numbers it lacks");
+    bool others = true;
+    for (size_t i = 0; i < banks.size(); ++i) {
+        if (i != 9 && i != 19) others = others && banks[i] == before[i];
+    }
+    check(others, "text: the other banks stay");
+    auto shuffled = part(Russian::kStandIn);
     std::swap(shuffled[2], shuffled[3]);
     std::vector<std::vector<uint8_t>*> shuffled_pointers;
     for (auto& b : shuffled) shuffled_pointers.push_back(&b);
     check(text::fill_missing_texts(shuffled_pointers).empty(), "text: banks not in the languages' order stay");
+    auto broken = part(Russian::kSome);
+    put32(broken[9], 0x30, 1000); // table 1 runs past the bank
+    std::vector<std::vector<uint8_t>*> broken_pointers;
+    for (auto& b : broken) broken_pointers.push_back(&b);
+    check(text::fill_missing_texts(broken_pointers).empty(), "text: a bank whose index does not read stays");
 }
 
 void test_language() {

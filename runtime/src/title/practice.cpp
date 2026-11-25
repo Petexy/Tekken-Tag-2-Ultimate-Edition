@@ -234,7 +234,10 @@ constexpr TextPatch kRowTexts[] = {
     {"Manu_1668", {"ULTIMATE"}},
     {"Manu_1669", {"Frame data, hitboxes and camera settings.", "Donn\xC3\xA9" "es de frames, hitbox et cam\xC3\xA9ra.",
                    "Frame-Daten, Hitboxen und Kamera einstellen.", "Impostazioni di dati frame, hitbox e telecamera.",
-                   "Datos de frames, hitboxes y c\xC3\xA1mara."}},
+                   "Datos de frames, hitboxes y c\xC3\xA1mara.",
+                   "\xD0\xA4\xD1\x80\xD0\xB5\xD0\xB9\xD0\xBC\xD0\xB4\xD0\xB0\xD1\x82\xD0\xB0, "
+                   "\xD1\x85\xD0\xB8\xD1\x82\xD0\xB1\xD0\xBE\xD0\xBA\xD1\x81\xD1\x8B \xD0\xB8 "
+                   "\xD0\xBA\xD0\xB0\xD0\xBC\xD0\xB5\xD1\x80\xD0\xB0."}},
 };
 constexpr title::language::Text kRowLabel = {"ULTIMATE SETTINGS", "R\xC3\x89GLAGES ULTIMATE", "ULTIMATE-OPTIONEN",
     "IMPOSTAZIONI ULTIMATE", "AJUSTES ULTIMATE",
@@ -450,7 +453,8 @@ constexpr uint32_t kEntryHeapText = 20, kEntryTextLength = 24, kEntryTextRoom = 
 constexpr uint32_t kSlowTextRoom = 128;
 constexpr const char* kSlowSpeeds[] = {" 1/2 ", " 1/4 "};
 constexpr std::string_view kOnWords[] = {" ON ",          " OUI ",         " EIN ",
-                                         " S\xC3\x8C ", " S\xC3\x8D ", " \xD0\x92\xD0\x9A\xD0\x9B "};
+                                         " S\xC3\x8C ", " S\xC3\x8D ", " \xD0\x92\xD0\x9A\xD0\x9B ",
+                                         " \xD0\x92\xD0\x9A\xD0\x9B. "}; // (Russian's own ON, with a stop)
 
 struct OwnEntries {
     bool swapped = false;

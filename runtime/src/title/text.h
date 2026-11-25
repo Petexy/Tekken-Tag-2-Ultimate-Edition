@@ -1,12 +1,12 @@
 #pragma once
 
 // The title's text banks ("NTXB" entries of data003: per language, the
-// texts of a part of the game). Each text is a record: its key
-// ("common_4"), padded to four with at least one zero byte; two bytes; its
+// texts of a part of the game). Each text is a record: two bytes; its
 // length in characters (big-endian); its UTF-8 text, then the English text
 // it was translated from (cut to 32 bytes), each padded to four with at
-// least two zero bytes. The bank's index points at the records, so a text
-// can change in place within its space.
+// least two zero bytes; its key ("common_4"), padded to four with at least
+// one zero byte. The bank's index points at the records, so a text can
+// change in place within its space; a key is followed by the next record.
 
 #include <cstddef>
 #include <cstdint>
@@ -42,14 +42,14 @@ enum BankLanguage : uint8_t {
 };
 uint8_t bank_language(const std::vector<uint8_t>& bank); // 0: not a bank
 
-// The number of texts (records with a key) of the bank.
-size_t text_count(const std::vector<uint8_t>& bank);
-
-// The banks the title reads for a language it has no texts of in a part of
-// the game (the Wii U's Russian Practice texts are missing: their bank has
-// none) take that part's English bank's texts: `banks` in an archive's
-// order, each part's in the languages' order. Returns the indices of the
-// banks changed (their language byte kept).
+// The Russian banks lack texts the other languages have (the Wii U's own:
+// of Practice, all; of the menus, the special modes'; ...). Each gets the
+// English bank's texts of the numbers it has none of, so the title finds a
+// text where it would find none; in Russian where a Russian bank of the
+// archive has another text with the same English one (its most frequent
+// Russian one). `banks` in an archive's order, each part's in the
+// languages' order. Returns the indices of the banks changed (their
+// language byte kept, rebuilt with their index).
 std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks);
 
 } // namespace cafe::title::text
