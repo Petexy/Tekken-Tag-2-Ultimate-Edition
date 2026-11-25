@@ -413,8 +413,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
         log('         ' + line)
     said = _subtitles(source, d, streams, lambda s: log('         ' + s))
     # (the languages its subtitles were read in, which the pack keeps: a Tekken 7 fighter's not saved, Steam not
-    # running when they were asked for, are left out, all of them or some, and the pack says so, so that it is
-    # updated once they can be had)
+    # running when they were asked for or the game not reading them in time, are left out, all of them or some, and
+    # the pack says so, so that it is updated once they can be had)
     languages = tuple(source.subtitle_languages(d)) if hasattr(source, 'subtitle_languages') else ()
     without_subtitles = game_of(d) == 'tekken7' and 'en' not in languages
     unsaved = [lang for lang in sources.SUBTITLE_LANGUAGES if lang not in languages]

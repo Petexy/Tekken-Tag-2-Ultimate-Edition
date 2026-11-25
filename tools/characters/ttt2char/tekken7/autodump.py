@@ -73,6 +73,16 @@ SUBTITLE_LANGUAGES = ('us', 'fr', 'de', 'it', 'es', 'ru', 'jp')
 SUBTITLE_BATCH = 32                             # fighters whose subtitles the game reads at once (the helper: 64)
 
 
+class _Late:
+    def __repr__(self):
+        return 'LATE'
+
+
+# Helper.subtitles' answer for a file the game had not read in time (the helper's "late"): no answer of the game's,
+# so nothing is saved for it and it is asked for again
+LATE = _Late()
+
+
 class DumpError(Exception):
     pass
 
@@ -349,8 +359,8 @@ class Helper:
 
     def subtitles(self, language, fighters):
         """The fighters' (roster ids) battle subtitle files in a language of the game's ('us': English) as the game
-        reads them: [(the game's code of the fighter, or None when it does not know the fighter; the file's bytes, or
-        None when the game has none)], in order."""
+        reads them: [(the game's code of the fighter, or None when it does not know the fighter; the file's bytes,
+        None when the game has none, or LATE when it had not read it in time)], in order."""
         self.send('subtitles %s %s' % (language, ' '.join('%d' % f for f in fighters)))
         out = []
         while True:
@@ -359,6 +369,9 @@ class Helper:
                 return out
             if line.startswith('error'):
                 raise DumpError(line[6:])
+            if line.startswith('late '):
+                out.append((line.split()[1], LATE))
+                continue
             _, ok, n, code = line.split()
             d = self._exact(int(n))
             out.append((None if code == '-' else code, d if ok == '1' else None))
@@ -815,9 +828,11 @@ def _save_subtitles(h, fighters, folder, languages):
     `folder` (subtitles.saved_path); a fighter the game has no file of gets an empty one (nothing to ask for again).
     Only the languages a fighter's file is not saved in yet are asked for (an earlier version saved English only), and
     a saved file with records is never replaced by an empty answer (the game's helper answers none, too, when it could
-    not read the file or did not read it in time). -> {roster id: why} of the fighters whose files were not saved."""
+    not read the file). One the game had not read in time (LATE) is not saved: the next import or update asks for it
+    again, and a pack made meanwhile says it lacks that language (source.Tekken7Source.subtitle_languages).
+    -> {roster id: why} of the fighters whose files were not saved (all of them, or those languages)."""
     from . import subtitles
-    failed = {}
+    failed, late = {}, {}
     for language in languages:
         ids = [fid for fid in fighters if not subtitles.saved(fighters[fid][0], language, folder)]
         for k in range(0, len(ids), SUBTITLE_BATCH):
@@ -827,6 +842,9 @@ def _save_subtitles(h, fighters, folder, languages):
                     failed[fid] = ('Tekken 7 does not know the fighter' if code is None else
                                    'Tekken 7 calls the fighter %s, not %s' % (code, fighters[fid][0]))
                     continue
+                if d is LATE:                   # (nothing saved: asked for again)
+                    late.setdefault(fid, []).append(language)
+                    continue
                 path = subtitles.saved_path(fighters[fid][0], language, folder)
                 if not d and os.path.isfile(path) and os.path.getsize(path) > 0:
                     continue                    # (kept: what was saved before over nothing)
@@ -834,6 +852,9 @@ def _save_subtitles(h, fighters, folder, languages):
                 with open(path + '.part', 'wb') as f:
                     f.write(d or b'')
                 os.replace(path + '.part', path)
+    for fid, missed in late.items():
+        failed.setdefault(fid, 'Tekken 7 did not read them in time in %s (asked for again by the next import or '
+                               'update)' % ' '.join(missed))
     return failed
 
 

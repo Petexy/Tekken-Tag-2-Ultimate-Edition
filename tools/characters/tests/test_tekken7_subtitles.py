@@ -141,9 +141,10 @@ class HelperAnswer(unittest.TestCase):
         h = autodump.Helper.__new__(autodump.Helper)
         h.s, h.buf = here, b''
         data = record('ab_s00', 'Ready?')
-        there.sendall(b'file 1 %d ABC\n' % len(data) + data + b'file 0 0 xyz\nfile 0 0 -\nend\n')
-        self.assertEqual(h.subtitles('us', [20, 25, 300]), [('ABC', data), ('xyz', None), (None, None)])
-        self.assertEqual(there.recv(100), b'subtitles us 20 25 300\n')
+        there.sendall(b'file 1 %d ABC\n' % len(data) + data + b'file 0 0 xyz\nlate qrs\nfile 0 0 -\nend\n')
+        self.assertEqual(h.subtitles('us', [20, 25, 26, 300]),
+                         [('ABC', data), ('xyz', None), ('qrs', autodump.LATE), (None, None)])
+        self.assertEqual(there.recv(100), b'subtitles us 20 25 26 300\n')
         there.sendall(b'error not a language or too many fighters\n')
         with self.assertRaisesRegex(autodump.DumpError, 'not a language'):
             h.subtitles('xx', [20])
@@ -175,8 +176,7 @@ class Saving(unittest.TestCase):
                                   27: 'Tekken 7 calls the fighter qqq, not rst'})
 
     class Answers:
-        """The game's answers: a record in every language, none in English (no file, not read, or not read in
-        time: the helper cannot tell which)."""
+        """The game's answers: a record in every language, none in English (no file, or one it could not read)."""
         def __init__(self):
             self.asked = []
 
@@ -214,6 +214,97 @@ class Saving(unittest.TestCase):
             for language in ('fr', 'de'):
                 with open(subtitles.saved_path('abc', language, d), 'rb') as f:
                     self.assertEqual(f.read(), record('ab_s00', 'Line in ' + language))
+
+
+class NotReadInTime(unittest.TestCase):
+    """A file the game had not read in time (the helper's "late") is not saved, so it is asked for again, and a pack
+    made meanwhile lacks that language; the game's "none" ("file 0") is still saved as an empty file."""
+
+    class Game:
+        """The helper's answers per language: {language: {code: LATE, None (the game has none) or bytes}}, a record of
+        its own for the rest."""
+        def __init__(self, answers=None):
+            self.answers, self.asked = answers or {}, []
+
+        def subtitles(self, language, fighters):
+            self.asked.append((language, list(fighters)))
+            codes = {20: 'abc', 25: 'xyz', 27: 'rst'}
+            return [(codes[f], self.answers.get(language, {}).get(
+                codes[f], record('ab_s00', 'Line in %s of %s' % (language, codes[f])))) for f in fighters]
+
+    FIGHTERS = {20: ('abc', 'Abc'), 25: ('xyz', 'Xyz'), 27: ('rst', 'Rst')}
+
+    def test_late_is_not_saved_and_asked_again(self):
+        english = record('ab_s00', 'Made-up line.')
+        late = {'fr': {'abc': autodump.LATE, 'xyz': autodump.LATE}, 'jp': {'abc': autodump.LATE},
+                'de': {'xyz': None}}
+        with tempfile.TemporaryDirectory() as d:
+            saved(d, 'abc', english)                                # (English saved before: never asked again)
+            game = self.Game(late)
+            failed = autodump._save_subtitles(game, self.FIGHTERS, d, autodump.SUBTITLE_LANGUAGES)
+            self.assertEqual(failed, {20: 'Tekken 7 did not read them in time in fr jp (asked for again by the next '
+                                          'import or update)',
+                                      25: 'Tekken 7 did not read them in time in fr (asked for again by the next '
+                                          'import or update)'})
+            for code, language in (('abc', 'fr'), ('abc', 'jp'), ('xyz', 'fr')):
+                self.assertFalse(os.path.exists(subtitles.saved_path(code, language, d)), (code, language))
+                self.assertFalse(os.path.exists(subtitles.saved_path(code, language, d) + '.part'))
+            self.assertEqual(os.path.getsize(subtitles.saved_path('xyz', 'de', d)), 0)  # ("file 0": the game has none)
+            with open(subtitles.saved_path('abc', 'us', d), 'rb') as f:
+                self.assertEqual(f.read(), english)
+            self.assertEqual(subtitles.saved_languages('abc', d), ('us', 'de', 'it', 'es', 'ru'))
+            self.assertEqual(subtitles.saved_languages('xyz', d), ('us', 'de', 'it', 'es', 'ru', 'jp'))
+            self.assertTrue(subtitles.all_saved('rst', d))
+            self.assertFalse(subtitles.all_saved('abc', d) or subtitles.all_saved('xyz', d))
+            # (the pack made now says which: character.ini subtitle_languages, launcher.py's partial_subtitles)
+            src = source.Tekken7Source(types.SimpleNamespace(saved=d))
+            self.assertEqual(src.subtitle_languages(types.SimpleNamespace(TEKKEN7_CODE='abc')),
+                             ('en', 'de', 'it', 'es', 'ru'))
+            self.assertEqual(src.subtitle_languages(types.SimpleNamespace(TEKKEN7_CODE='xyz')),
+                             ('en', 'de', 'it', 'es', 'ru', 'ja'))
+            self.assertEqual(game.asked[0], ('us', [25, 27]))
+            # the next import or update: only the late ones are asked for, and saved now
+            again = self.Game()
+            self.assertEqual(autodump._save_subtitles(again, self.FIGHTERS, d, autodump.SUBTITLE_LANGUAGES), {})
+            self.assertEqual(again.asked, [('fr', [20, 25]), ('jp', [20])])
+            self.assertTrue(subtitles.all_saved('abc', d) and subtitles.all_saved('xyz', d))
+            self.assertEqual(subtitles.lines('abc', 'fr', d), {'ab_s00': 'Line in fr of abc'})
+            self.assertEqual(os.path.getsize(subtitles.saved_path('xyz', 'de', d)), 0)    # (not asked again)
+            with open(subtitles.saved_path('abc', 'us', d), 'rb') as f:
+                self.assertEqual(f.read(), english)
+
+    def test_late_never_replaces_a_saved_file(self):
+        """Asked again (as for a file not saved), a late answer leaves what was saved as it is, records or none."""
+        english = record('ab_s00', 'Made-up line.')
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(subtitles, 'saved', return_value=False):
+            saved(d, 'abc', english)
+            saved(d, 'abc', b'', 'fr')
+            game = self.Game({'us': {'abc': autodump.LATE}, 'fr': {'abc': autodump.LATE}})
+            autodump._save_subtitles(game, {20: ('abc', 'Abc')}, d, ('us', 'fr'))
+            with open(subtitles.saved_path('abc', 'us', d), 'rb') as f:
+                self.assertEqual(f.read(), english)
+            self.assertEqual(os.path.getsize(subtitles.saved_path('abc', 'fr', d)), 0)
+
+    def test_the_dump_logs_it(self):
+        """dump() of the subtitles alone: the late languages named in the log, the rest saved."""
+        helper = types.SimpleNamespace(attach=lambda: 'ok', ready=lambda: True,
+                                       subtitles=self.Game({'ru': {'abc': autodump.LATE}}).subtitles)
+        session = types.SimpleNamespace(wait_game=lambda: 1, connect=lambda: helper, close=lambda: None)
+        lines = []
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(autodump, 'steam_running', return_value=True), \
+                mock.patch.object(autodump, 'find_tekken7', return_value=autodump.Tekken7('s', 't7', 'p', 'proton')), \
+                mock.patch.object(autodump, 'tekken7_running', return_value=False), \
+                mock.patch.object(autodump, 'build_helper'), \
+                mock.patch.object(autodump, 'owned_dlc', return_value={}), \
+                mock.patch.object(autodump, 'session', return_value=session):
+            self.assertEqual(autodump.dump({}, os.path.join(d, 'movesets'), log=lines.append,
+                                           subtitles={20: ('abc', 'Abc'), 27: ('rst', 'Rst')}, saved=d), ({}, {}))
+            self.assertEqual(subtitles.saved_languages('abc', d), ('us', 'fr', 'de', 'it', 'es', 'jp'))
+            self.assertTrue(subtitles.all_saved('rst', d))
+        self.assertIn('  battle subtitles of 1 fighter(s), as the game reads them', lines)
+        self.assertIn('  WARNING: the subtitles of Abc were not saved: Tekken 7 did not read them in time in ru (asked '
+                      'for again by the next import or update)', lines)
 
 
 class TheImportAsks(unittest.TestCase):
