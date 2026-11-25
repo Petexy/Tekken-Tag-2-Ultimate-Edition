@@ -230,6 +230,7 @@ private:
     ui::TextureId portrait_of(const std::string& display) const;
     void group_view(const std::string& group, const std::string& action_id, const std::vector<FighterGroup>& groups);
     void outfits_view();
+    void add_all_view();
     void needs_view();
     bool fighters_activate(const std::string& id);
 

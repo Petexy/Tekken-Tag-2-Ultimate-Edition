@@ -70,7 +70,7 @@ std::optional<std::vector<TestAction>> parse_test_actions(std::string_view text,
             ok = rest == "tekken7" || rest == "tekken8";
         } else if (a.name == "add-all-owned" && colon != std::string::npos) {
             a.args = {rest};
-            ok = rest == "tekken7" || rest == "tekken8";
+            ok = rest == "tekken7" || rest == "tekken8" || rest == "all";
         } else if (a.name == "bind") {
             // bind:<input>:<XKB keycode>[+<XKB keycode>...]
             const size_t at = rest.find(':');

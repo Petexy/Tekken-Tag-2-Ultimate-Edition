@@ -63,6 +63,9 @@ std::string unknown_owned_why(const Facts& facts, const Fighter& fighter);
 std::string removable(const Facts& facts, const Fighter& fighter);
 std::vector<std::string> base_to_add(const Facts& facts, const std::string& game);
 std::vector<std::string> owned_to_add(const Facts& facts, const std::string& game);
+// Every character that can be added now from every game that can be used: each game's own and the DLC ones the
+// Steam account owns (Fighters' Add All Owned for all of them, add-all-owned:all).
+std::vector<std::string> all_owned_to_add(const Facts& facts);
 std::vector<std::string> to_update(const Facts& facts, const std::string& game, bool stand_ins = false);
 std::vector<std::string> to_remove_all(const Facts& facts, const std::string& game);
 bool wants_outfits(const Facts& facts, const Fighter& fighter);

@@ -181,6 +181,7 @@ struct CharactersView {
     std::vector<Line> lines; // early lines, or the notes above the facts
     std::vector<Fact> facts;
     std::vector<Line> news; // "Main adds ..."
+    std::optional<Action> add_all_owned; // add-all-owned:all: every game's characters at once
     std::optional<Action> outfits_all;
     std::vector<Line> outfits_notes;
     std::vector<GameGroup> games;

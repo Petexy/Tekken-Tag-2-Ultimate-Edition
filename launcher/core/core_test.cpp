@@ -608,7 +608,8 @@ void test_actions() {
     const auto all = parse_test_actions("add-all:tekken8;remove-all:tekken7;add-all-owned:tekken8", &error);
     check(all && all->size() == 3 && (*all)[0].args == std::vector<std::string>{"tekken8"} &&
               (*all)[0].label() == "add-all-tekken8" && (*all)[1].label() == "remove-all-tekken7" &&
-              (*all)[2].label() == "add-all-owned-tekken8" && !parse_test_actions("add-all-owned:tekken6", nullptr),
+              (*all)[2].label() == "add-all-owned-tekken8" && !parse_test_actions("add-all-owned:tekken6", nullptr) &&
+              parse_test_actions("add-all-owned:all", nullptr),
           "actions: a game's Add All and Remove All (" + error + ")");
     const auto settings =
         parse_test_actions("settings; bind:face_bottom:38 ;bind:plus:9;reset-keys;back;bind:zl:64+23", &error);

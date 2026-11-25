@@ -1,7 +1,7 @@
 # Intended differences from the old launchers
 
 What `launcher::model` shows differently from the old GTK app on purpose.
-`model_test` applies I1-I7 to a GTK golden before comparing it (model_test.cpp,
+`model_test` applies I1-I8 to a GTK golden before comparing it (model_test.cpp,
 `intended()`) and accepts W0-W8 between the Tk goldens' texts and the model's
 Windows views (`kTkDifferences`); anything else that differs fails.
 
@@ -48,6 +48,12 @@ they differ in just that.
   and opens it." Its Update (`notice-update`) still updates only the launcher;
   Home draws it no button while UPDATE includes it. The comparison takes the
   model's UPDATE element as it is (units.cpp `update_all` checks its parts).
+- **I8 Add All Owned for every game** (one button that adds them all): Fighters
+  has `add-all-owned:all`, which adds every character that can be added now
+  from the games that can be used: each game's own and the DLC characters the
+  Steam account owns, in one import. The old apps had an Add All per game and
+  one Add All Owned for Tekken 7's DLC only. The comparison takes the model's
+  element as it is (units.cpp `add_all_everything` checks what it adds).
 
 Not seen in the goldens but also changed on purpose: every item that cannot
 be used now keeps a reason (`describe.why`, U7) instead of only being
@@ -87,6 +93,7 @@ The rules in `kTkDifferences` (model_test.cpp) name these:
   stand-in moves, packs made by another version (Remove, Remove All).
 - **I7** as above: Home's UPDATE, and the notice's sentence ("Update
   replaces this launcher with it and opens it." on Windows).
+- **I8** as above: Add All Owned for every game.
 - **W8 Linux's sentence with Windows' action**: "Set up the game first: the
   characters are made from it and from your Tekken 7 or Tekken 8." (Tk: "Set
   up the game first: characters are made from it.").
