@@ -1662,6 +1662,9 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
     // the slant, so the gaps between them stay even.)
     const bool upright = spec.half == Half::Crimson && !ui.mirrored();
     if (upright) focus.straight_left_first = true;
+    // (Blue, the mirror: the last of each line stands upright at the half's right edge.)
+    const bool upright_right = ui.mirrored();
+    if (upright_right) focus.straight_right_last = true;
     TextEngine& te = ui.text();
     const Glyphs g = ui.glyphs();
     ui.leaf(
@@ -1672,11 +1675,13 @@ void button(Ui& ui, const std::string& id, const ButtonSpec& spec, Focus focus, 
             if (spec.check) w += 20 + gap;
             return Vec2{w, h};
         },
-        [spec, pad, gap, st, upright](PaintContext& ctx) {
+        [spec, pad, gap, st, upright, upright_right](PaintContext& ctx) {
             Canvas& cv = ctx.canvas;
             const Rect r = ctx.rect;
             const float f = ctx.focus_t;
-            const Shape shape = upright && ctx.line_start ? Shape::StraightLeft : Shape::Skewed;
+            const Shape shape = upright && ctx.line_start        ? Shape::StraightLeft
+                                : upright_right && ctx.line_end ? Shape::StraightRight
+                                                                : Shape::Skewed;
             if (spec.disabled) cv.push_layer({}, f > .5f ? .7f : .42f);
             Gradient fill;
             Color border;

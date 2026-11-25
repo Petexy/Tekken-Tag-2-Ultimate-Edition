@@ -367,6 +367,7 @@ void Ui::place(int index, float x, float y) {
                 iy - scroll + k.box.margin.top + (b.align == Align::Stretch ? 0 : cross(k, room, k.h, b.align));
             k.slot_x = cx + k.box.margin.left;
             k.line_start = c == n.children.front();
+            k.line_end = c == n.children.back();
             place(c, cx + k.box.margin.left + k.fit_dx, cy);
             cx += k.w + k.box.margin.horizontal() + k.fit_dx + b.gap;
         }
@@ -391,6 +392,7 @@ void Ui::place(int index, float x, float y) {
                 Node& k = nodes_[static_cast<std::size_t>(n.children[q])];
                 k.slot_x = cx + k.box.margin.left;
                 k.line_start = q == i;
+                k.line_end = q + 1 == j;
                 place(n.children[q], cx + k.box.margin.left,
                       cy + k.box.margin.top +
                           cross(k, line_h - k.box.margin.vertical(), k.h,
@@ -1001,6 +1003,7 @@ void Ui::step_animations() {
     if (highlight_id_ != focused_ && highlight_.settled(.5f)) highlight_id_ = focused_;
     highlight_screen_ = highlight_.value().translated(o);
     highlight_shape_ = n.focus->straight_left || (n.focus->straight_left_first && n.line_start) ? Shape::StraightLeft
+                       : n.focus->straight_right_last && n.line_end                          ? Shape::StraightRight
                        : n.focus->skewed                                                     ? Shape::Skewed
                                                                                              : Shape::Rect;
     highlight_alpha_ = 1;
@@ -1068,6 +1071,7 @@ void Ui::paint_node(Canvas& canvas, int index) {
                      frame_.glyphs,
                      &paint_animating_,
                      n.line_start,
+                     n.line_end,
                      frame_.ambient.value_or(frame_.now),
                      &paint_looping_};
     if (n.paint) n.paint(ctx);
