@@ -718,6 +718,14 @@ void test_menudata() {
     const size_t script = std::string_view(reinterpret_cast<const char*>(file.data()), file.size()).find("xtal ghost 3");
     long_text[script - 4] = 0x7F; // the script's length, past the file's end
     check(!menudata::add_solo_ghost_row(long_text), "menudata: a text longer than the file");
+    const auto german = menudata::add_solo_ghost_row(file, language::kGerman);
+    const auto russian = menudata::add_solo_ghost_row(file, language::kRussian);
+    const auto has = [](const std::optional<std::vector<uint8_t>>& f, std::string_view s) {
+        return f && std::string_view(reinterpret_cast<const char*>(f->data()), f->size()).find(s) != std::string_view::npos;
+    };
+    check(has(german, "SOLO-GEISTERKAMPF") && has(german, "ein Geist nach dem anderen") && !has(german, "SOLO GHOST BATTLE"),
+          "menudata: the row in German");
+    check(has(russian, "СОЛО-БОЙ С ПРИЗРАКАМИ") && has(russian, "один за другим"), "menudata: the row in Russian");
     const auto last = menudata::add_solo_ghost_row(offline_menu(true, true));
     check(last && std::string_view(reinterpret_cast<const char*>(last->data()), last->size()).find("MenuItemMode002-09") !=
                       std::string_view::npos,
