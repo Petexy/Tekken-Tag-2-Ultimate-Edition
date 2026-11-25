@@ -9,6 +9,8 @@
 // Event handlers (OnLoad, OnEnter, ...) are children whose text is a
 // compiled Xtal script.
 
+#include "title/language.h"
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -25,8 +27,16 @@ namespace cafe::title::menudata {
 // does, with its own label and description. The rows' icons and
 // descriptions follow the cursor's place (the OnLoad script's icon arrays,
 // statics named StaticMode002-0<place + 1>), so both get a place for it.
-// Null when the file is not as expected.
-std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t>& file);
+// Its label and description are in the language at `place` (the label is
+// the one the fight's corner shows too). Null when the file is not as expected.
+std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t>& file,
+                                                       language::Place place = language::place());
+
+// SOLO GHOST BATTLE in each language (the game's GHOST BATTLE and SOLO).
+inline constexpr language::Text kSoloGhostLabel = {
+    "SOLO GHOST BATTLE", "FANT\xC3\x94ME SOLO", "SOLO-GEISTERKAMPF", "BATTAGLIA FANTASMA SOLO", "COMBATE FANTASMA SOLO",
+    "\xD0\xA1\xD0\x9E\xD0\x9B\xD0\x9E-\xD0\x91\xD0\x9E\xD0\x99 \xD0\xA1 "
+    "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x97\xD0\xA0\xD0\x90\xD0\x9A\xD0\x90\xD0\x9C\xD0\x98"};
 
 constexpr const char* kSoloGhostRow = "MenuItemMode002-09";
 constexpr const char* kOfflineMenu = "MenuMode002-01";

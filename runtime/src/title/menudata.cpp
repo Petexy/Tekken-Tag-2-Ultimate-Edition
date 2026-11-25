@@ -223,12 +223,18 @@ bool add_static(Element& frame, std::string_view prefix, size_t place, const cha
 
 constexpr const char* kFrame = "FrameMode002-01";
 constexpr const char* kGhostRow = "MenuItemMode002-02";
-constexpr const char* kLabel = "SOLO GHOST BATTLE";
-constexpr const char* kDescription = "Battle against a series of ghost characters one-on-one. ";
+// (one-on-one fights against ghosts, one after another)
+constexpr language::Text kDescription = {
+    "Battle against a series of ghost characters one-on-one. ",
+    "Des duels en 1 contre 1, un fant\xC3\xB4me apr\xC3\xA8s l'autre. ",
+    "Duelle 1 gegen 1, ein Geist nach dem anderen. ",
+    "Duelli 1 contro 1, un fantasma dopo l'altro. ",
+    "Duelos 1 contra 1, un fantasma tras otro. ",
+    "\xD0\x9F\xD0\xBE\xD0\xB5\xD0\xB4\xD0\xB8\xD0\xBD\xD0\xBA\xD0\xB8 1 \xD0\xBD\xD0\xB0 1 \xD1\x81 \xD0\xBF\xD1\x80\xD0\xB8\xD0\xB7\xD1\x80\xD0\xB0\xD0\xBA\xD0\xB0\xD0\xBC\xD0\xB8, \xD0\xBE\xD0\xB4\xD0\xB8\xD0\xBD \xD0\xB7\xD0\xB0 \xD0\xB4\xD1\x80\xD1\x83\xD0\xB3\xD0\xB8\xD0\xBC. "};
 
 } // namespace
 
-std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t>& file) {
+std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t>& file, language::Place place) {
     if (file.size() < kHeader + 4 || std::memcmp(file.data(), "BX01", 4) != 0) return std::nullopt;
     const uint32_t tags = be32(&file[8]), attributes = be32(&file[12]);
     if (tags > file.size() || attributes < tags || attributes > file.size()) return std::nullopt;
@@ -268,12 +274,13 @@ std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t
     }
     Element row = menu->children[ghost];
     set_attribute(row, n.name, kSoloGhostRow);
-    set_attribute(row, n.text, kLabel);
+    set_attribute(row, n.text, language::in(kSoloGhostLabel, place));
     remove_attribute(row, n.text_id);
     menu->children.insert(menu->children.begin() + ghost + 1, std::move(row));
     // (the menu may be one of the frame's children, which move as these are added)
     menu = nullptr;
-    if (!add_static(*frame, "StaticMode002-0", kSoloGhostPlace, kDescription, n) ||
+    const std::string description(language::in(kDescription, place));
+    if (!add_static(*frame, "StaticMode002-0", kSoloGhostPlace, description.c_str(), n) ||
         !add_static(*frame, "StaticValueMode002-0", kSoloGhostPlace, nullptr, n)) {
         return std::nullopt;
     }
