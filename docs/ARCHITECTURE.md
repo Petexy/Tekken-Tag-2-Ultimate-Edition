@@ -622,14 +622,18 @@ and the Korean and Japanese gothic fonts (22 px, help panels such as
 Controller Setup; B1277EE3/C4C9633E, 46B70814/335915C9), which have Latin
 letters; only the main font has the icon glyphs.
 
-**Texts** (`title/text.*`). An `NTXB` record is the key (padded to four with
-at least one zero), two bytes, the length in characters, the UTF-8 text and
-the English original (each padded with at least two zeros); the bank's index
-points at records, so a text can change in place. In every bank (data003's
+**Texts** (`title/text.*`). An `NTXB` record is two bytes, the length in
+characters, the UTF-8 text and the English original (each padded with at
+least two zeros), then its key (padded to four with at least one zero),
+which the next record follows; the bank's index points at records, so a
+text can change in place. In every bank (data003's
 and data100's), names of the Wii U's buttons (English, French, Italian,
-German, Spanish: "the X Button", "bouton X", "X-Knopf", "+Control Pad", …)
-become the buttons' icons, which are always shorter, and the prompt "PRESS
-THE + BUTTON" and its translations show the Start icon. An icon in a text is
+German, Spanish: "the X Button", "bouton X", "X-Knopf", "+Control Pad", …;
+Russian, whose texts are the PlayStation 3's and Xbox 360's: "кнопку
+START", "кнопку SELECT", "кнопку BACK") become the buttons' icons, which
+are always shorter, and the prompt "PRESS THE + BUTTON" and its
+translations show the Start icon (the Russian texts' "кнопку PS", the HOME
+Button elsewhere, stays). An icon in a text is
 a symbol no text uses that all four fonts have (£ ¥ ¢ ª for the right,
 bottom, top and left buttons, ＼ ³ » for +, − and the D-pad), its glyph
 changed in each: in the main font to the icon's box and placement, in the
@@ -803,8 +807,8 @@ line where the title puts its hints (Defensive Training's "Select +
 button: Start", at the left: 23 pixels high at y 643 to 666 of the TV
 image): Select's icon and 3's button picture from the main font's texture
 with the port's icons for the controller in use (neutral or PlayStation,
-`font::neutral_icons`/`playstation_icons`), "+" and "Reset Position" in
-the label font outlined as the title outlines its hints. The panels and
+`font::neutral_icons`/`playstation_icons`), "+" and "Reset Position" (in
+the language shown) in the label font outlined as the title outlines its hints. The panels and
 the top view stand above that line (their bottom at y 634, whether DAMAGE
 INFO 2's bars are on or not; those bars share the line). The title's own
 hints stay where its HUD movie puts them: their place is in that movie's
@@ -830,8 +834,11 @@ inside dark glass at 72% and the rim opaque, all at four texels a pixel,
 filtered, so the outline cuts smoothly on larger screens. 2P's has its
 colours turned to their opposites (the teal rim red). Without the texture
 a box drawn in its likeness stands in. The panels sit in
-from the screen's sides under the fighters, and the ASCII glyphs of the title's Japanese gothic font (labels)
-and main bold italic font (values), neither of which has a space glyph.
+from the screen's sides under the fighters, and the glyphs of the title's Japanese gothic font (labels)
+and main bold italic font (values), neither of which has a space glyph: ASCII, Latin-1, Latin Extended-A and
+Cyrillic, for the panels' words in each language shown (`words::` in `framedata.cpp`: the game's own HUD words
+where it has them). A label too long to leave its value room is drawn smaller; the flags' row (Clean, Counter,
+Punish, Wall) closes its gaps, then shrinks, where a language's words are longer.
 
 The pause menu's ULTIMATE SETTINGS row takes the place of TOUCH SELECT, which
 opens the GamePad's Easy Input screen. The pause menu is a Lumen movie
@@ -879,9 +886,14 @@ description (menu text Manu_1669, which other menus may show) while
 Practice runs, the submenu's while it is open; a text can only take the
 space of the one it replaces. The row's label, longer than TOUCH SELECT's
 space, is set on the row itself whenever the pause menu's frame comes up
-(`MenuEntitySetText`, `sub_085A9978`: r3 the text, plain ASCII, r4 the
+(`MenuEntitySetText`, `sub_085A9978`: r3 the text, UTF-8, r4 the
 entity's name); the pause menu's labels come from the movie's own data,
-not through the script (`MenuEntitySetTextID` is not called).
+not through the script (`MenuEntitySetTextID` is not called). The texts
+are in each language shown (see Language), each within that language's
+space; one that does not fit (Russian's in the English texts standing in
+for Russian's: see Language) is English's. SLOW MOTION's 1/2 and 1/4 take
+the place of the ON word of the language shown (ON, OUI, EIN, SÌ, SÍ,
+ВКЛ).
 
 HITBOXES draws where the title tests attacks against bodies. Each fighter
 has 14 spheres on its bones (+2168, 24 bytes each: the centre, the radius
@@ -1046,6 +1058,58 @@ before without the file). The game logs
 game's own (from <file>)` or `game: defaults (no <file>)`, and a line for
 each line of the file it leaves out or changes.
 
+## Language
+
+The European Wii U game has its texts in English, French, German, Italian
+and Spanish, and the Russian texts of the PlayStation 3 and Xbox 360
+versions; `game.ini`'s `language` (`host::game::kLanguages`: en, fr, de,
+it, es, ru; none: English) chooses the one shown. `main.cpp` reads
+game.ini once before the title runs and makes the language the console's
+(`cafe.language` of `UCReadSysConfig`, `os/system_config.cpp`: 1 English,
+2 French, 3 German, 4 Italian, 5 Spanish, 10 Russian; the console stays a
+European one in the United Kingdom) and the port's (`title/language.h`),
+and logs `ttt2: the console's language: <name> (cafe.language <n>)`.
+
+The title loads every language's text banks (data003: each part of the
+game, online, common, practice, menus, tutorial, has ten banks, their byte
+6 the language: 1 Japanese, 2 English, 3 English again, 4 French, 5
+Italian, 6 German, 7 Spanish, 8 Korean, 9 Chinese, 10 Russian) and shows
+the language at +4 of its system settings object (`sub_0864107C`: 1
+Japanese, 2 English, 3 French, 4 Italian, 5 German, 6 Spanish, 7 Russian),
+which it sets from `cafe.language` (0 to 5 through a table; 10, Russian,
+it takes for English). With game.ini's Russian the port sets +4 to 7 as
+the object is made (`presentation.cpp`). The pictures with words (the
+select screen's movie and textures, data007 entries 6 to 21) follow the
+language too; the copyright lines of the title screen are one picture for
+all.
+
+The Russian banks lack the texts only the Wii U has: Practice's bank has
+none, and the menus', common and online ones lack their Wii U screens'
+(the main menu's SPECIAL GAME MODE row, Tekken Ball, paint ...), which
+showed blank. `text::fill_missing_texts` rebuilds each such Russian bank
+(served through the archive overlay, its language byte kept) with every
+record it has and English's of the numbers it lacks; where a Russian bank
+has the same English text under another number, the record gets that
+Russian text (SELECT, CONFIRM, BACK, ON, OFF, COMMAND LIST ...: about 430
+of the 1,471), the rest stay English. A bank is its header, three tables
+and its records: table 1 one entry per record by number (offsets of its
+header, English text and key, its number), tables 2 and 3 the texts' and
+keys' hashes, each pointing at a table 1 entry (4 + 16 per entry from
+table 1), then the records (a hash of the text and its length, the text,
+the English one, the key); the rebuilt bank keeps each record's hashes.
+
+The port's own texts (ULTIMATE SETTINGS, SOLO GHOST BATTLE, the frame data
+panels and the position reset's hint, the customization's messages) are a
+`language::Text` each, in every language offered (English where one has
+none), chosen by `language::in_current`; non-ASCII characters are written
+as `\x` escapes. A text written over one of the title's fits that text's
+space in that language's bank.
+
+Japanese (`cafe.language` 0) is not offered: the title's Japanese menus
+draw, but the port's own texts have no Japanese (the frame data panels'
+atlas has no faces for it), and its texts name the Wii U's buttons
+("Aボタン", "十字ボタン") with no rewrite to the icons.
+
 ## Paint without a GamePad
 
 CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
@@ -1127,7 +1191,9 @@ arrays its OnLoad script fills (an append each: `02 02 00 VV` loads the
 icon's number, `43 01 02` appends it). At start-up the port writes the file
 again with a ninth row, MenuItemMode002-09, at place 2: a copy of GHOST
 BATTLE's (the same OnEnter script) with its own label (the `text`
-attribute, without GHOST BATTLE's `textid`), an append more after GHOST
+attribute, without GHOST BATTLE's `textid`; in the language shown, from
+the game's GHOST BATTLE and SOLO, as its description and the fight
+corner's mode name are), an append more after GHOST
 BATTLE's in both icon arrays (the script's code size, at +8, and the word
 holding the code's size less one, 66 bytes after the code, grow by 14), and
 a description and a value at place 2 (the later ones renamed a number on),
@@ -1525,7 +1591,8 @@ costumes are whole bodies, not records), and the mode's save writes that
 file, with the slot's picture.
 The title's save call has no failure of its own, so a save the disk refuses
 is said on the screen by the port (`framedata::notice`: a box in the title's
-fonts over the picture, the overlay Practice's panels use), and again when
+fonts over the picture, the overlay Practice's panels use, in the language
+shown), and again when
 a later try has written it. The mode's two other screens with a character
 grid, REGISTER TAG and TOUCH SELECT, are the title's own code with the
 fights' grid, where the cursor stands on an added fighter's cell as on any
