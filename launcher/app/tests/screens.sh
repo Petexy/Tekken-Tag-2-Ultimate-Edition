@@ -21,6 +21,8 @@
 # - typing the player's name (Settings > Game): the keyboard's text and keys (Enter keeps it, Esc does not, a
 #   character it refuses), the on-screen keys with a pad (B, X, Y, Start), the Steam Controller's A on the row and on
 #   a key (one press: never Done), a tab change while typing (the name as it was), game.ini as written;
+# - the Language row below it: Left and Right change it on the row, the pad's A takes the next one, language:
+#   sets one, each written in game.ini;
 # - adding and removing a character with the stub importer, and Cancel while it runs.
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4
@@ -257,6 +259,15 @@ for how in steam steam-key; do
     [ "$(grep -c '@name start' "$h/out.txt")" = 1 ] || fail "name-$how: $(grep '@name' "$h/out.txt" | tr '\n' '|')"
     name_is "$h" Qx
 done
+# The Language row (Settings > Game, below Player name): Right and Left change it on the row, the pad's A takes the
+# next one, language: sets one, each saved in game.ini (fr, de, fr, it, es, then it).
+h=$(home language)
+run "$h" installed \
+    "TTT2_LAUNCHER_TEST_ACTIONS=tab:settings;press:Down;press:Right;press:Right;press:Left;language:IT;pad:south;press:Left;quit"
+clean "$h"
+has "$h" '@test language:IT ok'
+grep -q '^language = it$' "$h/.config/ttt2/game.ini" ||
+    fail "language: game.ini has $(grep language "$h/.config/ttt2/game.ini" 2>/dev/null || echo 'no language')"
 
 # Adding and removing with the stub importer: the fighter's own progress, the task strip; Cancel.
 h=$(home add)
