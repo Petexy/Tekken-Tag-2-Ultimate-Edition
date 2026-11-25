@@ -687,6 +687,33 @@ void test_missing_texts() {
               ours_some[2].text == "ТРИ" && ours_some[3].text == "FIVE" && ours_some[3].english == "FIVE",
           "text: our translations only for the numbers Russian lacks; English, not the game's text, for one left out");
 
+    // our texts' references: expanded from the Russian banks as they were, then markup checked; one naming a
+    // record no Russian bank has leaves English (named)
+    std::vector<std::vector<uint8_t>> with_references = three_parts();
+    with_references[29] = make_indexed(text::kBankRussian, {{1, "practice_1", "TEXT 10", "TEXT"},
+                                                            {2, "practice_2", "ДВА\nСЛОВА", "TWO"},
+                                                            {3, "practice_3", "ЛЕВЫЙ", "THREE"},
+                                                            {5, "practice_5", " жёлтый ", "FIVE"},
+                                                            {0xFFFF, "practice_9_2", "BY KEY", "BY KEY"}});
+    const text::Translation referring[] = {{"practice_1", "{practice_4}"},
+                                           {"practice_2", "\xE2\x96\xA0{practice_3:capital}"},
+                                           {"practice_3", "{practice_5:upper}!"},
+                                           {"practice_5", "{practice_2}"}};
+    const text::Filled filled_refs = text::fill_missing_texts(pointers_to(with_references), referring);
+    const auto refs_stand_in = indexed(with_references[9]), refs_some = indexed(with_references[19]);
+    check(filled_refs.banks == (std::vector<size_t>{9, 19}) &&
+              filled_refs.unresolved == (std::vector<std::string>{"practice_1"}) &&
+              filled_refs.kept_english == (std::vector<std::string>{"practice_5", "practice_5"}),
+          "text: references to records the banks lack, and those whose expanded markup differs, named");
+    const std::string left = "\xE2\x96\xA0Левый"; // (■ and the record's text, a capital first letter only)
+    check(refs_stand_in.size() == 5 && refs_stand_in[0].text == "TEXT 2" && refs_stand_in[0].key == "practice_1" &&
+              refs_stand_in[1].text == left && refs_stand_in[1].header_hash == text::text_hash(left) &&
+              refs_stand_in[1].count == 6 && refs_stand_in[2].text == "ЖЁЛТЫЙ!" &&
+              refs_stand_in[3].text == "ENGLISH ONLY" && refs_some.size() == 4 && refs_some[1].text == left &&
+              refs_some[2].text == "ЖЁЛТЫЙ!" && refs_some[3].text == "FIVE",
+          "text: references expanded from the player's Russian records; English where one is missing or its markup "
+          "differs");
+
     auto shuffled = part(Russian::kStandIn);
     std::swap(shuffled[2], shuffled[3]);
     check(text::fill_missing_texts(pointers_to(shuffled), {}).banks.empty(),
@@ -724,13 +751,36 @@ void test_markup() {
               text::markup("Шляпа \xEF\xBF\xB2\xEF\xBF\xBF") == U"\uFFF2\uFFFF",
           "text: markup: a text ending after a colour's first half differs");
     check(text::markup("Mug\xEF\xBF\xBF" "a\n") == U"\uFFFF\n", "text: markup: U+FFFF takes no argument");
-    // our Russian table: keys of a part's records, each once, texts without the icons' code points
+
+    // references to the player's Russian records: as they are (spaces at the ends dropped), in capitals, with
+    // a capital first letter only; nothing when one is not well formed or names a record there is none of
+    const std::map<std::string_view, std::string_view> records = {
+        {"common_7", " Ёжик в тумане "}, {"Manu_12", "СТАРАЯ ЛАМПА"}, {"online_3", "Стул"}, {"common_8", "  "}};
+    const auto record = [&](std::string_view key) -> std::optional<std::string_view> {
+        const auto found = records.find(key);
+        return found == records.end() ? std::nullopt : std::optional(found->second);
+    };
+    check(text::with_references("\xE2\x96\xA0{common_7}", record) == "\xE2\x96\xA0Ёжик в тумане" &&
+              text::with_references(code + " {online_3:upper} " + code, record) == code + " СТУЛ " + code &&
+              text::with_references("{Manu_12:capital} / {common_7:upper}", record) == "Старая лампа / ЁЖИК В ТУМАНЕ" &&
+              text::with_references(code + "{common_7:capital}", record) == code + "Ёжик в тумане" &&
+              text::with_references("Без ссылок.", record) == "Без ссылок.",
+          "text: references expanded, in their case forms");
+    check(!text::with_references("{common_9}", record) && !text::with_references("{common_8}", record) &&
+              !text::with_references("{common_7", record) && !text::with_references("common_7}", record) &&
+              !text::with_references("a} {common_7}", record) && !text::with_references("{common_7:bold}", record) &&
+              !text::with_references("{common 7}", record) && !text::with_references("{}", record),
+          "text: a reference to a record there is none of, an empty one, or one not well formed: nothing");
+
+    // our Russian table: keys of a part's records, each once, texts without the icons' code points, references
+    // well formed
     std::set<std::string_view> keys;
     bool well_formed = !text::russian_texts().empty();
+    const auto any_record = [](std::string_view) -> std::optional<std::string_view> { return "Слово"; };
     for (const text::Translation& t : text::russian_texts()) {
         const size_t underscore = t.key.find('_');
         well_formed = well_formed && underscore != std::string_view::npos && underscore > 0 && !t.text.empty() &&
-                      keys.insert(t.key).second;
+                      keys.insert(t.key).second && text::with_references(t.text, any_record).has_value();
         for (const char32_t c : {text::kRightButton, text::kBottomButton, text::kTopButton, text::kLeftButton,
                                  text::kStartButton, text::kSelectButton, text::kPad}) {
             std::string utf8;
@@ -740,7 +790,8 @@ void test_markup() {
             well_formed = well_formed && t.text.find(utf8) == std::string_view::npos;
         }
     }
-    check(well_formed, "text: our Russian texts by key, each once, none with an icon's code point");
+    check(well_formed,
+          "text: our Russian texts by key, each once, none with an icon's code point, references well formed");
 }
 
 void test_language() {

@@ -134,8 +134,13 @@ void append_utf8(std::string& out, char32_t c) {
     } else if (c < 0x800) {
         out += static_cast<char>(0xC0 | (c >> 6));
         out += static_cast<char>(0x80 | (c & 0x3F));
-    } else {
+    } else if (c < 0x10000) {
         out += static_cast<char>(0xE0 | (c >> 12));
+        out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (c & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (c >> 18));
+        out += static_cast<char>(0x80 | ((c >> 12) & 0x3F));
         out += static_cast<char>(0x80 | ((c >> 6) & 0x3F));
         out += static_cast<char>(0x80 | (c & 0x3F));
     }
@@ -186,16 +191,20 @@ std::string_view string_at(const std::vector<uint8_t>& bank, size_t at) {
     return end ? std::string_view(begin, static_cast<size_t>(static_cast<const char*>(end) - begin)) : std::string_view{};
 }
 
-// A key: letters, '_', digits ("common_4", "Manu_627"), after the previous
-// record's padding.
-bool key_at(const std::vector<uint8_t>& bank, size_t at, std::string_view& key) {
-    if (at == 0 || bank[at - 1] != 0) return false;
-    key = string_at(bank, at);
+// A key: letters, '_', digits ("common_4", "Manu_627").
+bool is_key(std::string_view key) {
     const size_t underscore = key.find('_');
     if (underscore == 0 || underscore == std::string_view::npos || underscore + 1 >= key.size()) return false;
     const auto letters = key.substr(0, underscore), digits = key.substr(underscore + 1);
     return std::all_of(letters.begin(), letters.end(), [](char c) { return std::isalpha(static_cast<unsigned char>(c)); }) &&
            std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); });
+}
+
+// A key after the previous record's padding.
+bool key_at(const std::vector<uint8_t>& bank, size_t at, std::string_view& key) {
+    if (at == 0 || bank[at - 1] != 0) return false;
+    key = string_at(bank, at);
+    return is_key(key);
 }
 
 } // namespace
@@ -473,6 +482,60 @@ std::span<const Translation> russian_texts() {
 
 namespace {
 
+// Latin and Cyrillic (А-я, Ёё) letters in capitals or small; other code points as they are.
+char32_t to_upper(char32_t c) {
+    if ((c >= U'a' && c <= U'z') || (c >= 0x0430 && c <= 0x044F)) return c - 0x20;
+    return c == 0x0451 ? 0x0401 : c;
+}
+
+char32_t to_lower(char32_t c) {
+    if ((c >= U'A' && c <= U'Z') || (c >= 0x0410 && c <= 0x042F)) return c + 0x20;
+    return c == 0x0401 ? 0x0451 : c;
+}
+
+} // namespace
+
+std::optional<std::string> with_references(
+    std::string_view text, const std::function<std::optional<std::string_view>(std::string_view key)>& russian) {
+    std::string out;
+    size_t at = 0;
+    for (size_t open; (open = text.find('{', at)) != std::string_view::npos;) {
+        const size_t close = text.find('}', open);
+        if (close == std::string_view::npos || text.substr(at, open - at).find('}') != std::string_view::npos) {
+            return std::nullopt;
+        }
+        std::string_view key = text.substr(open + 1, close - open - 1), form;
+        if (const size_t colon = key.find(':'); colon != std::string_view::npos) {
+            form = key.substr(colon + 1);
+            key = key.substr(0, colon);
+        }
+        if (!is_key(key) || !(form.empty() || form == "upper" || form == "capital")) return std::nullopt;
+        const std::optional<std::string_view> record = russian(key);
+        if (!record) return std::nullopt;
+        std::string_view words = *record;
+        words.remove_prefix(std::min(words.find_first_not_of(' '), words.size()));
+        words.remove_suffix(words.size() - (words.find_last_not_of(' ') + 1));
+        if (words.empty()) return std::nullopt;
+        out += text.substr(at, open - at);
+        if (form.empty()) {
+            out += words;
+        } else {
+            bool first = true; // (the first letter, for "capital")
+            for (const char32_t c : decode(words)) {
+                const bool letter = to_upper(c) != c || to_lower(c) != c;
+                append_utf8(out, form == "upper" || (letter && first) ? to_upper(c) : to_lower(c));
+                first = first && !letter;
+            }
+        }
+        at = close + 1;
+    }
+    if (text.find('}', at) != std::string_view::npos) return std::nullopt;
+    out += text.substr(at);
+    return out;
+}
+
+namespace {
+
 // A record's text (after its header, up to its English text).
 std::string_view text_of(const Indexed::Record& r) {
     const std::string_view room(reinterpret_cast<const char*>(r.bytes.data() + 4), r.english - 4);
@@ -562,6 +625,17 @@ Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks, std::span<co
     for (const Translation& t : russian) ours.emplace(t.key, t.text);
     Matches matches;
     for (const Part& part : parts) matches.add(part);
+    // the player's Russian texts by key, as the banks were (for our texts' references)
+    std::map<std::string_view, std::string_view> game;
+    for (const Part& part : parts) {
+        for (const Indexed::Record& r : part.russian.records) {
+            if (r.keyed) game.emplace(key_of(r), text_of(r));
+        }
+    }
+    const auto game_text = [&](std::string_view key) -> std::optional<std::string_view> {
+        const auto found = game.find(key);
+        return found == game.end() ? std::nullopt : std::optional(found->second);
+    };
     Filled filled;
     for (const Part& part : parts) {
         // Russian's records, and English's of the numbers Russian has none of, in Russian where their markup
@@ -572,12 +646,14 @@ Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks, std::span<co
         for (const Indexed::Record& english : part.english.records) {
             if (!english.keyed || english.number() == kNoNumber || numbers.count(english.number())) continue;
             const std::u32string marks = markup(text_of(english));
-            std::optional<std::string_view> text;
+            std::optional<std::string> text;
             if (const auto our = ours.find(key_of(english)); our != ours.end()) {
-                if (markup(our->second) == marks) text = our->second;
+                std::optional<std::string> expanded = with_references(our->second, game_text);
+                if (!expanded) filled.unresolved.emplace_back(our->first);
+                else if (markup(*expanded) == marks) text = std::move(expanded);
                 else filled.kept_english.emplace_back(our->first);
             } else if (const auto match = matches.of(text_of(english)); match && markup(*match) == marks) {
-                text = match;
+                text = std::string(*match);
             }
             merged.records.push_back(text ? with_text(english, *text) : english);
         }

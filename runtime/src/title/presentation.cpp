@@ -519,8 +519,9 @@ void prepare_presentation() {
     std::map<std::string, std::map<uint32_t, std::vector<uint8_t>>> changed;
     changed[kFontArchive] = prepare_icons(used);
     const bool icons = !changed[kFontArchive].empty();
-    // (Russian lacks the Wii U's own texts: they come in Russian, ours or the game's of the same English text,
-    // English where one's markup is not the English text's; they are rewritten as the others are.)
+    // (Russian lacks the Wii U's own texts: they come in Russian, ours (naming records of the player's Russian
+    // banks where it says what they say) or the game's of the same English text, English where one's markup is
+    // not the English text's or it names a record the banks lack; they are rewritten as the others are.)
     std::vector<bool> filled(banks.size());
     for (const char* archive_name : {kFontArchive, kPatchArchive}) {
         std::vector<std::vector<uint8_t>*> of_archive;
@@ -534,6 +535,10 @@ void prepare_presentation() {
         for (const size_t i : f.banks) filled[at[i]] = true;
         for (const std::string& key : f.kept_english) {
             std::fprintf(stderr, "ttt2: Russian text %s left in English: its markup is not the English text's\n",
+                         key.c_str());
+        }
+        for (const std::string& key : f.unresolved) {
+            std::fprintf(stderr, "ttt2: Russian text %s left in English: it names a record the Russian banks lack\n",
                          key.c_str());
         }
     }

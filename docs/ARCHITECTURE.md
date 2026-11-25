@@ -1092,26 +1092,34 @@ record it has and, for the 1,471 numbers it lacks, English's records with
 our own Russian: `title/text_russian.inc`, the port's translation of each
 such text by key (`text::russian_texts`; UTF-8, the game's control codes
 as `\u` escapes; about 1,030 records, only keys and our Russian, none of
-the game's texts). A record the table has no entry for gets the Russian
-text the bank has for the same English text under another number (SELECT,
-CONFIRM, ON, OFF, COMMAND LIST ...), if any; the rest (song titles, a
-stage's name, texts of icons only) stay English. A text goes in only with
-its English record's markup (`text::markup`: after the button names become
-icons, the control codes with their arguments (as the title's table of
-them at 0x102F619C says: two for U+FFF2, a colour's two halves, none for
-U+FFFF, one for the others), the line breaks, the icons and the symbols
-☆【】↑↓, in order); one that differs (the player's banks
-decide, and another version of the game may differ) leaves the record
-English, and the port logs `ttt2: Russian text <key> left in English: its
-markup is not the English text's`. A bank is its header, three tables and
-its records: table 1 one entry per record by number (offsets of its
-header, English text and key, its number), table 2 the English texts'
-hashes (and lengths), table 3 the keys', each pointing at a table 1 entry
-(4 + 16 per entry from table 1), then the records (the text's hash, its
-length in characters, the text, the English one, the key). A rebuilt
-record keeps its English record's index entries, with its own text's
-hash (`text::text_hash`: for each character c, h = T(h) ^ c, T a linear
-map of the 16 bits) and length.
+the game's texts). Where ours would say what a record of the player's
+Russian banks says (a mode's name, a menu's, a term the game uses
+elsewhere: about 40 entries), the entry names that record by key with
+our markup around it, `■{common_82}`, `{common_911:upper}` (in capitals),
+`{common_375:capital}` (a capital first letter only), and
+`text::with_references` puts in the player's text of that record (spaces
+at its ends dropped) before the markup check; an entry naming a record the
+banks lack stays English, and the port logs `ttt2: Russian text <key> left
+in English: it names a record the Russian banks lack`. A record the table
+has no entry for gets the Russian text the bank has for the same English
+text under another number (SELECT, CONFIRM, ON, OFF, COMMAND LIST ...), if
+any; the rest (song titles, a stage's name, texts of icons only) stay
+English. A text goes in only with its English record's markup
+(`text::markup`: after the button names become icons, the control codes
+with their arguments (as the title's table of them at 0x102F619C says:
+two for U+FFF2, a colour's two halves, none for U+FFFF, one for the
+others), the line breaks, the icons and the symbols ☆【】↑↓, in order); one
+that differs (the player's banks decide, and another version of the game
+may differ) leaves the record English, and the port logs `ttt2: Russian
+text <key> left in English: its markup is not the English text's`. A bank
+is its header, three tables and its records: table 1 one entry per record
+by number (offsets of its header, English text and key, its number), table
+2 the English texts' hashes (and lengths), table 3 the keys', each
+pointing at a table 1 entry (4 + 16 per entry from table 1), then the
+records (the text's hash, its length in characters, the text, the English
+one, the key). A rebuilt record keeps its English record's index entries,
+with its own text's hash (`text::text_hash`: for each character c, h =
+T(h) ^ c, T a linear map of the 16 bits) and length.
 
 The port's own texts (ULTIMATE SETTINGS, SOLO GHOST BATTLE, the frame data
 panels and the position reset's hint, the customization's messages) are a
