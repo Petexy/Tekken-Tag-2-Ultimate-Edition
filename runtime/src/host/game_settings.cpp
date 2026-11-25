@@ -16,6 +16,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view kPlayerName = "player_name";
+constexpr std::string_view kLanguage = "language";
 
 // A hand-edited file is a few hundred bytes; anything much larger is not one.
 constexpr uint64_t kMaxFileSize = 64 * 1024;
@@ -73,10 +74,31 @@ std::string clean_name(std::string_view text) {
     return std::string(kept);
 }
 
+const Language* find_language(std::string_view code) {
+    for (const Language& language : kLanguages) {
+        if (code.size() == language.code.size() &&
+            std::equal(code.begin(), code.end(), language.code.begin(), [](char a, char b) {
+                return (a >= 'A' && a <= 'Z' ? static_cast<char>(a - 'A' + 'a') : a) == b;
+            })) {
+            return &language;
+        }
+    }
+    return nullptr;
+}
+
+const Language& language_of(const Settings& settings) {
+    const Language* language = find_language(settings.language);
+    return language ? *language : kLanguages[0];
+}
+
 Parsed parse(std::string_view text) {
     Parsed parsed;
-    size_t name_line = 0; // the line that gave the name
-    std::string_view given;
+    // Of each key, the line that gave it (0: none) and its value.
+    struct Given {
+        std::string_view key;
+        size_t line = 0;
+        std::string_view value;
+    } name{kPlayerName, 0, {}}, language{kLanguage, 0, {}};
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3); // a byte order mark from an editor
     size_t number = 0;
     while (!text.empty()) {
@@ -92,24 +114,37 @@ Parsed parse(std::string_view text) {
             continue;
         }
         const std::string_view id = trim(line.substr(0, equals));
-        if (id != kPlayerName) {
+        Given* const g = id == kPlayerName ? &name : id == kLanguage ? &language : nullptr;
+        if (!g) {
             parsed.warnings.push_back({number, "unknown setting " + in_quotes(id) + ", line ignored"});
             continue;
         }
         // The earlier line is the one left out.
-        if (name_line != 0) {
-            parsed.warnings.push_back({name_line, std::string(kPlayerName) + ": given again on line " +
-                                                      std::to_string(number) + ", line ignored"});
+        if (g->line != 0) {
+            parsed.warnings.push_back({g->line, std::string(g->key) + ": given again on line " +
+                                                    std::to_string(number) + ", line ignored"});
         }
-        name_line = number;
-        given = trim(line.substr(equals + 1));
+        g->line = number;
+        g->value = trim(line.substr(equals + 1));
     }
-    parsed.settings.player_name = clean_name(given);
-    if (parsed.settings.player_name != given) {
-        parsed.warnings.push_back({name_line, std::string(kPlayerName) + ": " + in_quotes(given) + " is shown as " +
-                                                  in_quotes(parsed.settings.player_name) + " (at most " +
-                                                  std::to_string(kMaxNameLength) +
+    parsed.settings.player_name = clean_name(name.value);
+    if (parsed.settings.player_name != name.value) {
+        parsed.warnings.push_back({name.line, std::string(kPlayerName) + ": " + in_quotes(name.value) +
+                                                  " is shown as " + in_quotes(parsed.settings.player_name) +
+                                                  " (at most " + std::to_string(kMaxNameLength) +
                                                   " characters of printable ASCII)"});
+    }
+    if (!language.value.empty()) {
+        const Language* found = find_language(language.value);
+        if (!found) {
+            std::string codes;
+            for (const Language& l : kLanguages) codes += (codes.empty() ? "" : ", ") + std::string(l.code);
+            parsed.warnings.push_back({language.line, std::string(kLanguage) + ": the game has no language " +
+                                                          in_quotes(language.value) + " (" + codes +
+                                                          "), English shown"});
+        } else if (found != &kLanguages[0]) {
+            parsed.settings.language = std::string(found->code);
+        }
     }
     std::stable_sort(parsed.warnings.begin(), parsed.warnings.end(),
                      [](const Warning& a, const Warning& b) { return a.line < b.line; });
@@ -158,7 +193,7 @@ Loaded load(const fs::path& file) {
     loaded.log.push_back("game: player name " +
                          (parsed.settings.player_name.empty() ? std::string("the game's own")
                                                               : in_quotes(parsed.settings.player_name)) +
-                         " (from " + name + ")");
+                         ", language " + std::string(language_of(parsed.settings).name) + " (from " + name + ")");
     return loaded;
 }
 
