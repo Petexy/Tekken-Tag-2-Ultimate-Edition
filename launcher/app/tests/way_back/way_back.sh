@@ -97,6 +97,9 @@ wait_for() { # SECONDS COMMAND...: until it is true
 }
 same() { cmp -s "$1" "$2"; }
 gone() { [ ! -e "$1" ]; }
+# Whether process PID has ended: gone, or ended and not reaped yet (state Z). A container's first process may never
+# reap the orphans it inherits (CI's job container), so kill -0 alone would see an ended launcher as running.
+ended() { [ "$(sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | cut -c1)" = Z ] || ! kill -0 "$1" 2>/dev/null; }
 
 # crash: the way back puts the old one back and opens it, which says why.
 case_run crash
@@ -128,6 +131,6 @@ gone "$h/apps/.Golden_Fist_Launcher-x86_64.AppImage.previous" || fail "window: a
 
 # (The one put back answered and ended: nothing of the cases is left running.)
 pid=$("$PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["pid"])' "$WORK/crash/restored.json" 2>/dev/null)
-[ -n "$pid" ] && { wait_for 30 sh -c "! kill -0 $pid 2>/dev/null" || fail "the one put back still runs"; }
+[ -n "$pid" ] && { wait_for 30 ended "$pid" || fail "the one put back still runs"; }
 [ "$failures" = 0 ] && echo "way_back: all passed"
 exit $((failures > 0))
