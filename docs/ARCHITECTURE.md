@@ -2213,8 +2213,9 @@ folder) for Release with Clang and Ninja, with
 runtime's messages name are relative; it builds `ttt2-launcher` and
 `ttt2_kit`, installs them with `cmake --install --prefix AppDir/usr --strip`,
 refuses an AppDir holding anything but the launcher, the kit, the importer's
-scripts and C sources (and checks that what a Tekken 8 import needs is there), the desktop entry and the icon (nothing of the game, no tests, no
-Python caches), adds `AppRun` (it only starts `usr/bin/ttt2-launcher`: no
+scripts and C sources (and checks that what a Tekken 8 import needs is there), the desktop entry, the icon and
+the license texts of what is built in, `usr/share/licenses/ttt2-launcher` (nothing of the game, no tests, no
+Python caches; each text `release_checks.sh` lists must be there), adds `AppRun` (it only starts `usr/bin/ttt2-launcher`: no
 `LD_LIBRARY_PATH`, as the compiler, Python, gamescope, Proton and the game
 it starts must not load anything of the AppImage), the desktop entry, the
 icon and `.DirIcon` at the AppDir's root, and packs it as zstd squashfs

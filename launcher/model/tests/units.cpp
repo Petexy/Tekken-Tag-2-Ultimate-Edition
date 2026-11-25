@@ -1497,7 +1497,6 @@ void dlc_groups(const fs::path& golden, const fs::path& scratch) {
     }
 }
 
-// Fighters' Add All Owned for every game: each usable game's own and owned DLC characters, in one import.
 // The release .exe asks its files whether a newer release is out (`main.py --query release`): when it opens, and
 // again after hours away, as the AppImage asks GitHub.
 void windows_release(const fs::path& golden, const fs::path& scratch) {
@@ -1561,6 +1560,7 @@ void windows_release(const fs::path& golden, const fs::path& scratch) {
            }});
 }
 
+// Fighters' Add All Owned for every game: each usable game's own and owned DLC characters, in one import.
 void add_all_everything(const fs::path& golden, const fs::path& scratch) {
     current = "add all owned, every game";
     std::string text = read(golden / "installed" / "case.json");

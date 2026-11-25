@@ -322,9 +322,10 @@ frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
 its keyboard keys ([Playing](#playing)), and the launcher's own sounds, motion, button prompts and text size.
 **Fighters** shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a group for each game's
-fighters (the installed game's first), with **Add** per fighter: Tekken 7's with **Add All** and its DLC
-fighters in a group of their own, with those your Steam account owns and **Add
-All Owned**; Tekken 8's with **Add All**, without Tekken 7 or any of its fighters. **Remove** takes one out again. A
+fighters (the installed game's first), with **Add** per fighter and **Add All**; each game's DLC fighters are in a
+group of their own, with those your Steam account owns and **Add All Owned**. Above the groups, one **Add All Owned**
+adds every fighter that can be added now from both games: their own and the DLC fighters your account owns. Tekken
+8's fighters are added without Tekken 7 or any of its fighters. **Remove** takes one out again. A
 Tekken 8 fighter whose moves could not be saved from Tekken 8 (a game update its helper does not know yet, or
 nothing to run it hidden) is added with Heihachi's moves, says so and why, and is offered as an update once
 their own can be saved. What all added fighters share is made from each one's own game, so while one game is

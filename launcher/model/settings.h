@@ -71,7 +71,7 @@ struct KeyFile final : KeyStore {
 };
 
 // The label a key has in the keyboard layout used (injected by the app: SDL's
-// key names for the layout; Windows' own). By default the US one: Key::name.
+// key names for the layout, on both systems). By default the US one: Key::name.
 using KeyLabel = std::function<std::string(int usage)>;
 std::string us_key_label(int usage);
 
