@@ -1008,6 +1008,44 @@ delay as they say. The game logs `ttt2: input delay: 0 frames in place of
 the game's 2` when a mode first asks; `TTT2_TRACE_INPUT_DELAY=1` logs each
 delay the queues get.
 
+## Player name
+
+Offline, the Wii U game calls the player "Player" (in its language:
+Joueur, Giocatore, Spieler, Jugador, ...) on the main menu's player panel,
+the select and versus screens and under the fight's health bar. That is
+the text common 1599 of the language's text bank (in a bank a text's key
+follows its record; table 1 numbers the records), which the local player's
+name (`sub_021ECCFC`) returns when the player is not online (online it is
+the network account's name), through the thunk `sub_020044AC` to the text
+getter `sub_04D49F5C`. The title asks for it every frame: the menus' name
+objects (`sub_05816540` by the player's id, then `sub_0581677C`) and the
+records filled at start-up (`sub_02262AE8`, `sub_058168E8`) copy it with
+`strncpy` into 20-byte fields (a 16-bit kind follows at +20), and a mode's
+records copy those fields whole (`sub_0380470C`: 62-byte blocks). Other
+uses of the text (the tuning data dialog, `sub_025043DC`) are not the
+player's name, and the bank's PLAYER 1 and PLAYER 2 are other texts.
+
+`game.ini`, beside display.ini (`runtime/src/host/game_settings.cpp`,
+`host::game::file_path()`: display.ini's folder on both systems, read once
+when the game starts), may give another: `player_name = <name>`, one
+`key = value` per line, `#` starting a comment as in display.ini, the later
+of two lines counting and other keys left out with a warning (the
+launcher's Settings write the file and keep what they do not know). The
+name loses the spaces and tabs at both ends, each character outside
+printable ASCII (a UTF-8 sequence, or a byte that is not one) becomes `?`,
+and it is cut to 16 characters (`host::game::kMaxNameLength`: with at most
+19 bytes a 20-byte field keeps its terminating zero, and every Latin font
+of the title has all of printable ASCII, not all of Latin-1); empty, it is
+the game's own. `title/player_name.cpp` puts it in guest memory as a text
+of a bank (its length in characters, big-endian, in the two bytes before
+it) and answers `sub_020044AC` with it when called from `sub_021ECCFC`
+(lr `0x021ECDD4`) for text 1599, so every place above shows it and the
+records keep it; nothing else changes (a save written meanwhile loads as
+before without the file). The game logs
+`ttt2: game: player name "<name>" (from <file>)`, `game: player name the
+game's own (from <file>)` or `game: defaults (no <file>)`, and a line for
+each line of the file it leaves out or changes.
+
 ## Paint without a GamePad
 
 CUSTOMIZE > PAINT draws on a fighter's clothes where the Wii U GamePad's
