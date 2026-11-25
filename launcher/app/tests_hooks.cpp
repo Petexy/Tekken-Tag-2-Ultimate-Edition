@@ -33,7 +33,8 @@ std::string one_line(std::string s) {
 }
 
 bool is_task_action(const std::string& n) {
-    return n == "update" || n == "update-launcher" || n == "add" || n == "add-all-base" || n == "add-all" ||
+    return n == "update" || n == "update-launcher" || n == "update-everything" || n == "update-continued" ||
+           n == "add" || n == "add-all-base" || n == "add-all" ||
            n == "add-all-owned" || n == "remove" || n == "remove-all" || n == "uninstall" || n == "get-packages";
 }
 
@@ -377,7 +378,18 @@ void App::test_tick(double t) {
             return;
         }
         if (working_ > 0) return;
+        // (Home's UPDATE: until its last part is done, or it stops.)
+        if (model_->in_update()) return;
+        if (test_now_.name == "update-continued" && !test_task_seen_) {
+            if (t < test_until_) return;
+            test_said(false, "no update went on");
+            return;
+        }
         const m::TaskResult& last = r.last();
+        if (model_->update_shown() && view_.task.chain.done) {
+            test_said(true, view_.task.chain.summary);
+            return;
+        }
         test_said(last.ok, last.ok ? last.title : last.title + (last.detail.empty() ? "" : ": " + last.detail));
         return;
     }
@@ -463,7 +475,12 @@ void App::test_tick(double t) {
         pending_choose_.clear();
         answer_game(arg);
         test_wait_ = TestWait::kPreflight;
-    } else if (n == "update" || n == "get-packages" || n == "update-launcher") {
+    } else if (n == "update-continued") {
+        // (It starts by itself once the launcher has looked, maybe before this action: waited for, a minute at most.)
+        test_task_seen_ = model_->in_update() || model_->update_shown();
+        test_until_ = t + 60;
+        test_wait_ = TestWait::kTask;
+    } else if (n == "update" || n == "get-packages" || n == "update-launcher" || n == "update-everything") {
         if (n == "update" && model_->facts().install.state != InstallState::kInstalled)
             return test_said(false, "no complete install to update");
         task_step(n);

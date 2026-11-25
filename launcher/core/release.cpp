@@ -161,6 +161,7 @@ std::vector<std::string> open_with_rollback(const fs::path& appimage, const std:
         "\"$1\"; c=$?\n"
         "if [ \"$c\" -gt 128 ] && [ -e \"$2\" ] && mv -f \"$2\" \"$1\"; then\n"
         "  echo \"ttt2-launcher: version $3 ended (code $c) before its first frame: the version before is back\" >&2\n"
+        "  unset TTT2_LAUNCHER_CONTINUE\n" // (the update stops there: never again by itself)
         "  TTT2_LAUNCHER_ROLLED_BACK=\"$3\" exec \"$1\"\n"
         "fi\n"
         "exit \"$c\"\n";

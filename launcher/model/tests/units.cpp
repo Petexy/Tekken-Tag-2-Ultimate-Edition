@@ -1108,7 +1108,7 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
         CHECK(!action_in(v, "update"));                  // (nothing of the game's own to update)
         CHECK(v.game.update.size() == 1 && v.game.update[0].kind == "fighters");
         CHECK_EQ(v.game.update[0].text,
-                 display_name(h.model.facts(), "josie") + " gets the newest pack, made again from your own Tekken 7.");
+                 display_name(h.model.facts(), "josie") + " gets the newest pack, made from your own Tekken 7.");
         CHECK_EQ(all->describe.explain, std::string("One part to bring up to date:"));
     }});
     current = "update plan: the game program and the fighters";
@@ -1119,8 +1119,8 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
         CHECK(!action_in(v, "update")); // (UPDATE does the game's: no second Update competes)
         CHECK(action_in(v, "play") && !action_in(v, "play")->primary);
         CHECK(v.game.update.size() == 2 && v.game.update[0].kind == "game" && v.game.update[1].kind == "fighters");
-        CHECK(v.game.update.size() == 2 && v.game.update[0].text.starts_with("Built again for 0.8.0, from the game in "
-                                                                             "its folder: a few minutes."));
+        CHECK(v.game.update.size() == 2 && v.game.update[0].text == "Built again for 0.8.0, from the game in its "
+                                                                     "folder: a few minutes. Saves and settings stay.");
         CHECK_EQ(action_in(v, "update-everything")->describe.explain,
                  std::string("2 parts, brought up to date one after another:"));
     }});
@@ -1132,9 +1132,9 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
         const View v = h.model.view();
         CHECK(v.game.update.size() == 3 && v.game.update[0].title == "Ultimate Launcher 0.8.0 → 0.9.0");
         CHECK(v.game.update.size() == 3 &&
-              v.game.update[0].text.ends_with("The launcher then restarts by itself and goes on with the rest."));
-        CHECK(v.game.update.size() == 3 && v.game.update[1].text.starts_with("The new launcher builds it again for "
-                                                                             "0.9.0"));
+              v.game.update[0].text == "Downloads 0.9.0 in place of this AppImage, which then restarts by itself and "
+                                       "goes on.");
+        CHECK(v.game.update.size() == 3 && v.game.update[1].text.starts_with("Built again by the new launcher, "));
         // (The notice's Update is the launcher's alone: Home's says it does all, and the app shows only that one.)
         CHECK(v.notice.shown && v.notice.whole);
         CHECK(v.notice.detail.ends_with("Update on Home gets it first, then brings the game program and the fighters "
@@ -1170,7 +1170,7 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
               p.later[0].second == "Start Steam: it checks that you own their DLC");
         const auto parts = update_parts(f, p);
         CHECK(parts.size() == 2 && parts[1].kind == "later" && parts[1].title == "Left for later" &&
-              parts[1].text == display_name(f, dlc_name) + ": Start Steam: it checks that you own their DLC.");
+              parts[1].text == display_name(f, dlc_name) + " (Start Steam: it checks that you own their DLC).");
         // (Only fighters that cannot be done: nothing for UPDATE, Play is suggested again.)
         for (Fighter& x : f.status->fighters)
             if (x.name == "josie") x.moveset_saved = false;

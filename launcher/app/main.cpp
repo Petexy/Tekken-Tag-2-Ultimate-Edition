@@ -206,6 +206,14 @@ static int launcher_main(int argc, char** argv) {
     o.rolled_back = environment(launcher::kRolledBackVariable);
     unsetenv(launcher::kRolledBackVariable);
 #endif
+    // (Home's UPDATE goes on in this one after the launcher's part, kContinueVariable: never for the programs it
+    // starts, and never on a start put back after the new version failed: the update stops there.)
+    o.go_on_update = environment(launcher::kContinueVariable) == "update" && o.rolled_back.empty();
+#ifdef _WIN32
+    SetEnvironmentVariableW(L"TTT2_LAUNCHER_CONTINUE", nullptr);
+#else
+    unsetenv(launcher::kContinueVariable);
+#endif
     // (For --ui-smoke-test / TTT2_LAUNCHER_TEST_SMOKE's answer: what this start found, as the release tests read it.)
     {
         std::string facts = "\"pid\": " + std::to_string(
@@ -221,6 +229,8 @@ static int launcher_main(int argc, char** argv) {
                      (st::wait_for_exit(std::strtoll(after.c_str(), nullptr, 10), 0) ? "true" : "false");
         facts += ", \"after_left\": " + json_string(environment("TTT2_LAUNCHER_AFTER"));
         facts += ", \"rolled_back\": " + json_string(o.rolled_back);
+        facts += std::string(", \"go_on_update\": ") + (o.go_on_update ? "true" : "false");
+        facts += ", \"continue_left\": " + json_string(environment(launcher::kContinueVariable));
         facts += ", \"args\": [";
         for (size_t i = 0; i < start.args.size(); ++i) facts += (i ? ", " : "") + json_string(start.args[i]);
         facts += "], \"files\": " + json_string(utf8(start.files));

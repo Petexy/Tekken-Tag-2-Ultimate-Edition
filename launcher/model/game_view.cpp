@@ -72,16 +72,15 @@ std::vector<UpdatePart> update_parts(const Facts& facts, const UpdatePlan& plan)
     std::vector<UpdatePart> parts;
     if (plan.launcher) {
         parts.push_back({"launcher", "Ultimate Launcher " + plan.launcher_from + " → " + plan.launcher_to,
-                         "Downloads version " + plan.launcher_to + " and puts it in this " +
-                             (facts.caps.windows ? std::string("launcher's") : std::string("AppImage's")) +
-                             " place. The launcher then restarts by itself and goes on with the rest."});
+                         "Downloads " + plan.launcher_to + " in place of this " +
+                             (facts.caps.windows ? std::string("launcher") : std::string("AppImage")) +
+                             ", which then restarts by itself and goes on."});
     }
     if (plan.game) {
         const std::string from = facts.caps.windows ? "on this PC from your game" : "from the game in its folder";
         parts.push_back({"game", "The game program",
-                         (plan.launcher ? "The new launcher builds it again for " + plan.game_for + ", "
-                                        : "Built again for " + plan.game_for + ", ") +
-                             from + ": a few minutes. Your saves and settings stay."});
+                         (plan.launcher ? "Built again by the new launcher, " : "Built again for " + plan.game_for + ", ") +
+                             from + ": a few minutes. Saves and settings stay."});
     }
     if (!plan.fighters.empty()) {
         bool tekken7 = false, tekken8 = false;
@@ -95,14 +94,13 @@ std::vector<UpdatePart> update_parts(const Facts& facts, const UpdatePlan& plan)
         parts.push_back({"fighters", "Fighters",
                          (names.size() <= 4 ? joined(names) : joined_most(names, 3)) +
                              (names.size() == 1 ? " gets" : " get") +
-                             " the newest pack, made again from your own " + games + "." +
-                             (plan.launcher ? " The new version may update more." : "")});
+                             " the newest pack, made from your own " + games + "."});
     }
     if (!plan.later.empty()) {
         std::string text;
         for (const auto& [name, why] : plan.later)
-            text += (text.empty() ? "" : " ") + name + ": " + without_stop(why) + ".";
-        parts.push_back({"later", "Left for later", text});
+            text += (text.empty() ? "" : "; ") + name + " (" + without_stop(why) + ")";
+        parts.push_back({"later", "Left for later", text + "."});
     }
     return parts;
 }

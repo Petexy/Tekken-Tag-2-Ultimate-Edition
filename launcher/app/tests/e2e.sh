@@ -5,7 +5,9 @@
 #   e2e.sh LAUNCHER STUB WORK PYTHON
 #
 # start + Quit; an install whose game is missing (the checks before it); Play (the stub game writes a marker and
-# its output goes to the game log); Update (the stub builder's steps, its build record); an update killed by a
+# its output goes to the game log); Update (the stub builder's steps, its build record); Home's UPDATE (the game
+# program, then the characters, one result) and its rest going on in the launcher an update opened
+# (TTT2_LAUNCHER_CONTINUE: not left to the programs it starts, not on a start put back); an update killed by a
 # signal (code 128 + 9 named); Cancel (the builder stopped, nothing left running); Uninstall; a screenshot at a
 # size. An install end to end too when WORK's drive has the space the install's checks ask for (16.2 GB).
 set -u
@@ -92,6 +94,36 @@ run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=update"
 has "$h" '@test update ok'
 grep -q "kit $(head -n1 "$STUB/kit/VERSION")" "$h/Games/Tekken Tag Tournament 2/.ttt2-build" ||
     fail "update: the build record is not the stub kit's"
+
+# Home's UPDATE: the game program built again, then the character to update, one result for both.
+h=$(home chain older)
+run "$h" installed TTT2_STUB_ENV_FILE="$h/builder-env.txt" "TTT2_LAUNCHER_TEST_ACTIONS=update-everything"
+has "$h" '@test update-everything ok Updated: the game program and Josie Rizal'
+grep -q "kit $(head -n1 "$STUB/kit/VERSION")" "$h/Games/Tekken Tag Tournament 2/.ttt2-build" ||
+    fail "chain: the build record is not the stub kit's"
+
+# Its rest in the launcher an update opened (TTT2_LAUNCHER_CONTINUE=update): it goes on by itself once it has
+# looked, and the programs it starts never see the variable.
+h=$(home continued older)
+run "$h" installed TTT2_LAUNCHER_CONTINUE=update TTT2_STUB_ENV_FILE="$h/builder-env.txt" \
+    "TTT2_LAUNCHER_TEST_ACTIONS=update-continued"
+has "$h" '@test update-continued ok Updated: launcher [0-9.]*, the game program and Josie Rizal'
+[ -s "$h/builder-env.txt" ] || fail "continued: the builder did not run"
+grep -q '^TTT2_LAUNCHER_CONTINUE=' "$h/builder-env.txt" 2>/dev/null && fail "continued: the builder got the variable"
+
+# A start put back after the new version failed (C2) never goes on, and nothing it starts gets the variable.
+for start in continue rolled-back; do
+    h=$(home "smoke-$start" older)
+    vars=(TTT2_LAUNCHER_CONTINUE=update TTT2_LAUNCHER_TEST_SMOKE="$h/smoke.json")
+    [ "$start" = rolled-back ] && vars+=(TTT2_LAUNCHER_ROLLED_BACK=9.9.9)
+    run "$h" installed "${vars[@]}"
+    want=$([ "$start" = continue ] && echo True || echo False)
+    "$PYTHON" - "$h/smoke.json" "$want" <<'PY' || fail "smoke-$start: its smoke answer (see $h/smoke.json)"
+import json, sys
+said = json.load(open(sys.argv[1]))
+assert str(said['go_on_update']) == sys.argv[2] and said['continue_left'] == '', said
+PY
+done
 
 # An update killed by a signal: 128 + 9, named.
 h=$(home killed older)

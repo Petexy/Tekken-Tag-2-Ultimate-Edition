@@ -301,6 +301,8 @@ int App::run() {
     sounds_tick();
     const double t0 = now();
     model_->start(t0);
+    // (Opened by the launcher this one replaced, in the middle of Home's UPDATE: the rest goes on once it has looked.)
+    if (o_.go_on_update) model_->continue_update(t0);
     handle(model_->take_effects());
 #ifdef _WIN32
     if (!ready_->restored().empty()) {
@@ -549,7 +551,7 @@ void App::frame(double t) {
     // there until it is closed.
     const m::TaskRunner& runner = model_->task();
     const bool running = runner.running();
-    if (running && !task_was_running_ && full_kind(runner.spec().kind)) {
+    if (running && !task_was_running_ && (full_kind(runner.spec().kind) || model_->in_update())) {
         task_kind_ = runner.spec().kind;
         task_title_ = runner.spec().title;
         if (!task_screen_) {
@@ -561,9 +563,14 @@ void App::frame(double t) {
         }
     }
     if (task_was_running_ && !running && !runner.last().cancelled) {
-        // (The shaders prepared before the game are Play's own: the game starts, no chime over Play's sound.)
+        // (The shaders prepared before the game are Play's own: the game starts, no chime over Play's sound. A part
+        // of Home's UPDATE: one chime for the whole update, at its end, below.)
         if (!runner.last().ok) cue(ttt2::app::Cue::TaskFailed);
-        else if (runner.spec().kind != m::TaskKind::kShaders) cue(ttt2::app::Cue::TaskDone);
+        else if (runner.spec().kind != m::TaskKind::kShaders && !model_->update_shown()) cue(ttt2::app::Cue::TaskDone);
+    }
+    if (model_->updates_done() != updates_done_) {
+        updates_done_ = model_->updates_done();
+        cue(ttt2::app::Cue::TaskDone);
     }
     if (task_was_running_ && !running) ++portraits_generation_;
 #ifdef _WIN32
@@ -1407,8 +1414,11 @@ void App::activate(const std::string& id, ttt2::ui::Device device) {
     }
     if (id == "task/again") {
         const m::TaskKind k = task_kind_;
+        const bool update = view_.task.chain.count > 0;
         task_screen_ = false;
         if (!model_->task().running() && view_.task.shown) handle(model_->activate("task", t));
+        // (Home's UPDATE: from the part that stopped, the parts done stay done.)
+        if (update) return handle(model_->activate("update-resume", t));
         if (k == m::TaskKind::kInstall) {
             if (model_->facts().install.state == InstallState::kUnfinished) return activate("resume");
             return activate("install");
@@ -1496,6 +1506,7 @@ void App::handle(std::vector<m::Effect> effects) {
             c.argv = {win32::narrow(exe.native())};
             c.cwd = exe.parent_path();
             c.env["TTT2_LAUNCHER_AFTER"] = std::to_string(GetCurrentProcessId());
+            if (e.go_on) c.env[launcher::kContinueVariable] = "update"; // (Home's UPDATE goes on there)
             c.mode = m::Command::Mode::kDetached;
             c.log_file = win_files_->root / "local" / "launcher-reopened.log";
             std::string error;

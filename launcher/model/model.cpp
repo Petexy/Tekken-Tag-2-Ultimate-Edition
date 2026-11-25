@@ -1340,7 +1340,7 @@ View LauncherModel::view() const {
         v.settings = settings_view(facts_, in);
     }
     v.task = runner_.view();
-    if (chain_ && (chain_->running || chain_->next || chain_->end_serial == runner_.serial())) {
+    if (update_shown()) {
         const Chain& c = *chain_;
         TaskView::Chain& ch = v.task.chain;
         ch.count = static_cast<int>(c.parts.size());

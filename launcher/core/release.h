@@ -117,7 +117,8 @@ void forget_previous(const fs::path& appimage);
 inline constexpr const char* kRolledBackVariable = "TTT2_LAUNCHER_ROLLED_BACK";
 // How the updated `appimage` (release `version`) is opened: through /bin/sh, which waits for it. When it ended by a
 // signal (a crash) while previous_file() is still there (no first frame), the previous one is put back and opened
-// with kRolledBackVariable=version (and TTT2_LAUNCHER_AFTER still: it waits for the one that updated, too). (One
+// with kRolledBackVariable=version (and TTT2_LAUNCHER_AFTER still: it waits for the one that updated, too; never
+// kContinueVariable: Home's UPDATE stops there). (One
 // that cannot open its window puts it back itself: restore_previous.)
 std::vector<std::string> open_with_rollback(const fs::path& appimage, const std::string& version);
 

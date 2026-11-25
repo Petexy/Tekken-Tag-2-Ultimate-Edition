@@ -228,6 +228,10 @@ public:
     // The task that ended was a part of Home's UPDATE that is not its end (another part follows, here or in the new
     // launcher): one sound for the whole update (updates_done()).
     bool update_goes_on() const { return chain_ && !chain_->stopped && !chain_->done; }
+    // The task shown (running or its result) is a part of Home's UPDATE (view().task.chain says which).
+    bool update_shown() const {
+        return chain_ && (chain_->running || chain_->next || chain_->end_serial == runner_.serial());
+    }
     // How many of Home's UPDATEs ended with every part done (the app's sound when it changes).
     int updates_done() const { return updates_done_; }
     // Something the player is told as a refusal is (no task runs then): the app's own news, e.g. files put back.

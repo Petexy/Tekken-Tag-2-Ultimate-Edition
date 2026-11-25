@@ -9,5 +9,5 @@ hidden through Steam, the real builder takes 16 GB and an hour):
   $TTT2_STUB_STEP_SECONDS apart (default 0.05), and makes an install the launcher finds: the folder's marker, its
   build record, the user's install record and a game program (a script writing $TTT2_STUB_MARKER when started);
   $TTT2_STUB_FAIL=<step> stops it there with an error, signal:<step> kills it there (SIGKILL: code 137);
-  $TTT2_STUB_PIDFILE gets its process id;
+  $TTT2_STUB_PIDFILE gets its process id, $TTT2_STUB_ENV_FILE its environment;
 - kit/VERSION is the kit version the stub builder records.
