@@ -27,7 +27,7 @@ int current_step(const std::vector<StepLine>& steps);
 
 namespace launcher::app {
 
-// Windows' first start (C9): how far "Start Ultimate Launcher.cmd --check" is, from its log
+// Windows' first start (C9): how far "Start Golden Fist Launcher.cmd --check" is, from its log
 // (local\windows-bootstrap.log: its "@step <id> <text>" lines since the last "@step check", curl's progress bar).
 struct BootstrapProgress {
     std::string step;      // "check", "download", "verify", "unpack", "ready" ("" none yet)

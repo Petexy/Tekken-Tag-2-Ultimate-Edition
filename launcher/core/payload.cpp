@@ -118,17 +118,17 @@ void remove_file(const fs::path& path) {
 std::string Payload::digest() const { return hex(trailer.sha256, sizeof trailer.sha256); }
 
 std::optional<Payload> read(std::string_view all, bool check) {
-    if (all.size() < sizeof(Trailer)) throw std::runtime_error("Cannot read Ultimate Launcher's own file.");
+    if (all.size() < sizeof(Trailer)) throw std::runtime_error("Cannot read Golden Fist Launcher's own file.");
     Payload p;
     std::memcpy(&p.trailer, all.data() + all.size() - sizeof(Trailer), sizeof(Trailer));
     if (std::memcmp(p.trailer.magic, kMagic, sizeof kMagic) != 0) return std::nullopt;
     if (p.trailer.size > all.size() - sizeof(Trailer))
-        throw std::runtime_error("This Ultimate Launcher is incomplete: download it again.");
+        throw std::runtime_error("This Golden Fist Launcher is incomplete: download it again.");
     p.files = std::string(all.substr(all.size() - sizeof(Trailer) - p.trailer.size, p.trailer.size));
     if (!check) return p;
     const auto digest = sha256(p.files);
     if (std::memcmp(digest.data(), p.trailer.sha256, 32) != 0)
-        throw std::runtime_error("This Ultimate Launcher is damaged: download it again.");
+        throw std::runtime_error("This Golden Fist Launcher is damaged: download it again.");
     return p;
 }
 
@@ -136,7 +136,7 @@ std::vector<Entry> entries(const Payload& p) {
     std::vector<Entry> out;
     std::string_view rest = p.files;
     const auto take = [&](size_t n) {
-        if (n > rest.size()) throw std::runtime_error("This Ultimate Launcher is damaged: download it again.");
+        if (n > rest.size()) throw std::runtime_error("This Golden Fist Launcher is damaged: download it again.");
         const std::string_view part = rest.substr(0, n);
         rest.remove_prefix(n);
         return part;
@@ -157,10 +157,10 @@ std::vector<Entry> entries(const Payload& p) {
             safe = !part.empty() && part != "." && part != "..";
             start = end + 1;
         }
-        if (!safe) throw std::runtime_error("This Ultimate Launcher holds an unsafe path: " + path);
+        if (!safe) throw std::runtime_error("This Golden Fist Launcher holds an unsafe path: " + path);
         out.push_back({std::move(path), data});
     }
-    if (!rest.empty()) throw std::runtime_error("This Ultimate Launcher is damaged: download it again.");
+    if (!rest.empty()) throw std::runtime_error("This Golden Fist Launcher is damaged: download it again.");
     return out;
 }
 

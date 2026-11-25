@@ -19,7 +19,7 @@ namespace launcher {
 // pre-releases are never it). $TTT2_LAUNCHER_RELEASES is asked instead when
 // set (tests: an answer of their own, on this PC).
 inline constexpr const char* kLatestRelease =
-    "https://api.github.com/repos/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/latest";
+    "https://api.github.com/repos/Petexy/Golden-Fist-Launcher/releases/latest";
 
 // The variable that holds the pid of the launcher an update replaces: the
 // new one waits for it to end before it opens its window (one window per

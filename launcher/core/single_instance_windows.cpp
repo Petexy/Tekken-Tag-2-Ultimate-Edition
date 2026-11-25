@@ -220,8 +220,7 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
         }
         if (seconds_since(t0) >= patience) {
             claim.result = options.after ? InstanceClaim::Result::kFailed : InstanceClaim::Result::kAlone;
-            claim.error = options.after ? "Another Ultimate Launcher is still running: close it, then start this one "
-                                          "again."
+            claim.error = options.after ? "Another launcher is still running: close it, then start this one again."
                                         : "the running launcher does not listen";
             return claim;
         }

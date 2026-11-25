@@ -5,13 +5,19 @@ What `launcher::model` shows differently from the old GTK app on purpose.
 `intended()`) and accepts W0-W8 between the Tk goldens' texts and the model's
 Windows views (`kTkDifferences`); anything else that differs fails.
 
+**The name**: the old launchers called themselves Ultimate Launcher. The
+goldens (their texts and the release's file names) were changed to Golden Fist
+Launcher with the rename of 2026-11-25, and "from an older Ultimate Launcher"
+to "from an older version of the launcher": made again from the old launchers,
+they differ in just that.
+
 ## Linux (compared with the GTK goldens)
 
 - **I1 Settings is always reachable** (ARCHITECTURE U17). The old app had the
   settings button only once the game was installed; the model puts it beside
   Install and Resume too, because Settings now also has the launcher's own
   section.
-- **I2 The launcher's own settings** (U6, U9, U17): a section "Ultimate
+- **I2 The launcher's own settings** (U6, U9, U17): a section "Golden Fist
   Launcher" after Keyboard with Sounds (on by default), Reduce motion and
   Text size (100 %, 125 %, 150 %).
 - **I3 Play reads display.ini when it is pressed.** The old app used what

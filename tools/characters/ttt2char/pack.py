@@ -447,7 +447,7 @@ def target_of(folder, d):
     for p in installed(folder):
         if p['code'] == d.CODE and p['newer']:
             raise InputError('%s\'s pack in %s was made by a newer importer (pack format %d; this one makes %d): it is '
-                             'not replaced by an older one; update Tekken Tag 2 Ultimate Edition'
+                             'not replaced by an older one; update Golden Fist Launcher'
                              % (d.NAME, p['path'], p['format'], PACK_FORMAT))
     return real
 

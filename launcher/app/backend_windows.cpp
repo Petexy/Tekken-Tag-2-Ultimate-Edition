@@ -136,7 +136,7 @@ model::Command bootstrap_command(const WindowsFiles& files) {
     model::Command c;
     std::wstring shell = env_wide(L"ComSpec");
     c.argv = {shell.empty() ? std::string("cmd.exe") : win32::narrow(shell), "/d", "/c", "call",
-              "Start Ultimate Launcher.cmd", "--check"};
+              "Start Golden Fist Launcher.cmd", "--check"};
     c.cwd = files.root;
     return c;
 }
@@ -266,8 +266,8 @@ void WindowsReady::tick(double now) {
         }
         return fail({"These files are another version's",
                      "The launcher's files in " + u8(files_.root) +
-                         " are not the ones this launcher came with. Close every Ultimate Launcher, then start it "
-                         "again; if this stays, get the newest one from the releases page.",
+                         " are not the ones this launcher came with. Close every other launcher window, then start "
+                         "this one again; if this stays, get the newest one from the releases page.",
                      "Their answers' protocol is " + error.text + ", this launcher's " +
                          std::to_string(backend::kQueryProtocol) + "." +
                          (why.empty() ? std::string() : " Its own files could not be put back: " + why),

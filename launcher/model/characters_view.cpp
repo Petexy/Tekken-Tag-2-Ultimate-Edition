@@ -93,7 +93,7 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
                       "Made by an older version: the game leaves them out until they are added again."};
     } else if (f.newer) {
         r.pill = Pill{"Newer version", PillKind::kWarn,
-                      "Made by a newer version of Ultimate Launcher: the game leaves them out until it is updated."};
+                      "Made by a newer version of Golden Fist Launcher: the game leaves them out until it is updated."};
     } else if (f.update && !(f.stand_in && !addable(facts, f))) {
         r.pill = Pill{"Update ready", PillKind::kWarn,
                       f.stand_in ? "They fight with Heihachi's moves: updating them gives them their own."
@@ -284,7 +284,7 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
         g.notes.push_back(note_line(Icon::kWarning, text + todo, true));
     };
     warn_line(outdated, "an older version", "add them again.");
-    warn_line(newer, "a newer version of Ultimate Launcher", "update it, then the game, to play them.");
+    warn_line(newer, "a newer version of Golden Fist Launcher", "update it, then the game, to play them.");
 
     if (tekken8 && usable) {
         std::vector<const Fighter*> stand_ins, unsaved;
@@ -556,7 +556,7 @@ CharactersView characters_view(const Facts& facts) {
             if (get_packages) {
                 char size[32];
                 std::snprintf(size, sizeof size, "%.0f MB", static_cast<double>(s.packages_size) / 1e6);
-                Line line = text_line(std::string("Ultimate Launcher can download them for this Python (") + size +
+                Line line = text_line(std::string("Golden Fist Launcher can download them for this Python (") + size +
                                           " from PyPI, Python's package index) into a folder of its own: nothing of "
                                           "the system changes.",
                                       Tone::kDim, true);
@@ -565,7 +565,7 @@ CharactersView characters_view(const Facts& facts) {
                 needed.lines.push_back(line);
             } else if ((!s.numpy || !s.pillow) && !s.packages_error.empty()) {
                 needed.lines.push_back(text_line(
-                    "Ultimate Launcher cannot download them itself: " + s.packages_error + ".", Tone::kDim, true));
+                    "Golden Fist Launcher cannot download them itself: " + s.packages_error + ".", Tone::kDim, true));
             }
             if (!names.empty()) {
                 needed.lines.push_back(

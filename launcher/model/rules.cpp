@@ -4,7 +4,8 @@
 
 namespace launcher::model {
 
-const char* const kUnknownBuild = "Tekken 8 was updated to a version that Ultimate Launcher cannot save moves from yet";
+const char* const kUnknownBuild =
+    "Tekken 8 was updated to a version that Golden Fist Launcher cannot save moves from yet";
 
 const char* game_name(std::string_view game) { return game == kTekken8 ? "Tekken 8" : "Tekken 7"; }
 const char* other_game(std::string_view game) { return game == kTekken8 ? kTekken7 : kTekken8; }
@@ -48,7 +49,7 @@ std::string names_text(const Facts& facts, const std::vector<std::string>& names
 std::string older_game(const Facts& facts) {
     if (facts.install.state != InstallState::kInstalled) return {};
     if (!built_older(facts.game_built, facts.this_build)) return {};
-    return "The game is from an older Ultimate Launcher (" + std::string(launcher_version(facts.game_built)) +
+    return "The game is from an older version of the launcher (" + std::string(launcher_version(facts.game_built)) +
            "; this one is " + std::string(launcher_version(facts.this_build)) +
            "): update it to play and to add or update characters, which need the newer game.";
 }
@@ -364,7 +365,7 @@ std::string setup_problem_text(const SetupProblem& p) {
         const std::string what = p.what == "project" ? "launcher's files folder" : "Windows tools folder";
         return "The " + what + " (" + p.path + ") has letters the Windows build tools cannot read: " + p.letters +
                ". Use a folder whose path has only plain letters, such as C:\\TTT2 (outside OneDrive); the "
-               "release Ultimate_Launcher-x86_64.exe keeps its files in such a folder by itself.";
+               "release Golden_Fist_Launcher-x86_64.exe keeps its files in such a folder by itself.";
     }
     if (c == "project_length")
         return "The launcher's files are in a folder whose path is too long for the Windows build tools (" + p.path +

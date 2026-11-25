@@ -1,8 +1,8 @@
 """The new launcher from these files: what main.py does without --worker or --query (ARCHITECTURE 3, C4).
 
-The project ZIP's first start (Start Ultimate Launcher.cmd) and the .exe of old test builds (entry.cpp, 0.4.0 to 0.8.0,
-after their files were updated from their branch) start `python main.py --build-dir <folder> [GAME.wua]`, which opened
-the Tk window. A source ZIP has no compiled launcher, so this builds it on the PC, once, and starts it:
+The project ZIP's first start (Start Golden Fist Launcher.cmd) and the .exe of old test builds (entry.cpp, 0.4.0 to
+0.8.0, after their files were updated from their branch) start `python main.py --build-dir <folder> [GAME.wua]`, which
+opened the Tk window. A source ZIP has no compiled launcher, so this builds it on the PC, once, and starts it:
 
   1. the folders checked as Set Up Game checks them (setup_game.validate_build_paths: short, plain letters), before
      anything is downloaded;
@@ -51,7 +51,7 @@ BUILD_FORMAT = '1'
 SDL_CONFIG = 'x86_64-w64-mingw32/lib/cmake/SDL3'
 BUILD_LOG = 'local/launcher-build.log'
 RELEASES_PAGE = 'https://github.com/%s/releases/latest' % self_update.REPOSITORY
-TITLE = 'Ultimate Launcher'
+TITLE = 'Golden Fist Launcher'
 HEADING = 'Preparing the new launcher (once)...'
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
@@ -124,7 +124,7 @@ def check_paths(settings, home):
     if not str(home).isascii():
         letters = ''.join(sorted({c for c in str(home) if not c.isascii()}))
         raise BuildError('The folder the launcher is built in has letters the Windows build tools cannot read (%s): '
-                         '%s. Use Ultimate_Launcher-x86_64.exe from the newest release instead.' % (letters, home))
+                         '%s. Use Golden_Fist_Launcher-x86_64.exe from the newest release instead.' % (letters, home))
 
 
 # 3. The tools: Set Up Game's.
@@ -408,7 +408,7 @@ def main(args, settings, root=ROOT, tools=None, home=None, window=None):
     """main.py without --worker or --query; its exit code."""
     os.environ.pop(self_update.UI_PID_VARIABLE, None)   # (a launcher that reopened this one has ended)
     if args.check:
-        print('Windows Ultimate Launcher: Python and the launcher build available', flush=True)
+        print('Windows Golden Fist Launcher: Python and the launcher build available', flush=True)
         return 0
     log_path = root / BUILD_LOG
     log_path.parent.mkdir(parents=True, exist_ok=True)

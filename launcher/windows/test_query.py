@@ -93,7 +93,7 @@ class Query(unittest.TestCase):
         logs = self.data / 'logs'; logs.mkdir(parents=True)
         for i, name in enumerate(('import-1.log', 'setup-2.log', 'notes.txt')):
             (logs / name).touch(); os.utime(logs / name, (1000 + i, 1000 + i))
-        exe = self.root / 'Ultimate_Launcher-x86_64.exe'; exe.touch()
+        exe = self.root / 'Golden_Fist_Launcher-x86_64.exe'; exe.touch()
         with mock.patch.dict(os.environ, TTT2_LAUNCHER_EXE=str(exe)):
             state = self.ask('state')
         self.assertEqual((state['icon'], state['latest_log'], state['logs'], state['exe']),
@@ -196,12 +196,12 @@ class Query(unittest.TestCase):
         self.assertEqual(importer.call_args.args[1:], ('main', '--commit', 'c' * 40))
 
     def test_release(self):
-        newer = self_update.Release('99.0.0', 'v99.0.0', 'https://page', 'Ultimate_Launcher-x86_64.exe',
+        newer = self_update.Release('99.0.0', 'v99.0.0', 'https://page', 'Golden_Fist_Launcher-x86_64.exe',
                                     'https://file', 123, 'ab' * 32)
         with mock.patch.object(self_update, 'ask', return_value=self_update.Answer(release=newer)):
             answer = self.ask('release')
         self.assertEqual(answer['newer'], dict(version='99.0.0', tag='v99.0.0', page='https://page',
-                                               asset='Ultimate_Launcher-x86_64.exe', url='https://file', size=123,
+                                               asset='Golden_Fist_Launcher-x86_64.exe', url='https://file', size=123,
                                                sha256='ab' * 32))
         same = self_update.Release(self_update.version(), 'v', 'p', 'a', 'u')
         with mock.patch.object(self_update, 'ask', return_value=self_update.Answer(release=same)):

@@ -1,6 +1,6 @@
 #pragma once
 
-// The launcher's window (Ultimate Launcher, Tag Split): the loop that drives the model (launcher/model) and the
+// The launcher's window (Golden Fist Launcher, Tag Split): the loop that drives the model (launcher/model) and the
 // toolkit (launcher/ui), the top band (brand, tabs, version, Sound, Quit), the prompt band, the task strip, the
 // seam (its split per screen, its lean, the blue readout's slide, the wipe between screens), the model's dialogs
 // and the Effects it asks for. Screens: home.cpp (Home in every state, the install's task screen), picker.cpp (the

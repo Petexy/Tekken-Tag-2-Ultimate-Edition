@@ -647,10 +647,14 @@ void brand(Ui& ui, const std::string& id, const std::string& line1, const std::s
         const float x = ctx.rect.x, cy = ctx.rect.y + ctx.rect.h / 2;
         // The mark: the launcher's own icon (the program's icon too).
         ctx.icons.draw(cv, kLauncherIcon, {x, cy - 17, 34, 34});
-        if (ctx.rect.w < 44 + std::max(ctx.text.width(tx::kBrand, line1), ctx.text.width(kSecond, line2))) return;
-        const float lh = ctx.text.line_height(tx::kBrand);
-        ctx.text.draw(cv, tx::kBrand, line1, {x + 44, cy - lh}, rgb(0xe6e9f2));
-        ctx.text.draw(cv, kSecond, line2, {x + 44, cy}, c::kDim);
+        // (Less room than the words take: their letters move together before the words go.)
+        theme::TextStyle first = tx::kBrand, second = kSecond;
+        auto words = [&] { return std::max(ctx.text.width(first, line1), ctx.text.width(second, line2)); };
+        while (first.tracking > .05f && ctx.rect.w < 44 + words()) second.tracking = first.tracking -= .02f;
+        if (ctx.rect.w < 44 + words()) return;
+        const float lh = ctx.text.line_height(first);
+        ctx.text.draw(cv, first, line1, {x + 44, cy - lh}, rgb(0xe6e9f2));
+        ctx.text.draw(cv, second, line2, {x + 44, cy}, c::kDim);
     });
 }
 
@@ -1592,9 +1596,12 @@ void numbered_item(Ui& ui, const std::string& id, int number, const std::string&
             ctx.text.draw(cv, tx::kLabelEm, digits,
                           {sq.x + (kSquare - dw) / 2, sq.y + (kSquare - ctx.text.line_height(tx::kLabelEm)) / 2},
                           c::kCyan);
-            const float tw = ctx.text.width(tx::kExplainTitle, title);
-            const float tx0 = mirrored ? r.right() - kIndent - tw : r.x + kIndent;
-            ctx.text.draw(cv, tx::kExplainTitle, title, {tx0, r.y + 2}, rgb(0xe9edf5));
+            // (One line: a title longer than that moves its letters together, then gets smaller.)
+            theme::TextStyle st = tx::kExplainTitle;
+            while (st.tracking > .05f && ctx.text.width(st, title) > r.w - kIndent) st.tracking -= .03f;
+            while (st.size > 11 && ctx.text.width(st, title) > r.w - kIndent) st.size -= 1;
+            const float tx0 = mirrored ? r.right() - kIndent - ctx.text.width(st, title) : r.x + kIndent;
+            ctx.text.draw(cv, st, title, {tx0, r.y + 2}, rgb(0xe9edf5));
             if (text.empty()) return;
             const float y = r.y + 2 + ctx.text.line_height(tx::kExplainTitle) + 3;
             const Rect body{mirrored ? r.x : r.x + kIndent, y, r.w - kIndent, r.bottom() - y};

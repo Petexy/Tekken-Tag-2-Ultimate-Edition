@@ -385,7 +385,7 @@ Keymap::Bound Keymap::bind(int input, int usage) {
 std::string Keymap::text() const {
     std::string out =
         "# Tekken Tag Tournament 2: the keyboard's keys for the Wii U GamePad's buttons.\n"
-        "# Written by Ultimate Launcher (Settings); the game reads it when it starts and\n"
+        "# Written by Golden Fist Launcher (Settings); the game reads it when it starts and\n"
         "# again whenever it changes. A line is \"input = key\": the key's position on the keyboard as a USB HID\n"
         "# usage (an SDL scancode) or an SDL scancode name; the comment names that key on a US keyboard.\n";
     const char* group = nullptr;

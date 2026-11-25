@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 # launcher/appimage/make_appimage.sh's and launcher/windows/make_launcher_exe.py's output
 *.AppImage
+Golden_Fist_Launcher*.exe
 Ultimate_Launcher*.exe
 
 # The game and anything taken or generated from it stay out of the repository.

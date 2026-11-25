@@ -144,7 +144,7 @@ double App::now() const { return clock_.now(); }
 bool App::open_window() {
     SDL_SetMainReady();
     WindowOptions wo;
-    wo.title = "Ultimate Launcher";
+    wo.title = "Golden Fist Launcher";
     wo.app_id = TTT2_LAUNCHER_APP_ID;
     wo.version = TTT2_LAUNCHER_VERSION;
     const int w = o_.width > 0 ? o_.width : 1280, h = o_.height > 0 ? o_.height : 800;
@@ -776,7 +776,7 @@ void App::top_band() {
     top.h = Size::fixed(theme::kTopBand);
     top.pad = {30, 0, 0, 0};  // (the caption buttons sit in the window's top-right corner)
     auto g = ui.open("top", top);
-    brand(ui, "brand", "Ultimate", "Launcher");
+    brand(ui, "brand", "Golden Fist", "Launcher");
     int to_update = 0;
     if (const auto& s = model_->facts().status) {
         for (const Fighter& f : s->fighters) to_update += f.added() && f.update;

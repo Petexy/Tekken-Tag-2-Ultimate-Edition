@@ -1,4 +1,4 @@
-// ttt2-launcher (Ultimate Launcher): first what needs no window (core/startup: --version, --help, the launcher it
+// ttt2-launcher (Golden Fist Launcher): first what needs no window (core/startup: --version, --help, the launcher it
 // replaces waited for, one launcher per user), then SDL and the window (app.h).
 //
 //   ttt2-launcher [GAME.wua] [--screenshot FILE [--size WxH] [--scale S]] | --version | --help
@@ -192,7 +192,7 @@ static int launcher_main(int argc, char** argv) {
     // which a start from the desktop's menu shows nowhere; compat review #8. Tests' starts only write it.)
     program.tell = [quiet = !environment("TTT2_LAUNCHER_TEST_SMOKE").empty()](const std::string& text) {
         std::fprintf(stderr, "ttt2-launcher: %s\n", text.c_str());
-        if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Ultimate Launcher", text.c_str(), nullptr);
+        if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Golden Fist Launcher", text.c_str(), nullptr);
     };
 #endif
     st::Start start = st::begin(args, program);

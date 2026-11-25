@@ -23,21 +23,21 @@ VERSION=99.0.0
 
 # The broken new version, as an AppImage (type 2) is recognised: "AI" 2 at byte 8.
 mkdir -p "$WORK/release"
-cp "$BROKEN" "$WORK/release/Ultimate_Launcher-x86_64.AppImage"
-printf 'AI\002' | dd of="$WORK/release/Ultimate_Launcher-x86_64.AppImage" bs=1 seek=8 conv=notrunc status=none
+cp "$BROKEN" "$WORK/release/Golden_Fist_Launcher-x86_64.AppImage"
+printf 'AI\002' | dd of="$WORK/release/Golden_Fist_Launcher-x86_64.AppImage" bs=1 seek=8 conv=notrunc status=none
 
 # GitHub's latest release and its AppImage (with its SHA-256), on a free port.
 cat > "$WORK/server.py" <<'PY'
 import hashlib, http.server, json, os, sys
 folder, version, ready = sys.argv[1], sys.argv[2], sys.argv[3]
-data = open(os.path.join(folder, 'Ultimate_Launcher-x86_64.AppImage'), 'rb').read()
+data = open(os.path.join(folder, 'Golden_Fist_Launcher-x86_64.AppImage'), 'rb').read()
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         port = self.server.server_address[1]
         if self.path == '/latest.json':
             body = json.dumps({'tag_name': 'v' + version, 'draft': False, 'prerelease': False,
                                'html_url': 'http://127.0.0.1:%d/release' % port,
-                               'assets': [{'name': 'Ultimate_Launcher-x86_64.AppImage', 'state': 'uploaded',
+                               'assets': [{'name': 'Golden_Fist_Launcher-x86_64.AppImage', 'state': 'uploaded',
                                            'size': len(data), 'digest': 'sha256:' + hashlib.sha256(data).hexdigest(),
                                            'browser_download_url': 'http://127.0.0.1:%d/file' % port}]}).encode()
         elif self.path == '/file':
@@ -65,7 +65,7 @@ case_run() {
     local name=$1 h=$WORK/$1
     mkdir -p "$h/apps" "$h/home/Games" "$h/run" && chmod 700 "$h/run"
     : > "$h/out.txt" # (appended to by all: the old one, the new one and the one put back share it)
-    local image=$h/apps/Ultimate_Launcher-x86_64.AppImage
+    local image=$h/apps/Golden_Fist_Launcher-x86_64.AppImage
     # (The version before: this launcher as an AppImage. Put back and opened again, it answers as a player's start.)
     cat > "$image" <<SH
 #!/bin/sh
@@ -111,9 +111,9 @@ said = json.load(open(sys.argv[1]))
 assert said['rolled_back'] == sys.argv[2] and said['frame'] and not said['error'], said
 PY
 grep -q "Version $VERSION did not start" "$h/out.txt" || fail "crash: the one put back did not tell the player"
-same "$h/apps/Ultimate_Launcher-x86_64.AppImage" "$h/old-one" || fail "crash: the AppImage is not the old one"
-gone "$h/apps/.Ultimate_Launcher-x86_64.AppImage.previous" || fail "crash: a .previous is left"
-gone "$h/apps/.Ultimate_Launcher-x86_64.AppImage.update" || fail "crash: an .update is left"
+same "$h/apps/Golden_Fist_Launcher-x86_64.AppImage" "$h/old-one" || fail "crash: the AppImage is not the old one"
+gone "$h/apps/.Golden_Fist_Launcher-x86_64.AppImage.previous" || fail "crash: a .previous is left"
+gone "$h/apps/.Golden_Fist_Launcher-x86_64.AppImage.update" || fail "crash: an .update is left"
 
 # window: the new one puts the version before back itself.
 case_run window
@@ -123,8 +123,8 @@ wait_for 60 grep -q "the version before this update is back in" "$h/out.txt" ||
 grep -q "cannot open its window" "$h/out.txt" || fail "window: no window failure said"
 grep -q "went back to the version it was before this update: start it again" "$h/out.txt" ||
     fail "window: the player is not told"
-same "$h/apps/Ultimate_Launcher-x86_64.AppImage" "$h/old-one" || fail "window: the AppImage is not the old one"
-gone "$h/apps/.Ultimate_Launcher-x86_64.AppImage.previous" || fail "window: a .previous is left"
+same "$h/apps/Golden_Fist_Launcher-x86_64.AppImage" "$h/old-one" || fail "window: the AppImage is not the old one"
+gone "$h/apps/.Golden_Fist_Launcher-x86_64.AppImage.previous" || fail "window: a .previous is left"
 
 # (The one put back answered and ended: nothing of the cases is left running.)
 pid=$("$PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["pid"])' "$WORK/crash/restored.json" 2>/dev/null)

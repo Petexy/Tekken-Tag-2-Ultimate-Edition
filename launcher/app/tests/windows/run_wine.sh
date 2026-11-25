@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_wine.sh BUILD WORK [SHOTS]: the Windows launcher (BUILD = a mingw build: launcher/ttt2-launcher.exe, SDL3.dll,
 # launcher/app/launcher_win_stub.exe) under headless Wine, drawn offscreen, against stand-ins (stub_tools.cpp): a
-# files folder with the real "Start Ultimate Launcher.cmd" and stub curl/certutil/findstr/tar.exe, and a stub
+# files folder with the real "Start Golden Fist Launcher.cmd" and stub curl/certutil/findstr/tar.exe, and a stub
 # python.exe answering --query from answers.py. Nothing is downloaded, no Python and no game runs, no window opens,
 # no sound plays. WORK holds its Wine prefix (its user folders inside WORK, never linked to the real home) and one
 # folder per case; SHOTS (optional) gets each case's pictures.
@@ -40,7 +40,7 @@ fi
 find "$WINEPREFIX/drive_c/users" -maxdepth 2 -type l -delete 2>/dev/null || true
 
 winpath() { printf 'Z:%s' "$(printf '%s' "$1" | sed 's#/#\\#g')"; }
-HASH=$(grep -o 'findstr.exe /i /x "[0-9a-f]*"' "$SRC/Start Ultimate Launcher.cmd" | grep -o '[0-9a-f]\{64\}')
+HASH=$(grep -o 'findstr.exe /i /x "[0-9a-f]*"' "$SRC/Start Golden Fist Launcher.cmd" | grep -o '[0-9a-f]\{64\}')
 GOLDEN=$SRC/launcher/model/tests/golden
 
 ONLY=${RUN_WINE_CASES:-}  # (a list of cases to run; all when empty)
@@ -58,7 +58,7 @@ make_root() {
     rm -rf "$dir"
     mkdir -p "$dir/root/launcher/windows" "$dir/root/local" "$dir/root/Downloads" "$dir/root/appdata/TTT2Ultimate/logs" \
         "$dir/root/appdata/TTT2Ultimate/config" "$dir/root/Games" "$dir/shots"
-    sed 's/\r*$/\r/' "$SRC/Start Ultimate Launcher.cmd" > "$dir/root/Start Ultimate Launcher.cmd"
+    sed 's/\r*$/\r/' "$SRC/Start Golden Fist Launcher.cmd" > "$dir/root/Start Golden Fist Launcher.cmd"
     printf '# (the stub python answers instead)\n' > "$dir/root/launcher/windows/main.py"
     for t in curl certutil findstr tar; do cp "$STUB" "$dir/root/$t.exe"; done
     printf 'x' > "$dir/root/Downloads/Tekken Tag Tournament 2 [EUR] (update 16).wua"
@@ -168,7 +168,7 @@ import self_update
 root = case / 'root'
 own = {'launcher/windows/main.py': (root / 'launcher/windows/main.py').read_bytes(),
        'launcher/windows/query.py': b'PROTOCOL = 1\n',
-       'Start Ultimate Launcher.cmd': (root / 'Start Ultimate Launcher.cmd').read_bytes(),
+       'Start Golden Fist Launcher.cmd': (root / 'Start Golden Fist Launcher.cmd').read_bytes(),
        self_update.BUILD_BRANCH: b'dev-test\n', self_update.BUILD_COMMIT: b'a' * 40 + b'\n'}
 files = payload(own)
 (case / 'test-build.exe').write_bytes(exe.read_bytes() + files)

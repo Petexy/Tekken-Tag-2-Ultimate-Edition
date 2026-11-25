@@ -37,8 +37,8 @@ class Release(unittest.TestCase):
         self.assertIsNone(compare_versions('', '0.3'))
         self.assertEqual(self_update.version(), self_update.version(self_update.ROOT))
     def test_exe_of_newest_release(self):
-        assets = [dict(name='Ultimate_Launcher-x86_64.AppImage', browser_download_url='https://x/a', size=5),
-                  dict(name='Ultimate_Launcher-x86_64.exe', browser_download_url='https://x/e', size=7,
+        assets = [dict(name='Golden_Fist_Launcher-x86_64.AppImage', browser_download_url='https://x/a', size=5),
+                  dict(name='Golden_Fist_Launcher-x86_64.exe', browser_download_url='https://x/e', size=7,
                        digest='sha256:' + 'A' * 64)]
         answer = parse_release(json.dumps(dict(tag_name='v0.4.0', html_url='https://x/r', assets=assets)))
         self.assertEqual((answer.release.version, answer.release.url, answer.release.size, answer.release.sha256),
@@ -89,7 +89,7 @@ class Update(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
-        self.exe = self.folder / 'Ultimate_Launcher-x86_64.exe'; self.exe.write_bytes(fake_exe(b'old'))
+        self.exe = self.folder / 'Golden_Fist_Launcher-x86_64.exe'; self.exe.write_bytes(fake_exe(b'old'))
         self.new = fake_exe(b'new' * 100000)
         handler = type('Handler', (GitHub,), dict(files={'/new.exe': self.new}))
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler); self.handler = handler
@@ -100,7 +100,7 @@ class Update(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.lines = []
     def release(self, version='99.0.0', sha256=None, size=None, status=200):
-        asset = dict(name='Ultimate_Launcher-x86_64.exe', browser_download_url=self.base + '/new.exe',
+        asset = dict(name='Golden_Fist_Launcher-x86_64.exe', browser_download_url=self.base + '/new.exe',
                      size=len(self.new) if size is None else size,
                      digest='sha256:' + (sha256 or hashlib.sha256(self.new).hexdigest()))
         self.handler.answer = json.dumps(dict(tag_name='v' + version, html_url=self.base, assets=[asset])).encode()
@@ -169,12 +169,12 @@ class Answers(BaseHTTPRequestHandler):
 OLD, HEAD = 'a' * 40, 'b' * 40
 PROJECT = {'launcher/windows/main.py': b'new main', 'launcher/windows/self_update.py': b'new update',
            'launcher/builder/CMakeLists.txt': b'set(TTT2_LAUNCHER_VERSION 0.4.0)\n',
-           'Start Ultimate Launcher.cmd': b'@echo off\n:start\n', 'tools/added.py': b'added'}
+           'Start Golden Fist Launcher.cmd': b'@echo off\n:start\n', 'tools/added.py': b'added'}
 
 def archive(files, commit=HEAD, others=()):
     """GitHub's ZIP of a commit: its files in one folder, the commit in its comment (and `others`, by their
     names in the ZIP)."""
-    data, top = io.BytesIO(), 'Tekken-Tag-2-Ultimate-Edition-' + HEAD + '/'
+    data, top = io.BytesIO(), 'Golden-Fist-Launcher-' + HEAD + '/'
     with zipfile.ZipFile(data, 'w') as z:
         z.comment = commit.encode()
         z.writestr(top, b'')
@@ -186,7 +186,7 @@ class OpenUpdated(unittest.TestCase):
     """The new .exe waits for the launcher's window to end (C3): the new launcher names it (TTT2_LAUNCHER_UI_PID), as
     its update runs in a worker program of its own; the Tk window updated in its own process."""
     def opened_after(self, **environment):
-        exe = Path(tempfile.gettempdir()) / 'Ultimate_Launcher-x86_64.exe'
+        exe = Path(tempfile.gettempdir()) / 'Golden_Fist_Launcher-x86_64.exe'
         with mock.patch.dict(os.environ, environment), mock.patch('subprocess.Popen') as popen:
             if 'TTT2_LAUNCHER_UI_PID' not in environment: os.environ.pop('TTT2_LAUNCHER_UI_PID', None)
             self_update.open_updated(exe)
@@ -208,7 +208,7 @@ class Files(unittest.TestCase):
         self.root = Path(temp.name)
         self.old = {'launcher/windows/main.py': b'old main', 'launcher/windows/self_update.py': b'old update',
                     'launcher/builder/CMakeLists.txt': b'set(TTT2_LAUNCHER_VERSION 0.4.0)\n',
-                    'Start Ultimate Launcher.cmd': b'@echo off\r\n', 'tools/removed.py': b'gone',
+                    'Start Golden Fist Launcher.cmd': b'@echo off\r\n', 'tools/removed.py': b'gone',
                     self_update.BUILD_COMMIT: (OLD + '\n').encode(), self_update.BUILD_BRANCH: b'dev-0-4-0\n'}
         for path, data in self.old.items(): (self.root / path).parent.mkdir(parents=True, exist_ok=True); (self.root / path).write_bytes(data)
         self.stamp = 'f' * 64 + '\n' + ''.join(path + '\n' for path in sorted(self.old))
@@ -239,7 +239,7 @@ class Files(unittest.TestCase):
         self.assertEqual(self.update(), HEAD)
         self.assertEqual((self.root / 'launcher/windows/main.py').read_bytes(), b'new main')
         self.assertEqual((self.root / 'tools/added.py').read_bytes(), b'added')
-        self.assertEqual((self.root / 'Start Ultimate Launcher.cmd').read_bytes(), b'@echo off\r\n:start\r\n')
+        self.assertEqual((self.root / 'Start Golden Fist Launcher.cmd').read_bytes(), b'@echo off\r\n:start\r\n')
         self.assertFalse((self.root / 'tools/removed.py').exists())
         self.assertEqual((self.root / 'build-windows-tools/game.exe').read_bytes(), b'built')
         self.assertEqual(self_update.build_commit(self.root), HEAD)
@@ -256,7 +256,7 @@ class Files(unittest.TestCase):
         self.assertIsNone(self.update()); self.assertUnchanged()
     def test_wrong_downloads_change_nothing(self):
         for data, why in [(b'<html>', 'not a ZIP'), (archive(PROJECT, commit=OLD), 'another commit'),
-                          (archive(PROJECT, others=['Tekken-Tag-2-Ultimate-Edition-%s/../escape.py' % HEAD]),
+                          (archive(PROJECT, others=['Golden-Fist-Launcher-%s/../escape.py' % HEAD]),
                            'not a plain file'),
                           (archive(PROJECT, others=['another-folder/a.py']), 'not a plain file'),
                           (archive({k: v for k, v in PROJECT.items() if 'main.py' not in k}), 'lacks')]:

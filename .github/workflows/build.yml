@@ -73,12 +73,12 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p build-release
-          launcher/appimage/make_appimage.sh build-release/Ultimate_Launcher-x86_64.AppImage build-appimage
+          launcher/appimage/make_appimage.sh build-release/Golden_Fist_Launcher-x86_64.AppImage build-appimage
           launcher/appimage/release_checks.sh --launcher build-appimage/AppDir/usr/bin/ttt2-launcher
           # What an old launcher asks the new AppImage before it switches to it (here without FUSE).
           version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
           said=$(env -u DISPLAY -u WAYLAND_DISPLAY -u DBUS_SESSION_BUS_ADDRESS APPIMAGE_EXTRACT_AND_RUN=1 \
-            build-release/Ultimate_Launcher-x86_64.AppImage --version)
+            build-release/Golden_Fist_Launcher-x86_64.AppImage --version)
           test "$said" = "ttt2-launcher $version"
       - name: Windows program of the new launcher (cross-built, SDL built in), its tests under Wine
         shell: bash
@@ -101,12 +101,12 @@ jobs:
         run: |
           export WINEPREFIX="$RUNNER_TEMP/wineprefix"
           unset DISPLAY WAYLAND_DISPLAY
-          python launcher/windows/make_launcher_exe.py build-release/Ultimate_Launcher-x86_64.exe
+          python launcher/windows/make_launcher_exe.py build-release/Golden_Fist_Launcher-x86_64.exe
           version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))$/\1/p' launcher/builder/CMakeLists.txt)
           # (the program as built, without files: launcher/CMakeLists.txt's TTT2_LAUNCHER_RELEASE_TARGET)
           program=$(ls build-launcher-windows/launcher/ttt2-launcher.exe)
           cd launcher/windows && python test_launcher_exe.py "../../$program" "$version" \
-            ../../build-release/Ultimate_Launcher-x86_64.exe
+            ../../build-release/Golden_Fist_Launcher-x86_64.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
@@ -164,4 +164,6 @@ jobs:
           if ($said.program -ne 'ttt2-launcher' -or -not $said.frame) { $said; exit 1 }
       - name: Source ZIP first-run runtime check
         shell: cmd
-        run: call "Start Ultimate Launcher.cmd" --check
+        run: |
+          call "Start Golden Fist Launcher.cmd" --check || exit /b 1
+          call "Start Ultimate Launcher.cmd" --check

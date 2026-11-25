@@ -1,7 +1,7 @@
 """The Windows launcher's own updates, as the Linux AppImage's
 (launcher/core/release.cpp, launcher/app/self_update.cpp).
 
-The release's Ultimate_Launcher-x86_64.exe (entry.cpp with the project's
+The release's Golden_Fist_Launcher-x86_64.exe (entry.cpp with the project's
 files in it, make_launcher_exe.py) opens this launcher with
 TTT2_LAUNCHER_EXE naming it. Only then is GitHub asked for this repository's
 newest release; when that one is newer, Update downloads its .exe beside the
@@ -37,7 +37,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 # The newest release as GitHub's API gives it (drafts and pre-releases are
 # never it). $TTT2_LAUNCHER_RELEASES is asked instead when set (tests).
-LATEST = 'https://api.github.com/repos/Petexy/Tekken-Tag-2-Ultimate-Edition/releases/latest'
+LATEST = 'https://api.github.com/repos/Petexy/Golden-Fist-Launcher/releases/latest'
 # The .exe this launcher was opened from (entry.cpp sets it).
 EXE_VARIABLE = 'TTT2_LAUNCHER_EXE'
 # The pid of the launcher an update replaces: the new .exe waits for it to end.
@@ -56,7 +56,7 @@ BUILD_COMMIT = 'launcher/windows/build-commit'
 BUILD_BRANCH = 'launcher/windows/build-branch'
 # What entry.cpp unpacked last: their SHA-256, then their paths.
 STAMP = 'local/launcher-files.txt'
-REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
+REPOSITORY = 'Petexy/Golden-Fist-Launcher'
 # The new launcher's worker environment: "1" when the launcher's program is built into the .exe these files came
 # from (a release or test build's own files, not a program the source ZIP's bridge builds from them). Its files'
 # update then leaves out changes to that program: they need a new .exe (program_file).
@@ -526,7 +526,7 @@ def archive_files(data, commit):
             # cmd.exe can miss a batch file's labels when its lines end in LF only.
             if path.lower().endswith(('.cmd', '.bat')): content = content.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
             files[path] = content
-    for needed in ('launcher/windows/main.py', 'launcher/windows/self_update.py', 'Start Ultimate Launcher.cmd',
+    for needed in ('launcher/windows/main.py', 'launcher/windows/self_update.py', 'Start Golden Fist Launcher.cmd',
                    'launcher/builder/CMakeLists.txt'):
         if needed not in files: raise UpdateError('What was downloaded for %s is not this project: it lacks %s.'
                                                   % (short, needed))

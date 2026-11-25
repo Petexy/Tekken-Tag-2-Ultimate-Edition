@@ -1,6 +1,6 @@
 {
   "header": [
-    {"k": "label", "t": "Ultimate Launcher", "tone": "heading"},
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
     {"k": "button", "icon": "view-refresh-symbolic", "tip": "Check again", "s": true}
   ],
   "notice": [
@@ -23,7 +23,7 @@
     {"k": "label", "t": "Running"},
     {"k": "label", "t": "Missing", "tone": "dim"},
     {"k": "label", "t": "numpy and Pillow for Python", "tone": "warning"},
-    {"k": "label", "t": "Ultimate Launcher can download them for this Python (41 MB from PyPI, Python's package index) into a folder of its own: nothing of the system changes.", "tone": "dim"},
+    {"k": "label", "t": "Golden Fist Launcher can download them for this Python (41 MB from PyPI, Python's package index) into a folder of its own: nothing of the system changes.", "tone": "dim"},
     {"k": "button", "id": "get-packages", "t": "Download", "s": true},
     {"k": "check", "id": "outfits-all", "t": "Import outfits for every character", "tip": "Outfits are complete bodies for the in-game costume chooser. Without them, a character has their default costume.", "on": false, "mixed": true, "s": true},
     {"k": "label", "t": "Tekken 7's characters", "tone": "heading"},

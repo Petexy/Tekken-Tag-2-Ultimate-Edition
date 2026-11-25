@@ -205,8 +205,8 @@ def older_game(settings, files):
 def older_game_note(game, files):
     """What the launcher says while the game is older (older_game gave `game`): Play, adding and updating characters
     wait for its Update."""
-    return ('The game is from an older Ultimate Launcher (%s; this one is %s): update it to play and to add or update '
-            'characters, which need the newer game.' % (game, files.partition(' ')[0]))
+    return ('The game is from an older version of the launcher (%s; this one is %s): update it to play and to add or '
+            'update characters, which need the newer game.' % (game, files.partition(' ')[0]))
 
 
 def importer(settings, *args, timeout=None):

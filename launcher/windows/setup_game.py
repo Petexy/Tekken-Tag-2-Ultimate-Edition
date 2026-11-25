@@ -179,7 +179,7 @@ def _validate_lengths(settings):
         raise ValueError(
             'The extracted project folder path is too long for Windows build tools. '
             'Extract a fresh copy into a short folder such as D:/TTT2 or C:/Games/TTT2 '
-            '(Start Ultimate Launcher.cmd must be directly inside that folder), then start setup again. '
+            '(Start Golden Fist Launcher.cmd must be directly inside that folder), then start setup again. '
             'Your game archive does not need to move. Current project: ' + str(settings.root))
     tools = _tools_path(settings)
     if windows_length(tools) > MAX_TOOLS_PATH:
@@ -195,7 +195,7 @@ def _validate_plain_letters(settings):
             letters = ''.join(sorted({c for c in str(path) if not c.isascii()}))
             raise ValueError('The %s path has letters the Windows build tools cannot read (%s). Extract a fresh copy '
                              'into a folder whose path has only plain letters, such as C:/TTT2 (outside OneDrive), '
-                             'then start setup again; or use Ultimate_Launcher-x86_64.exe, which keeps its files in '
+                             'then start setup again; or use Golden_Fist_Launcher-x86_64.exe, which keeps its files in '
                              'such a folder by itself. Current %s: %s' % (what, letters, what, path))
 
 

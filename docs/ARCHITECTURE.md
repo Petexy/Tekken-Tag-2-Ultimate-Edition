@@ -1961,11 +1961,11 @@ later.
 
 ## The launcher
 
-`launcher/` is what players start: `ttt2-launcher`, shown as "Ultimate
-Launcher" (to be shipped as an AppImage). Nothing derived from the
-game may be shipped, so the game program is built on the player's PC from
-their own `.wua`, by the tools this build uses and the system's C++
-compiler.
+`launcher/` is what players start: `ttt2-launcher`, shown as "Golden Fist
+Launcher" ("Ultimate Launcher" up to 0.8.0; to be shipped as an AppImage).
+Nothing derived from the game may be shipped, so the game program is built on
+the player's PC from their own `.wua`, by the tools this build uses and the
+system's C++ compiler.
 
 - **The kit** (`launcher/builder`, target `ttt2_kit`: `<build>/launcher/kit`,
   installed as `<prefix>/lib/ttt2/kit`): `bin/ttt2-build`, `bin/cafe-recomp`,

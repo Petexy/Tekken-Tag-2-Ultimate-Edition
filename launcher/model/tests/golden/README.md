@@ -6,6 +6,8 @@ files, the test steps), `linux/` is what the old GTK launcher
 (`launcher/app`) showed for it and `windows/` what the old Tk window
 (`launcher/windows/window.py`) showed for it.
 
+The name: the recorded texts said Ultimate Launcher (INTENDED.md, "The name").
+
 In `linux/`:
 
 - `00-start.json`: once the window had settled after opening;

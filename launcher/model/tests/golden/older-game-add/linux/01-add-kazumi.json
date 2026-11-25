@@ -1,6 +1,6 @@
 {
   "header": [
-    {"k": "label", "t": "Ultimate Launcher", "tone": "heading"},
+    {"k": "label", "t": "Golden Fist Launcher", "tone": "heading"},
     {"k": "button", "icon": "view-refresh-symbolic", "tip": "Check again", "s": true}
   ],
   "notice": [
@@ -10,7 +10,7 @@
     {"k": "label", "t": "/home/player/Games/Tekken Tag Tournament 2", "tone": "path", "tip": "/home/player/Games/Tekken Tag Tournament 2"},
     {"k": "pill", "t": "Installed", "pill": "ok"},
     {"k": "icon", "t": "dialog-warning-symbolic", "tone": "warn"},
-    {"k": "label", "t": "The game is from an older Ultimate Launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game. Update builds it again from the game in its folder: a few minutes.", "tone": "dim"},
+    {"k": "label", "t": "The game is from an older version of the launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game. Update builds it again from the game in its folder: a few minutes.", "tone": "dim"},
     {"k": "button", "id": "update", "t": "Update", "icon": "ttt2-update-symbolic", "tip": "Build the game program again with this launcher's version", "cls": "primary", "s": true},
     {"k": "button", "id": "settings", "icon": "ttt2-settings-symbolic", "tip": "Settings", "s": true},
     {"k": "button", "id": "open-folder", "icon": "folder-symbolic", "tip": "Open the install folder", "s": true},
@@ -18,7 +18,7 @@
   ],
   "characters": [
     {"k": "icon", "t": "dialog-warning-symbolic", "tone": "warn"},
-    {"k": "label", "t": "The game is from an older Ultimate Launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game."},
+    {"k": "label", "t": "The game is from an older version of the launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game."},
     {"k": "label", "t": "Tekken 7", "tone": "dim"},
     {"k": "label", "t": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 7", "tone": "path", "tip": "/home/player/.local/share/Steam/steamapps/common/TEKKEN 7"},
     {"k": "label", "t": "Tekken 8", "tone": "dim"},
@@ -63,7 +63,7 @@
   ],
   "task": [
     {"k": "label", "t": "Cannot add characters", "tone": "error"},
-    {"k": "label", "t": "The game is from an older Ultimate Launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game.", "tone": "dim"},
+    {"k": "label", "t": "The game is from an older version of the launcher (0.7.0; this one is 0.8.0): update it to play and to add or update characters, which need the newer game.", "tone": "dim"},
     {"k": "button", "id": "task", "t": "Close", "s": true},
     {"k": "expander", "t": "Details", "on": false}
   ],

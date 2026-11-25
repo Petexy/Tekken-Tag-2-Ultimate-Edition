@@ -26,10 +26,10 @@
 namespace ttt2::ui {
 
 struct WindowOptions {
-    std::string title = "Ultimate Launcher";
+    std::string title = "Golden Fist Launcher";
     std::string app_id;              // Wayland app_id / X11 class / SDL_SetAppMetadata
     std::string version;
-    std::string releases_url = "https://github.com/Petexy/Tekken-Tag-2-Ultimate-Edition/releases";
+    std::string releases_url = "https://github.com/Petexy/Golden-Fist-Launcher/releases";
     Vec2 size{1280, 800};            // points at content scale 1 (multiplied by the display's content scale)
     Vec2 min_size{960, 600};
     bool offscreen = false;          // tests / --screenshot: SDL's offscreen driver + the software renderer

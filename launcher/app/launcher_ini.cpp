@@ -47,7 +47,7 @@ bool write_launcher_ini(const std::filesystem::path& file, const model::Launcher
     std::string prompts = model::kPrompts[std::clamp(s.prompts, 0, static_cast<int>(std::size(model::kPrompts)) - 1)];
     std::transform(prompts.begin(), prompts.end(), prompts.begin(), [](unsigned char c) { return std::tolower(c); });
     std::ostringstream o;
-    o << "# Ultimate Launcher's own settings (Settings > Launcher)\n"
+    o << "# Golden Fist Launcher's own settings (Settings > Launcher)\n"
       << "sounds=" << (s.sounds ? "yes" : "no") << "\n"
       << "reduce_motion=" << (s.reduce_motion ? "yes" : "no") << "\n"
       << "prompts=" << prompts << "\n"
