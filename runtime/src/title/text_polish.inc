@@ -1442,7 +1442,6 @@
 {"Manu_274", u8"Obejrzyj zakończenie: \uFFFA\u8000. "},
 {"Manu_275", u8"Ten film jest zablokowany."},
 {"Manu_280", u8"Obejrzyj: \uFFFA\u8000."},
-{"Manu_286", u8"Obejrzyj portret z wyboru postaci: (キャラクター名). "},
 {"Manu_287", u8"Ten obraz jest zablokowany."},
 {"Manu_294", u8"Przesuń obraz"},
 {"Manu_304", u8"Obejrzyj film początkowy i zakończenia: \uFFFA\u8000."},
