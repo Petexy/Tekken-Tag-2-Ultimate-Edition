@@ -40,6 +40,14 @@ def saved(code, language='us', folder=None):
     return os.path.isfile(saved_path(code, language, folder))
 
 
+def all_saved(code, folder=None):
+    """Whether the fighter's subtitle files are saved in every language the import has the game read
+    (autodump.SUBTITLE_LANGUAGES). Its pack shows them only then; else the pack is made without them and says so
+    (character.ini without_subtitles), and launcher.py status offers to update it."""
+    from .autodump import SUBTITLE_LANGUAGES
+    return all(saved(code, language, folder) for language in SUBTITLE_LANGUAGES)
+
+
 def _name(b):
     return b.split(b'\0', 1)[0].decode('latin1')
 

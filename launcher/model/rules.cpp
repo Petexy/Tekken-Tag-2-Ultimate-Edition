@@ -173,12 +173,18 @@ bool addable(const Facts& facts, const Fighter& f) {
         if (f.added()) return block == MovesBlock::kNone;
         return block != MovesBlock::kSteam;
     }
-    return s.steam_running || (f.moveset_saved && s.heihachi_saved);
+    // (Their subtitles not saved yet are saved as Tekken 7 runs too: without Steam the pack would be made without
+    // them, and made again once it runs.)
+    return s.steam_running || (f.moveset_saved && s.heihachi_saved && f.subtitles_saved);
 }
 
 std::string not_addable_why(const Facts& facts, const Fighter& f) {
     if (f.dlc != 0 && !f.of(kTekken8)) return "Start Steam: it checks that you own their DLC";
-    if (!f.of(kTekken8)) return "Start Steam: Tekken 7 needs it to save their moves";
+    if (!f.of(kTekken8)) {
+        return f.moveset_saved && facts.status && facts.status->heihachi_saved
+                   ? "Start Steam: Tekken 7 needs it to save their subtitles"
+                   : "Start Steam: Tekken 7 needs it to save their moves";
+    }
     switch (moves_block(facts)) {
     case MovesBlock::kBuild: return kUnknownBuild;
     case MovesBlock::kRun: return sentence(facts.status->tekken8_run_error);

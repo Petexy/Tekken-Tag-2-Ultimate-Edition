@@ -28,7 +28,9 @@ read from Tekken 8), its "moveset_saved" is whether its own Tekken 8 moveset is 
 --tekken8-movesets: the import uses it without Tekken 8 running; true for a fighter that converts none), and
 "stand_in" whether the pack the game loads fights with its stand-in's moveset because its own could not be had when
 it was imported (character.ini stand_in): "update" is true then once its own can be had (saved, or Tekken 8 is a
-build the helper knows, so Steam running saves it); a Tekken 7 fighter's entry is as it always was. With --game:
+build the helper knows, so Steam running saves it). A Tekken 7 fighter has "subtitles_saved": whether its intro and
+win subtitles are saved (else the import has Tekken 7 read them, which needs Steam running, or makes the pack without
+them). "without_subtitles": the pack the game loads was made without them; "update" is true for it too. With --game:
 whether that folder is an installed game the importer can read.
 
 owned: which DLC fighters the player's Steam account owns, as Steam tells the game ({"owned": {name: true|false}}):
@@ -67,6 +69,7 @@ sys.path.insert(0, HERE)
 from ttt2char import native, pack, python_packages, signals, source   # noqa: E402  (these need no numpy)
 from ttt2char.characters import CHARACTERS, definition, game_of  # noqa: E402
 from ttt2char.tekken7 import autodump                          # noqa: E402
+from ttt2char.tekken7 import subtitles as subtitles7            # noqa: E402
 from ttt2char.tekken7.pak import pak_names                     # noqa: E402
 from ttt2char.tekken7.tkmvst import saved_movesets             # noqa: E402
 from ttt2char.tekken8 import autodump as dump8                 # noqa: E402
@@ -165,7 +168,9 @@ def status(game=None, movesets=None, movesets8=None):
                    'dlc': dump8.DLC.get(d.TEKKEN8_ID) if tekken8_fighter else autodump.DLC.get(d.TEKKEN7_ID),
                    'installed': d.CODE in packs, 'outdated': packs.get(d.CODE) == 'outdated',
                    'newer': packs.get(d.CODE) == 'newer',
-                   'update': d.CODE in loaded and loaded[d.CODE]['revision'] < pack.revision(d),
+                   'update': d.CODE in loaded and (loaded[d.CODE]['revision'] < pack.revision(d)
+                                                   or loaded[d.CODE]['without_subtitles']),
+                   'without_subtitles': d.CODE in loaded and loaded[d.CODE]['without_subtitles'],
                    'moveset_saved': tekken8_fighter or d.TEKKEN7_ID in saved,
                    'outfits': len(getattr(d, 'PRESETS', ())),
                    'outfits_added': d.CODE in loaded and loaded[d.CODE]['outfits'] > 0,
@@ -179,6 +184,8 @@ def status(game=None, movesets=None, movesets8=None):
             if fighter['stand_in'] and own and not fighter['update']:
                 fighter['update'] = fighter['moveset_saved'] or build_known
             fighter['game'] = 'tekken8'
+        else:
+            fighter['subtitles_saved'] = subtitles7.all_saved(d.TEKKEN7_CODE)
         fighters.append(fighter)
     found8['build_known'] = build_known if found8['found'] else None       # (None: no fighter needs a moveset saved)
     out = {'python': {'version': platform.python_version(), 'numpy': importable('numpy'),

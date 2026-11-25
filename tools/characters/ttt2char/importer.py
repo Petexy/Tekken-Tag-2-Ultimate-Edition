@@ -21,6 +21,7 @@ from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, ite
     movelist_rows, moveset, outfits, particles, prefabs8, snakes8, sounds, subtitles, summons8, tagsystem, tiger, \
     voice, wardrobe, weapons
 from .tekken7 import tkmvst
+from .tekken7 import subtitles as subtitles7
 from .tekken8 import sounds as sounds8
 from .tekken7.autodump import FILES, unread
 from .tekken7.pak import EncryptedError, Paks, pak_names
@@ -412,6 +413,11 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     for line in lines:
         log('         ' + line)
     said = _subtitles(source, d, streams, lambda s: log('         ' + s))
+    # (a Tekken 7 fighter's subtitles not saved, Steam not running when they were asked for: the pack is made without
+    # them and says so, so that it is updated once they can be had)
+    without_subtitles = game_of(d) == 'tekken7' and not subtitles7.all_saved(d.TEKKEN7_CODE, files)
+    if without_subtitles:
+        log('         WARNING: its Tekken 7 subtitles are not saved: made without them, to update with Steam running')
     shown = subtitles.values(said, place['id'])     # (its poses' subtitles: moveset.rewrite_subtitles)
 
     if stand_in(d):
@@ -483,7 +489,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                         weapons=weapons.of_skeleton(bone.read(bon), getattr(d, 'WEAPONS', ())) if weapons8 is None
                         else prefabs8.with_fades(d, prefabs8.with_channels(weapons8, summonfade.ramps(  # (Tekken 8:
                             bone.read(bon), nud, weapons.of_skeleton(bone.read(bon), weapons8)))),  # how its summons fade)
-                        outfits=outfit_codes)
+                        outfits=outfit_codes, without_subtitles=without_subtitles)
     step('wrote %s' % target)
 
     if make_shared:

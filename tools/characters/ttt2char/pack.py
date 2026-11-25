@@ -8,7 +8,9 @@ $XDG_DATA_HOME/ttt2/characters, else ~/.local/share/ttt2/characters, as the port
                                after), revision = revision(d) (the port ignores it), and stand_in = <a TTT2
                                fighter's code> when the fighter fights with that one's moveset because its own could
                                not be had when it was imported (importer.with_stand_in; the launcher offers to update
-                               the pack once it can be had; the port ignores this too)
+                               the pack once it can be had; the port ignores this too), and without_subtitles = 1
+                               when a Tekken 7 fighter's subtitles were not saved when it was imported (Steam was not
+                               running): its intro and win poses show none, and the launcher offers to update it
     <code>.xml                 item database (BXML)
     <code>.nud .nut .bon       body model, textures, skeleton
     <code>.mop                 spring entries of its extra bones (Kazumi's tiger)
@@ -280,7 +282,8 @@ def revision(d):
     return REVISION + vars(d).get('REVISION', 0)
 
 
-def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), sound_extra=(), gauge_sound=None):
+def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), sound_extra=(), gauge_sound=None,
+                  without_subtitles=False):
     """voice_extra: the se_Chr tones of the shouts past the donor's (the port appends them to the voice list);
     sound_extra: the se_Chr tones of its sound effects (the port appends them to its item sounds: convert/sounds.py);
     gauge_sound: the item sound its gauge plays as it fills up (convert/gauge.py);
@@ -306,6 +309,7 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), 
             % (d.NAME.split(' (')[0], GAMES[game_of(d)], PACK_FORMAT, d.CODE, d.DONOR, d.SEX, slot, chr_tones,
                revision(d))
             + ('stand_in = %s\n' % d.DONOR if getattr(d, 'WITHOUT_OWN_MOVESET', False) else '')
+            + ('without_subtitles = 1\n' if without_subtitles else '')
             + ('voice_extra = %s\n' % ' '.join(map(str, voice_extra)) if voice_extra else '')
             + ('sound_extra = %s\n' % ' '.join(map(str, sound_extra)) if sound_extra else '')
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
@@ -340,7 +344,8 @@ def number(value):
 def installed(folder):
     """The packs in the characters folder: [{'path', 'code', 'donor', 'slot' (None if it names none), 'format' (0:
     an older importer's; see above), 'revision' (0 without one), 'stand_in' (the code of the fighter whose moveset
-    it fights with because its own could not be had, '' for none), 'outfits' (how many preset outfits it has),
+    it fights with because its own could not be had, '' for none), 'without_subtitles' (made without its Tekken 7
+    subtitles: not saved then), 'outfits' (how many preset outfits it has),
     'valid' (the port takes it: a three-letter code and a donor), 'current' (valid and of PACK_FORMAT: the port loads
     it), 'newer' (valid and of a later format)}], by folder name. A folder whose name starts with a dot is none
     (write()'s pack being made, or the one it replaces; the port skips them too)."""
@@ -360,7 +365,7 @@ def installed(folder):
         valid = bool(CODE.fullmatch(v.get('code', ''))) and v.get('donor', '') != ''
         out.append(dict(path=path, code=v.get('code', ''), donor=v.get('donor', ''), slot=number(v.get('slot', '')),
                         format=form, revision=number(v.get('revision', '')) or 0, stand_in=v.get('stand_in', ''),
-                        outfits=len(v.get('outfits', '').split()), valid=valid,
+                        without_subtitles=v.get('without_subtitles', '') == '1',                        outfits=len(v.get('outfits', '').split()), valid=valid,
                         current=valid and form == PACK_FORMAT, newer=valid and form > PACK_FORMAT))
     return out
 
@@ -458,7 +463,7 @@ def target_of(folder, d):
 
 
 def write(folder, d, files, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), sound_extra=(),
-          gauge_sound=None):
+          gauge_sound=None, without_subtitles=False):
     """Writes the pack <folder>/<code>/ from files {suffix or file name: bytes} (a suffix starts with '.': the file
     is <code><suffix>); returns its path. The pack is made whole in a hidden folder beside its place first
     (.<code>.part, character.ini last), which then takes the place of the fighter's earlier pack: that one goes
@@ -472,7 +477,7 @@ def write(folder, d, files, slot, chr_tones=0, voice_extra=(), weapons=(), outfi
     out = {(d.CODE + name if name.startswith('.') else name): data for name, data in files.items()}
     out.pop('character.ini', None)
     out['character.ini'] = character_ini(d, slot, chr_tones, voice_extra, weapons, outfits,
-                                         sound_extra, gauge_sound).encode('utf-8')
+                                         sound_extra, gauge_sound, without_subtitles).encode('utf-8')
     os.makedirs(os.path.dirname(real), exist_ok=True)
     for path in (part, old):                        # (a killed write's, or one that could not be deleted)
         try:

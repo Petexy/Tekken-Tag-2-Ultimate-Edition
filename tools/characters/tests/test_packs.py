@@ -69,6 +69,15 @@ class Format(unittest.TestCase):
             [p] = pack.installed(d)
             self.assertEqual((p['format'], p['current'], p['slot']), (pack.PACK_FORMAT, True, 3))
 
+    def test_a_pack_made_without_its_subtitles_says_so(self):
+        self.assertNotIn('without_subtitles', pack.character_ini(KAZUMI, 3))
+        self.assertIn('without_subtitles = 1\n', pack.character_ini(KAZUMI, 3, without_subtitles=True))
+        with tempfile.TemporaryDirectory() as d:
+            pack.write(d, KAZUMI, {'.nud': b'nud'}, 3)
+            pack.write(d, definition('chloe'), {'.nud': b'nud'}, 4, without_subtitles=True)
+            self.assertEqual({p['code']: p['without_subtitles'] for p in pack.installed(d)},
+                             {'kzm': False, 'dnc': True})
+
     def test_unblurred_meshes_listed_only_for_a_definition_that_names_them(self):
         made_up = dict(NAME='X', CODE='abc', DONOR='lar', SEX='male')
         listed = pack.character_ini(type('D', (), dict(made_up, UNBLURRED=('abc_dog', 'abc_wpn1'))), 3)

@@ -25,6 +25,7 @@ sys.path.insert(0, HERE)
 import launcher                                       # noqa: E402
 from ttt2char import importer, pack, shared, signals, source, ttt2   # noqa: E402
 from ttt2char.tekken7 import autodump                 # noqa: E402
+from ttt2char.tekken7 import subtitles as subtitles7  # noqa: E402
 from ttt2char.tekken8 import autodump as dump8        # noqa: E402
 
 spec = importlib.util.spec_from_file_location('import_character', os.path.join(HERE, 'import_character.py'))
@@ -89,8 +90,9 @@ class Status(unittest.TestCase):
             self.assertEqual(list(fighters), list(importer.CHARACTERS))
             self.assertEqual(fighters['kazumi'], {'name': 'kazumi', 'display': 'Kazumi Mishima', 'code': 'kzm', 'dlc': None,
                                                   'installed': False, 'outdated': False, 'newer': False,
-                                                  'update': False, 'moveset_saved': False, 'outfits': 9,
-                                                  'outfits_added': False, 'needs_game': False})
+                                                  'update': False, 'without_subtitles': False,
+                                                  'moveset_saved': False, 'outfits': 9, 'outfits_added': False,
+                                                  'needs_game': False, 'subtitles_saved': False})
             self.assertEqual(fighters['reina']['outfits'], 0)
             self.assertEqual(fighters['eliza']['dlc'], 592370)
 
@@ -140,6 +142,33 @@ class Status(unittest.TestCase):
                 f.write('outfits = kza kzb\n')
             fighters = {f['name']: f for f in launcher.status(install, os.path.join(d, 'movesets'))['fighters']}
             self.assertTrue(fighters['kazumi']['outfits_added'])
+
+    def test_a_pack_made_without_its_subtitles(self):
+        """A Tekken 7 fighter's subtitles not saved: status says so; a pack made without them is one to update."""
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, HOME=d, TTT2_CHARACTERS=os.path.join(d, 'packs')), \
+                mock.patch.object(autodump, 'FILES', os.path.join(d, 'files')), \
+                mock.patch.object(source, 'find_tekken8', return_value=None):
+            packs = os.path.join(d, 'packs')
+            made_pack(packs, 'kzm', 0)
+            ini = os.path.join(packs, 'kzm', 'character.ini')
+            with open(ini, 'a') as f:
+                f.write('revision = %d\n' % pack.revision(importer.definition('kazumi')))
+
+            def fighters():
+                return {f['name']: f for f in launcher.status(None, os.path.join(d, 'movesets'))['fighters']}
+
+            def kazumi():
+                k = fighters()['kazumi']
+                return k['update'], k['without_subtitles'], k['subtitles_saved']
+            self.assertEqual(kazumi(), (False, False, False))           # (made with them, before they went)
+            with open(ini, 'a') as f:
+                f.write('without_subtitles = 1\n')
+            self.assertEqual(kazumi(), (True, True, False))
+            write(subtitles7.saved_path(importer.definition('kazumi').TEKKEN7_CODE, 'us', os.path.join(d, 'files')))
+            self.assertEqual(kazumi(), (True, True, True))              # (saved since: the update has them)
+            self.assertNotIn('subtitles_saved', fighters()['reina'])    # (Tekken 7's only)
+            self.assertFalse(fighters()['chloe']['without_subtitles'])  # (no pack)
 
     def test_needs_its_game_only_without_a_copy_of_its_pictures(self):
         # (Reina's and Azucena's packs, made by an older version, have no source/; Tekken 8 is gone)
