@@ -166,7 +166,8 @@ for how in steam steam-key; do
     run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=tab:fighters;$how:east;wait:0.5" -- --frames "$h/frames"
     clean "$h" 7
     [ "$(grep -c '@cue tab' "$h/out.txt")" = 2 ] || fail "$how-back-tab: $(grep -c '@cue tab' "$h/out.txt") tab changes"
-    has "$h" '@frames idle ok (focus play,'
+    # (Back on Home's slab: UPDATE, the installed case has a fighter to update.)
+    has "$h" '@frames idle ok (focus update-everything,'
     h=$(home "$how-dialog")
     run "$h" installed "TTT2_LAUNCHER_TEST_ACTIONS=focus:uninstall;$how:south;wait:0.6" -- --frames "$h/frames"
     clean "$h" 7

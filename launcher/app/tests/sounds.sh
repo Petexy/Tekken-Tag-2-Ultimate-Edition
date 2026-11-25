@@ -10,6 +10,7 @@
 # - the top band's Sound button turns the same setting on (launcher.ini says so) and what follows is heard;
 # - Play, then the launcher quits at once: the Play sound is still written whole (the launcher waits for it), and the
 #   shaders prepared before the game (on by default) add no chime of their own;
+# - Home's UPDATE of two parts chimes once, at the end;
 # - GAME_FOLDER (optional: an installed Tekken Tag Tournament 2, only read): the game's own sounds are the ones used.
 set -u
 LAUNCHER=$1 STUB=$2 WORK=$3 PYTHON=$4 GAME=${5:-}
@@ -108,6 +109,13 @@ run "$h" "wait:0.3;focus:play;press:Return;quit"
 [ "$(cues "$h")" = "play " ] || fail "play: cues $(cues "$h")"
 s=$(sounding "$h")
 at_least "$s" 0.8 || fail "play: only $s s of the Play sound before the launcher ended"
+
+# (Home's UPDATE, two parts one after the other (the game program built again, then a fighter): one chime at the end.)
+h=$(home update yes)
+echo "kit 0.0.1" > "$h/Games/Tekken Tag Tournament 2/.ttt2-build"
+run "$h" "wait:0.3;update-everything;quit"
+[ "$(grep -c '@cue task-done' "$h/out.txt")" = 1 ] || fail "update: cues $(cues "$h")"
+grep -q '@cue task-failed' "$h/out.txt" && fail "update: a part failed: $(cues "$h")"
 
 if [ -n "$GAME" ]; then
     h=$(home game yes "$GAME")

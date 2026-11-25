@@ -212,6 +212,10 @@ void chips(Ui& ui, const std::string& id, std::span<const std::string> options, 
 // A described thing: a title in cyan and its text (.xpl).
 void describe_panel(Ui& ui, const std::string& id, const std::string& title, const std::string& body,
                     const Box& box = {});
+// An entry of a numbered list (Home's UPDATE, its parts in order): the number in a small square, the title, the text
+// under it, wrapped. Mirrored (the blue side): the number at the right end, the words right-aligned before it.
+void numbered_item(Ui& ui, const std::string& id, int number, const std::string& title, const std::string& text,
+                   const Box& box = {});
 enum class ButtonKind : std::uint8_t { Ghost, Primary, Blue, Danger };
 enum class ButtonSize : std::uint8_t { Normal, Small, Tiny };
 struct ButtonSpec {

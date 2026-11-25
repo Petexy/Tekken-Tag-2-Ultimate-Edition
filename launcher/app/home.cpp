@@ -131,6 +131,10 @@ void App::home_readout(const std::string& key) {
         const m::Facts& f = model_->facts();
         std::string title, body, why;
         bool notes = false;
+        if (k == "update-everything" && !view_.game.update.empty()) {
+            if (const m::Action* a = action(k)) update_list(*a);
+            return;
+        }
         if (const m::Action* a = action(k)) {
             title = a->describe.title.empty() ? a->label : a->describe.title;
             if (title.ends_with("…")) title.resize(title.size() - std::string("…").size());
@@ -217,6 +221,8 @@ void App::notice_card() {
         b.size = ButtonSize::Tiny;
         button(ui, "release-page", b, blue_focus());
     }
+    // (Home's UPDATE gets it with the rest: one Update, the slab's, FEEDBACK of 2026-11-25.)
+    if (view_.notice.whole && screen_ == Screen::kHome) return;
     ButtonSpec u;
     u.label = view_.notice.update.label;
     u.kind = ButtonKind::Blue;
@@ -225,6 +231,38 @@ void App::notice_card() {
     Focus uf = blue_focus();
     uf.disabled = u.disabled;
     button(ui, "notice-update", u, uf);
+}
+
+// Home's UPDATE in the slab: the word and what it brings up to date ("launcher, game" / "+ fighters").
+SlabSpec App::update_slab() const {
+    std::vector<std::string> names;
+    for (const m::UpdatePart& p : view_.game.update) {
+        if (p.kind == "launcher") names.push_back("launcher");
+        else if (p.kind == "game") names.push_back("game");
+        else if (p.kind == "fighters") names.push_back("fighters");
+    }
+    if (names.size() == 1) return {"Update", "the " + names[0], "then play"};
+    if (names.size() == 2) return {"Update", names[0] + " + " + names[1], "then play"};
+    return {"Update", names[0] + ", " + names[1], "+ " + names[2]};
+}
+
+// The focused UPDATE on the blue side: what it does, its parts in order (numbered), what it leaves for later.
+void App::update_list(const m::Action& a) {
+    Ui& ui = *ui_;
+    describe_panel(ui, "home/xpl", "Update", a.describe.explain, fit({}, SeamFit::BlueSkewed));
+    if (!a.why.empty())
+        note(ui, "home/why", Tone::Warn, a.why, fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect), "stroke:warn");
+    int n = 0;
+    for (const m::UpdatePart& p : view_.game.update) {
+        if (p.kind == "later") {
+            note(ui, "home/later", Tone::Warn, p.title + ": " + p.text,
+                 fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect), "stroke:warn");
+            continue;
+        }
+        ++n;
+        numbered_item(ui, "home/part" + std::to_string(n), n, p.title, p.text,
+                      fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect));
+    }
 }
 
 void App::home_installed(const Box& crimson, const Box& blue) {
@@ -241,13 +279,18 @@ void App::home_installed(const Box& crimson, const Box& blue) {
             update += x.added() && x.update;
         }
     }
+    // (The slab became UPDATE while Play was focused, the importer's answer in: the focus goes with the slab, so that
+    // Accept does what the big button says.)
+    if (primary && primary->id != home_primary_ && ui.focused() == home_primary_) ui_->focus(primary->id, false);
+    home_primary_ = primary ? primary->id : std::string();
     {
         auto g = ui.open("home/crimson", crimson);
         section_label(ui, "home/menu-label", "Menu", Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         if (primary) {
             SlabSpec s;
-            if (primary->id == "update") s = {"Update", "then play", "a few minutes"};
+            if (primary->id == "update-everything") s = update_slab();
+            else if (primary->id == "update") s = {"Update", "then play", "a few minutes"};
             else s = {primary->label, "Tekken Tag", "Tournament 2"};
             s.mid = s.big.size() > 6;
             s.disabled = !primary->enabled;
@@ -255,6 +298,12 @@ void App::home_installed(const Box& crimson, const Box& blue) {
                  fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
+        // (Update in the slab: Play is an ordinary row, first.)
+        if (const m::Action* play = action("play"); play && !play->primary) {
+            MenuRowSpec p{"stroke:play", play->label};
+            p.disabled = !play->enabled;
+            menu_row(ui, "play", p, crimson_focus(false, !play->enabled), fit({}, SeamFit::CrimsonSkewed));
+        }
         menu_row(ui, "fighters",
                  {"stroke:users", "Fighters", f.status ? std::to_string(added) + " of " + std::to_string(total) : ""},
                  crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
@@ -303,12 +352,25 @@ void App::home_installed(const Box& crimson, const Box& blue) {
         {"Fighters", fighters_runs, false}};
     // (Drilled into More: its entries and what the focused one does take the facts' place.)
     if (drilled() && drill_->opener == "more") return more_view();
-    facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
-    notice_card();
     const std::string& fo = ui.focused();
     if (!fo.empty() && (ui.rect(fo).x < stage_->seam_now().x_at(ui.rect(fo).center().y) ||
                         fo == "notice-update" || fo == "release-page"))
         readout_key_ = fo;
+    // (UPDATE focused: its parts take the facts' and the notice's place, what they say is in them; a small window
+    // scrolls to them while they come in, then leaves the scrolling to the player.)
+    const bool parts = readout_key_ == "update-everything" && !view_.game.update.empty();
+    if (!parts) {
+        facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
+        notice_card();
+        update_scroll_since_ = -1;
+    } else {
+        // (Again when a part comes in: the fighters' once the importer has answered.)
+        if (update_scroll_since_ < 0 || update_parts_seen_ != view_.game.update.size()) {
+            update_scroll_since_ = ui.now();
+            update_parts_seen_ = view_.game.update.size();
+        }
+        if (ui.now() - update_scroll_since_ < 1.0) ui.scroll_to_end("home/blue");
+    }
     home_readout(readout_key_);
 }
 
@@ -658,6 +720,11 @@ void App::home_task(const Box& crimson, const Box& blue) {
     const bool stopped = !running && last.cancelled;
     const bool failed = !running && !ok && !stopped;
     const bool build = task_kind_ == m::TaskKind::kInstall || task_kind_ == m::TaskKind::kUpdate;
+    // Home's UPDATE: its parts one after another ("Update · 2 of 3 · The game program"); between two of them (the
+    // next starts by itself) and once the new launcher opens, nothing to close yet.
+    const m::TaskView::Chain& chain = view_.task.chain;
+    const bool update = chain.count > 0;
+    const bool between = update && !running && (chain.waiting || chain.handed_over);
     std::vector<StepLine> steps;
     if (build) {
         steps = build_steps(r.log(), !running, ok);
@@ -673,9 +740,13 @@ void App::home_task(const Box& crimson, const Box& blue) {
     const double fraction = task_fraction();
     {
         auto g = ui.open("home/crimson", crimson);
+        const std::string steps_label = build ? std::to_string(steps.size()) + " steps" : std::string("Steps");
         section_label(ui, "task/steps-label",
-                      build ? std::to_string(steps.size()) + " steps" : std::string("Steps"), Half::Crimson, {},
-                      fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
+                      !update       ? steps_label
+                      : chain.done ? "Last part · " + steps_label
+                                   : "Part " + std::to_string(chain.waiting ? chain.at - 1 : chain.at) + " of " +
+                                         std::to_string(chain.count) + " · " + steps_label,
+                      Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         {
             auto rows = ui.open("task/rows", Box{.gap = 6});
             for (size_t i = 0; i < steps.size(); ++i) {
@@ -697,11 +768,15 @@ void App::home_task(const Box& crimson, const Box& blue) {
         auto b = ui.open("task/btns", fit(Box{.layout = Layout::Row, .margin = {0, 14, 0, 0}, .gap = 12,
                                               .line_gap = 12, .wrap = true},
                                           SeamFit::CrimsonRect));
-        const bool can_play = ok && (task_kind_ == m::TaskKind::kInstall || task_kind_ == m::TaskKind::kUpdate) &&
+        const bool can_play = ok && !between &&
+                              (update ? chain.done
+                                      : task_kind_ == m::TaskKind::kInstall || task_kind_ == m::TaskKind::kUpdate) &&
                               action("play") && action("play")->enabled;
-        if (running) {
+        if (between && chain.handed_over) {
+            // (The new launcher opens and this one ends: nothing to press.)
+        } else if (running || between) {
             ButtonSpec cancel;
-            cancel.label = view_.task.button.label.empty() ? "Cancel" : view_.task.button.label;
+            cancel.label = !running || view_.task.button.label.empty() ? "Cancel" : view_.task.button.label;
             cancel.prompt = Prompt::Back;
             cancel.half = Half::Crimson;
             cancel.disabled = !view_.task.button.enabled;
@@ -750,14 +825,26 @@ void App::home_task(const Box& crimson, const Box& blue) {
                                               .gap = 12, .align = Align::Center},
                                           SeamFit::BlueRect));
         if (running) pill(ui, "task/pill", r.view().button.label == "Stopping…" ? "Stopping" : "Running", Tone::Blue, true);
+        else if (between && chain.waiting) pill(ui, "task/pill", "Running", Tone::Blue, true);
         else pill(ui, "task/pill", ok ? "Done" : stopped ? "Stopped" : "Failed", ok ? Tone::Ok : stopped ? Tone::Warn : Tone::Bad);
-        text(ui, "task/folder", TextSpec{m::shown_path(folder), tx::kKick, c::kBlueDim}, Box{.w = Size::grow()});
+        if (update) {
+            // ("UPDATE · 2 OF 3 · THE GAME PROGRAM": the part that runs, or the one that starts next.)
+            std::string kick = "Update · " + std::to_string(chain.at) + " of " + std::to_string(chain.count) + " · " +
+                               (chain.waiting && !chain.next.empty() ? chain.next[0].title : chain.part);
+            if (chain.done) kick = "Update · all " + std::to_string(chain.count) + " parts";
+            for (char& ch : kick) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            text(ui, "task/folder", TextSpec{kick, tx::kKick, c::kCyan}, Box{.w = Size::grow()});
+        } else {
+            text(ui, "task/folder", TextSpec{m::shown_path(folder), tx::kKick, c::kBlueDim}, Box{.w = Size::grow()});
+        }
     }
     const char* doing = task_kind_ == m::TaskKind::kInstall      ? "Installing"
                         : task_kind_ == m::TaskKind::kUpdate     ? "Updating"
                         : task_kind_ == m::TaskKind::kUninstall  ? "Uninstalling"
                                                                  : "Updating";
-    const std::string big = running ? doing : last.title;
+    const std::string big = running || (between && chain.waiting) ? std::string(doing)
+                            : update && chain.done                ? std::string("Updated")
+                                                                  : last.title;
     text(ui, "task/title", TextSpec{.text = big, .style = tx::kBig, .chroma = 3, .autofit_min = 26},
          fit({}, SeamFit::BlueRect));
     text(ui, "task/game",
@@ -775,6 +862,10 @@ void App::home_task(const Box& crimson, const Box& blue) {
         step_name = ok ? std::string("Done") : steps[static_cast<size_t>(at - 1)].name;
     } else if (!running) {
         where = ok ? "Done" : stopped ? "Stopped" : "Failed";
+    }
+    if (between && chain.waiting) {
+        where = "Part " + std::to_string(chain.at - 1) + " of " + std::to_string(chain.count) + " done";
+        step_name = "Next: " + (chain.next.empty() ? chain.part : chain.next[0].title);
     }
     {
         auto row = ui.open("task/numbers", fit(Box{.layout = Layout::Row, .gap = 22, .align = Align::Center},
@@ -802,6 +893,18 @@ void App::home_task(const Box& crimson, const Box& blue) {
             headline = "Stopped at: " + l.text + (l.count.empty() ? "" : "  ·  " + l.count);
         }
         detail = last.detail;
+        if (between && chain.waiting) {
+            headline = "The next part starts by itself in a moment.";
+            detail.clear();
+        } else if (between) {
+            headline = last.title + ": the new launcher opens and goes on with the rest.";
+            detail.clear();
+        } else if (update && chain.done) {
+            headline = chain.summary;
+            detail = chain.later;
+        } else if (update && !ok) {
+            detail = last.detail + (chain.later.empty() ? "" : (last.detail.empty() ? "" : " ") + chain.later);
+        }
     }
     if (!headline.empty())
         text(ui, "task/headline", TextSpec{.text = headline, .style = tx::kFileName, .color = rgb(0xe9edf5)},
@@ -813,7 +916,26 @@ void App::home_task(const Box& crimson, const Box& blue) {
         log_view(ui, "task/log", log_, fit(Box{.h = Size::fixed(220), .margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
         return;
     }
-    if (running && task_kind_ == m::TaskKind::kInstall) {
+    if (update && (running || between) && !chain.next.empty() && !chain.handed_over) {
+        // What comes after this part, in order.
+        text(ui, "task/next-label", TextSpec{"Then", tx::kLabelEm, c::kCyan},
+             fit(Box{.margin = {0, 12, 0, 0}}, SeamFit::BlueRect));
+        int n = chain.waiting ? chain.at : chain.at + 1;
+        for (size_t i = 0; i < chain.next.size(); ++i, ++n) {
+            numbered_item(ui, "task/next" + std::to_string(i), n, chain.next[i].title, chain.next[i].text,
+                          fit(Box{.margin = {0, 8, 0, 0}}, SeamFit::BlueRect));
+        }
+    } else if (update && chain.done) {
+        describe_panel(ui, "task/xpl", "Next",
+                       "Play starts the game. Fighters has every character; Settings the display and the keys.",
+                       fit({}, SeamFit::BlueSkewed));
+    } else if (update && (failed || stopped)) {
+        describe_panel(ui, "task/xpl", "What now",
+                       "Details has this part's own words. Try Again goes on from it: the parts done stay done. "
+                       "Close leaves the rest for Update on Home.",
+                       fit({}, SeamFit::BlueSkewed));
+    } else if (update) {
+    } else if (running && task_kind_ == m::TaskKind::kInstall) {
         describe_panel(ui, "task/xpl", "While it runs",
                        "The game program is built for this PC from your game, then the game is copied into this "
                        "folder. Stopping keeps what is copied: the install resumes from there.",

@@ -124,7 +124,7 @@ struct Effect {
         kOpenMenu,     // Windows: More's menu (view().game.more)
         kSaveOwned,    // Steam's answer kept (text: the JSON) in Places::owned_cache
         kSaveFolders,  // Windows: Settings > Folders saved (main.py --query save-settings)
-        kOpenUpdated,  // Windows: the updated launcher opened (then opened_updated())
+        kOpenUpdated,  // Windows: the updated launcher opened (then opened_updated()); go_on: Home's UPDATE goes on there
         kQuit,
     };
     Kind kind;
@@ -132,6 +132,7 @@ struct Effect {
     fs::path path, path2;
     UninstallOptions uninstall{};
     uint64_t generation = 0; // kRunPreflight: the request its answer goes with (Preflight::generation)
+    bool go_on = false;      // kOpenUpdated: opened with kContinueVariable (the rest of Home's UPDATE runs there)
 };
 
 // What the model asks of the PC (the app's real one, a test's).
@@ -173,6 +174,7 @@ public:
     static constexpr double kStatusSeconds = 5;         // back in the window: looked at again after this
     static constexpr double kReleaseSeconds = 6 * 3600; // GitHub asked again after this
     static constexpr double kGameWatchSeconds = 2;      // a game started elsewhere: looked for again after this
+    static constexpr double kContinueSeconds = 300;     // continue_update(): given up when the facts take longer
 
     struct Parts {
         Commands& commands;
@@ -217,6 +219,21 @@ public:
     void set_launcher_settings(LauncherSettings s) { launcher_ = s; }
     // Windows: what --query state answered (after each task too).
     void set_windows_state(WindowsState state);
+    // Home's UPDATE after its launcher part (kContinueVariable: the launcher that updated this one opened it so):
+    // the rest starts by itself once the facts are complete (the importer's answer in, nothing running), never the
+    // launcher's part again. Given up after kContinueSeconds.
+    void continue_update(double now);
+    // A part of Home's UPDATE runs, or starts next by itself: the task screen shows the update.
+    bool in_update() const { return chain_ && (chain_->running || chain_->next); }
+    // The task that ended was a part of Home's UPDATE that is not its end (another part follows, here or in the new
+    // launcher): one sound for the whole update (updates_done()).
+    bool update_goes_on() const { return chain_ && !chain_->stopped && !chain_->done; }
+    // The task shown (running or its result) is a part of Home's UPDATE (view().task.chain says which).
+    bool update_shown() const {
+        return chain_ && (chain_->running || chain_->next || chain_->end_serial == runner_.serial());
+    }
+    // How many of Home's UPDATEs ended with every part done (the app's sound when it changes).
+    int updates_done() const { return updates_done_; }
     // Something the player is told as a refusal is (no task runs then): the app's own news, e.g. files put back.
     void tell(const std::string& title, const std::string& text, double now) { refuse(title, text, now); }
 
@@ -258,6 +275,12 @@ private:
     void before_next(double now);
     void before_answered(double now);
     void sync();
+    // Home's UPDATE (update_plan's parts, one task each).
+    void start_update_all(double now);
+    void start_part(double now);
+    void part_ended(const TaskResult& result);
+    void part_done();
+    bool settled() const; // nothing runs or is asked: the facts are the PC's
 
     Facts facts_;
     Parts parts_;
@@ -295,6 +318,24 @@ private:
     std::unique_ptr<Job> before_job_;
     std::string before_out_, before_err_;
     bool before_done_ = false;
+    // Home's UPDATE that runs, waits for its next part, or stopped (Try Again goes on from it).
+    struct Chain {
+        std::vector<UpdatePart> parts; // launcher, game, fighters: those to do, in order
+        size_t at = 0;                 // the part that runs, starts next, or stopped
+        bool running = false;          // its task was started and has not ended
+        bool next = false;             // the part `at` starts once settled()
+        bool stopped = false;
+        bool done = false;
+        bool handed_over = false;      // the launcher's part ended with the new launcher opened
+        std::string launcher_to;       // the version the launcher's part brings
+        std::vector<std::string> results; // what each part done brought: "launcher 0.9.0", "the game program", ...
+        std::vector<std::pair<std::string, std::string>> later; // characters left for later, and why
+        int end_serial = -1;           // the runner's serial when its last part ended (that result is the update's)
+    };
+    std::optional<Chain> chain_;
+    bool continue_ = false;
+    double continue_until_ = -1;
+    int updates_done_ = 0;
 };
 
 } // namespace launcher::model

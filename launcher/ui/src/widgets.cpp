@@ -1571,6 +1571,39 @@ void chips(Ui& ui, const std::string& id, std::span<const std::string> options, 
     }
 }
 
+void numbered_item(Ui& ui, const std::string& id, int number, const std::string& title, const std::string& text,
+                   const Box& box) {
+    TextEngine& te = ui.text();
+    static constexpr float kSquare = 26, kIndent = 40;
+    const std::string digits = std::to_string(number);
+    ui.leaf(
+        id, box,
+        [&te, title, text](float max_w) {
+            const float w =
+                std::min(max_w, kIndent + std::max(te.width(tx::kExplainTitle, title), te.width(tx::kExplainText, text)));
+            const float h = te.line_height(tx::kExplainTitle) + 3 +
+                            (text.empty() ? 0 : te.wrapped_height(tx::kExplainText, text, std::max(1.f, w - kIndent)));
+            return Vec2{w, std::max(kSquare, h)};
+        },
+        [title, text, digits, mirrored = ui.mirrored()](PaintContext& ctx) {
+            Canvas& cv = ctx.canvas;
+            const Rect r = ctx.rect;
+            const Rect sq{mirrored ? r.right() - kSquare : r.x, r.y, kSquare, kSquare};
+            surface(cv, sq, rgba(45, 128, 255, .28f), rgba(140, 190, 255, .55f), 0);
+            const float dw = ctx.text.width(tx::kLabelEm, digits);
+            ctx.text.draw(cv, tx::kLabelEm, digits,
+                          {sq.x + (kSquare - dw) / 2, sq.y + (kSquare - ctx.text.line_height(tx::kLabelEm)) / 2},
+                          c::kCyan);
+            const float tw = ctx.text.width(tx::kExplainTitle, title);
+            const float tx0 = mirrored ? r.right() - kIndent - tw : r.x + kIndent;
+            ctx.text.draw(cv, tx::kExplainTitle, title, {tx0, r.y + 2}, rgb(0xe9edf5));
+            if (text.empty()) return;
+            const float y = r.y + 2 + ctx.text.line_height(tx::kExplainTitle) + 3;
+            const Rect body{mirrored ? r.x : r.x + kIndent, y, r.w - kIndent, r.bottom() - y};
+            ctx.text.draw_wrapped(cv, tx::kExplainText, text, body, TextPaint{rgb(0xc4d3ec)}, mirrored ? 1 : 0);
+        });
+}
+
 void describe_panel(Ui& ui, const std::string& id, const std::string& title, const std::string& body, const Box& box) {
     TextEngine& te = ui.text();
     Box b = box;

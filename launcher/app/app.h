@@ -65,6 +65,7 @@ struct Options {
     // (smoke_start: this start's facts, JSON members), then the end.
     fs::path smoke;
     std::string rolled_back; // TTT2_LAUNCHER_ROLLED_BACK (C2): the version an update opened, which never drew
+    bool go_on_update = false; // TTT2_LAUNCHER_CONTINUE=update: Home's UPDATE goes on here after the launcher's part
     std::string smoke_start;
     bool offscreen = false; // TTT2_LAUNCHER_TEST_VIDEO=offscreen (Wine without a display)
 #ifdef _WIN32
@@ -177,6 +178,8 @@ private:
     bool tall() const;
     bool task_screen() const { return task_screen_; }
     void home(const ui::Box& crimson, const ui::Box& blue);
+    ttt2::ui::SlabSpec update_slab() const;
+    void update_list(const launcher::model::Action& a);
     void home_installed(const ui::Box& crimson, const ui::Box& blue);
     void home_first_run(const ui::Box& crimson, const ui::Box& blue);
     void home_unfinished(const ui::Box& crimson, const ui::Box& blue);
@@ -380,6 +383,10 @@ private:
     m::TaskKind task_kind_ = m::TaskKind::kInstall;
     std::string task_title_;
     bool task_was_running_ = false;
+    int updates_done_ = 0; // the model's updates_done() last heard (its chime)
+    std::string home_primary_; // Home's slab's id last drawn (Play, Update, Install, ...)
+    double update_scroll_since_ = -1; // when UPDATE's parts came on the blue side (scrolled to for a moment)
+    size_t update_parts_seen_ = 0;
     std::string pending_choose_;  // kChooseGame's purpose ("" install, "resume")
     fs::path slot_folder_;        // where the install goes (first run's second slot)
     std::string toast_title_, toast_text_;

@@ -25,6 +25,9 @@ inline constexpr const char* kLatestRelease =
 // new one waits for it to end before it opens its window (one window per
 // user: the old one's would be shown instead).
 inline constexpr const char* kReplacesVariable = "TTT2_LAUNCHER_AFTER";
+// Set ("update") on the launcher an update opens when Home's UPDATE has more to do (the game program, the
+// characters): it goes on with them once it has looked. Never passed on to the programs it starts.
+inline constexpr const char* kContinueVariable = "TTT2_LAUNCHER_CONTINUE";
 
 // A version's numbers ("0.1.0", "v0.2", "V1.10.3"); none when it is not one.
 std::optional<std::vector<unsigned>> version_numbers(std::string_view text);
@@ -114,7 +117,8 @@ void forget_previous(const fs::path& appimage);
 inline constexpr const char* kRolledBackVariable = "TTT2_LAUNCHER_ROLLED_BACK";
 // How the updated `appimage` (release `version`) is opened: through /bin/sh, which waits for it. When it ended by a
 // signal (a crash) while previous_file() is still there (no first frame), the previous one is put back and opened
-// with kRolledBackVariable=version (and TTT2_LAUNCHER_AFTER still: it waits for the one that updated, too). (One
+// with kRolledBackVariable=version (and TTT2_LAUNCHER_AFTER still: it waits for the one that updated, too; never
+// kContinueVariable: Home's UPDATE stops there). (One
 // that cannot open its window puts it back itself: restore_previous.)
 std::vector<std::string> open_with_rollback(const fs::path& appimage, const std::string& version);
 

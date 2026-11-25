@@ -6,6 +6,7 @@
 // the goldens (tests/golden) hold them to it.
 
 #include "facts.h"
+#include "rules.h"
 #include "view.h"
 
 #include <string>
@@ -19,6 +20,8 @@ std::string refusal_sentence(const std::string& title, const std::string& why);
 Banner banner_view(const Facts& facts);
 Header header_view(const Facts& facts, bool in_settings);
 GameView game_view(const Facts& facts);
+// What Home's UPDATE does, part by part, as the blue side says it (and what it leaves for later).
+std::vector<UpdatePart> update_parts(const Facts& facts, const UpdatePlan& plan);
 // A path as the window shows it: the home folder ($HOME) as "~".
 std::string shown_path(const fs::path& path);
 CharactersView characters_view(const Facts& facts);

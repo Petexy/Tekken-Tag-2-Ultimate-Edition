@@ -67,11 +67,12 @@ public:
     SelfUpdate(TaskRunner& runner, Starter& starter, UpdateFiles& files, Config config)
         : runner_(runner), starter_(starter), files_(files), config_(std::move(config)) {}
 
-    // Update (header bar, notice): refused (title, why) when it cannot start; nullopt when it started.
+    // Update (header bar, notice): refused (title, why) when it cannot start; nullopt when it started. `go_on`:
+    // Home's UPDATE has more to do, which the new version does once opened (kContinueVariable).
     struct Refusal {
         std::string title, why;
     };
-    std::optional<Refusal> start(double now);
+    std::optional<Refusal> start(double now, bool go_on = false);
     void tick(double now);
     bool running() const { return state_ != State::kIdle; }
 
@@ -100,7 +101,7 @@ private:
     Release release_;
     fs::path file_;
     double now_ = 0, watch_at_ = -1, deadline_ = -1;
-    bool timed_out_ = false, opened_ = false;
+    bool timed_out_ = false, opened_ = false, go_on_ = false;
     int serial_ = 0;
 };
 

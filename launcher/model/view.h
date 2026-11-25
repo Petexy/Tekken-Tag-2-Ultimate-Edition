@@ -116,6 +116,15 @@ struct Header {
 
 enum class GameState { kNotInstalled, kChecking, kCannotInstall, kInstalling, kNotFinished, kInstalled };
 
+// A part of Home's UPDATE, as the blue side lists it: "launcher", "game", "fighters", or "later" (characters it
+// leaves for later, with why).
+struct UpdatePart {
+    std::string kind;
+    std::string title; // "Ultimate Launcher 0.8.0 → 0.9.0", "The game program", "Fighters", "Left for later"
+    std::string text;  // what happens, in a sentence or two
+    bool operator==(const UpdatePart&) const = default;
+};
+
 struct GameView {
     GameState state = GameState::kNotInstalled;
     std::string title = "Tekken Tag Tournament 2";
@@ -125,6 +134,7 @@ struct GameView {
     std::vector<Action> actions; // the button row, in order
     size_t spacer = SIZE_MAX;    // actions from this index on are at the row's right end
     std::vector<Action> more;    // Windows: the More menu's entries (the menu button is in `actions`)
+    std::vector<UpdatePart> update; // UPDATE's parts in order, then what is left for later (empty: nothing to do)
     bool operator==(const GameView&) const = default;
 };
 
@@ -183,6 +193,7 @@ struct NoticeView {
     std::string title, detail;
     std::optional<Action> page; // release-page (What's New), when there is a page
     Action update;              // notice-update
+    bool whole = false;         // Home's UPDATE does it (with the game and the fighters): no button of its own
     bool operator==(const NoticeView&) const = default;
 };
 
@@ -255,6 +266,20 @@ struct TaskView {
     Action button;                  // task: Cancel / Stopping… / Close
     std::optional<Action> open_log; // Windows: Open Log
     Action details;                 // details: the log's expander
+    // Home's UPDATE, one part after another: which part this task is ("2 of 3: the game program"), what comes
+    // after it, and, once all are done, what it brought. `count` 0: the task is not an update's part.
+    struct Chain {
+        int at = 0, count = 0;          // this part's number (1-based) and how many
+        std::string part;               // "Ultimate Launcher", "The game program", "Fighters"
+        std::vector<UpdatePart> next;   // the parts still to come after it (all of them when `waiting`: from it)
+        bool waiting = false;           // the part `at` starts by itself once the launcher has looked again
+        bool handed_over = false;       // the launcher's part is done: the new launcher goes on with the rest
+        bool stopped = false;           // stopped at `at` (failed or cancelled): Try Again goes on from it
+        bool done = false;              // every part is done
+        std::string summary;            // done: "Updated: launcher 0.9.0, the game program, 3 fighters"
+        std::string later;              // characters left for later, and why ("" none)
+        bool operator==(const Chain&) const = default;
+    } chain;
     bool operator==(const TaskView&) const = default;
 };
 

@@ -19,6 +19,7 @@ struct StrokeIcon {
 };
 constexpr StrokeIcon kStrokeIcons[] = {
     {"update", R"(<path d="M12 15V4M7 9l5-5 5 5M5 20h14"/>)"},
+    {"play", R"(<path d="M8 5.5v13l10.5-6.5z"/>)"},
     {"gear",
      R"(<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.6M12 18.4V21M3 12h2.6M18.4 12H21M5.6 5.6l1.9 1.9M16.5 16.5l1.9 1.9M5.6 18.4l1.9-1.9M16.5 7.5l1.9-1.9"/><circle cx="12" cy="12" r="6.4"/>)"},
     {"folder", R"(<path d="M3 6.5h6l2 2.2h10V19H3z"/>)"},

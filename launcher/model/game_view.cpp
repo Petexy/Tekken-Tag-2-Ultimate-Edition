@@ -60,6 +60,53 @@ std::string task_why(const char* then) {
 
 const char* const kBuilderMissing = "The game builder is missing from this launcher.";
 
+// A text without its last full stop (to go on after it).
+std::string without_stop(std::string text) {
+    while (!text.empty() && (text.back() == '.' || text.back() == ' ')) text.pop_back();
+    return text;
+}
+
+} // namespace
+
+std::vector<UpdatePart> update_parts(const Facts& facts, const UpdatePlan& plan) {
+    std::vector<UpdatePart> parts;
+    if (plan.launcher) {
+        parts.push_back({"launcher", "Ultimate Launcher " + plan.launcher_from + " → " + plan.launcher_to,
+                         "Downloads " + plan.launcher_to + " in place of this " +
+                             (facts.caps.windows ? std::string("launcher") : std::string("AppImage")) +
+                             ", which then restarts by itself and goes on."});
+    }
+    if (plan.game) {
+        const std::string from = facts.caps.windows ? "on this PC from your game" : "from the game in its folder";
+        parts.push_back({"game", "The game program",
+                         (plan.launcher ? "Built again by the new launcher, " : "Built again for " + plan.game_for + ", ") +
+                             from + ": a few minutes. Saves and settings stay."});
+    }
+    if (!plan.fighters.empty()) {
+        bool tekken7 = false, tekken8 = false;
+        std::vector<std::string> names;
+        for (const std::string& name : plan.fighters) {
+            const Fighter* f = fighter(facts, name);
+            if (f) (f->of(kTekken8) ? tekken8 : tekken7) = true;
+            names.push_back(display_name(facts, name));
+        }
+        const std::string games = tekken7 && tekken8 ? "Tekken 7 and Tekken 8" : tekken8 ? "Tekken 8" : "Tekken 7";
+        parts.push_back({"fighters", "Fighters",
+                         (names.size() <= 4 ? joined(names) : joined_most(names, 3)) +
+                             (names.size() == 1 ? " gets" : " get") +
+                             " the newest pack, made from your own " + games + "."});
+    }
+    if (!plan.later.empty()) {
+        std::string text;
+        for (const auto& [name, why] : plan.later)
+            text += (text.empty() ? "" : "; ") + name + " (" + without_stop(why) + ")";
+        parts.push_back({"later", "Left for later", text + "."});
+    }
+    return parts;
+}
+
+namespace {
+
 void installed(const Facts& facts, GameView& v) {
     const bool playing = facts.game_running;
     const bool task = facts.task.has_value();
@@ -119,8 +166,23 @@ void installed(const Facts& facts, GameView& v) {
         if (b.describe.more.back().empty()) b.describe.more.pop_back();
         v.actions.push_back(b);
     };
+    // Home's UPDATE (any part pending): in Play's place; Play is then an ordinary entry (none while the game is older
+    // than this launcher can run).
+    const UpdatePlan plan = update_plan(facts);
+    if (!plan.empty()) {
+        Action all = button("update-everything", "Update", !playing && !task,
+                            playing ? refusal_sentence("The game is running", "Quit it, then update.") : task_why("update"),
+                            "Bring the launcher, the game and the fighters up to date");
+        all.primary = true;
+        all.icon = Icon::kUpdate;
+        all.describe.explain = plan.parts() == 1 ? std::string("One part to bring up to date:")
+                                                 : std::to_string(plan.parts()) +
+                                                       " parts, brought up to date one after another:";
+        v.actions.push_back(all);
+        v.update = update_parts(facts, plan);
+    }
     if (!older.empty()) {
-        update_button(true);
+        if (plan.empty()) update_button(true);
     } else {
         Action play =
             button("play", playing ? "Playing" : "Play", !playing && !task,
@@ -128,7 +190,7 @@ void installed(const Facts& facts, GameView& v) {
                    : facts.task && facts.task->kind == TaskKind::kShaders
                        ? std::string("The game starts by itself once its shaders are ready.")
                        : task_why("play"));
-        play.primary = true;
+        play.primary = plan.empty();
         play.icon = Icon::kPlay;
         play.describe.state = playing ? "Running" : "";
         v.actions.push_back(play);
@@ -137,7 +199,7 @@ void installed(const Facts& facts, GameView& v) {
     settings.icon = Icon::kSettings;
     settings.describe.title = "Settings";
     v.actions.push_back(settings);
-    if (update && older.empty()) update_button(false);
+    if (update && older.empty() && plan.empty()) update_button(false);
     v.spacer = v.actions.size();
     Action open = button("open-folder", "", true, {}, "Open the install folder");
     open.icon = Icon::kFolder;
@@ -446,6 +508,12 @@ NoticeView notice_view(const Facts& facts) {
                                      : facts.launcher_version;
         n.detail = "You have " + have + ". Update replaces this " + (facts.caps.windows ? "launcher" : "AppImage") +
                    " with it and opens it.";
+        // (Installed: Home's UPDATE does it with the rest, the game and the fighters; this one says so.)
+        if (update_plan(facts).launcher && facts.install.state == InstallState::kInstalled) {
+            n.whole = true;
+            n.detail = "You have " + have + ". Update on Home gets it first, then brings the game program and the "
+                       "fighters up to date.";
+        }
         page(facts.newer->page,
              facts.newer->page.starts_with("https://") || (facts.custom_releases && !facts.newer->page.empty()));
     } else if (facts.self_update && facts.caps.branch_updates && !facts.windows.branch.empty() && facts.main_news &&
