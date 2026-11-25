@@ -26,7 +26,8 @@
  *                                      the fighters' battle subtitles (Binary/subtitles/<code>/<language>/<code>_sub.bin
  *                                      in the game's tkdata.bin), read by the game's own reader of those files, the
  *                                      language one of jp us br ns fr it de es ru ar tw kr: "file <0/1> <n> <code>"
- *                                      then n raw bytes per fighter, in order, then "end"
+ *                                      then n raw bytes per fighter, in order, or "late <code>" (no bytes) for one
+ *                                      whose file the game had not read in time (ask again later), then "end"
  *     quit                             ends the helper
  * The game's functions are called on a thread of their own (they queue work on the game's own threads, or work on the
  * buffers alone); no address or code comes from the connection.
@@ -441,9 +442,11 @@ static void load(unsigned id) {
 /* The battle subtitles of fighters (roster ids) in one of the game's text languages, as the game reads them for a
  * fight: Binary/subtitles/<code>/<language>/<code>_sub.bin from its tkdata.bin, through its own reader, the code the
  * game's own (its fighter info's). "file <0/1> <n> <code>" then n raw bytes per fighter, in order, then "end" (0: the
- * game has no such file or could not read it, or the fighter is unknown: code "-"). The requests sit on a vector of
- * the helper's (its room made beforehand: the game never reallocates it) and are released with the game's release,
- * which frees them once read; the helper's memory is freed only when every call has ended. */
+ * game has no such file or could not read it, or the fighter is unknown: code "-"); "late <code>" instead (no bytes)
+ * for a fighter the game had not answered for within SUBTITLE_WAIT_MS (its request still reading, or none could be
+ * made): not an answer of the game's, so the caller asks again later. The requests sit on a vector of the helper's
+ * (its room made beforehand: the game never reallocates it) and are released with the game's release, which frees
+ * them once read; the helper's memory is freed only when every call has ended. */
 static const char* const LANGUAGES[] = {"jp", "us", "br", "ns", "fr", "it", "de", "es", "ru", "ar", "tw", "kr"};
 enum { MAX_SUBTITLES = 64, SUBTITLE_PATH = 64, SUBTITLE_WAIT_MS = 30000, MAX_SUBTITLE_BYTES = 16 << 20 };
 
@@ -508,6 +511,10 @@ static void subtitles(const char* language, const unsigned* ids, unsigned count)
         Sleep(20);
     }
     for (unsigned i = 0; i < count; ++i) {
+        if (codes[i][0] && !states[i]) {      /* (no answer of the game's yet: neither read nor "not there") */
+            out_printf("late %s\n", codes[i]);
+            continue;
+        }
         const unsigned long long data = states[i] == READ ? read_u64(requests[i] + REQUEST_DATA) : 0;
         const unsigned long long n = data ? read_u64(requests[i] + REQUEST_SIZE) : 0;
         char* bytes = n && n <= MAX_SUBTITLE_BYTES ? malloc((size_t)n) : NULL;

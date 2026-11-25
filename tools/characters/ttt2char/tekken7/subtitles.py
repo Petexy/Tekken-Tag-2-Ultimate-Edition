@@ -42,10 +42,18 @@ def saved(code, language='us', folder=None):
 
 def all_saved(code, folder=None):
     """Whether the fighter's subtitle files are saved in every language the import has the game read
-    (autodump.SUBTITLE_LANGUAGES). Its pack shows them only then; else the pack is made without them and says so
-    (character.ini without_subtitles), and launcher.py status offers to update it."""
+    (autodump.SUBTITLE_LANGUAGES); else the import has the game read them first (Steam running), and a pack made
+    without some says which languages it has (character.ini subtitle_languages; none at all: without_subtitles), so
+    that launcher.py status offers to update it. Files saved by an earlier version (English only) are not all."""
     from .autodump import SUBTITLE_LANGUAGES
     return all(saved(code, language, folder) for language in SUBTITLE_LANGUAGES)
+
+
+def saved_languages(code, folder=None):
+    """The languages (the game's names, autodump.SUBTITLE_LANGUAGES' order) the fighter's subtitle files are saved
+    in."""
+    from .autodump import SUBTITLE_LANGUAGES
+    return tuple(language for language in SUBTITLE_LANGUAGES if saved(code, language, folder))
 
 
 def _name(b):
@@ -91,13 +99,16 @@ def parts(code, language='us', folder=None):
     return out
 
 
-def one_line(texts):
-    """Parts' texts as one line: line breaks and runs of spaces become one space (for the languages written with
-    spaces: English)."""
+def one_line(texts, spaced=True):
+    """Parts' texts as one line: line breaks and runs of spaces become one space (spaced: the languages written with
+    spaces); else (Japanese) the parts and the lines of each are joined as they are."""
+    if not spaced:
+        return ''.join(line.strip() for t in texts for line in t.splitlines())
     return ' '.join(' '.join(texts).split())
 
 
 def lines(code, language='us', folder=None):
     """{key (a pose's move name = its voice line's event name: <prefix>_s00, <prefix>_w02): its text, its parts
     joined on one line} of the fighter's saved subtitles; {} when none are saved or the game has none."""
-    return {key: one_line(t for _, _, t in ps) for key, ps in parts(code, language, folder).items()}
+    return {key: one_line((t for _, _, t in ps), language != 'jp')
+            for key, ps in parts(code, language, folder).items()}

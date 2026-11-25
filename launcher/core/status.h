@@ -48,6 +48,10 @@ struct Fighter {
     // Their pack was made without those subtitles (not saved then): `update`
     // is true for it. (Only with `added()`.)
     bool without_subtitles = false;
+    // (Tekken 7) Their pack has those subtitles in English but not in every
+    // other language the game shows (not saved then): `update` is true for
+    // it. (Only with `added()`, never with `without_subtitles`.)
+    bool partial_subtitles = false;
     // How many outfits adding them can make (import_character.py
     // --outfits), 0 for none.
     int outfits = 0;

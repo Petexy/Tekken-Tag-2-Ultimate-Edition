@@ -420,7 +420,8 @@ class LauncherStatus(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             packs, movesets8, game = (os.path.join(d, n) for n in ('packs', 'movesets8', 'TEKKEN 8'))
             r = definition('reina')
-            pack.write(packs, importer.with_stand_in(r) if stand_in else r, {'.nud': b'nud'}, 0)
+            pack.write(packs, importer.with_stand_in(r) if stand_in else r, {'.nud': b'nud'}, 0,
+                       subtitle_languages=source.SUBTITLE_LANGUAGES)
             if saved is not None:                  # (every Tekken 8 fighter's alike: one unsaved asks for the build)
                 write_saved(movesets8, {definition(f).TEKKEN8_CODE: saved for f in CHARACTERS
                                         if game_of(definition(f)) == 'tekken8'}, {'build': 'old'})

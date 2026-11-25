@@ -91,7 +91,7 @@ class Status(unittest.TestCase):
             self.assertEqual(fighters['kazumi'], {'name': 'kazumi', 'display': 'Kazumi Mishima', 'code': 'kzm', 'dlc': None,
                                                   'installed': False, 'outdated': False, 'newer': False,
                                                   'update': False, 'without_subtitles': False,
-                                                  'moveset_saved': False, 'outfits': 9, 'outfits_added': False,
+                                                  'partial_subtitles': False, 'moveset_saved': False, 'outfits': 9, 'outfits_added': False,
                                                   'needs_game': False, 'subtitles_saved': False})
             self.assertEqual(fighters['reina']['outfits'], 0)
             self.assertEqual(fighters['eliza']['dlc'], 592370)
@@ -153,7 +153,8 @@ class Status(unittest.TestCase):
             made_pack(packs, 'kzm', 0)
             ini = os.path.join(packs, 'kzm', 'character.ini')
             with open(ini, 'a') as f:
-                f.write('revision = %d\n' % pack.revision(importer.definition('kazumi')))
+                f.write('revision = %d\nsubtitle_languages = %s\n' % (pack.revision(importer.definition('kazumi')),
+                                                                       ' '.join(source.SUBTITLE_LANGUAGES)))
 
             def fighters():
                 return {f['name']: f for f in launcher.status(None, os.path.join(d, 'movesets'))['fighters']}
@@ -165,10 +166,52 @@ class Status(unittest.TestCase):
             with open(ini, 'a') as f:
                 f.write('without_subtitles = 1\n')
             self.assertEqual(kazumi(), (True, True, False))
-            write(subtitles7.saved_path(importer.definition('kazumi').TEKKEN7_CODE, 'us', os.path.join(d, 'files')))
+            for language in autodump.SUBTITLE_LANGUAGES:
+                write(subtitles7.saved_path(importer.definition('kazumi').TEKKEN7_CODE, language,
+                                            os.path.join(d, 'files')))
+                if language == 'us':
+                    self.assertEqual(kazumi(), (True, True, False))     # (English only: the other languages too)
             self.assertEqual(kazumi(), (True, True, True))              # (saved since: the update has them)
             self.assertNotIn('subtitles_saved', fighters()['reina'])    # (Tekken 7's only)
             self.assertFalse(fighters()['chloe']['without_subtitles'])  # (no pack)
+
+    def test_packs_made_without_some_languages(self):
+        """A pack whose subtitles are missing a language an import reads (source.SUBTITLE_LANGUAGES) is one to update:
+        one made before packs said which (English only then), a Tekken 7 fighter's made while some were not saved.
+        Status tells which (update, without_subtitles: no English, partial_subtitles: English, not all the others),
+        the C++ launcher's words for each."""
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, HOME=d, TTT2_CHARACTERS=os.path.join(d, 'packs')), \
+                mock.patch.object(autodump, 'FILES', os.path.join(d, 'files')), \
+                mock.patch.object(source, 'find_tekken8', return_value=None):
+            packs = os.path.join(d, 'packs')
+            inis = {}
+            for name, code, slot in (('kazumi', 'kzm', 0), ('reina', 'rei', 1)):
+                made_pack(packs, code, slot)
+                inis[name] = os.path.join(packs, code, 'character.ini')
+                with open(inis[name], 'a') as f:
+                    f.write('revision = %d\n' % pack.revision(importer.definition(name)))
+
+            def state(name, languages):
+                text = pack.read_ini(inis[name])
+                with open(inis[name], 'w') as f:
+                    f.write(''.join('%s = %s\n' % kv for kv in text.items() if kv[0] != 'subtitle_languages')
+                            + ('subtitle_languages = %s\n' % languages if languages is not None else ''))
+                f = {f['name']: f for f in launcher.status(None, os.path.join(d, 'movesets'))['fighters']}[name]
+                return f['update'], f['without_subtitles'], f['partial_subtitles']
+            everything = ' '.join(source.SUBTITLE_LANGUAGES)
+            for name in ('kazumi', 'reina'):
+                self.assertEqual(state(name, everything), (False, False, False))
+                self.assertEqual(state(name, 'ru ja it es de fr en'), (False, False, False))     # (any order)
+                self.assertEqual(state(name, None), (True, False, False))   # (an earlier version's pack: to update)
+                self.assertEqual(state(name, 'en fr de it es ja'),
+                                 (True, False, False) if name == 'reina' else (True, False, True))
+            self.assertEqual(state('kazumi', 'en'), (True, False, True))    # (Steam closed: an earlier English only)
+            self.assertEqual(state('kazumi', ''), (True, True, False))      # (no English: none saved)
+            self.assertEqual(state('kazumi', 'fr de it es ru ja'), (True, True, False))
+            with open(inis['kazumi'], 'a') as f:
+                f.write('without_subtitles = 1\n')
+            self.assertEqual(state('kazumi', ''), (True, True, False))
 
     def test_needs_its_game_only_without_a_copy_of_its_pictures(self):
         # (Reina's and Azucena's packs, made by an older version, have no source/; Tekken 8 is gone)

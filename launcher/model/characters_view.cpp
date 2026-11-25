@@ -100,6 +100,9 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
                       : f.without_subtitles
                           ? "Their intro and win subtitles could not be saved from Tekken 7 when they were added (Steam "
                             "was not running): updating them adds them."
+                      : f.partial_subtitles
+                          ? "Their intro and win subtitles in the game's other languages are saved from Tekken 7 by an "
+                            "update; Steam must be running."
                           : "Made by an older version: they are in the game, and updating them gives them what "
                             "this version adds."};
     } else if (outfits_changed(facts, f)) {

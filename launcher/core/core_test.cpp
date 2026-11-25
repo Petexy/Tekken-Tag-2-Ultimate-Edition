@@ -189,11 +189,15 @@ void test_status() {
                     "readable": true},
         "tekken8": {"found": true, "path": "/l/TEKKEN 8", "error": null, "run_error": null, "build_known": false},
         "fighters": [{"name": "kazumi", "display": "Kazumi Mishima", "dlc": null, "installed": true,
-                      "moveset_saved": true, "subtitles_saved": false, "without_subtitles": true},
+                      "moveset_saved": true, "subtitles_saved": false, "without_subtitles": true,
+                      "partial_subtitles": true},
                      {"name": "reina", "display": "Reina", "dlc": null, "installed": true, "outdated": false,
                       "newer": false, "update": true, "moveset_saved": false, "stand_in": true, "game": "tekken8"},
                      {"name": "later", "display": "Later", "dlc": 2732280, "installed": false, "update": false,
-                      "moveset_saved": false, "stand_in": true, "game": "tekken8", "without_subtitles": true}]})");
+                      "moveset_saved": false, "stand_in": true, "game": "tekken8", "without_subtitles": true,
+                      "partial_subtitles": true},
+                     {"name": "josie", "display": "Josie Rizal", "dlc": null, "installed": true,
+                      "moveset_saved": true, "subtitles_saved": false, "partial_subtitles": true}]})");
     check(both && both->tekken8_helper == "mingw" && both->helper == "prebuilt" && both->cc == "/usr/bin/gcc",
           "status both: each game's helper, the C compiler");
     check(both && !both->tekken7_usable() && both->tekken7_readable && both->readable(kTekken7) &&
@@ -202,13 +206,17 @@ void test_status() {
     check(both && both->tekken8_usable() && both->readable(kTekken8) && both->tekken8_path == "/l/TEKKEN 8" &&
               both->tekken8_build_known == false && both->tekken8_run_error.empty(),
           "status both: Tekken 8");
-    check(both && both->fighters.size() == 3, "status both: fighters");
-    if (both && both->fighters.size() == 3) {
-        const Fighter &kazumi = both->fighters[0], &reina = both->fighters[1], &later = both->fighters[2];
+    check(both && both->fighters.size() == 4, "status both: fighters");
+    if (both && both->fighters.size() == 4) {
+        const Fighter &kazumi = both->fighters[0], &reina = both->fighters[1], &later = both->fighters[2],
+                      &josie = both->fighters[3];
         check(kazumi.of(kTekken7) && !kazumi.of(kTekken8) && !kazumi.stand_in, "status both: kazumi");
         check(!kazumi.subtitles_saved && kazumi.without_subtitles && reina.subtitles_saved && !reina.without_subtitles &&
                   !later.without_subtitles,
               "status both: Tekken 7's subtitles not saved, a pack made without them (only with a pack)");
+        check(josie.partial_subtitles && !josie.without_subtitles && !josie.subtitles_saved &&
+                  !kazumi.partial_subtitles && !later.partial_subtitles && !reina.partial_subtitles,
+              "status both: a pack made with English only (only with a pack, never with no subtitles at all)");
         check(reina.of(kTekken8) && reina.added() && reina.stand_in && reina.update && !reina.moveset_saved &&
                   reina.dlc == 0,
               "status both: a stand-in Reina to update");
