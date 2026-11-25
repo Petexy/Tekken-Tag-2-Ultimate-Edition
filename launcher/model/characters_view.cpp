@@ -160,11 +160,14 @@ FighterRow fighter_row(const Facts& facts, const Fighter& f, bool usable) {
     return r;
 }
 
+// A game's DLC characters (each game's: the old launcher had only Tekken 7's apart).
 void dlc_block(const Facts& facts, GameGroup& g, bool usable) {
     const ImporterStatus& s = *facts.status;
+    const bool tekken8 = g.game == kTekken8;
+    const bool askable = tekken8 ? s.tekken8_usable() : s.tekken7_usable();
     int dlc_count = 0, owned_count = 0, known_count = 0, dlc_outdated = 0, dlc_update = 0;
     for (const Fighter& f : s.fighters) {
-        if (!f.of(kTekken7) || f.dlc == 0) continue;
+        if (!f.of(g.game) || f.dlc == 0) continue;
         ++dlc_count;
         owned_count += owns(facts, f) == true;
         known_count += owns(facts, f).has_value();
@@ -174,11 +177,11 @@ void dlc_block(const Facts& facts, GameGroup& g, bool usable) {
     if (dlc_count == 0) return;
     const bool known = known_count > 0;
     DlcBlock d;
-    d.expander.id = "dlc";
+    d.expander.id = tekken8 ? "dlc:tekken8" : "dlc";
     d.expander.label = "DLC characters";
     d.expander.kind = ActionKind::kExpander;
     d.expander.checked = facts.dlc_expanded;
-    d.expander.describe.title = "DLC characters";
+    d.expander.describe.title = std::string(game_name(g.game)) + "'s DLC characters";
     d.pills.push_back({known ? std::to_string(owned_count) + " of " + std::to_string(dlc_count) + " owned"
                              : std::to_string(dlc_count),
                        PillKind::kNeutral,
@@ -196,8 +199,8 @@ void dlc_block(const Facts& facts, GameGroup& g, bool usable) {
                           : "Asking Steam which DLC you own…";
         note.tone = Tone::kDim;
         note.small = true;
-    } else if ((o.state == OwnedState::kFailed || o.errors.count(kTekken7)) && s.tekken7_usable()) {
-        const auto failed = o.errors.find(kTekken7);
+    } else if ((o.state == OwnedState::kFailed || o.errors.count(g.game)) && askable) {
+        const auto failed = o.errors.find(g.game);
         const std::string& why = failed != o.errors.end() ? failed->second : o.error;
         note = text_line(known ? "Steam could not be asked again (" + why +
                                      "). It said last time that your account owns " + owns_text + "."
@@ -208,13 +211,16 @@ void dlc_block(const Facts& facts, GameGroup& g, bool usable) {
     } else if (known) {
         note = text_line(s.steam_running ? "Your Steam account owned " + owns_text + " last time Steam was asked."
                                          : "Your Steam account owned " + owns_text +
-                                               " last time Steam was asked. Start Steam to add them: it checks again.",
+                                               " last time Steam was asked. Start Steam" +
+                                               // (a Tekken 8 one whose moves are saved is added without it)
+                                               (tekken8 ? " and it checks again." : " to add them: it checks again."),
                          Tone::kDim, true);
     } else if (!s.steam_installed) {
         note = text_line("Which DLC you own is not known: Steam, which tells it, is not installed.", Tone::kDim, true);
-    } else if (!s.tekken7_usable()) {
-        note = text_line(std::string("Which DLC you own is not known: Steam is asked through Tekken 7, which ") +
-                             (s.tekken7_found ? "cannot be used (see above)." : "is not installed."),
+    } else if (!askable) {
+        note = text_line("Which DLC you own is not known: Steam is asked through " +
+                             std::string(game_name(g.game)) + ", which " +
+                             ((tekken8 ? s.tekken8_found : s.tekken7_found) ? "cannot be used (see above)." : "is not installed."),
                          Tone::kDim, true);
     } else {
         note = text_line(s.steam_running ? "Which DLC you own is not known yet."
@@ -223,12 +229,14 @@ void dlc_block(const Facts& facts, GameGroup& g, bool usable) {
     }
     d.notes.push_back(note);
     d.expander.describe.explain = note.text;
-    const auto owned = owned_to_add(facts);
-    std::string why = facts.task ? task_why("add characters") : game_why(facts, kTekken7);
+    const auto owned = owned_to_add(facts, g.game);
+    std::string why = facts.task ? task_why("add characters") : game_why(facts, g.game);
     if (why.empty() && owned.empty()) why = "No owned DLC character can be added now.";
-    d.add_owned = button("add-all-owned", "Add All Owned", usable && !facts.task && !owned.empty(), why);
+    d.add_owned = button(tekken8 ? "add-all-owned:tekken8" : "add-all-owned", "Add All Owned",
+                         usable && !facts.task && !owned.empty(), why);
+    d.add_owned.describe.title = "Add All Owned: " + d.expander.describe.title;
     for (const Fighter& f : s.fighters) {
-        if (f.of(kTekken7) && f.dlc != 0) d.rows.push_back(fighter_row(facts, f, usable));
+        if (f.of(g.game) && f.dlc != 0) d.rows.push_back(fighter_row(facts, f, usable));
     }
     g.dlc = d;
 }
@@ -356,9 +364,9 @@ GameGroup game_group(const Facts& facts, const std::string& game) {
     }
 
     for (const Fighter& f : s.fighters) {
-        if (f.of(game) && (tekken8 || f.dlc == 0)) g.rows.push_back(fighter_row(facts, f, usable));
+        if (f.of(game) && f.dlc == 0) g.rows.push_back(fighter_row(facts, f, usable));
     }
-    if (!tekken8) dlc_block(facts, g, usable);
+    dlc_block(facts, g, usable);
     return g;
 }
 

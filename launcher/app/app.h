@@ -201,7 +201,7 @@ private:
 
     // ---- Fighters (fighters.cpp)
     struct FighterGroup {
-        std::string key, title, game; // "t7" / "dlc" / "t8", "Tekken 7 DLC", kTekken7
+        std::string key, title, game; // "t7" / "dlc" / "t8" / "dlc8", "Tekken 7 DLC", kTekken7
         const m::GameGroup* group = nullptr;
         bool dlc = false;
         std::vector<const m::FighterRow*> rows;

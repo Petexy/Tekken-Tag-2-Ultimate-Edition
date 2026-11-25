@@ -157,10 +157,10 @@ struct FighterRow {
 };
 
 struct DlcBlock {
-    Action expander;              // dlc
+    Action expander;              // dlc[:tekken8]
     std::vector<Pill> pills;      // "3 of 8 owned", "1 to add again", "2 to update"
     std::vector<Line> notes;      // what Steam said (inside)
-    Action add_owned;             // add-all-owned
+    Action add_owned;             // add-all-owned[:tekken8]
     std::vector<FighterRow> rows; // inside
     bool operator==(const DlcBlock&) const = default;
 };
@@ -171,7 +171,7 @@ struct GameGroup {
     std::vector<Action> head; // add-all[:tekken8], remove-all:<game>
     std::vector<Line> notes;  // warnings, stand-ins, updates (with their buttons)
     std::vector<FighterRow> rows;
-    std::optional<DlcBlock> dlc; // Tekken 7's DLC (Windows: either game's)
+    std::optional<DlcBlock> dlc; // the game's DLC
     bool operator==(const GameGroup&) const = default;
 };
 
