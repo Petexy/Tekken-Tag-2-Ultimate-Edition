@@ -465,6 +465,87 @@ TEST(layout_scroll_keeps_focus_in_view) {
     CHECK_NEAR(h.ui.state("list")->scroll.value, 400 - 100.f, .5f);
 }
 
+TEST(layout_half_scrolls_to_its_end) {
+    // A half of the stage that scrolls ends scroll_end_gap higher and gives its rows room for its bar; scrolled to
+    // the end it gets there and stays (each frame lays it out from its full height again: the position is kept to
+    // the settled layout's end, not an earlier pass's).
+    Harness h;
+    const Seam seam{900, 400, theme::kSeamTan};
+    int rows = 10;
+    auto declare = [&](Ui& ui) {
+        Box half;
+        half.seam = seam;
+        half.scroll = true;
+        half.scroll_end_gap = 14;
+        half.margin = {38, 102, 0, 0};
+        half.w = Size::fixed(std::round(seam.x_at(102) - 26 - 38));  // (to 26 short of the seam, as the app's)
+        half.h = Size::fixed(300);
+        auto g = ui.open("half", half);
+        for (int i = 0; i < rows; ++i) {
+            Box row;
+            row.h = Size::fixed(40);
+            row.fit = SeamFit::CrimsonRect;
+            ui.leaf("r" + std::to_string(i), row, {}, {});  // (nothing focused pulls it back)
+        }
+    };
+    h.run(declare);
+    CHECK_NEAR(h.ui.rect("half").h, 300 - 14.f, .01f);
+    const Rect r0 = h.ui.rect("r0");
+    CHECK_NEAR(r0.right(), std::round(seam.x_at(r0.bottom()) - theme::kSeamGap - theme::metric::kScrollRoom), .51f);
+    h.ui.scroll_to_end("half", true);
+    for (int i = 0; i < 3; ++i) h.run(declare);
+    const NodeState* s = h.ui.state("half");
+    CHECK(s != nullptr);
+    if (!s) return;
+    const float end = s->content_h - (300 - 14);
+    CHECK_NEAR(s->scroll.value, end, .01f);
+    CHECK_NEAR(h.ui.rect("r9").bottom(), h.ui.rect("half").bottom(), .51f);
+    for (int i = 0; i < 5; ++i) {
+        h.run(declare);
+        CHECK_NEAR(h.ui.state("half")->scroll.value, end, .01f);
+    }
+    // The wheel: up to the top, then down past the end.
+    const Rect hv = h.ui.rect("half");
+    MouseState wheel;
+    wheel.inside = true;
+    wheel.pos = {hv.x + 100, hv.y + 100};
+    const auto turn = [&](float notches) {
+        wheel.wheel = notches;
+        h.run(declare, {}, wheel);
+        for (int i = 0; i < 120; ++i) h.run(declare);
+    };
+    turn(50);
+    CHECK_NEAR(h.ui.state("half")->scroll.value, 0.f, .01f);
+    turn(-50);
+    CHECK_NEAR(h.ui.state("half")->scroll.value, end, .01f);
+    // The thumb, from the top, dragged below the bar's end (the bar runs along the plate's edge, slanted as it).
+    turn(50);
+    const float y0 = hv.y + theme::metric::kScrollBarEnd, y1 = hv.bottom() - theme::metric::kScrollBarEnd;
+    const auto bar_x = [&](float y) { return seam.x_at(y) - theme::kGutter - theme::metric::kScrollRail; };
+    MouseState drag;
+    drag.inside = drag.down = drag.pressed = drag.moved = true;
+    drag.pos = {bar_x(y0 + 4), y0 + 4};
+    h.run(declare, {}, drag);
+    CHECK(h.ui.state("half")->dragging_bar);
+    drag.pressed = false;
+    drag.pos = {bar_x(y1), y1 + 60};
+    for (int i = 0; i < 3; ++i) h.run(declare, {}, drag);
+    CHECK_NEAR(h.ui.state("half")->scroll.value, end, .01f);
+    drag.down = false;
+    drag.released = true;
+    h.run(declare, {}, drag);
+    h.run(declare);
+    CHECK_NEAR(h.ui.state("half")->scroll.value, end, .01f);
+    // All of it fits: its full height, no room, back at the top.
+    rows = 5;
+    h.run(declare);
+    h.run(declare);
+    CHECK_NEAR(h.ui.rect("half").h, 300.f, .01f);
+    CHECK_NEAR(h.ui.state("half")->scroll.value, 0.f, .01f);
+    const Rect f0 = h.ui.rect("r0");
+    CHECK_NEAR(f0.right(), std::round(seam.x_at(f0.bottom()) - theme::kSeamGap), .51f);
+}
+
 TEST(layout_scroll_anchoring) {
     // Lines inserted above the focused row (a refresh) move the scroll offset with it: the row stays in place.
     Harness h;

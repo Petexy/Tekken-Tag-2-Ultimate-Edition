@@ -326,10 +326,10 @@ void Ui::place(int index, float x, float y) {
         NodeState& s = states_[n.id];
         s.content_h = n.content_h;
         s.view_h = n.h;
+        // (Kept within this pass's end only for placing: the position itself is kept to the settled layout's, layout(),
+        // as an earlier pass may end sooner - a half before its scroll bar's room and gap, fit_pass.)
         const float max = std::max(0.f, n.content_h - n.h);
-        s.scroll.target = std::clamp(s.scroll.target, 0.f, max);
-        s.scroll.value = std::clamp(s.scroll.value, 0.f, max);
-        scroll = std::round(s.scroll.value * frame_.scale) / frame_.scale;
+        scroll = std::round(std::clamp(s.scroll.value, 0.f, max) * frame_.scale) / frame_.scale;
         n.scroll_used = scroll;
     }
     auto cross = [&](const Node&, float room, float size, Align a) {
@@ -501,6 +501,13 @@ void Ui::layout() {
         assign_heights(0);
         place(0, 0, 0);
         if (pass == 3 || !fit_pass()) break;
+    }
+    for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+        const Node& n = nodes_[static_cast<std::size_t>(i)];
+        if (!n.box.scroll) continue;
+        NodeState& s = states_[n.id];
+        s.scroll.target = std::clamp(s.scroll.target, 0.f, scroll_max(i));
+        s.scroll.value = std::clamp(s.scroll.value, 0.f, scroll_max(i));
     }
     compute_clips(0, {0, 0, frame_.size.x, frame_.size.y}, -1);
 }
