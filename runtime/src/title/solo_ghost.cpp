@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <string_view>
 
 PPC_FUNC(sub_04545920); // the menu's entity by name (r3 the menus + 4, r4 the name) -> r3
 
@@ -173,11 +174,15 @@ PPC_FUNC(sub_04D49F5C) {
         cafe::title::solo_ghost_battle()) {
         // as a text of a bank: its length in characters before it
         static const uint32_t name = [] {
-            constexpr char kName[] = "SOLO GHOST BATTLE";
-            const uint32_t at = system_alloc(4 + sizeof kName);
+            namespace language = cafe::title::language;
+            const std::string_view label = language::in_current(cafe::title::menudata::kSoloGhostLabel);
+            const uint32_t at = system_alloc(4 + static_cast<uint32_t>(label.size()) + 1);
+            const size_t characters = language::characters(label);
             std::memset(guest_pointer(at), 0, 4);
-            guest_pointer(at)[3] = static_cast<uint8_t>(sizeof kName - 1);
-            std::memcpy(guest_pointer(at + 4), kName, sizeof kName);
+            guest_pointer(at)[2] = static_cast<uint8_t>(characters >> 8);
+            guest_pointer(at)[3] = static_cast<uint8_t>(characters);
+            std::memcpy(guest_pointer(at + 4), label.data(), label.size());
+            guest_pointer(at + 4)[label.size()] = 0;
             return at + 4;
         }();
         ctx.r[3] = name;

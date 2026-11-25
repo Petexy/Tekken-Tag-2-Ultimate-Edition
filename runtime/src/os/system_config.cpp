@@ -1,11 +1,13 @@
 // MCP product settings and UC system configuration: the console's region,
-// language and the like, as an EU console set to English (United Kingdom),
-// matching the title's region.
+// language and the like, as an EU console (United Kingdom), matching the
+// title's region, set to game.ini's language (English by default: see
+// set_system_language).
 
 #include "kernel.h"
 
 #include "cafe/export.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -16,6 +18,8 @@ namespace {
 constexpr uint8_t kRegionEurope = 4;
 constexpr uint32_t kLanguageEnglish = 1;
 constexpr uint32_t kCountryUnitedKingdom = 110;
+
+std::atomic<uint32_t> g_language{kLanguageEnglish}; // cafe.language
 
 // MCP ---------------------------------------------------------------------
 uint32_t MCP_Open() { return 1; }
@@ -46,9 +50,12 @@ int32_t UCOpen() { return 1; }
 int32_t UCClose(int32_t) { return 0; }
 
 bool lookup(std::string_view name, uint32_t& value) {
+    if (name == "cafe.language") {
+        value = g_language.load(std::memory_order_relaxed);
+        return true;
+    }
     struct Setting { std::string_view name; uint32_t value; };
     static constexpr Setting kSettings[] = {
-        {"cafe.language", kLanguageEnglish},
         {"cafe.cntry_reg", kCountryUnitedKingdom},
         {"cafe.initial_launch", 2}, // set up, with a user
         {"cafe.eula_version", 0},
@@ -99,6 +106,10 @@ int32_t UCWriteSysConfig(int32_t, uint32_t, uint32_t) { return 0; }
 int32_t UCDeleteSysConfig(int32_t, uint32_t, uint32_t) { return 0; }
 
 } // namespace
+
+// The console's language (cafe.language: 0 Japanese, 1 English, 2 French,
+// 3 German, 4 Italian, 5 Spanish, ... 10 Russian), before the title runs.
+void set_system_language(uint32_t language) { g_language.store(language, std::memory_order_relaxed); }
 
 CAFE_EXPORT(coreinit, MCP_Open, MCP_Open);
 CAFE_EXPORT(coreinit, MCP_Close, MCP_Close);

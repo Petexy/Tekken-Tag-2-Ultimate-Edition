@@ -6,9 +6,12 @@
 // versus screens, under the fight's health bar) and in the records it is
 // copied into. Without one the title's own stays.
 
+#include <string>
+
 namespace cafe::title {
 
-// After the system heap is made, before the title runs: reads game.ini.
-void prepare_player_name();
+// After the system heap is made, before the title runs: game.ini's
+// player_name (host::game::Settings::player_name; empty: the title's own).
+void prepare_player_name(const std::string& name);
 
 } // namespace cafe::title

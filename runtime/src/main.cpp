@@ -8,9 +8,11 @@
 #include "gpu/backend.h"
 
 #include "host/audio.h"
+#include "host/game_settings.h"
 #include "host/window.h"
 #include "install.h"
 #include "title/controllers.h"
+#include "title/language.h"
 #include "title/paint.h"
 #include "title/player_name.h"
 #include "title/presentation.h"
@@ -27,6 +29,7 @@
 
 namespace cafe::os {
 void init_heaps(uint32_t mem2_begin);
+void set_system_language(uint32_t language);
 int run_main_thread(uint32_t entry, uint32_t argc, uint32_t argv, uint32_t stack_size,
                     uint32_t sda_base, uint32_t sda2_base);
 } // namespace cafe::os
@@ -119,12 +122,21 @@ int main(int argc, char** argv) {
     build_dispatch_table();
     os::init_heaps(image.data_end);
     init_data_imports();
+    // game.ini, read once: the console's language the title reads, and the
+    // player's name.
+    const host::game::Loaded game_settings = host::game::load(host::game::file_path());
+    for (const std::string& line : game_settings.log) std::fprintf(stderr, "ttt2: %s\n", line.c_str());
+    const host::game::Language& language = host::game::language_of(game_settings.settings);
+    os::set_system_language(language.wiiu);
+    title::language::set(language);
+    std::fprintf(stderr, "ttt2: the console's language: %.*s (cafe.language %u)\n",
+                 static_cast<int>(language.name.size()), language.name.data(), language.wiiu);
     title::prepare_presentation();
     title::prepare_controllers();
     title::prepare_paint();
     title::prepare_roster();
     title::prepare_solo_ghost_battle();
-    title::prepare_player_name();
+    title::prepare_player_name(game_settings.settings.player_name);
     title::prepare_customize_select();
     std::fprintf(stderr, "ttt2: loaded image, entry 0x%08X, %zu/%zu guest entries compiled\n",
                  image.entry_point, cafe_program_info.compiled_entries,
