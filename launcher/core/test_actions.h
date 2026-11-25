@@ -33,7 +33,10 @@
 // fullscreen:yes|no, resolution:<auto|1280x720|1920x1080|2560x1440|3840x2160|
 // 5120x2880>, interpolation:yes|no, input-delay:yes|no, async-shaders:yes|no and precompile-shaders:yes|no (that display.ini
 // setting's switch or list set, which saves the file, then the file read
-// back).
+// back), player-name:<name> (Settings > Game's player name set, "player-name:"
+// none, which saves game.ini, then the file read back) and type:<text> (the
+// SDL launcher: text as the keyboard's text input gives it, to the name being
+// edited).
 
 #include <optional>
 #include <string>

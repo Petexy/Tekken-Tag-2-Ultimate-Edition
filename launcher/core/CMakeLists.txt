@@ -4,7 +4,7 @@
 # settings; the launcher's own updates. Tested on its own.
 #
 # Two libraries: ttt2_launcher_core is what any OS's launcher uses (JSON, the
-# progress lines, keyboard.ini, display.ini, release numbers and GitHub's
+# progress lines, keyboard.ini, display.ini, game.ini, release numbers and GitHub's
 # answers, the test actions, the importer's answers, writing settings files),
 # ttt2_launcher_core_linux what only Linux's has (its folders and the install,
 # the PC's checks before an install, uninstalling, the AppImage). The Windows
@@ -18,6 +18,7 @@ add_library(ttt2_launcher_core STATIC
     display.cpp
     distro.cpp
     files.cpp
+    game_ini.cpp
     json.cpp
     keymap.cpp
     paths_common.cpp
