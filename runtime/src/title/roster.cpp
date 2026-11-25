@@ -18,6 +18,7 @@
 #include "title/damage_scaling.h"
 #include "title/gauge.h"
 #include "title/framedata.h"
+#include "title/language.h"
 #include "title/warp.h"
 #include "outfit_menu.h"
 
@@ -3750,6 +3751,50 @@ PPC_FUNC(sub_024306B4); // the title's save call (manager r3, player r4, select 
 
 customize_store::Unsaved g_unsaved; // saves the disk refused: kept, read back by a load, tried again
 
+// The port's messages on the screen, in each language shown ({en, fr, de, it, es, ru}).
+constexpr language::Text kNotSaved = {"The customization could not be saved to the disk.",
+    "La personnalisation n'a pas pu \xC3\xAAtre sauvegard\xC3\xA9" "e sur le disque.",
+    "Die Anpassung konnte nicht auf dem Datentr\xC3\xA4ger gespeichert werden.",
+    "Impossibile salvare la personalizzazione sul disco.",
+    "No se ha podido guardar la personalizaci\xC3\xB3n en el disco.",
+    "\xD0\x9D\xD0\xB5 \xD1\x83\xD0\xB4\xD0\xB0\xD0\xBB\xD0\xBE\xD1\x81\xD1\x8C "
+    "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C "
+    "\xD0\xBD\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 "
+    "\xD0\xB2\xD0\xBD\xD0\xB5\xD1\x88\xD0\xBD\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8 \xD0\xBD\xD0\xB0 "
+    "\xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA."};
+constexpr language::Text kSavedLater = {"It is kept while the game runs and the save is tried again.",
+    "Elle est conserv\xC3\xA9" "e pendant la partie et la sauvegarde sera retent\xC3\xA9" "e.",
+    "Sie bleibt erhalten, solange das Spiel l\xC3\xA4uft, und das Speichern wird wiederholt.",
+    "Resta valida finch\xC3\xA9 il gioco \xC3\xA8 aperto e il salvataggio verr\xC3\xA0 ritentato.",
+    "Se mantiene mientras el juego est\xC3\xA9 abierto y se volver\xC3\xA1 a intentar guardar.",
+    "\xD0\x9E\xD0\xBD\xD0\xB8 \xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x82\xD1\x81\xD1\x8F, "
+    "\xD0\xBF\xD0\xBE\xD0\xBA\xD0\xB0 \xD0\xB8\xD0\xB4\xD1\x91\xD1\x82 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0, \xD0\xB8 "
+    "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB5 "
+    "\xD0\xB1\xD1\x83\xD0\xB4\xD0\xB5\xD1\x82 "
+    "\xD0\xBF\xD0\xBE\xD0\xB2\xD1\x82\xD0\xBE\xD1\x80\xD0\xB5\xD0\xBD\xD0\xBE."};
+constexpr language::Text kKeptForSession = {"It is kept only while the game runs.",
+    "Elle n'est conserv\xC3\xA9" "e que pendant la partie.", "Sie bleibt nur erhalten, solange das Spiel l\xC3\xA4uft.",
+    "Resta valida solo finch\xC3\xA9 il gioco \xC3\xA8 aperto.",
+    "Solo se mantiene mientras el juego est\xC3\xA9 abierto.",
+    "\xD0\x9E\xD0\xBD\xD0\xB8 \xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x82\xD1\x81\xD1\x8F "
+    "\xD1\x82\xD0\xBE\xD0\xBB\xD1\x8C\xD0\xBA\xD0\xBE \xD0\xB4\xD0\xBE "
+    "\xD0\xB2\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4\xD0\xB0 \xD0\xB8\xD0\xB7 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B."};
+constexpr language::Text kSavedNow = {"The customization is saved now.",
+    "La personnalisation est maintenant sauvegard\xC3\xA9" "e.", "Die Anpassung ist jetzt gespeichert.",
+    "La personalizzazione \xC3\xA8 stata salvata.", "La personalizaci\xC3\xB3n ya se ha guardado.",
+    "\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 "
+    "\xD0\xB2\xD0\xBD\xD0\xB5\xD1\x88\xD0\xBD\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8 "
+    "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD1\x8B."};
+constexpr language::Text kNoAddedPick = {"Added fighters cannot be set on this screen.",
+    "Les combattants ajout\xC3\xA9s ne peuvent pas \xC3\xAAtre choisis sur cet \xC3\xA9" "cran.",
+    "Hinzugef\xC3\xBCgte K\xC3\xA4mpfer k\xC3\xB6nnen auf diesem Bildschirm nicht gew\xC3\xA4hlt werden.",
+    "I personaggi aggiunti non possono essere scelti in questa schermata.",
+    "Los luchadores a\xC3\xB1" "adidos no se pueden elegir en esta pantalla.",
+    "\xD0\x94\xD0\xBE\xD0\xB1\xD0\xB0\xD0\xB2\xD0\xBB\xD0\xB5\xD0\xBD\xD0\xBD\xD1\x8B\xD1\x85 "
+    "\xD0\xB1\xD0\xBE\xD0\xB9\xD1\x86\xD0\xBE\xD0\xB2 \xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C\xD0\xB7\xD1\x8F "
+    "\xD0\xB2\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C \xD0\xBD\xD0\xB0 \xD1\x8D\xD1\x82\xD0\xBE\xD0\xBC "
+    "\xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5."};
+
 PPC_FUNC(sub_02669380_orig);
 PPC_FUNC(sub_02669380) {
     const uint32_t object = ctx.r[3], player = ctx.r[4], id = ctx.r[5];
@@ -3794,9 +3839,8 @@ PPC_FUNC(sub_02669264) {
                      named ? ": they stay for this session and the save is tried again every few seconds" : "");
     // (the title's save call has no failure of its own to show: the port's message, on the screen)
     if (!written)
-        framedata::notice({"The customization could not be saved to the disk.",
-                           named ? "It is kept while the game runs and the save is tried again."
-                                 : "It is kept only while the game runs."},
+        framedata::notice({std::string(language::in_current(kNotSaved)),
+                           std::string(language::in_current(named ? kSavedLater : kKeptForSession))},
                           10.0);
     else if (traces().roster)
         std::fprintf(stderr, "ttt2: customize: %s: saved to its own file (player %u)\n", g_added[k].code.c_str(),
@@ -3814,7 +3858,7 @@ void retry_unsaved() {
     for (const std::string& code : g_unsaved.retry(vfs::save_root()))
     {
         std::fprintf(stderr, "Tekken Tag Tournament 2: the customizations of %s are saved now\n", code.c_str());
-        framedata::notice({"The customization is saved now."}, 5.0);
+        framedata::notice({std::string(language::in_current(kSavedNow))}, 5.0);
     }
 }
 
@@ -4134,7 +4178,7 @@ void refuse_added_pick(PPCContext& ctx, uint8_t* base, uint32_t events, uint32_t
     if (entry == 0 || slot_of_id(load(entry)) < 0) return;
     store(events, load(events) & ~kEventConfirm);
     if (traces().roster) std::fprintf(stderr, "ttt2: customize: no pick of added fighter %u on this screen\n", load(entry));
-    framedata::notice({"Added fighters cannot be set on this screen."}, 2.5);
+    framedata::notice({std::string(language::in_current(kNoAddedPick))}, 2.5);
 }
 #define NO_ADDED_PICK(name, events, cell)                                                                        \
     PPC_FUNC(name##_orig);                                                                                       \
