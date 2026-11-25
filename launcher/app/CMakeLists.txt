@@ -142,6 +142,14 @@ endif()
 install(TARGETS ttt2-launcher RUNTIME DESTINATION bin)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.desktop DESTINATION share/applications)
 install(FILES ${TTT2_LAUNCHER_APP_ID}.svg DESTINATION share/icons/hicolor/scalable/apps)
+# The license texts, at the paths THIRD_PARTY_NOTICES.md names (the AppImage must have them: release_license_files in
+# ../appimage/release_checks.sh).
+set(licenses_source ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+set(licenses_folder share/licenses/ttt2-launcher)
+install(FILES ${licenses_source}/LICENSE ${licenses_source}/THIRD_PARTY_NOTICES.md DESTINATION ${licenses_folder})
+install(DIRECTORY ${licenses_source}/licenses DESTINATION ${licenses_folder})
+install(DIRECTORY ${licenses_source}/launcher/ui/fonts DESTINATION ${licenses_folder}/launcher/ui
+    FILES_MATCHING PATTERN OFL.txt)
 
 # Tests: the parts (no window), and the program itself offscreen against stub programs (tests/stub: an importer
 # answering from a fixture, a builder printing the protocol, a game writing a marker), in a scratch home.

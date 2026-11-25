@@ -18,6 +18,35 @@ release_glibcxx=GLIBCXX_3.4.33
 # What the launcher program itself may need (C10): everything else it uses is in it (SDL 3, built statically) or
 # opened by it at run time (X11, Wayland, libdecor, PipeWire, PulseAudio, ALSA, udev, D-Bus, Vulkan, GL).
 release_launcher_libraries=(libc.so.6 libm.so.6 libstdc++.so.6 libgcc_s.so.1 ld-linux-x86-64.so.2)
+# The license texts the AppImage has in usr/share/licenses/ttt2-launcher (launcher/app/CMakeLists.txt installs them),
+# at the paths THIRD_PARTY_NOTICES.md names: all of them, and nothing else there.
+release_license_files=(
+    LICENSE
+    THIRD_PARTY_NOTICES.md
+    launcher/ui/fonts/Barlow/OFL.txt
+    launcher/ui/fonts/BarlowCondensed/OFL.txt
+    launcher/ui/fonts/JetBrainsMono/OFL.txt
+    licenses/SDL/LICENSE.txt
+    licenses/SDL/edid.txt
+    licenses/SDL/hidapi.txt
+    licenses/SDL/imKStoUCS.txt
+    licenses/SDL/wayland-protocols.txt
+    licenses/SDL/xdg-user-dirs.txt
+    licenses/SDL/xsettings-client.txt
+    licenses/SDL/yuv2rgb.txt
+    licenses/ZArchive.txt
+    licenses/addrlib.txt
+    licenses/appimage-runtime/libfuse-LGPL2.txt
+    licenses/appimage-runtime/mimalloc.txt
+    licenses/appimage-runtime/musl.txt
+    licenses/appimage-runtime/squashfuse.txt
+    licenses/appimage-runtime/type2-runtime.txt
+    licenses/appimage-runtime/zlib.txt
+    licenses/appimage-runtime/zstd.txt
+    licenses/mingw-w64/COPYING.MinGW-w64-runtime.txt
+    licenses/mingw-w64/winpthreads.txt
+    licenses/nanosvg.txt
+    licenses/stb.txt)
 
 if ! declare -F die >/dev/null; then
     die() {
@@ -145,6 +174,14 @@ release_check_launcher_libraries() {
     for library in $libraries; do
         [[ " ${release_launcher_libraries[*]} " == *" $library "* ]] ||
             die "${program##*/} needs $library: the launcher may only need ${release_launcher_libraries[*]} (SDL is built into it, the display's libraries are opened when it starts)"
+    done
+}
+
+# release_check_licenses DIR: DIR (a package's usr/share/licenses/ttt2-launcher) has every license text.
+release_check_licenses() {
+    local file
+    for file in "${release_license_files[@]}"; do
+        [ -s "$1/$file" ] || die "the license text $file is missing (or empty) in $1"
     done
 }
 
