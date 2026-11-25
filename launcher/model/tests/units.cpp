@@ -1403,6 +1403,100 @@ void update_all(const fs::path& golden, const fs::path& scratch) {
     }});
 }
 
+// Each game's DLC characters are a group of their own (the old launcher's Tekken 8 list had them among the others).
+void dlc_groups(const fs::path& golden, const fs::path& scratch) {
+    current = "DLC groups";
+    replay(fixture(golden, "installed"), Caps::linux_caps(), scratch, {0, [](Harness& h) {
+        Facts f = h.model.facts();
+        CHECK(f.status.has_value());
+        const auto group = [&](const char* game) {
+            for (const GameGroup& g : characters_view(f).games)
+                if (g.game == game) return g;
+            fail(__FILE__, __LINE__, std::string("no group of ") + game);
+            return GameGroup{};
+        };
+        const auto has = [](const std::vector<FighterRow>& rows, const char* name) {
+            return std::any_of(rows.begin(), rows.end(), [&](const FighterRow& r) { return r.name == name; });
+        };
+        // None of Tekken 8's is a DLC: no group.
+        CHECK(group(kTekken7).dlc && !group(kTekken8).dlc);
+        for (const auto& [name, display, code] :
+             {std::array{"clive", "Clive Rosfield", "clv"}, std::array{"miary_zo", "Miary Zo", "mzo"}}) {
+            Fighter x;
+            x.name = name, x.display = display, x.code = code, x.game = kTekken8;
+            x.dlc = 3145880;
+            x.moveset_saved = true;
+            f.status->fighters.push_back(x);
+        }
+        f.status->tekken8_found = true;
+        f.status->tekken8_error.clear();
+        f.status->steam_running = false;
+        f.owned.state = OwnedState::kUnknown;
+        f.owned.errors.clear();
+        f.owned.has_answer = true;
+        f.owned.answer["clive"] = true;
+        f.owned.answer["miary_zo"] = false;
+        f.task.reset();
+        GameGroup g = group(kTekken8);
+        CHECK(g.dlc && g.dlc->rows.size() == 2 && has(g.dlc->rows, "clive") && has(g.dlc->rows, "miary_zo"));
+        CHECK(!has(g.rows, "clive") && !has(g.rows, "miary_zo") && has(g.rows, "reina"));
+        CHECK_EQ(g.dlc->add_owned.id, std::string("add-all-owned:tekken8"));
+        CHECK_EQ(g.dlc->expander.id, std::string("dlc:tekken8"));
+        CHECK_EQ(g.dlc->pills[0].text, std::string("1 of 2 owned"));
+        // (Their moves saved: added without Steam. Tekken 7's are not mixed in.)
+        CHECK(owned_to_add(f, kTekken8) == std::vector<std::string>{"clive"});
+        for (const std::string& name : owned_to_add(f, kTekken7)) CHECK(name != "clive");
+        CHECK(g.dlc->add_owned.enabled);
+        CHECK_EQ(g.dlc->notes[0].text, std::string("Your Steam account owned 1 of them last time Steam was asked. "
+                                                   "Start Steam and it checks again."));
+        // (Asked through its own game.)
+        f.status->steam_running = true;
+        f.owned.state = OwnedState::kKnown;
+        f.owned.errors["tekken8"] = "the helper failed";
+        CHECK(group(kTekken8).dlc->notes[0].text.find("the helper failed") != std::string::npos);
+        CHECK(group(kTekken7).dlc->notes[0].text.find("the helper failed") == std::string::npos);
+        f.owned.errors.clear();
+        f.owned.answer.erase("clive");
+        f.owned.answer.erase("miary_zo");
+        f.status->tekken8_found = false;
+        f.status->tekken8_error = "Tekken 8 is not installed in any Steam library";
+        f.owned.state = OwnedState::kUnknown;
+        g = group(kTekken8);
+        CHECK_EQ(g.dlc->notes[0].text, std::string("Which DLC you own is not known: Steam is asked through Tekken 8, "
+                                                   "which is not installed."));
+        CHECK(!g.dlc->add_owned.enabled && !g.dlc->add_owned.describe.why.empty());
+    }});
+    // Add All Owned adds its game's owned ones, not the other game's.
+    std::string text = read(golden / "installed" / "case.json");
+    const auto insert = [&](const std::string& after, const std::string& what) {
+        const size_t at = text.find(after);
+        CHECK(at != std::string::npos);
+        if (at != std::string::npos) text.insert(at + after.size(), what);
+    };
+    insert("\"fighters\": [",
+           R"({"name": "clive", "display": "Clive Rosfield", "game": "tekken8", "dlc": 3145880, "installed": false,
+               "outdated": false, "newer": false, "update": false, "moveset_saved": true, "stand_in": false,
+               "outfits": 0, "outfits_added": false, "needs_game": true},)");
+    insert("\"owned\": {\n  \"owned\": {", "\"clive\": true,");
+    const auto with_clive = json::parse(text);
+    CHECK(with_clive.has_value());
+    for (const char* id : {"add-all-owned", "add-all-owned:tekken8"}) {
+        replay(with_clive.value_or(json::Value()), Caps::linux_caps(), scratch / "add", {0, [&](Harness& h) {
+            h.settle();
+            const size_t before = h.starter.started.size();
+            h.model.activate(id, h.now);
+            h.settle();
+            std::vector<std::string> asked;
+            for (size_t i = before; i < h.starter.started.size(); ++i)
+                for (const std::string& arg : h.starter.started[i].argv)
+                    if (arg == "clive" || arg == "geese" || arg == "noctis") asked.push_back(arg);
+            const bool tekken8 = std::string_view(id).ends_with(":tekken8");
+            CHECK(!asked.empty());
+            for (const std::string& name : asked) CHECK((name == "clive") == tekken8);
+        }});
+    }
+}
+
 void units(const fs::path& golden, const fs::path& scratch) {
     const int before = failures, made = checks;
     keys();
@@ -1415,6 +1509,7 @@ void units(const fs::path& golden, const fs::path& scratch) {
     every_id(golden, scratch / "ids", Caps::windows_caps());
     windows_before(scratch / "windows-before");
     update_all(golden, scratch / "update-all");
+    dlc_groups(golden, scratch / "dlc-groups");
     std::printf("units: %d checks, %d ids activated, %d failed\n", checks - made, activated, failures - before);
 }
 

@@ -1035,6 +1035,8 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
                 Color top = rgba(255, 42, 85, .42f), mid = rgba(60, 6, 20, .85f), low = rgba(10, 6, 10, .92f);
                 if (spec.tone == TileTone::Orange)
                     top = rgba(255, 110, 60, .42f), mid = rgba(70, 16, 8, .85f), low = rgba(12, 6, 6, .92f);
+                if (spec.tone == TileTone::Gold)
+                    top = rgba(255, 176, 46, .40f), mid = rgba(74, 40, 6, .84f), low = rgba(13, 8, 5, .92f);
                 if (spec.tone == TileTone::Pink)
                     top = rgba(255, 42, 140, .36f), mid = rgba(70, 8, 46, .82f), low = rgba(10, 6, 14, .92f);
                 const float lift = 1 + .4f * f;
@@ -1066,7 +1068,9 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
                 const Quad top = sk_rect(r, {r.x, r.y, r.w, 3});
                 if (spec.tone == TileTone::Pink && !none)
                     cv.fill(top, Gradient::linear({r.x, 0}, {r.right(), 0}, c::kRed, rgb(0xff4fc0)));
-                else cv.fill(top, (spec.tone == TileTone::Orange ? rgb(0xff7a3c) : c::kRed).faded(none ? .5f : 1));
+                else if (spec.tone == TileTone::Gold && !none)
+                    cv.fill(top, Gradient::linear({r.x, 0}, {r.right(), 0}, rgb(0xff7a3c), rgb(0xffc93c)));
+                else cv.fill(top, (spec.tone == TileTone::Orange || spec.tone == TileTone::Gold ? rgb(0xff7a3c) : c::kRed).faded(none ? .5f : 1));
             }
             // Border.
             const Color border = notowned    ? rgba(255, 255, 255, .1f)

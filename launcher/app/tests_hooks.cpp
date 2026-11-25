@@ -496,7 +496,7 @@ void App::test_tick(double t) {
     } else if (n == "add-all") {
         task_step("add-all:" + arg);
     } else if (n == "add-all-owned") {
-        task_step("add-all-owned");
+        task_step(arg.empty() ? n : n + ":" + arg);
     } else if (n == "remove") {
         task_step("remove:" + arg);
     } else if (n == "remove-all") {
