@@ -108,16 +108,17 @@ void portrait_card(Ui& ui, const std::string& id, TextureId texture, float w, fl
                 const Rect r = ctx.rect;
                 const Quad q = skewed(r, theme::kSeamTan);
                 cv.fill(q, Gradient::css(r, 180, {{0, rgba(20, 34, 70, .9f)}, {1, rgba(4, 8, 22, .95f)}}));
-                // From the top of the frame's inside down to the hips (the card's height), centred on the face.
-                const float tall = std::min(art::kInner.h, 470.f);
-                const float s = r.h / tall;
-                const float wide = art::kInner.w * s;
+                // From the top of the frame's inside down (at most to the hips: the card's height), the face on the
+                // card's middle at the eyes' height - the card leans, so its middle there is right of its box's - and
+                // the picture at least as wide there as the card, either side of the face.
                 const float face = art::kFaceX - art::kInner.x;   // (in the inside's pixels)
-                Rect dst{r.center().x - face * s, r.y, wide, r.h};
-                // (Kept inside the frame: the card's middle is all picture.)
-                dst.x = std::clamp(dst.x, r.right() - wide, r.x);
+                const float s = std::max(r.h / std::min(art::kInner.h, 470.f),
+                                         r.w / 2 / std::min(face, art::kInner.w - face));
+                const float eyes = (art::kFaceY - art::kInner.y) * s;
+                const float middle = r.center().x + (r.h / 2 - eyes) * theme::kSeamTan;
+                const Rect dst{middle - face * s, r.y, art::kInner.w * s, r.h};
                 const Rect uv{art::kInner.x / art::kPortraitW, art::kInner.y / art::kPortraitH,
-                              art::kInner.w / art::kPortraitW, tall / art::kPortraitH};
+                              art::kInner.w / art::kPortraitW, r.h / s / art::kPortraitH};
                 cv.picture(texture, dst, uv, std::span<const Vec2>(q.p, 4), [dst](Vec2 p) {
                     const float u = (p.x - dst.x) / dst.w, v = (p.y - dst.y) / dst.h;
                     const float sides = std::clamp(std::min(u, 1 - u) / .07f, 0.f, 1.f);
