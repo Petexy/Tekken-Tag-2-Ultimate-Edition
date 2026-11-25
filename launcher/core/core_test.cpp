@@ -931,6 +931,17 @@ void test_game_ini(const fs::path& root) {
           "game.ini: the language after a byte order mark");
     check(game_ini::with_language("\xEF\xBB\xBFlanguage = de\nlanguage = fr\n", "es") == "\xEF\xBB\xBFlanguage = es\n",
           "game.ini: the byte order mark of a line left out kept");
+    // A byte order mark counts only at the start of the file, as the game reads it: one later on starts no key.
+    {
+        const std::string mid = "player_name = Mira\nlanguage = it\n\xEF\xBB\xBFlanguage = es\n";
+        const std::string saved = game_ini::with_language(mid, "de");
+        check(saved == "player_name = Mira\nlanguage = de\n\xEF\xBB\xBFlanguage = es\n" &&
+                  cafe::host::game::parse(saved).settings.language == "de" &&
+                  game_ini::with_name(mid, "Zo").find("\xEF\xBB\xBFlanguage = es") != std::string::npos,
+              "game.ini: a byte order mark inside the file starts no setting (" + saved + ")");
+        const std::string twice = game_ini::with_language("\xEF\xBB\xBF\xEF\xBB\xBFlanguage = it\nlanguage = fr\n", "de");
+        check(cafe::host::game::parse(twice).settings.language == "de", "game.ini: two marks at the start");
+    }
     check(game_ini::with_language("last = 1", "ru") == "last = 1\nlanguage = ru\n" &&
               game_ini::with_language("language = fr\n", "") == "",
           "game.ini: language added at the end, or left out");
@@ -945,7 +956,7 @@ void test_game_ini(const fs::path& root) {
     for (const std::string text :
          {"language = fr\n", "language = FR\n", "language=de # mine\n", "language = xx\n", "language =\n",
           "language = en\n", "language = it\nlanguage = es\n", "language = es\nlanguage = qq\n",
-          "\xEF\xBB\xBFlanguage = ru\r\n", "#language = fr\n", "language\n", "Language = fr\n", "language = f r\n",
+          "\xEF\xBB\xBFlanguage = ru\r\n", "a = 1\n\xEF\xBB\xBFlanguage = fr\n", "#language = fr\n", "language\n", "Language = fr\n", "language = f r\n",
           "  language   =   It  \n", "language = de#x\n", "language = de #x\n", "player_name = A\nlanguage = es\n",
           ""}) {
         const cafe::host::game::Language* found = cafe::host::game::find_language(game_ini::parse(text).language);

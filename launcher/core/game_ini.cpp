@@ -99,7 +99,7 @@ std::string with_setting(std::string_view text, std::string_view key, std::strin
     // Each line: whole (with its end), without its end, whether it gives the key.
     struct Part {
         std::string_view whole, body;
-        bool keyed;
+        bool keyed, marked; // marked: the file's byte order mark starts it (the first line only, as the game reads it)
     };
     std::vector<Part> parts;
     size_t keyed = 0;
@@ -109,9 +109,10 @@ std::string with_setting(std::string_view text, std::string_view key, std::strin
         text.remove_prefix(whole.size());
         std::string_view body = whole;
         if (body.ends_with('\n')) body.remove_suffix(1);
-        const bool is_key = setting_of(body.starts_with("\xEF\xBB\xBF") ? body.substr(3) : body).first == key;
+        const bool marked = parts.empty() && body.starts_with("\xEF\xBB\xBF");
+        const bool is_key = setting_of(marked ? body.substr(3) : body).first == key;
         keyed += is_key;
-        parts.push_back({whole, body, is_key});
+        parts.push_back({whole, body, is_key, marked});
     }
     std::string out;
     size_t seen = 0;
@@ -122,7 +123,7 @@ std::string with_setting(std::string_view text, std::string_view key, std::strin
         }
         // (One line of the key takes the new value; another would win over it, or lose to it: left out.)
         ++seen;
-        if (p.body.starts_with("\xEF\xBB\xBF")) out += "\xEF\xBB\xBF"; // (the file's byte order mark stays)
+        if (p.marked) out += "\xEF\xBB\xBF"; // (the file's byte order mark stays)
         if (value.empty() || seen != (at_last ? keyed : 1)) continue;
         out += line + (p.body.ends_with('\r') ? "\r\n" : "\n");
     }
