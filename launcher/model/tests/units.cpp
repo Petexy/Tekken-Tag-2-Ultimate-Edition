@@ -1778,8 +1778,23 @@ void subtitles_later(const fs::path& golden, const fs::path& scratch) {
         for (const GameGroup& g : characters_view(f).games)
             for (const FighterRow& r : g.rows)
                 if (r.name == "josie" && r.pill)
-                    said = r.pill->text == "Update ready" && r.pill->explain.starts_with("Their intro and win subtitles");
+                    said = r.pill->text == "Update ready" &&
+                           r.pill->explain.starts_with("Their intro and win subtitles could not be saved");
         CHECK(said);
+        // (In English only, not every other language: those words, and it waits for Steam all the same.)
+        x->without_subtitles = false;
+        x->partial_subtitles = true;
+        CHECK(!addable(f, *x));
+        said = false;
+        for (const GameGroup& g : characters_view(f).games)
+            for (const FighterRow& r : g.rows)
+                if (r.name == "josie" && r.pill)
+                    said = r.pill->text == "Update ready" &&
+                           r.pill->explain == "Their intro and win subtitles in the game's other languages are saved "
+                                              "from Tekken 7 by an update; Steam must be running.";
+        CHECK(said);
+        x->partial_subtitles = false;
+        x->without_subtitles = true;
         f.status->steam_running = true;
         CHECK(addable(f, *x));
         p = update_plan(f);

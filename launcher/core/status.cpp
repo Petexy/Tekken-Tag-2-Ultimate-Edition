@@ -62,6 +62,7 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
         fighter.stand_in = fighter.added() && f["stand_in"].boolean();
         fighter.subtitles_saved = f["subtitles_saved"].boolean(true);
         fighter.without_subtitles = fighter.added() && f["without_subtitles"].boolean();
+        fighter.partial_subtitles = fighter.added() && !fighter.without_subtitles && f["partial_subtitles"].boolean();
         fighter.outfits = static_cast<int>(f["outfits"].number(0));
         fighter.outfits_added = fighter.added() && f["outfits_added"].boolean();
         // (An importer without "needs_game": every pack needs its game.)

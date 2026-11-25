@@ -615,7 +615,8 @@ class Launcher(unittest.TestCase):
         fighters = {f['name']: f for f in s['fighters']}
         self.assertEqual(fighters['reina'], {'name': 'reina', 'display': 'Reina', 'code': 'rei', 'dlc': None, 'installed': False,
                                              'outdated': False, 'newer': False, 'update': False,
-                                             'without_subtitles': False, 'moveset_saved': False, 'outfits': 0, 'outfits_added': False,
+                                             'without_subtitles': False, 'partial_subtitles': False,
+                                             'moveset_saved': False, 'outfits': 0, 'outfits_added': False,
                                              'needs_game': False, 'stand_in': False, 'game': 'tekken8'})
         self.assertNotIn('game', fighters['kazumi'])
         self.assertEqual(s['tekken8'], {'found': False, 'path': None,
