@@ -11,6 +11,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace cafe::title::text {
@@ -27,8 +30,9 @@ bool is_bank(const std::vector<uint8_t>& contents);
 // Rewrites the Wii U's button names in the bank's texts (the + and -
 // buttons, A B X Y, the +Control Pad; in English, French, Italian, German
 // and Spanish; in Russian, whose texts are the PlayStation 3's and Xbox
-// 360's, START, SELECT and BACK) to the buttons' icons, which follow the
-// controller. Returns how many texts changed.
+// 360's, START, SELECT and BACK, and our translations' names) to the
+// buttons' icons, which follow the controller. Returns how many texts
+// changed.
 int show_button_icons(std::vector<uint8_t>& bank);
 
 // Adds the code points of the bank's texts to `used`.
@@ -42,14 +46,42 @@ enum BankLanguage : uint8_t {
 };
 uint8_t bank_language(const std::vector<uint8_t>& bank); // 0: not a bank
 
+// A text's markup, in order: its control codes (a code of U+FFF0 on with the
+// code point after it, its argument), line breaks and other codes below
+// U+0020, the private-use code points the fonts draw as icons, the button
+// names show_button_icons turns into icons (as those icons) and the
+// symbols that stand for inputs (☆【】↑↓). A translation keeps its
+// original's.
+std::u32string markup(std::string_view text);
+
+// The hash a record's header holds of its text (in its first two bytes, the
+// low byte first): per code point c, h = T(h) ^ c, T a fixed linear map.
+uint16_t text_hash(std::string_view text);
+
+// A translation of a record of a part's bank, by the record's key.
+struct Translation {
+    std::string_view key, text;
+};
+
+// Our Russian for the texts the Wii U's Russian banks lack (text_russian.inc):
+// where a Russian bank of the game has the same English text under another
+// number, the game's own Russian text of it fits that record too and has no
+// entry here.
+std::span<const Translation> russian_texts();
+
 // The Russian banks lack texts the other languages have (the Wii U's own:
 // of Practice, all; of the menus, the special modes'; ...). Each gets the
-// English bank's texts of the numbers it has none of, so the title finds a
-// text where it would find none; in Russian where a Russian bank of the
-// archive has another text with the same English one (its most frequent
-// Russian one). `banks` in an archive's order, each part's in the
-// languages' order. Returns the indices of the banks changed (their
-// language byte kept, rebuilt with their index).
-std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks);
+// English bank's records of the numbers it has none of, each with its text
+// in Russian: `russian`'s for its key, else the text a Russian bank of the
+// archive has for the same English text (its most frequent one), else the
+// English one; a Russian text whose markup is not the English text's is
+// left out (English stays). `banks` in an archive's order, each part's in
+// the languages' order.
+struct Filled {
+    std::vector<size_t> banks;               // the banks changed (their language byte kept, rebuilt with their index)
+    std::vector<std::string> kept_english;   // the keys of `russian`'s texts left out: their markup is not English's
+};
+Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks,
+                          std::span<const Translation> russian = russian_texts());
 
 } // namespace cafe::title::text

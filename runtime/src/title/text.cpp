@@ -5,6 +5,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -100,6 +101,16 @@ constexpr Rewrite kNames[] = {
     {"\xD0\x9D\xD0\xB0\xD0\xB6\xD0\xB0\xD1\x82\xD1\x8C START", "\xD0\x9D\xD0\xB0\xD0\xB6\xD0\xB0\xD1\x82\xD1\x8C \x05"},
     {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 SELECT", "\x06"},
     {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 BACK", "\x06"},
+    // and our translations' (text_russian.inc): "кнопками A, B, X и Y", "кнопку +", "кнопку -", "кнопку A" ...,
+    // "крестовину" (the +Control Pad)
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD0\xB0\xD0\xBC\xD0\xB8 A, B, X \xD0\xB8 Y", "\x01, \x02, \x03 \xD0\xB8 \x04"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 +", "\x05"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 -", "\x06"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 A", "\x01"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 B", "\x02"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 X", "\x03"},
+    {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 Y", "\x04"},
+    {"\xD0\xBA\xD1\x80\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB2\xD0\xB8\xD0\xBD\xD1\x83", "\x07"},
 };
 
 // A text's space: its bytes and at least two zero bytes, to four. A key's:
@@ -363,10 +374,120 @@ std::vector<uint8_t> write_index(const std::vector<uint8_t>& like, const Indexed
 
 namespace {
 
+// The code points of UTF-8 text (a malformed byte: itself).
+std::u32string decode(std::string_view utf8) {
+    std::u32string out;
+    for (size_t i = 0; i < utf8.size();) {
+        const auto b = static_cast<unsigned char>(utf8[i]);
+        const size_t length = b < 0xC0 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        if (b >= 0x80 && (b < 0xC0 || i + length > utf8.size())) {
+            out += b;
+            ++i;
+            continue;
+        }
+        char32_t c = length == 1 ? b : b & (0x3F >> (length - 1));
+        for (size_t k = 1; k < length; ++k) c = c << 6 | (static_cast<unsigned char>(utf8[i + k]) & 0x3F);
+        out += c;
+        i += length;
+    }
+    return out;
+}
+
+bool is_code(char32_t c) { return c < 0x20 || (c >= 0xE000 && c <= 0xF8FF) || (c >= 0xFFF0 && c <= 0xFFFF); }
+
+bool is_marked_symbol(char32_t c) {
+    switch (c) {
+    case kRightButton: case kBottomButton: case kTopButton: case kLeftButton: case kStartButton: case kSelectButton:
+    case kPad: case U'☆': case U'【': case U'】': case U'↑': case U'↓': return true;
+    default: return false;
+    }
+}
+
+// T(1 << b) of the header hash's linear map.
+constexpr uint16_t kHashColumns[16] = {0x3133, 0x6266, 0xC4CC, 0xA989, 0x7303, 0xE606, 0xCC0D, 0x981B,
+                                       0x2110, 0x4220, 0x8440, 0x0881, 0x3112, 0x6224, 0xC448, 0x8891};
+
+} // namespace
+
+std::u32string markup(std::string_view text) {
+    const std::u32string points = decode(rewrite(text));
+    std::u32string out;
+    for (size_t i = 0; i < points.size(); ++i) {
+        const char32_t c = points[i];
+        if (is_code(c)) {
+            out += c;
+            if (c >= 0xFFF0 && i + 1 < points.size()) out += points[++i]; // its argument
+        } else if (is_marked_symbol(c)) {
+            out += c;
+        }
+    }
+    return out;
+}
+
+uint16_t text_hash(std::string_view text) {
+    uint16_t h = 0;
+    for (const char32_t c : decode(text)) {
+        uint16_t t = 0;
+        for (int b = 0; b < 16; ++b) {
+            if (h >> b & 1) t ^= kHashColumns[b];
+        }
+        h = static_cast<uint16_t>(t ^ c);
+    }
+    return h;
+}
+
+namespace {
+
+struct RussianText {
+    std::string_view key;
+    std::u8string_view text;
+};
+
+constexpr RussianText kRussian[] = {
+#include "title/text_russian.inc"
+};
+
+} // namespace
+
+std::span<const Translation> russian_texts() {
+    static const std::vector<Translation> texts = [] {
+        std::vector<Translation> out;
+        for (const RussianText& t : kRussian) {
+            out.push_back({t.key, {reinterpret_cast<const char*>(t.text.data()), t.text.size()}});
+        }
+        return out;
+    }();
+    return texts;
+}
+
+namespace {
+
 // A record's text (after its header, up to its English text).
 std::string_view text_of(const Indexed::Record& r) {
     const std::string_view room(reinterpret_cast<const char*>(r.bytes.data() + 4), r.english - 4);
     return room.substr(0, room.find('\0'));
+}
+
+std::string_view key_of(const Indexed::Record& r) {
+    const std::string_view rest(reinterpret_cast<const char*>(r.bytes.data() + r.key), r.bytes.size() - r.key);
+    return rest.substr(0, rest.find('\0'));
+}
+
+// The English record with `text` in its English one's place (its header
+// that text's: hash and length); its English text, key and number stay,
+// and so do its index hashes (of its English text and of its key).
+Indexed::Record with_text(const Indexed::Record& english, std::string_view text) {
+    Indexed::Record r = english;
+    const uint16_t hash = text_hash(text);
+    const size_t count = characters(text);
+    r.bytes = {static_cast<uint8_t>(hash), static_cast<uint8_t>(hash >> 8), static_cast<uint8_t>(count >> 8),
+               static_cast<uint8_t>(count)};
+    r.bytes.insert(r.bytes.end(), text.begin(), text.end());
+    r.bytes.resize(4 + text_space(text.size()), 0);
+    r.english = static_cast<uint32_t>(r.bytes.size());
+    r.bytes.insert(r.bytes.end(), english.bytes.begin() + english.english, english.bytes.end());
+    r.key = r.english + (english.key - english.english);
+    return r;
 }
 
 // A part's English and Russian banks, read.
@@ -375,9 +496,9 @@ struct Part {
     Indexed english, russian;
 };
 
-// The Russian record of each English text: of the records Russian has the
+// The Russian text of each English text: of the records Russian has the
 // number of, the text most of them have (the first of those first found).
-class Translations {
+class Matches {
 public:
     void add(const Part& part) {
         std::map<uint32_t, const Indexed::Record*> russian;
@@ -388,25 +509,25 @@ public:
             const auto found = russian.find(r.number());
             if (!r.keyed || found == russian.end() || text_of(r).empty()) continue;
             std::vector<Counted>& candidates = by_english_[text_of(r)];
-            const auto same = std::find_if(candidates.begin(), candidates.end(), [&](const Counted& c) {
-                return text_of(*c.record) == text_of(*found->second);
-            });
+            const std::string_view text = text_of(*found->second);
+            const auto same = std::find_if(candidates.begin(), candidates.end(),
+                                           [&](const Counted& c) { return c.text == text; });
             if (same != candidates.end()) ++same->count;
-            else candidates.push_back({found->second, 1});
+            else candidates.push_back({text, 1});
         }
     }
 
-    const Indexed::Record* of(const Indexed::Record& english) const {
-        const auto found = by_english_.find(text_of(english));
-        if (found == by_english_.end()) return nullptr;
+    std::optional<std::string_view> of(std::string_view english) const {
+        const auto found = by_english_.find(english);
+        if (found == by_english_.end()) return std::nullopt;
         const Counted* best = &found->second.front();
         for (const Counted& c : found->second) best = c.count > best->count ? &c : best;
-        return best->record;
+        return best->text;
     }
 
 private:
     struct Counted {
-        const Indexed::Record* record;
+        std::string_view text;
         size_t count;
     };
     std::map<std::string_view, std::vector<Counted>> by_english_;
@@ -414,7 +535,7 @@ private:
 
 } // namespace
 
-std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks) {
+Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks, std::span<const Translation> russian) {
     constexpr size_t kLanguages = kBankRussian;
     std::vector<Part> parts;
     for (size_t i = kLanguages - 1; i < banks.size(); ++i) {
@@ -422,37 +543,38 @@ std::vector<size_t> fill_missing_texts(std::vector<std::vector<uint8_t>*> banks)
         bool part = true;
         for (size_t l = 0; l < kLanguages && part; ++l) part = bank_language(*banks[i + 1 - kLanguages + l]) == l + 1;
         if (!part) continue;
-        auto russian = read_index(*banks[i]);
+        auto russian_bank = read_index(*banks[i]);
         auto english = read_index(*banks[i + kBankEnglish - kLanguages]);
-        if (russian && english) parts.push_back({i, std::move(*english), std::move(*russian)});
+        if (russian_bank && english) parts.push_back({i, std::move(*english), std::move(*russian_bank)});
     }
-    Translations translations;
-    for (const Part& part : parts) translations.add(part);
-    std::vector<size_t> filled;
+    std::map<std::string_view, std::string_view> ours;
+    for (const Translation& t : russian) ours.emplace(t.key, t.text);
+    Matches matches;
+    for (const Part& part : parts) matches.add(part);
+    Filled filled;
     for (const Part& part : parts) {
-        // Russian's records, and English's of the numbers Russian has none of: in Russian where Russian has
-        // the same English text elsewhere (the Wii U's own screens repeat SELECT, CONFIRM, ON, OFF ...)
+        // Russian's records, and English's of the numbers Russian has none of, in Russian where their markup
+        // allows
         std::set<uint32_t> numbers;
         for (const Indexed::Record& r : part.russian.records) numbers.insert(r.number());
         Indexed merged = part.russian;
         for (const Indexed::Record& english : part.english.records) {
             if (!english.keyed || english.number() == kNoNumber || numbers.count(english.number())) continue;
-            Indexed::Record r = english;
-            if (const Indexed::Record* russian = translations.of(english)) {
-                // the Russian header and text, the English original and key
-                r.bytes.assign(russian->bytes.begin(), russian->bytes.begin() + russian->english);
-                r.bytes.insert(r.bytes.end(), english.bytes.begin() + english.english, english.bytes.end());
-                r.english = russian->english;
-                r.key = russian->english + (english.key - english.english);
-                r.hashes[0] = russian->hashes[0];
+            const std::u32string marks = markup(text_of(english));
+            std::optional<std::string_view> text;
+            if (const auto our = ours.find(key_of(english)); our != ours.end()) {
+                if (markup(our->second) == marks) text = our->second;
+                else filled.kept_english.emplace_back(our->first);
+            } else if (const auto match = matches.of(text_of(english)); match && markup(*match) == marks) {
+                text = match;
             }
-            merged.records.push_back(std::move(r));
+            merged.records.push_back(text ? with_text(english, *text) : english);
         }
         if (merged.records.size() == part.russian.records.size()) continue;
         std::stable_sort(merged.records.begin(), merged.records.end(),
                          [](const Indexed::Record& a, const Indexed::Record& b) { return a.number() < b.number(); });
         *banks[part.russian_at] = write_index(*banks[part.russian_at], merged);
-        filled.push_back(part.russian_at);
+        filled.banks.push_back(part.russian_at);
     }
     return filled;
 }
