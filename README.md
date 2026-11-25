@@ -270,7 +270,7 @@ three screens: **Home** (Play, or UPDATE while the launcher, the game program or
 an added fighter can be updated), **Fighters** (the characters as the shared
 importer finds them: Tekken 7, Tekken 8 and Steam; Add, Update and Remove per
 fighter, Add All, the DLC with what Steam says you own) and **Settings**
-(fullscreen, resolution, 120 fps, input delay, shaders, and the keyboard's keys
+(the name the game shows for you, fullscreen, resolution, 120 fps, input delay, shaders, and the keyboard's keys
 chosen by pressing them, as the Linux launcher writes keyboard.ini). A task shows
 its progress and Cancel at the bottom of the window, an update on Home. Windows'
 own parts stay: Set Up, **More** on Home (Build / Rebuild, Install from Wii U
@@ -573,6 +573,18 @@ window opens at the chosen resolution when that fits on the desktop,
 otherwise smaller (the picture is scaled to the window or the screen).
 Uninstalling keeps it, as it keeps `keyboard.ini`. The environment
 variables below win over it.
+
+The name the game shows for you, in place of its own (Player in English), is
+kept beside it in `game.ini`, which the launcher's **Settings** > **Game**
+write; by hand:
+
+```ini
+player_name = Mira Q        # up to 16 characters; empty or missing: the game's own name
+```
+
+The game reads it when it starts too. A character it cannot show (anything
+but the letters A to Z, digits, spaces and an English keyboard's punctuation)
+becomes `?`, and a longer name is cut to 16 characters.
 
 | Environment variable | Effect |
 | --- | --- |
