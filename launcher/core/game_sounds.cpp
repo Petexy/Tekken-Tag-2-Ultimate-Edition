@@ -77,7 +77,7 @@ const char* cue_name(int cue) {
     return cue >= 0 && cue < kCueCount ? names[cue] : "?";
 }
 
-// Chosen by listening to every tone of the menu banks (local notes: agents/sound/NOTES.md, audition page):
+// Chosen by listening to every tone of the menu banks:
 // the main menu's own cursor / decide / cancel / return, the select screen's cursor, the practice menu's toggle
 // glow, the online lobby's window / match / leave sounds, and from the fight itself the tag-in whoosh, a mid guard
 // (a refused action is a blocked one) and the round's FIGHT hit for Play.

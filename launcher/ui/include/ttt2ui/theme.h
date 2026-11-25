@@ -1,4 +1,4 @@
-// The look ("Tag Split" v2, local/scratch/launcher2/concepts/tagsplit2): EVERY constant of it lives here - palette,
+// The look ("Tag Split" v2): EVERY constant of it lives here - palette,
 // split ratios, the seam's 12 degrees, plate offsets, metrics, durations, spring constants, font roles and text
 // styles - so a change the player asks for is one edit. The toolkit's code reads only these names; nothing here
 // knows a screen of the launcher.

@@ -352,7 +352,7 @@ void more(const Facts& facts, GameView& v) {
 }
 
 // What each of the game's actions does, said on the blue side beside it (the Tag Split's readout; the GTK
-// window had only tooltips): as the mock's texts (concepts/tagsplit2), from the facts.
+// window had only tooltips): as the mock's texts, from the facts.
 void explain(const Facts& facts, GameView& v) {
     const auto shown = [](const fs::path& p) { return shown_path(p); };
     const bool task = facts.task.has_value();
