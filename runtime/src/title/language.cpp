@@ -29,7 +29,7 @@ Place place_of(std::string_view code) {
 Place place() { return static_cast<Place>(g_place.load(std::memory_order_relaxed)); }
 
 std::string_view in(const Text& text, Place place) {
-    const char* const by_place[kPlaces] = {text.en, text.fr, text.de, text.it, text.es, text.ru};
+    const char* const by_place[kPlaces] = {text.en, text.fr, text.de, text.it, text.es, text.ru, text.pl};
     const char* chosen = place < kPlaces ? by_place[place] : nullptr;
     if (!chosen || !*chosen) chosen = text.en;
     return chosen ? std::string_view(chosen) : std::string_view();

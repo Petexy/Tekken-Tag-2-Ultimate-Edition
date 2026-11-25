@@ -96,10 +96,33 @@ std::optional<std::string> with_references(
 // order.
 struct Filled {
     std::vector<size_t> banks;               // the banks changed (their language byte kept, rebuilt with their index)
-    std::vector<std::string> kept_english;   // the keys of `russian`'s texts left out: their markup is not English's
+    std::vector<std::string> kept_english;   // the keys of our texts left out: their markup is not English's
     std::vector<std::string> unresolved;     // ... and of those left out as they name a record the banks lack
 };
 Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks,
                           std::span<const Translation> russian = russian_texts());
+
+// Our Polish (text_polish.inc), by key: of each English text, the record a
+// work list met it in first, and the others of that text where it needs
+// other words there.
+std::span<const Translation> polish_texts();
+
+// Polish, which the Wii U has none of: the title shows the English banks,
+// and their records get our Polish (`polish`'s for their key, else
+// `polish`'s for another key whose English record has the same English
+// text in the banks), else stay English; one whose markup is not the
+// English text's (its line breaks aside: lines may break elsewhere, and
+// table 1 counts the new text's) stays English. `banks` in an archive's
+// order, each part's in the languages' order. (Records without a key, the
+// arcade texts the other languages show in English too, stay English.)
+Filled put_polish(std::vector<std::vector<uint8_t>*> banks, std::span<const Translation> polish = polish_texts());
+
+// The bank with texts changed: `change` gets each record's text (table 1's
+// order) and gives its new text, or nothing to keep it; a changed record as
+// put_polish's (its header and line count its text's). Nothing when it is
+// not a bank this reads.
+std::optional<std::vector<uint8_t>> with_texts(
+    const std::vector<uint8_t>& bank,
+    const std::function<std::optional<std::string>(size_t record, std::string_view text)>& change);
 
 } // namespace cafe::title::text

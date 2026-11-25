@@ -19,6 +19,7 @@
 #include "title/gauge.h"
 #include "title/framedata.h"
 #include "title/language.h"
+#include "title/subtitles.h"
 #include "title/warp.h"
 #include "outfit_menu.h"
 
@@ -1062,6 +1063,31 @@ void add_shared(const fs::path& directory) {
         if (g_added[k].active) g_voice[k].name_tone = tone_index(*bank, "sel_syvo_name_" + g_added[k].code);
     }
 }
+
+} // namespace
+
+void prepare_subtitles() {
+    if (language::place() != language::kPolish) return;
+    // the file as the title reads it now (with the packs' copy), unpacked, and its stored flags
+    const auto located = locate_entries();
+    const auto it = located.find(subtitles::kFile);
+    const auto described = describe_entry(located, subtitles::kFile);
+    const auto file = it != located.end() && described ? read_title_contents(it->second.archive, subtitles::kFile)
+                                                        : std::nullopt;
+    const auto polish = file ? subtitles::in_polish(*file) : std::nullopt;
+    uint8_t flags[8];
+    if (described) std::copy(described->flags.begin(), described->flags.end(), flags);
+    if (!polish || !vfs::set_archive_entries(kUpdateArchive,
+                                             std::map<uint32_t, std::vector<uint8_t>>{
+                                                 {subtitles::kFile, archive::pack(polish->file, subtitles::kFile, flags)}})) {
+        std::fprintf(stderr, "ttt2: warning: the subtitle file is not as expected; its lines stay English\n");
+        return;
+    }
+    std::fprintf(stderr, "ttt2: subtitles in Polish: %zu of the title's lines (ours), %zu of added fighters\n",
+                 polish->ours, polish->added);
+}
+
+namespace {
 
 // The se_Chr bank id of fighter `id` (what sub_07A5CAC8 computes).
 uint32_t chr_bank(uint32_t id) {
@@ -3761,7 +3787,8 @@ constexpr language::Text kNotSaved = {"The customization could not be saved to t
     "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB8\xD1\x82\xD1\x8C "
     "\xD0\xBD\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 "
     "\xD0\xB2\xD0\xBD\xD0\xB5\xD1\x88\xD0\xBD\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8 \xD0\xBD\xD0\xB0 "
-    "\xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA."};
+    "\xD0\xB4\xD0\xB8\xD1\x81\xD0\xBA.",
+    "Nie uda\xC5\x82o si\xC4\x99 zapisa\xC4\x87 personalizacji na dysku."};
 constexpr language::Text kSavedLater = {"It is kept while the game runs and the save is tried again.",
     "Elle est conserv\xC3\xA9" "e pendant la partie et la sauvegarde sera retent\xC3\xA9" "e.",
     "Sie bleibt erhalten, solange das Spiel l\xC3\xA4uft, und das Speichern wird wiederholt.",
@@ -3771,20 +3798,23 @@ constexpr language::Text kSavedLater = {"It is kept while the game runs and the 
     "\xD0\xBF\xD0\xBE\xD0\xBA\xD0\xB0 \xD0\xB8\xD0\xB4\xD1\x91\xD1\x82 \xD0\xB8\xD0\xB3\xD1\x80\xD0\xB0, \xD0\xB8 "
     "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD0\xB8\xD0\xB5 "
     "\xD0\xB1\xD1\x83\xD0\xB4\xD0\xB5\xD1\x82 "
-    "\xD0\xBF\xD0\xBE\xD0\xB2\xD1\x82\xD0\xBE\xD1\x80\xD0\xB5\xD0\xBD\xD0\xBE."};
+    "\xD0\xBF\xD0\xBE\xD0\xB2\xD1\x82\xD0\xBE\xD1\x80\xD0\xB5\xD0\xBD\xD0\xBE.",
+    "Zostaje do ko\xC5\x84" "ca gry, a zapis zostanie ponowiony."};
 constexpr language::Text kKeptForSession = {"It is kept only while the game runs.",
     "Elle n'est conserv\xC3\xA9" "e que pendant la partie.", "Sie bleibt nur erhalten, solange das Spiel l\xC3\xA4uft.",
     "Resta valida solo finch\xC3\xA9 il gioco \xC3\xA8 aperto.",
     "Solo se mantiene mientras el juego est\xC3\xA9 abierto.",
     "\xD0\x9E\xD0\xBD\xD0\xB8 \xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD1\x8F\xD1\x82\xD1\x81\xD1\x8F "
     "\xD1\x82\xD0\xBE\xD0\xBB\xD1\x8C\xD0\xBA\xD0\xBE \xD0\xB4\xD0\xBE "
-    "\xD0\xB2\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4\xD0\xB0 \xD0\xB8\xD0\xB7 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B."};
+    "\xD0\xB2\xD1\x8B\xD1\x85\xD0\xBE\xD0\xB4\xD0\xB0 \xD0\xB8\xD0\xB7 \xD0\xB8\xD0\xB3\xD1\x80\xD1\x8B.",
+    "Zostaje tylko do ko\xC5\x84" "ca gry."};
 constexpr language::Text kSavedNow = {"The customization is saved now.",
     "La personnalisation est maintenant sauvegard\xC3\xA9" "e.", "Die Anpassung ist jetzt gespeichert.",
     "La personalizzazione \xC3\xA8 stata salvata.", "La personalizaci\xC3\xB3n ya se ha guardado.",
     "\xD0\x9D\xD0\xB0\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB9\xD0\xBA\xD0\xB8 "
     "\xD0\xB2\xD0\xBD\xD0\xB5\xD1\x88\xD0\xBD\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8 "
-    "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD1\x8B."};
+    "\xD1\x81\xD0\xBE\xD1\x85\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5\xD0\xBD\xD1\x8B.",
+    "Personalizacja jest ju\xC5\xBC zapisana."};
 constexpr language::Text kNoAddedPick = {"Added fighters cannot be set on this screen.",
     "Les combattants ajout\xC3\xA9s ne peuvent pas \xC3\xAAtre choisis sur cet \xC3\xA9" "cran.",
     "Hinzugef\xC3\xBCgte K\xC3\xA4mpfer k\xC3\xB6nnen auf diesem Bildschirm nicht gew\xC3\xA4hlt werden.",
@@ -3793,7 +3823,8 @@ constexpr language::Text kNoAddedPick = {"Added fighters cannot be set on this s
     "\xD0\x94\xD0\xBE\xD0\xB1\xD0\xB0\xD0\xB2\xD0\xBB\xD0\xB5\xD0\xBD\xD0\xBD\xD1\x8B\xD1\x85 "
     "\xD0\xB1\xD0\xBE\xD0\xB9\xD1\x86\xD0\xBE\xD0\xB2 \xD0\xBD\xD0\xB5\xD0\xBB\xD1\x8C\xD0\xB7\xD1\x8F "
     "\xD0\xB2\xD1\x8B\xD0\xB1\xD1\x80\xD0\xB0\xD1\x82\xD1\x8C \xD0\xBD\xD0\xB0 \xD1\x8D\xD1\x82\xD0\xBE\xD0\xBC "
-    "\xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5."};
+    "\xD1\x8D\xD0\xBA\xD1\x80\xD0\xB0\xD0\xBD\xD0\xB5.",
+    "Na tym ekranie nie mo\xC5\xBCna wybra\xC4\x87 dodanych postaci."};
 
 PPC_FUNC(sub_02669380_orig);
 PPC_FUNC(sub_02669380) {

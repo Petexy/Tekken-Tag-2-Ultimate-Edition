@@ -5,7 +5,9 @@
 //
 // The title has every language's text banks in memory at once and reads
 // the console's language (cafe.language: os/system_config.cpp) to choose
-// among them. The port's own texts (labels, descriptions it writes over the
+// among them. Polish, which the title has none of, runs it in English with
+// our Polish put over the English texts (text.h: polish_texts; the
+// subtitles too: subtitles.h). The port's own texts (labels, descriptions it writes over the
 // title's, names of its own modes) come in each language the game can be
 // shown in, chosen here; one a language lacks is English.
 
@@ -17,7 +19,7 @@
 namespace cafe::title::language {
 
 // The languages' places in a Text, in host::game::kLanguages' order.
-enum Place : size_t { kEnglish, kFrench, kGerman, kItalian, kSpanish, kRussian, kPlaces };
+enum Place : size_t { kEnglish, kFrench, kGerman, kItalian, kSpanish, kRussian, kPolish, kPlaces };
 
 // A text of the port's in each language (UTF-8; null or empty: English's).
 struct Text {
@@ -27,6 +29,7 @@ struct Text {
     const char* it = nullptr;
     const char* es = nullptr;
     const char* ru = nullptr;
+    const char* pl = nullptr;
 };
 
 // Before the title runs (main.cpp, with game.ini's language).

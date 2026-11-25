@@ -36,7 +36,8 @@ std::optional<std::vector<uint8_t>> add_solo_ghost_row(const std::vector<uint8_t
 inline constexpr language::Text kSoloGhostLabel = {
     "SOLO GHOST BATTLE", "FANT\xC3\x94ME SOLO", "SOLO-GEISTERKAMPF", "BATTAGLIA FANTASMA SOLO", "COMBATE FANTASMA SOLO",
     "\xD0\xA1\xD0\x9E\xD0\x9B\xD0\x9E-\xD0\x91\xD0\x9E\xD0\x99 \xD0\xA1 "
-    "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x97\xD0\xA0\xD0\x90\xD0\x9A\xD0\x90\xD0\x9C\xD0\x98"};
+    "\xD0\x9F\xD0\xA0\xD0\x98\xD0\x97\xD0\xA0\xD0\x90\xD0\x9A\xD0\x90\xD0\x9C\xD0\x98",
+    "SOLOWA WALKA Z DUCHAMI"};
 
 constexpr const char* kSoloGhostRow = "MenuItemMode002-09";
 constexpr const char* kOfflineMenu = "MenuMode002-01";

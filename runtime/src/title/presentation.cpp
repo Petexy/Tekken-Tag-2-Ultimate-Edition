@@ -158,8 +158,8 @@ struct TextFont {
     std::array<uint16_t, kCarried> boxes;
 };
 const TextFont kTextFonts[] = {
-    // The plain font (descriptions): £ ¥ Þ Œ ＼ Ź Ý.
-    {0x7C74E49A, 0x099AF947, 21, {0, 19, 22}, {0x00A3, 0x00A5, 0x00DE, 0x0152, 0xFF3C, 0x0179, 0x00DD}},
+    // The plain font (descriptions): £ ¥ Þ Œ ＼ Ř Ý (no Polish letter: our Polish texts are drawn with it too).
+    {0x7C74E49A, 0x099AF947, 21, {0, 19, 22}, {0x00A3, 0x00A5, 0x00DE, 0x0152, 0xFF3C, 0x0158, 0x00DD}},
     // The Korean and Japanese gothic fonts (help panels; they have Latin
     // letters too).
     {0xB1277EE3, 0xC4C9633E, 21, {0, 17, 22}, {}},
@@ -539,6 +539,14 @@ void prepare_presentation() {
         }
         for (const std::string& key : f.unresolved) {
             std::fprintf(stderr, "ttt2: Russian text %s left in English: it names a record the Russian banks lack\n",
+                         key.c_str());
+        }
+        // (Polish, which the Wii U has none of: our Polish over the English texts the title shows.)
+        if (language::place() != language::kPolish) continue;
+        const text::Filled polish = text::put_polish(of_archive);
+        for (const size_t i : polish.banks) filled[at[i]] = true;
+        for (const std::string& key : polish.kept_english) {
+            std::fprintf(stderr, "ttt2: Polish text %s left in English: its markup is not the English text's\n",
                          key.c_str());
         }
     }
