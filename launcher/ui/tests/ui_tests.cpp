@@ -12,6 +12,7 @@
 #include "ttt2ui/input.h"
 #include "ttt2ui/text.h"
 #include "ttt2ui/ui.h"
+#include "ttt2ui/widgets.h"
 #include "ttt2ui/window.h"
 
 using namespace ttt2::ui;
@@ -294,6 +295,51 @@ TEST(layout_row_counts_its_fitted_children) {
     CHECK_NEAR(words.x, card.right() + 22, .51f);
     CHECK_NEAR(words.right(), 1200, .51f);
     CHECK_NEAR(h.ui.rect("tall").right(), 1200, .51f);
+}
+
+TEST(widgets_section_tabs_shrink_then_wrap) {
+    // Settings' section switcher in a row too narrow for it: its sections shrink, the Z / C prompts kept, nothing past
+    // the row's end; narrower than the sections shrink to, it goes on two lines (Box::wrap, as Settings asks for it
+    // then), each section as wide as it likes, nothing past the row's end either.
+    const Section secs[] = {{"s0", "Game"}, {"s1", "Display"}, {"s2", "Keyboard"}, {"s3", "Launcher"}, {"s4", "Folders"}};
+    const char* ids[] = {"secs/prev", "s0", "s1", "s2", "s3", "s4", "secs/next"};
+    Harness h;
+    float natural = 0, least = 0;
+    h.run([&](Ui& ui) {
+        natural = section_tabs_width(ui, secs, false);
+        least = section_tabs_width(ui, secs, true);
+    });
+    CHECK(least < natural - 100);
+    const auto lay = [&](float w, bool wrap) {
+        h.run([&](Ui& ui) {
+            auto root = ui.open("root", Box{});
+            Box b;
+            b.w = Size::fixed(w);
+            b.wrap = wrap;
+            section_tabs(ui, "secs", secs, 0, b);
+        });
+    };
+    // As it likes: one line, every section wider than shrunk.
+    lay(natural + 20, false);
+    const float wide = h.ui.rect("s2").w;
+    // Shrunk onto one line just wide enough.
+    lay(least + 2, false);
+    float x = -8;
+    for (const char* id : ids) {
+        const Rect r = h.ui.rect(id);
+        CHECK(r.w > 10);
+        CHECK(r.x >= x + 7.5f);  // (in order, the row's gap between them)
+        CHECK(r.right() <= least + 2.5f);
+        CHECK_NEAR(r.y + r.h / 2, h.ui.rect("s0").y + h.ui.rect("s0").h / 2, .51f);
+        x = r.right();
+    }
+    CHECK(h.ui.rect("s2").w < wide - 20);
+    // Narrower still, on two lines: the sections as they like, inside the row.
+    lay(least - 60, true);
+    CHECK(h.ui.rect("s4").y > h.ui.rect("s0").y + 30);
+    CHECK_NEAR(h.ui.rect("s2").w, wide, .51f);
+    for (const char* id : ids) CHECK(h.ui.rect(id).right() <= least - 59.5f);
+    CHECK(h.ui.rect("secs/prev").w > 10 && h.ui.rect("secs/next").w > 10);
 }
 
 TEST(layout_mirror_right_aligned) {

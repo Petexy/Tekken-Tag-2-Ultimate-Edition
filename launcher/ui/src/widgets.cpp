@@ -1277,12 +1277,30 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
         &focus);
 }
 
+namespace {
+// A section's narrowest: its name at 60 % of its width (closed up and smaller) inside the slanted ends.
+float section_least(float word) { return 28 + word * .6f; }
+} // namespace
+
+float section_tabs_width(Ui& ui, std::span<const Section> sections, bool least) {
+    TextEngine& te = ui.text();
+    float w = 0;
+    for (const Section& s : sections) {
+        const float word = te.width(tx::kSection, s.label);
+        w += least ? section_least(word) : 40 + word;
+    }
+    if (sections.size() < 2) return w;
+    w += prompt_width(te, ui.glyphs(), Prompt::SectionPrev) + prompt_width(te, ui.glyphs(), Prompt::SectionNext);
+    return w + 8 * static_cast<float>(sections.size() + 1);
+}
+
 void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box,
                   int focus_group) {
     Box b = box;
     b.layout = Layout::Row;
     b.align = Align::Center;
     b.gap = 8;
+    if (b.wrap) b.line_gap = 8;
     if (zero(b.margin)) b.margin.bottom = 16;
     auto g = ui.open(id, b);
     const bool one = sections.size() < 2;
@@ -1294,9 +1312,12 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
         Focus f;
         f.disabled = s.disabled;
         f.group = focus_group;
+        // (A row too narrow for every section - many of them, a large Text size: the sections give up width before
+        // the Z / C prompts do, down to their names closed up and smaller.)
+        const float word = te.width(tx::kSection, s.label);
         ui.leaf(
-            s.id, Box{.h = Size::fixed(m::kSectionHeight)},
-            [&te, s](float) { return Vec2{40 + te.width(tx::kSection, s.label), m::kSectionHeight}; },
+            s.id, Box{.h = Size::fixed(m::kSectionHeight), .min_w = section_least(word), .shrink_order = 1},
+            [word](float) { return Vec2{40 + word, m::kSectionHeight}; },
             [s, on](PaintContext& ctx) {
                 const Rect r = ctx.rect;
                 const float fo = ctx.focus_t;
@@ -1309,8 +1330,20 @@ void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sectio
                     surface(ctx.canvas, r, rgba(255, 255, 255, .04f),
                             mix(rgba(255, 120, 150, .22f), rgb(0xffffff), fo));
                 }
-                ctx.text.draw(ctx.canvas, tx::kSection, s.label, {r.x + 20, centred_y(ctx.text, tx::kSection, r)},
-                              on ? rgb(0xffffff) : rgb(0xd8b9c1));
+                const Color col = on ? rgb(0xffffff) : rgb(0xd8b9c1);
+                if (ctx.text.width(tx::kSection, s.label) <= r.w - 40) {
+                    ctx.text.draw(ctx.canvas, tx::kSection, s.label, {r.x + 20, centred_y(ctx.text, tx::kSection, r)},
+                                  col);
+                } else {
+                    // (Narrowed: the name's letters closer, then smaller, centred inside the slanted ends.)
+                    TextStyle st = tx::kSection;
+                    while (st.tracking > 0 && ctx.text.width(st, s.label) > r.w - 28) st.tracking -= .02f;
+                    while (st.size > tx::kSection.size * .6f && ctx.text.width(st, s.label) > r.w - 28) st.size -= .5f;
+                    const float w = ctx.text.width(st, s.label);
+                    ctx.canvas.push_clip(r);
+                    ctx.text.draw(ctx.canvas, st, s.label, {r.center().x - w / 2, centred_y(ctx.text, st, r)}, col);
+                    ctx.canvas.pop_clip();
+                }
                 if (s.disabled) ctx.canvas.pop_layer();
             },
             &f);
@@ -1783,8 +1816,16 @@ void text_field(Ui& ui, const std::string& id, const TextFieldSpec& spec, const 
                 ctx.text.draw(cv, tx::kKeyCapBig, spec.placeholder, {x, ty}, rgba(200, 215, 240, .32f));
             else
                 ctx.text.draw(cv, tx::kKeyCapBig, spec.text, {x - shift, ty}, rgb(0xffffff));
-            // The caret: blinking (steady while Reduce motion is on).
-            const bool shown = ctx.reduced || std::fmod(static_cast<float>(ctx.ambient), 1.1f) < .7f;
+            // The caret: blinking (steady while Reduce motion is on), shown at once after each change.
+            NodeState& s = ctx.state;
+            const float h = hash01(spec.text + '\x01' + std::to_string(caret));
+            if (!s.user_set || s.user[0] != h) {
+                s.user[0] = h;
+                s.user[1] = static_cast<float>(ctx.ambient);
+                s.user_set = true;
+            }
+            const bool shown =
+                ctx.reduced || std::fmod(std::max(0.f, static_cast<float>(ctx.ambient) - s.user[1]), 1.1f) < .7f;
             if (shown) {
                 const float lh = ctx.text.line_height(tx::kKeyCapBig);
                 cv.fill_rect({x - shift + before, ty + lh * .08f, 2.5f, lh * .84f}, c::kCyan);

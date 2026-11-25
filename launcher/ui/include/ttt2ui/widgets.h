@@ -175,8 +175,13 @@ struct Section {
     bool disabled = false;
 };
 // `focus_group`: the sections' Focus::group (the list's below them: -1, so Up from its first item reaches them).
+// A row too narrow for them shrinks the sections (their names closed up, then smaller); `box.wrap`: on two lines
+// (or more) instead, every section as wide as it likes (for a row narrower than section_tabs_width(..., true)).
 void section_tabs(Ui& ui, const std::string& id, std::span<const Section> sections, int active, const Box& box = {},
                   int focus_group = 0);
+// How wide section_tabs is on one line: the prompts, the gaps and every section as it likes, or (`least`) as narrow
+// as it may be shrunk.
+float section_tabs_width(Ui& ui, std::span<const Section> sections, bool least);
 // A key binding row.
 struct KeyRowSpec {
     std::string icon{}, name{}, key{};
