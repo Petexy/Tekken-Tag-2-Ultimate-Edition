@@ -12,6 +12,9 @@ if(NOT WIN32)
         PATTERN __pycache__ EXCLUDE
         PATTERN .pytest_cache EXCLUDE
         PATTERN "*.pyc" EXCLUDE)
+    # The launcher's catalogs and their reader, for the importer's texts (ttt2char/texts.py: ../i18n beside it).
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../i18n/launcher_texts.py DESTINATION share/ttt2/i18n)
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../i18n/ DESTINATION share/ttt2/i18n FILES_MATCHING PATTERN "*.txt")
 endif()
 
 if(NOT TARGET ttt2_launcher_ui)

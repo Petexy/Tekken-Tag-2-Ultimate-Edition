@@ -37,6 +37,9 @@ struct WindowOptions {
     bool start_fullscreen = false;
     bool quiet = false;              // no message box when no window opens (a smoke test answers why itself)
     std::function<std::string()> no_window; // when none opens: more to tell (the version before put back)
+    // When none opens: what the player is told, in the launcher's language (`error`: SDL's reason; `url`:
+    // releases_url); unset, English.
+    std::function<std::string(const std::string& error, const std::string& url)> cannot_open;
 };
 
 // SteamDeck=1, SteamOS=1, XDG_CURRENT_DESKTOP=gamescope or GAMESCOPE_WAYLAND_DISPLAY set.

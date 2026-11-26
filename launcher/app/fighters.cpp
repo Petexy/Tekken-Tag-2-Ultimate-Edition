@@ -191,17 +191,18 @@ std::vector<m::Action> App::fighter_actions(const m::FighterRow& r) const {
         if (a.id.starts_with("remove:")) remove = &a;
         else main = &a;
     }
-    const bool main_is_remove = main && main->label == "Remove";
+    // (The model's words, in the same language: the row's main button removes them.)
+    const bool main_is_remove = main && main->label == tr("chars.remove", "Remove");
     if (main && !main_is_remove) out.push_back(*main);
     if (!main && !remove) {
         m::Action add;
         add.id = "fighter:" + r.name;
-        add.label = "Add";
+        add.label = tr("chars.add", "Add");
         add.enabled = false;
-        add.why = !r.button_note.empty() || r.state_text == "Not owned"
-                      ? "Your Steam account does not own their DLC: only owned ones can be added."
-                      : "They cannot be added now.";
-        add.describe.title = "Add " + r.display;
+        add.why = !r.button_note.empty() || r.state_text == tr("chars.not_owned", "Not owned")
+                      ? tr("chars.not_owned_why", "Your Steam account does not own their DLC: only owned ones can be added.")
+                      : tr("fighters.cannot_add_now", "They cannot be added now.");
+        add.describe.title = tr("fighters.add_name", "Add {name}", {{"name", r.display}});
         add.describe.why = add.why;
         out.push_back(add);
     }
@@ -222,7 +223,10 @@ App::FighterTask App::fighter_task(const std::string& name) const {
     t.in = true;
     t.count = static_cast<int>(s.names.size());
     t.index = static_cast<int>(it - s.names.begin()) + 1;
-    t.verb = s.kind == m::TaskKind::kRemove ? "Removing" : s.update ? "Updating" : "Adding";
+    t.removing = s.kind == m::TaskKind::kRemove;
+    t.verb = t.removing ? tr("fighters.removing", "Removing")
+             : s.update ? tr("fighters.updating", "Updating")
+                        : tr("fighters.adding", "Adding");
     // The importer's "@step fighter <name> <i> <n>" lines say whose turn it is; "@step shared" comes after them.
     std::string current;
     bool shared = false;
@@ -279,7 +283,7 @@ void App::fighters(const Box& crimson, const Box& blue) {
     group_of_button_.clear();
     const m::Fact* missing = nullptr;
     for (const m::Fact& f : cv.facts)
-        if (f.name == "Missing") missing = &f;
+        if (f.id == "missing") missing = &f;
     {
         auto g = ui.open("fi/crimson", crimson);
         int n = 0;
@@ -289,9 +293,9 @@ void App::fighters(const Box& crimson, const Box& blue) {
                  fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect), warn ? "stroke:warn" : "stroke:info");
         }
         if (missing) {
-            MenuRowSpec s{"stroke:warn", "Missing to add characters", ""};
+            MenuRowSpec s{"stroke:warn", tr("fighters.missing_row", "Missing to add characters"), ""};
             s.compact = true;
-            s.value = missing->lines.empty() ? "" : "See why";
+            s.value = missing->lines.empty() ? "" : tr("fighters.see_why", "See why");
             s.value_tone = Tone::Warn;
             menu_row(ui, "fx:needs", s, crimson_focus(), fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonSkewed));
         }
@@ -300,7 +304,8 @@ void App::fighters(const Box& crimson, const Box& blue) {
             const m::Action& a = *cv.add_all_owned;
             const size_t count = m::all_owned_to_add(model_->facts()).size();
             MenuRowSpec s{"stroke:users", a.label};
-            s.value = count > 0 ? std::to_string(count) + " to add" : "None to add";
+            s.value = count > 0 ? trn("fighters.to_add", static_cast<long long>(count), "{n} to add", "{n} to add")
+                                : tr("fighters.none_to_add", "None to add");
             s.value_tone = count > 0 ? Tone::Ok : Tone::Neutral;
             s.compact = true;
             s.disabled = !a.enabled;
@@ -322,21 +327,21 @@ void App::fighters(const Box& crimson, const Box& blue) {
             }
             GroupHeaderSpec h;
             h.title = fg.title;
-            h.count = std::to_string(added) + " of " + std::to_string(fg.rows.size()) + " added";
+            h.count = tr("home.added_of", "{added} of {total} added", {{"added", added}, {"total", fg.rows.size()}});
             h.focus_group = -1;
             if (fg.dlc) {
                 if (model_->facts().owned.state == m::OwnedState::kChecking) {
-                    h.sub = "Asking Steam…";
+                    h.sub = tr("fighters.asking_steam", "Asking Steam…");
                     h.sub_tone = Tone::Dim;
                 } else if (known > 0) {
-                    h.sub = std::to_string(owned) + " of " + std::to_string(fg.rows.size()) + " owned";
+                    h.sub = tr("fighters.owned_of", "{owned} of {total} owned", {{"owned", owned}, {"total", fg.rows.size()}});
                     h.sub_tone = Tone::Ok;
                 } else {
-                    h.sub = "Ownership not known";
+                    h.sub = tr("fighters.ownership_unknown", "Ownership not known");
                     h.sub_tone = Tone::Dim;
                 }
             } else if (update) {
-                h.sub = std::to_string(update) + " to update";
+                h.sub = trn("home.to_update", update, "{n} to update", "{n} to update");
                 h.sub_tone = Tone::Warn;
             }
             for (const m::Action& a : group_actions(fg)) {
@@ -369,7 +374,7 @@ void App::fighters(const Box& crimson, const Box& blue) {
                 else t.state = TileState::None;
                 if (f && f->outfits > 0 && t.state != TileState::NotOwned &&
                     ((f->added() && f->outfits_added) || m::wants_outfits(model_->facts(), *f)))
-                    t.tag = "Outfits";
+                    t.tag = tr("fighters.outfits", "Outfits");
                 t.busy = fighter_task(r->name).in;
                 // An added fighter: their portrait in place of the letters.
                 if (f && f->installed && t.state != TileState::NotOwned) {
@@ -386,9 +391,10 @@ void App::fighters(const Box& crimson, const Box& blue) {
             size_t wanted = 0;
             for (const Fighter* f : choices) wanted += m::wants_outfits(model_->facts(), *f);
             MenuRowSpec o;
-            o.title = "Outfits for every character";
-            o.value = a.checked ? "All" : wanted == 0 ? "None" : std::to_string(wanted) + " of " +
-                                                                    std::to_string(choices.size());
+            o.title = tr("fighters.outfits_all", "Outfits for every character");
+            o.value = a.checked     ? tr("fighters.all", "All")
+                      : wanted == 0 ? tr("fighters.none", "None")
+                                    : tr("progress.of", "{done} of {total}", {{"done", wanted}, {"total", choices.size()}});
             o.check = a.checked ? 1 : a.inconsistent ? 2 : 0;
             o.compact = true;
             o.disabled = !a.enabled;
@@ -418,21 +424,21 @@ std::vector<m::Action> App::group_actions(const FighterGroup& fg) const {
         if (a.id.starts_with("add-all")) out.push_back(a);
     if (update) {
         m::Action u = *update;
-        u.label = "Update All";
+        u.label = tr("fighters.update_all", "Update All");
         out.push_back(u);
     } else {
         m::Action u;
         u.id = fg.key == "t8" ? "update-all:tekken8" : "update-all";
-        u.label = "Update All";
+        u.label = tr("fighters.update_all", "Update All");
         u.enabled = false;
-        u.why = "Every added character is up to date.";
+        u.why = tr("fighters.all_up_to_date", "Every added character is up to date.");
         u.describe.title = u.label;
         u.describe.why = u.why;
         out.push_back(u);
     }
     if (stand_ins) {
         m::Action s = *stand_ins;
-        s.label = "Own Moves";
+        s.label = tr("fighters.own_moves", "Own Moves");
         out.push_back(s);
     }
     for (const m::Action& a : g.head)
@@ -451,17 +457,19 @@ void App::fighters_early(const Box& crimson, const Box& blue) {
             if (a.id.starts_with("copy:")) copy = a.id;
     {
         auto g = ui.open("fi/crimson", crimson);
-        section_label(ui, "fi/label", "Fighters", Half::Crimson, {},
+        section_label(ui, "fi/label", tr("home.fighters", "Fighters"), Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         MenuRowSpec s{looking ? "stroke:dots" : "stroke:warn",
-                      looking ? "Looking for your games…" : "Fighters cannot be added yet"};
+                      looking ? tr("fighters.looking_games", "Looking for your games…")
+                              : tr("fighters.cannot_yet", "Fighters cannot be added yet")};
         s.compact = true;
         menu_row(ui, "fx:early", s, crimson_focus(true), fit({}, SeamFit::CrimsonSkewed));
     }
     auto g = ui.open("fi/blue", blue);
-    section_label(ui, "fe/label", "Fighters", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "fe/label", tr("home.fighters", "Fighters"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
     text(ui, "fe/title",
-         TextSpec{.text = looking ? "Looking" : "Not yet", .style = tx::kBig, .chroma = 3, .autofit_min = 28},
+         TextSpec{.text = looking ? tr("fighters.looking", "Looking") : tr("fighters.not_yet", "Not yet"),
+                  .style = tx::kBig, .chroma = 3, .autofit_min = 28},
          fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
     int n = 0;
     for (const m::Line& l : cv.lines) {
@@ -479,7 +487,7 @@ void App::fighters_early(const Box& crimson, const Box& blue) {
     }
     if (!copy.empty()) {
         ButtonSpec b;
-        b.label = "Copy";
+        b.label = tr("pre.copy", "Copy");
         b.kind = ButtonKind::Blue;
         b.size = ButtonSize::Small;
         button(ui, copy, b, blue_focus(), fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
@@ -510,7 +518,7 @@ void App::fighters_blue(const Box& blue, const std::vector<FighterGroup>& groups
         if (k == "outfits") return view_.characters.outfits_all.has_value();
         if (k == "all") return view_.characters.add_all_owned.has_value();
         if (k == "needs") return std::any_of(view_.characters.facts.begin(), view_.characters.facts.end(),
-                                              [](const m::Fact& f) { return f.name == "Missing"; });
+                                              [](const m::Fact& f) { return f.id == "missing"; });
         return false;
     };
     if (!known(key)) {
@@ -541,7 +549,7 @@ void App::fighter_view(const std::string& name) {
     int index = 0, total = static_cast<int>(s.fighters.size());
     for (int i = 0; i < total; ++i)
         if (s.fighters[static_cast<size_t>(i)].name == name) index = i + 1;
-    section_label(ui, "fv/label", "Fighter", Half::Blue, std::to_string(index) + "/" + std::to_string(total),
+    section_label(ui, "fv/label", tr("fighters.fighter", "Fighter"), Half::Blue, std::to_string(index) + "/" + std::to_string(total),
                   fit({}, SeamFit::BlueRect));
     const bool t8 = f->of(kTekken8);
     const std::optional<bool> owned = m::owns(facts, *f);
@@ -552,15 +560,17 @@ void App::fighter_view(const std::string& name) {
         pill(ui, "fv/game-pill", (t8 ? "Tekken 8" : "Tekken 7") + std::string(f->dlc ? " · DLC" : ""), t8 ? Tone::Blue : Tone::Red);
         std::string found;
         if (f->dlc) {
-            found = owned == true    ? "Steam: owned"
-                    : owned == false ? "Steam: not owned"
-                    : facts.owned.state == m::OwnedState::kChecking ? "Steam: asking…"
-                                                                     : "Steam: not known";
+            found = owned == true    ? tr("fighters.steam_owned", "Steam: owned")
+                    : owned == false ? tr("fighters.steam_not_owned", "Steam: not owned")
+                    : facts.owned.state == m::OwnedState::kChecking ? tr("fighters.steam_asking", "Steam: asking…")
+                                                                     : tr("fighters.steam_unknown", "Steam: not known");
         } else {
             const bool usable = t8 ? s.tekken8_usable() : s.tekken7_usable();
             const bool present = t8 ? s.tekken8_found : s.tekken7_found;
-            found = std::string(t8 ? "Tekken 8" : "Tekken 7") +
-                    (usable ? " found" : present ? " cannot be used" : " not installed");
+            const i18n::Args game = {{"game", t8 ? "Tekken 8" : "Tekken 7"}};
+            found = usable    ? tr("fighters.game_found", "{game} found", game)
+                    : present ? tr("fighters.game_unusable", "{game} cannot be used", game)
+                              : tr("fighters.game_absent", "{game} not installed", game);
         }
         text(ui, "fv/found", TextSpec{found, tx::kKick, c::kBlueDim}, Box{.shrink_order = 1});
     }
@@ -594,36 +604,39 @@ void App::fighter_view(const std::string& name) {
     Tone tone = Tone::Neutral;
     bool live = false;
     if (task.in) {
-        state = std::string(task.verb) + "…";
+        state = task.verb + "…";
         tone = Tone::Blue;
         live = true;
-        sentence = task.state == 2 ? std::string("Their part is done: the rest of the task finishes it.")
-                   : task.state == 1 ? std::string("Their pack is being made now.")
-                                     : "Waiting for their turn: " + std::to_string(task.index) + " of " +
-                                           std::to_string(task.count) + ".";
-        if (task.verb == std::string("Removing"))
-            sentence = task.state == 2 ? "Removed: the rest of the task finishes it." : "Their pack is being removed.";
+        sentence = task.state == 2 ? tr("fighters.part_done", "Their part is done: the rest of the task finishes it.")
+                   : task.state == 1 ? tr("fighters.being_made", "Their pack is being made now.")
+                                     : tr("fighters.waiting_turn", "Waiting for their turn: {i} of {n}.",
+                                          {{"i", task.index}, {"n", task.count}});
+        if (task.removing)
+            sentence = task.state == 2 ? tr("fighters.removed_rest", "Removed: the rest of the task finishes it.")
+                                       : tr("fighters.being_removed", "Their pack is being removed.");
     } else if (r->pill) {
         state = r->pill->text;
         tone = pill_tone(r->pill->kind);
-        sentence = r->pill->text == "Added" ? "In the game: on the select screen next time it starts."
-                                             : r->pill->explain;
+        sentence = r->pill->text == tr("chars.pill_added", "Added")
+                       ? tr("fighters.in_game", "In the game: on the select screen next time it starts.")
+                       : r->pill->explain;
     } else if (owned == false) {
-        state = "Not owned";
-        sentence = "Your Steam account does not own their DLC: only owned ones can be added.";
+        state = tr("chars.not_owned", "Not owned");
+        sentence = tr("chars.not_owned_why", "Your Steam account does not own their DLC: only owned ones can be added.");
     } else if (f->dlc && !owned && facts.owned.state == m::OwnedState::kChecking) {
-        state = "Checking";
+        state = tr("fighters.checking", "Checking");
         tone = Tone::Blue;
         live = true;
-        sentence = "Asking Steam whether your account owns their DLC…";
+        sentence = tr("fighters.asking_owns", "Asking Steam whether your account owns their DLC…");
     } else {
-        state = "Not added";
+        state = tr("fighters.not_added", "Not added");
         const std::vector<m::Action> acts = fighter_actions(*r);
         const m::Action* add = acts.empty() ? nullptr : &acts.front();
         if (add && !add->enabled && !add->why.empty()) sentence = add->why;
         else
-            sentence = std::string("Not in the game yet: Add makes their pack from your ") +
-                       (t8 ? "Tekken 8" : "Tekken 7") + ". It takes a few minutes.";
+            sentence = tr("fighters.not_in_game", "Not in the game yet: Add makes their pack from your {game}. It "
+                                                  "takes a few minutes.",
+                          {{"game", t8 ? "Tekken 8" : "Tekken 7"}});
     }
     {
         auto row = ui.open("fv/state", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
@@ -645,8 +658,10 @@ void App::fighter_view(const std::string& name) {
     if (task.in) {
         progress_bar(ui, "fv/bar", static_cast<float>(task.fraction), task.state == 2 ? Tone::Ok : Tone::Blue,
                      fit(Box{.margin = {0, 8, 0, 6}}, SeamFit::BlueRect));
-        std::string line = (task.state == 2 ? std::string("Done") : task.state == 1 ? std::string("Now") : "Waiting") +
-                           " · " + std::to_string(task.index) + " of " + std::to_string(task.count);
+        const i18n::Args args = {{"i", task.index}, {"n", task.count}};
+        std::string line = task.state == 2   ? tr("fighters.done_of", "Done · {i} of {n}", args)
+                           : task.state == 1 ? tr("fighters.now_of", "Now · {i} of {n}", args)
+                                             : tr("fighters.waiting_of", "Waiting · {i} of {n}", args);
         if (task.state == 1 && !task.detail.empty()) line += " · " + task.detail;
         text(ui, "fv/progress", TextSpec{line, tx::kKick, c::kBlueDim}, fit({}, SeamFit::BlueRect));
     }
@@ -663,7 +678,7 @@ void App::fighter_view(const std::string& name) {
         bs.size = ButtonSize::Small;
         bs.disabled = !a.enabled;
         if (a.kind == m::ActionKind::kCheck) bs.check = a.checked;
-        else if (a.label == "Remove") bs.kind = ButtonKind::Danger;
+        else if (a.id.starts_with("remove:") || a.label == tr("chars.remove", "Remove")) bs.kind = ButtonKind::Danger;
         else bs.kind = ButtonKind::Blue;
         Focus fo = blue_focus(!a.enabled);
         // (Left from the first returns to its tile, unless the crimson side is locked: then Back does.)
@@ -685,19 +700,19 @@ void App::group_view(const std::string& group, const std::string& action_id,
     int added = 0;
     for (const m::FighterRow* r : fg->rows)
         if (const Fighter* f = status_fighter(r->name)) added += f->added();
-    section_label(ui, "gv/label", "Group", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "gv/label", tr("fighters.group", "Group"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
     {
         auto row = ui.open("gv/count", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
-        pill(ui, "gv/pill", std::to_string(added) + " of " + std::to_string(fg->rows.size()) + " added");
+        pill(ui, "gv/pill", tr("home.added_of", "{added} of {total} added", {{"added", added}, {"total", fg->rows.size()}}));
     }
     text(ui, "gv/title", TextSpec{.text = fg->title, .style = tx::kBig, .chroma = 3, .autofit_min = 28},
          fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     // The games and Steam as the importer found them.
     std::vector<Fact> list;
     for (const m::Fact& f : cv.facts) {
-        const bool game_fact = f.name == "Tekken 7" || f.name == "Tekken 8";
-        if (game_fact && f.name != m::game_name(fg->game)) continue;
-        if (f.name == "Missing") continue;
+        const bool game_fact = f.id == kTekken7 || f.id == kTekken8;
+        if (game_fact && f.id != fg->game) continue;
+        if (f.id == "missing") continue;
         std::vector<Run> runs;
         for (const m::Line& l : f.lines) {
             if (!l.actions.empty()) continue;
@@ -705,11 +720,11 @@ void App::group_view(const std::string& group, const std::string& action_id,
             const Color col = l.tone == m::Tone::kError     ? c::kBad
                               : l.tone == m::Tone::kWarning ? c::kWarn
                               : l.tone == m::Tone::kDim     ? c::kBlueDim
-                              : f.name == "Steam" && l.text == "Running" ? c::kOk
-                                                                         : kValue;
+                              : f.id == "steam" && l.text == tr("chars.steam_running", "Running") ? c::kOk
+                                                                                                  : kValue;
             runs.push_back({l.text, col});
         }
-        list.push_back({f.name, runs, f.name != "Steam" && f.name != "Game"});
+        list.push_back({f.name, runs, f.id != "steam" && f.id != "game"});
     }
     if (fg->dlc && fg->group->dlc) {
         std::vector<Run> runs;
@@ -731,28 +746,39 @@ void App::group_view(const std::string& group, const std::string& action_id,
     if (it == screen_actions_.end()) return;
     const m::Action& a = it->second;
     std::vector<std::string> names;
-    std::string doing;
-    if (action_id == "add-all") names = m::base_to_add(fa, kTekken7), doing = "Adds ";
-    else if (action_id == "add-all:tekken8") names = m::base_to_add(fa, kTekken8), doing = "Adds ";
-    else if (action_id == "add-all-owned") names = m::owned_to_add(fa, kTekken7), doing = "Adds ";
-    else if (action_id == "add-all-owned:tekken8") names = m::owned_to_add(fa, kTekken8), doing = "Adds ";
-    else if (action_id == "update-all") names = m::to_update(fa, kTekken7), doing = "Updates ";
-    else if (action_id == "update-all:tekken8") names = m::to_update(fa, kTekken8), doing = "Updates ";
-    else if (action_id == "update-stand-ins") names = m::to_update(fa, kTekken8, true), doing = "Gives their own moves to ";
-    else if (action_id.starts_with("remove-all:")) names = m::to_remove_all(fa, action_id.substr(11)), doing = "Removes ";
+    enum class Doing { kNone, kAdd, kUpdate, kOwnMoves, kRemove } doing = Doing::kNone;
+    if (action_id == "add-all") names = m::base_to_add(fa, kTekken7), doing = Doing::kAdd;
+    else if (action_id == "add-all:tekken8") names = m::base_to_add(fa, kTekken8), doing = Doing::kAdd;
+    else if (action_id == "add-all-owned") names = m::owned_to_add(fa, kTekken7), doing = Doing::kAdd;
+    else if (action_id == "add-all-owned:tekken8") names = m::owned_to_add(fa, kTekken8), doing = Doing::kAdd;
+    else if (action_id == "update-all") names = m::to_update(fa, kTekken7), doing = Doing::kUpdate;
+    else if (action_id == "update-all:tekken8") names = m::to_update(fa, kTekken8), doing = Doing::kUpdate;
+    else if (action_id == "update-stand-ins") names = m::to_update(fa, kTekken8, true), doing = Doing::kOwnMoves;
+    else if (action_id.starts_with("remove-all:")) names = m::to_remove_all(fa, action_id.substr(11)), doing = Doing::kRemove;
     std::string body;
     if (!a.enabled) {
         body = a.why;
     } else if (!names.empty()) {
         std::vector<std::string> shown;
         for (const std::string& nm : names) shown.push_back(m::display_name(fa, nm));
-        body = doing + m::joined_most(shown, 6);
-        if (doing == "Removes ") body += ". " + (a.describe.explain.empty() ? std::string() : a.describe.explain);
-        else if (doing == "Gives their own moves to ")
-            body += ": Tekken 8 runs hidden in the background to save them.";
+        const std::string list = m::joined_most(shown, 6);
+        const std::string game = m::game_name(fg->game);
+        if (doing == Doing::kRemove)
+            body = a.describe.explain.empty()
+                       ? tr("fighters.removes", "Removes {names}.", {{"names", list}})
+                       : tr("fighters.removes_about", "Removes {names}. {about}", {{"names", list}, {"about", a.describe.explain}});
+        else if (doing == Doing::kOwnMoves)
+            body = tr("fighters.own_moves_about", "Gives their own moves to {names}: Tekken 8 runs hidden in the "
+                                                  "background to save them.",
+                      {{"names", list}});
+        else if (doing == Doing::kUpdate)
+            body = tr("fighters.updates_about", "Updates {names}: a few minutes each; the first time, {game} runs "
+                                                "hidden in the background to save their moves.",
+                      {{"names", list}, {"game", game}});
         else
-            body += std::string(": a few minutes each; the first time, ") + m::game_name(fg->game) +
-                    " runs hidden in the background to save their moves.";
+            body = tr("fighters.adds_about", "Adds {names}: a few minutes each; the first time, {game} runs hidden in "
+                                             "the background to save their moves.",
+                      {{"names", list}, {"game", game}});
     }
     if (!body.empty())
         describe_panel(ui, "gv/what", a.label, body, fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueSkewed));
@@ -766,10 +792,12 @@ void App::add_all_view() {
     const m::Action& a = *cv.add_all_owned;
     const m::Facts& fa = model_->facts();
     const auto names = m::all_owned_to_add(fa);
-    section_label(ui, "av/label", "Every game", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "av/label", tr("fighters.every_game", "Every game"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
     {
         auto row = ui.open("av/count", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
-        pill(ui, "av/pill", names.empty() ? "None to add" : std::to_string(names.size()) + " to add",
+        pill(ui, "av/pill",
+             names.empty() ? tr("fighters.none_to_add", "None to add")
+                           : trn("fighters.to_add", static_cast<long long>(names.size()), "{n} to add", "{n} to add"),
              names.empty() ? Tone::Neutral : Tone::Ok);
     }
     text(ui, "av/title", TextSpec{.text = a.label, .style = tx::kBig, .chroma = 3, .autofit_min = 28},
@@ -780,8 +808,9 @@ void App::add_all_view() {
     if (a.enabled) {
         std::vector<std::string> shown;
         for (const std::string& nm : names) shown.push_back(m::display_name(fa, nm));
-        body = "Adds " + m::joined_most(shown, 8) +
-               ": a few minutes each; the first time, their game runs hidden in the background to save their moves.";
+        body = tr("fighters.adds_all_about", "Adds {names}: a few minutes each; the first time, their game runs hidden "
+                                             "in the background to save their moves.",
+                  {{"names", m::joined_most(shown, 8)}});
     }
     describe_panel(ui, "av/what", a.label, body, fit(Box{.margin = {0, 6, 0, 0}}, SeamFit::BlueSkewed));
 }
@@ -794,13 +823,18 @@ void App::outfits_view() {
     const auto choices = m::outfit_choices(model_->facts());
     size_t wanted = 0;
     for (const Fighter* f : choices) wanted += m::wants_outfits(model_->facts(), *f);
-    section_label(ui, "ov/label", "Outfits", Half::Blue, std::to_string(wanted) + " of " + std::to_string(choices.size()),
+    section_label(ui, "ov/label", tr("fighters.outfits", "Outfits"), Half::Blue,
+                  tr("progress.of", "{done} of {total}", {{"done", wanted}, {"total", choices.size()}}),
                   fit({}, SeamFit::BlueRect));
     {
         auto row = ui.open("ov/state", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
-        pill(ui, "ov/pill", a.checked ? "All" : a.inconsistent ? "Some" : "None", a.checked ? Tone::Ok : Tone::Neutral);
+        pill(ui, "ov/pill",
+             a.checked        ? tr("fighters.all", "All")
+             : a.inconsistent ? tr("fighters.some", "Some")
+                              : tr("fighters.none", "None"),
+             a.checked ? Tone::Ok : Tone::Neutral);
     }
-    text(ui, "ov/title", TextSpec{.text = "Outfits", .style = tx::kBig, .chroma = 3, .autofit_min = 28},
+    text(ui, "ov/title", TextSpec{.text = tr("fighters.outfits", "Outfits"), .style = tx::kBig, .chroma = 3, .autofit_min = 28},
          fit({}, SeamFit::BlueRect));
     text(ui, "ov/about", TextSpec{.text = a.tooltip, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
          fit(Box{.margin = {0, 8, 0, 10}}, SeamFit::BlueRect));
@@ -830,10 +864,11 @@ void App::needs_view() {
     Ui& ui = *ui_;
     const m::Fact* missing = nullptr;
     for (const m::Fact& f : view_.characters.facts)
-        if (f.name == "Missing") missing = &f;
+        if (f.id == "missing") missing = &f;
     if (!missing) return;
-    section_label(ui, "nv/label", "Missing", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-    text(ui, "nv/title", TextSpec{.text = "To add them", .style = tx::kBig, .chroma = 3, .autofit_min = 28},
+    section_label(ui, "nv/label", missing->name, Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    text(ui, "nv/title",
+         TextSpec{.text = tr("fighters.to_add_them", "To add them"), .style = tx::kBig, .chroma = 3, .autofit_min = 28},
          fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
     int n = 0;
     bool first_button = true;
@@ -850,7 +885,7 @@ void App::needs_view() {
         }
         for (const m::Action& a : l.actions) {
             ButtonSpec bs;
-            bs.label = a.id.starts_with("copy:") ? "Copy" : a.label;
+            bs.label = a.id.starts_with("copy:") ? tr("pre.copy", "Copy") : a.label;
             bs.kind = ButtonKind::Blue;
             bs.size = ButtonSize::Small;
             bs.disabled = !a.enabled;
@@ -877,7 +912,7 @@ bool App::fighters_activate(const std::string& id) {
     }
     if (id == "fx:needs") {
         for (const m::Fact& f : view_.characters.facts)
-            if (f.name == "Missing")
+            if (f.id == "missing")
                 for (const m::Line& l : f.lines)
                     for (const m::Action& a : l.actions)
                         if (!drilled()) drill_in(id, a.id);

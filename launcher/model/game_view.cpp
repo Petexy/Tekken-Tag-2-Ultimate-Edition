@@ -142,6 +142,7 @@ void installed(const Facts& facts, GameView& v) {
                   : task && facts.task->kind == TaskKind::kUninstall ? tr("game.pill_uninstalling", "Uninstalling")
                                                                      : tr("game.pill_installed", "Installed");
     v.pill.kind = task && !playing ? PillKind::kNeutral : PillKind::kOk;
+    v.pill.live = playing;
     if (playing && !facts.game_started_here && facts.caps.game_outside) {
         Line l = note_line(Icon::kInfo,
                            tr("game.started_outside",
@@ -345,7 +346,7 @@ void preflight(const Facts& facts, GameView& v) {
     v.state = p.running ? GameState::kChecking : GameState::kCannotInstall;
     v.folder = path_utf8(p.folder);
     v.pill = {p.running ? tr("game.pill_checking", "Checking") : tr("game.pill_cannot_install", "Cannot install yet"),
-              p.running ? PillKind::kNeutral : PillKind::kBad, {}};
+              p.running ? PillKind::kNeutral : PillKind::kBad, {}, p.running};
     if (p.running) {
         Line l;
         l.kind = Line::Kind::kSpinner;

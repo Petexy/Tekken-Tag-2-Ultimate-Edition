@@ -16,6 +16,8 @@ import tempfile
 import urllib.request
 import zipfile
 
+from texts import tr
+
 
 def digest(path):
     with path.open('rb') as stream:
@@ -61,7 +63,7 @@ def tools_folder(settings):
 def ensure_compiler(settings, lock, tools):
     compiler = tools / lock['compiler']['folder'] / 'bin/clang.exe'
     if not compiler.is_file():
-        print('@step tools Getting the C compiler', flush=True)
+        print('@step tools ' + tr('setup.getting_compiler', 'Getting the C compiler'), flush=True)
         unzip(download(lock['compiler'], settings.root / 'local/windows-downloads/llvm-mingw.zip'), tools)
     return compiler
 
@@ -84,7 +86,7 @@ def ensure_importer(settings, run):
     tools = tools_folder(settings)
     ensure_compiler(settings, lock, tools)
     if not importer_ready(settings):
-        print('@step tools Getting numpy and Pillow', flush=True)
+        print('@step tools ' + tr('setup.getting_packages', 'Getting numpy and Pillow'), flush=True)
         pins = [p for p in lock['packages'] if p.split('==')[0] in IMPORTER_PACKAGES]
         run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:',
              '--upgrade', '--target', str(tools / 'python'), *pins], settings)
@@ -134,7 +136,8 @@ def ensure_tools(settings, run):
 def verified_rpx(root, expected):
     for candidate in root.rglob('Tekken.rpx'):
         if digest(candidate) == expected: return candidate
-    raise ValueError('This game source does not contain the supported European Wii U update v16 executable.')
+    raise ValueError(tr('setup.no_rpx', 'This game source does not contain the supported European Wii U update v16 '
+                                        'executable.'))
 
 
 def prepare_rpx(settings, run):
@@ -142,7 +145,7 @@ def prepare_rpx(settings, run):
     if (not source_text or not Path(source_text).exists()) and settings.installed():
         source_text = str(settings.installed() / 'game')   # (an update: the installed game has it too)
     if not source_text or not Path(source_text).exists():
-        raise ValueError('Choose your European Wii U game archive with update v16 first.')
+        raise ValueError(tr('setup.choose_archive', 'Choose your European Wii U game archive with update v16 first.'))
     source = Path(source_text)
     expected = manifest(settings)['rpx_sha256']
     destination = settings.root / 'local/windows-setup/Tekken.rpx'
@@ -176,27 +179,32 @@ def _tools_path(settings):
 
 def _validate_lengths(settings):
     if windows_length(settings.root) > MAX_PROJECT_PATH:
-        raise ValueError(
-            'The extracted project folder path is too long for Windows build tools. '
-            'Extract a fresh copy into a short folder such as D:/TTT2 or C:/Games/TTT2 '
-            '(Start Golden Fist Launcher.cmd must be directly inside that folder), then start setup again. '
-            'Your game archive does not need to move. Current project: ' + str(settings.root))
+        raise ValueError(tr(
+            'setup.project_too_long',
+            'The extracted project folder path is too long for Windows build tools. Extract a fresh copy into a short '
+            'folder such as D:/TTT2 or C:/Games/TTT2 (Start Golden Fist Launcher.cmd must be directly inside that '
+            'folder), then start setup again. Your game archive does not need to move. Current project: {folder}',
+            folder=settings.root))
     tools = _tools_path(settings)
     if windows_length(tools) > MAX_TOOLS_PATH:
-        raise ValueError('The Windows tools folder path is too long. Choose a shorter tools folder '
-                         'in Paths, or use a fresh project copy in D:/TTT2. Current tools: ' + str(tools))
+        raise ValueError(tr('setup.tools_too_long', 'The Windows tools folder path is too long. Choose a shorter tools '
+                                                    'folder in Paths, or use a fresh project copy in D:/TTT2. Current '
+                                                    'tools: {folder}', folder=tools))
 
 
 def _validate_plain_letters(settings):
     # CMake runs some build steps through batch files it writes in UTF-8, which cmd.exe reads in the console's
     # code page (850 on an Italian Windows): a letter such as à in the path breaks them ("path not found").
-    for what, path in (('project folder', settings.root), ('Windows tools folder', _tools_path(settings))):
+    for what, path in ((tr('setup.project_folder', 'project folder'), settings.root),
+                       (tr('setup.tools_folder', 'Windows tools folder'), _tools_path(settings))):
         if not str(path).isascii():
             letters = ''.join(sorted({c for c in str(path) if not c.isascii()}))
-            raise ValueError('The %s path has letters the Windows build tools cannot read (%s). Extract a fresh copy '
-                             'into a folder whose path has only plain letters, such as C:/TTT2 (outside OneDrive), '
-                             'then start setup again; or use Golden_Fist_Launcher-x86_64.exe, which keeps its files in '
-                             'such a folder by itself. Current %s: %s' % (what, letters, what, path))
+            raise ValueError(tr('setup.letters_tools', 'The {what} path has letters the Windows build tools cannot read '
+                                                       '({letters}). Extract a fresh copy into a folder whose path has '
+                                                       'only plain letters, such as C:/TTT2 (outside OneDrive), then '
+                                                       'start setup again; or use Golden_Fist_Launcher-x86_64.exe, which '
+                                                       'keeps its files in such a folder by itself. Current {what}: '
+                                                       '{path}', what=what, letters=letters, path=path))
 
 
 def validate_build_paths(settings):
@@ -210,11 +218,13 @@ def validate_setup_paths(settings):
     _validate_lengths(settings)
     # The game's installer gets its source and folder in the ANSI code page: a letter it has not is lost.
     from backend import unreadable_letters
-    for what, key in (('installation folder', 'install'), ('Wii U archive', 'source')):
+    for what, key in ((tr('setup.install_folder', 'installation folder'), 'install'),
+                      (tr('setup.archive', 'Wii U archive'), 'source')):
         if letters := unreadable_letters(settings.values.get(key) or ''):
-            raise ValueError('The %s path has letters the game\'s installer cannot be given on this PC (%s). Choose one '
-                             'whose path has only plain letters, such as C:/Games/TTT2. Current %s: %s'
-                             % (what, letters, what, settings.values[key]))
+            raise ValueError(tr('setup.letters_installer', 'The {what} path has letters the game\'s installer cannot be '
+                                                           'given on this PC ({letters}). Choose one whose path has only '
+                                                           'plain letters, such as C:/Games/TTT2. Current {what}: {path}',
+                                what=what, letters=letters, path=settings.values[key]))
     _validate_plain_letters(settings)
 
 
@@ -222,11 +232,12 @@ def setup(settings, run):
     # Refuse missing inputs before downloading large developer tools.
     source = settings.values['source'] or settings.values['title']
     if not source or not Path(source).exists() or not settings.values['install']:
-        raise ValueError('Choose your Wii U game source and installation folder first.')
+        raise ValueError(tr('setup.choose_both', 'Choose your Wii U game source and installation folder first.'))
     if settings.build != settings.root / 'build-windows-tools':
-        raise ValueError('First-time setup requires the project build-windows-tools folder.')
+        raise ValueError(tr('setup.needs_build_folder', 'First-time setup requires the project build-windows-tools '
+                                                        'folder.'))
     build_game(settings, run)
-    print('@step install Installing the game', flush=True)
+    print('@step install ' + tr('setup.installing', 'Installing the game'), flush=True)
     # The project already has its launcher entry point. Do not require writing
     # a system/desktop shortcut to finish a portable first-time setup.
     run(settings.installer_command() + ['--no-launcher'], settings)
@@ -236,11 +247,12 @@ def setup(settings, run):
 def upgrade(settings, run):
     """The installed game built again from this launcher's files and put in its place: after the
     launcher updated itself, as the Linux launcher's Update."""
-    if not settings.installed(): raise ValueError('Set up the game first.')
+    if not settings.installed(): raise ValueError(tr('setup.set_up_first', 'Set up the game first.'))
     if settings.build != settings.root / 'build-windows-tools':
-        raise ValueError('Updating the game requires the project build-windows-tools folder.')
+        raise ValueError(tr('setup.update_needs_build_folder', 'Updating the game requires the project '
+                                                               'build-windows-tools folder.'))
     build_game(settings, run)
-    print('@step install Updating the installed game', flush=True)
+    print('@step install ' + tr('model.updating_installed', 'Updating the installed game'), flush=True)
     run(settings.installer_command(True), settings)
     print('The game is updated. You can now click Play.', flush=True)
 
@@ -248,17 +260,17 @@ def upgrade(settings, run):
 def build_game(settings, run):
     """Everything up to the built game: the tools, the libraries, the code from the player's RPX."""
     validate_setup_paths(settings)
-    print('@step tools Getting the missing Windows tools ready', flush=True)
+    print('@step tools ' + tr('setup.tools_ready', 'Getting the missing Windows tools ready'), flush=True)
     tools = ensure_tools(settings, run)
-    print('@step dependencies Preparing graphics libraries', flush=True)
+    print('@step dependencies ' + tr('setup.libraries', 'Preparing graphics libraries'), flush=True)
     run(powershell(settings.root / 'tools/setup_windows_runtime.ps1', '-ToolsRoot', tools), settings)
-    print('@step tools Building game preparation tools', flush=True)
+    print('@step tools ' + tr('setup.building_tools', 'Building game preparation tools'), flush=True)
     run(powershell(settings.root / 'tools/build_windows_tools.ps1', '-ToolsRoot', tools), settings)
-    print('@step source Checking your own Wii U game', flush=True)
+    print('@step source ' + tr('setup.checking_game', 'Checking your own Wii U game'), flush=True)
     rpx = prepare_rpx(settings, run)
     generated = settings.root / 'generated/ttt2-windows'
-    print('@step generate Preparing game code from your own copy', flush=True)
+    print('@step generate ' + tr('setup.generating', 'Preparing game code from your own copy'), flush=True)
     run([str(settings.build / 'recomp/cafe-recomp.exe'), str(rpx), str(generated)], settings)
-    print('@step build Building the Windows game', flush=True)
+    print('@step build ' + tr('setup.building_game', 'Building the Windows game'), flush=True)
     run(powershell(settings.root / 'tools/build_windows_runtime.ps1', '-ToolsRoot', tools,
                    '-Rpx', rpx), settings)

@@ -1,6 +1,8 @@
 #include "browser.h"
 #include "utf8_path.h"
 
+#include "i18n.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -91,9 +93,11 @@ std::vector<fs::path> wine_prefixes(const fs::path& home, size_t limit) {
 
 std::vector<Place> places(const fs::path& home, const std::string& user) {
     std::vector<Place> out;
-    out.push_back({"home", "Home", home, "stroke:home", ""});
-    if (is_dir(home / "Downloads")) out.push_back({"downloads", "Downloads", home / "Downloads", "stroke:down", ""});
-    if (is_dir(home / "Games")) out.push_back({"games", "Games", home / "Games", "stroke:folder", ""});
+    using i18n::tr;
+    out.push_back({"home", tr("places.home", "Home"), home, "stroke:home", ""});
+    if (is_dir(home / "Downloads"))
+        out.push_back({"downloads", tr("places.downloads", "Downloads"), home / "Downloads", "stroke:down", ""});
+    if (is_dir(home / "Games")) out.push_back({"games", tr("places.games", "Games"), home / "Games", "stroke:folder", ""});
 #ifdef _WIN32
     // Windows: each drive (C:, D:, ...).
     (void)user;
@@ -116,7 +120,8 @@ std::vector<Place> places(const fs::path& home, const std::string& user) {
         out.push_back({"steam-flatpak", "Steam (Flatpak)", steam, "stroke:folder", ""});
         break;
     }
-    if (is_dir(home / ".var/app")) out.push_back({"flatpak", "Flatpak apps", home / ".var/app", "stroke:folder", ""});
+    if (is_dir(home / ".var/app"))
+        out.push_back({"flatpak", tr("places.flatpak", "Flatpak apps"), home / ".var/app", "stroke:folder", ""});
     for (const fs::path& p : wine_prefixes(home)) {
         const std::string name = p == home / ".wine" ? std::string("Wine") : path_utf8(p.filename());
         out.push_back({"wine:" + path_utf8(p), name, p, "stroke:folder", "Wine"});
@@ -136,7 +141,7 @@ std::vector<Place> places(const fs::path& home, const std::string& user) {
         if (std::any_of(out.begin(), out.end(), [&](const Place& p) { return p.id == id; })) continue;
         out.push_back({id, path_utf8(d.filename()), d, "stroke:drive", ""});
     }
-    out.push_back({"root", "Computer", "/", "stroke:drive", ""});
+    out.push_back({"root", tr("places.computer", "Computer"), "/", "stroke:drive", ""});
     return out;
 #endif
 }
@@ -151,7 +156,7 @@ std::vector<Entry> list_folder(const fs::path& folder, bool folders_only, std::s
         up.kind = Entry::Kind::kUp;
         up.path = parent;
         const std::string pname = parent == parent.root_path() ? path_utf8(parent) : path_utf8(parent.filename());
-        up.name = ".. (up to " + pname + ")";
+        up.name = i18n::tr("picker.up_to", ".. (up to {folder})", {{"folder", pname}});
         out.push_back(up);
     }
     std::error_code ec;
@@ -197,12 +202,11 @@ std::vector<Entry> list_folder(const fs::path& folder, bool folders_only, std::s
 }
 
 std::string size_text(uint64_t bytes) {
-    char buf[32];
-    if (bytes >= 1000ull * 1000 * 1000) std::snprintf(buf, sizeof buf, "%.1f GB", bytes / 1e9);
-    else if (bytes >= 1000ull * 1000) std::snprintf(buf, sizeof buf, "%.0f MB", bytes / 1e6);
-    else if (bytes >= 1000) std::snprintf(buf, sizeof buf, "%.0f KB", bytes / 1e3);
-    else std::snprintf(buf, sizeof buf, "%llu B", static_cast<unsigned long long>(bytes));
-    return buf;
+    using i18n::tr;
+    if (bytes >= 1000ull * 1000 * 1000) return tr("units.gb", "{amount} GB", {{"amount", i18n::decimal(bytes / 1e9, 1)}});
+    if (bytes >= 1000ull * 1000) return tr("units.mb", "{amount} MB", {{"amount", i18n::decimal(bytes / 1e6, 0)}});
+    if (bytes >= 1000) return tr("units.kb", "{amount} KB", {{"amount", i18n::decimal(bytes / 1e3, 0)}});
+    return tr("units.bytes", "{amount} B", {{"amount", bytes}});
 }
 
 fs::path start_folder(const fs::path& current, const std::vector<fs::path>& fallbacks) {

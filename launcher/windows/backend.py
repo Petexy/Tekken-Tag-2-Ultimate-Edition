@@ -8,6 +8,8 @@ import re
 import subprocess
 import sys
 
+from texts import tr, trn
+
 ROOT = Path(__file__).resolve().parents[2]
 # The game's programs (built with llvm-mingw's libc++) print and write paths in this PC's ANSI code page: the
 # installer's "@folder" line and its record of the folder (%LOCALAPPDATA%\TTT2Ultimate\installed). (cp1252 off
@@ -77,7 +79,8 @@ class Settings:
 
     def save(self):
         if Path(self.values['data']).name != 'TTT2Ultimate':
-            raise ValueError('The data folder must end in TTT2Ultimate so runtime settings use the same location.')
+            raise ValueError(tr('backend.data_name', 'The data folder must end in TTT2Ultimate so runtime settings use '
+                                                     'the same location.'))
         for key in ('data', 'packs', 'saves'):
             if not Path(self.values[key]).is_absolute(): raise ValueError(key + ' must be an absolute path')
         write_json(self.file, self.values)
@@ -102,37 +105,41 @@ class Settings:
         folder = self.installed()
         if folder:
             exe = folder / 'TTT2 Ultimate.exe'
-            if not exe.is_file(): raise ValueError('Installed game executable is missing. Build and update it first.')
+            if not exe.is_file():
+                raise ValueError(tr('backend.exe_missing', 'Installed game executable is missing. Build and update it '
+                                                           'first.'))
             return [str(exe)]
         exe = self.build / 'ttt2-ultimate.exe'
         game = self.values['source'] or self.values['title']
         if not exe.is_file() or not game or not Path(game).exists():
-            raise ValueError('Choose your Wii U source and build the Windows game first.')
+            raise ValueError(tr('backend.build_first_source', 'Choose your Wii U source and build the Windows game '
+                                                              'first.'))
         return [str(exe), game]
 
     def title(self):
         installed = self.installed()
         title = installed / 'game' if installed else Path(self.values['title'])
         if not (title / 'code/Tekken.rpx').is_file() or not (title / 'content/hdd/data000.ofs').is_file():
-            raise ValueError('Choose an extracted title containing code/Tekken.rpx and content/hdd/data000.ofs, '
-                             'or install your .wua first.')
+            raise ValueError(tr('backend.choose_title', 'Choose an extracted title containing code/Tekken.rpx and '
+                                                        'content/hdd/data000.ofs, or install your .wua first.'))
         return title
 
     def installer_command(self, update=False):
         exe = self.build / 'ttt2-ultimate.exe'
-        if not exe.is_file(): raise ValueError('Build the Windows game first.')
+        if not exe.is_file(): raise ValueError(tr('backend.build_first', 'Build the Windows game first.'))
         if update:
             folder = self.installed()
-            if not folder: raise ValueError('Choose a complete installation before updating.')
+            if not folder:
+                raise ValueError(tr('backend.choose_installation', 'Choose a complete installation before updating.'))
             return [str(exe), '--update', str(folder)]
         source = self.values['source'] or self.values['title']
         if not source or not Path(source).exists() or not self.values['install']:
-            raise ValueError('Choose the Wii U source and destination in Paths first.')
+            raise ValueError(tr('backend.choose_paths', 'Choose the Wii U source and destination in Paths first.'))
         return [str(exe), '--install', source, self.values['install']]
 
     def import_command(self, names, remove=False, outfits='none'):
         """outfits: whose outfits an import makes, as import_character.py --outfits takes it."""
-        if not names: raise ValueError('Select one or more fighters.')
+        if not names: raise ValueError(tr('backend.select_fighters', 'Select one or more fighters.'))
         return [sys.executable, '-u', str(self.root / 'tools/characters/import_character.py'), *names,
                 '--game', str(self.title()), '--out', self.values['packs'], '--progress',
                 *(['--remove'] if remove else ['--outfits', outfits])]
@@ -148,11 +155,14 @@ def failure(lines):
                 found = re.match(r'\s*\d+ - (\S+) \((.+)\)\s*$', listed)
                 if not found: break
                 failed.append(found.group(1) + ('' if found.group(2) == 'Failed' else ' (%s)' % found.group(2)))
-            if failed: return 'Failed check%s: %s.' % ('' if len(failed) == 1 else 's', ', '.join(failed))
+            if failed:
+                return trn('backend.failed_checks', len(failed), 'Failed check: {checks}.', 'Failed checks: {checks}.',
+                           checks=', '.join(failed))
     for line in lines:
         if ': error: ' in line or ': fatal error: ' in line:
             text = line.strip()
-            return 'Build error: ' + (text if len(text) <= 300 else text[:297] + '...')
+            return tr('backend.build_error', 'Build error: {error}',
+                      error=text if len(text) <= 300 else text[:297] + '...')
     return ''
 
 
@@ -174,7 +184,7 @@ def run_command(command, settings):
     if result:
         # (Said in the task panel too: what a tester sends when it is all that is seen.)
         if why := failure(list(last)): print('@error ' + why, flush=True)
-        raise RuntimeError('Task exited with code %d; see the log above.' % result)
+        raise RuntimeError(tr('backend.task_exited', 'Task exited with code {code}; see the log above.', code=result))
 
 
 def built_by(settings):
@@ -225,7 +235,8 @@ def importer(settings, *args, timeout=None):
         return json.loads([line for line in result.stdout.splitlines() if line.strip()][-1])
     except (ValueError, IndexError):
         lines = [line for line in result.stderr.splitlines() if line.strip()]
-        raise RuntimeError(lines[-1] if lines else 'the importer ended with code %d' % result.returncode)
+        raise RuntimeError(lines[-1] if lines else tr('backend.importer_ended', 'the importer ended with code {code}',
+                                                      code=result.returncode))
 
 
 def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
@@ -240,23 +251,27 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
     elif action == 'build':
         tools = Path(settings.values['tools'])
         if not (tools / 'python/cmake/data/bin/cmake.exe').is_file():
-            raise ValueError('Select the Windows build tools folder in Paths first.')
+            raise ValueError(tr('backend.select_tools', 'Select the Windows build tools folder in Paths first.'))
         # (the last of the libraries Set Up Game prepares before building: missing when no setup got that far)
         if not (settings.root / 'build-windows-shaderc/libshaderc/libshaderc_shared.dll').is_file():
-            raise ValueError('The libraries the game is built with are not ready; Set Up Game prepares them. '
-                             'Use Set Up Game: it carries on from where an earlier one stopped.')
+            raise ValueError(tr('backend.libraries_not_ready', 'The libraries the game is built with are not ready; Set '
+                                                               'Up Game prepares them. Use Set Up Game: it carries on '
+                                                               'from where an earlier one stopped.'))
         run_command(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                      str(settings.root / 'tools/build_windows_runtime.ps1'), '-ToolsRoot', str(tools)], settings)
     elif action == 'launcher':
         import self_update
         exe = self_update.running_exe()
-        if not exe: raise ValueError('Only the release .exe updates itself, and this launcher was not opened from one.')
+        if not exe:
+            raise ValueError(tr('backend.not_release', 'Only the release .exe updates itself, and this launcher was not '
+                                                       'opened from one.'))
         self_update.update(exe, cancelled)
     elif action == 'files':
         import self_update
         branch = self_update.test_branch(settings.root)
         if not self_update.running_exe() or not branch:
-            raise ValueError('Only a test build\'s .exe updates its files from its branch, and this launcher is not one.')
+            raise ValueError(tr('backend.not_test_build', 'Only a test build\'s .exe updates its files from its branch, '
+                                                          'and this launcher is not one.'))
         self_update.update_files(settings.root, branch, cancelled,
                                  program_in_exe=os.environ.get(self_update.PROGRAM_IN_EXE_VARIABLE) == '1')
     elif action in ('install', 'update'):
@@ -284,7 +299,9 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
                 version = t8.game_version(game.game, game.library)
                 for d in t8_fighters:
                     if not t8.whole(t8.saved_files(d.TEKKEN8_CODE, t8.MOVESETS, version)):
-                        raise RuntimeError(d.NAME + ' extraction is incomplete; existing packs were not changed.')
+                        raise RuntimeError(tr('backend.extraction_incomplete', '{name} extraction is incomplete; '
+                                                                               'existing packs were not changed.',
+                                              name=d.NAME))
         import runpy
         sys.argv = command[2:]
         runpy.run_path(command[2], run_name='__main__')

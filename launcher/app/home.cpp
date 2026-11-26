@@ -25,6 +25,15 @@ Box fit(Box b, SeamFit f) {
     return b;
 }
 
+// `s` in capitals (Latin and Cyrillic letters too).
+std::string upper(const std::string& s) {
+    std::vector<char32_t> points;
+    decode_utf8(s, points);
+    std::string out;
+    for (const char32_t c : points) out += encode_utf8(to_upper(c));
+    return out;
+}
+
 Tone pill_tone(m::PillKind k) {
     switch (k) {
     case m::PillKind::kOk: return Tone::Ok;
@@ -106,12 +115,12 @@ void App::home(const Box& crimson, const Box& blue) {
 // The blue side's top: the game, its state and its name.
 void App::game_head(const std::string& kick) {
     Ui& ui = *ui_;
-    section_label(ui, "home/game-label", "The game", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "home/game-label", tr("home.the_game", "The game"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
     {
         auto k = ui.open("home/kick", fit(Box{.layout = Layout::Row, .h = Size::fixed(26), .margin = {0, 0, 0, 10},
                                               .gap = 12, .align = Align::Center},
                                           SeamFit::BlueRect));
-        const bool live = view_.game.pill.text == "Running" || view_.game.pill.text == "Checking";
+        const bool live = view_.game.pill.live;
         pill(ui, "home/pill", view_.game.pill.text, live ? Tone::Blue : pill_tone(view_.game.pill.kind), live);
         TextSpec ks{kick, tx::kKick, c::kBlueDim};
         text(ui, "home/kv", ks, Box{.w = Size::grow()});
@@ -142,31 +151,41 @@ void App::home_readout(const std::string& key) {
             why = a->why;
             notes = a->primary || k == "update";
         } else if (k == "fighters") {
-            title = "Fighters";
+            title = tr("home.fighters", "Fighters");
             if (f.install.state == InstallState::kInstalled && f.status) {
                 int added = 0, update = 0;
                 for (const Fighter& x : f.status->fighters) {
                     added += x.added();
                     update += x.added() && x.update;
                 }
-                body = "Tekken 7's and Tekken 8's characters, made from your own games: " + std::to_string(added) +
-                       " of " + std::to_string(f.status->fighters.size()) + " added" +
-                       (update ? ", " + std::to_string(update) + " to update." : ".");
+                const i18n::Args args = {{"added", added}, {"total", f.status->fighters.size()}, {"update", update}};
+                body = update ? trn("home.fighters_about_update", update,
+                                    "Tekken 7's and Tekken 8's characters, made from your own games: {added} of "
+                                    "{total} added, {update} to update.",
+                                    "Tekken 7's and Tekken 8's characters, made from your own games: {added} of "
+                                    "{total} added, {update} to update.",
+                                    args)
+                              : tr("home.fighters_about_added",
+                                   "Tekken 7's and Tekken 8's characters, made from your own games: {added} of {total} "
+                                   "added.",
+                                   args);
             } else if (f.install.state == InstallState::kInstalled) {
-                body = "Tekken 7's and Tekken 8's characters, made from your own games.";
+                body = tr("home.fighters_about", "Tekken 7's and Tekken 8's characters, made from your own games.");
             } else {
-                body = "See which characters can be added: they are made from your Tekken 7 and Tekken 8 once the "
-                       "game is installed.";
+                body = tr("home.fighters_about_later", "See which characters can be added: they are made from your "
+                                                       "Tekken 7 and Tekken 8 once the game is installed.");
             }
         } else if (k == "slot:game") {
-            title = "Game file";
+            title = tr("home.game_file", "Game file");
             body = f.chosen_game.empty()
-                       ? "Choose your .wua with the file browser: it works with a controller too."
-                       : path_utf8(f.chosen_game.filename()) + ", in " + m::shown_path(f.chosen_game.parent_path()) +
-                             ". Choose another one with the file browser.";
+                       ? tr("home.choose_wua_about", "Choose your .wua with the file browser: it works with a controller too.")
+                       : tr("home.chosen_wua_about", "{file}, in {folder}. Choose another one with the file browser.",
+                            {{"file", path_utf8(f.chosen_game.filename())},
+                             {"folder", m::shown_path(f.chosen_game.parent_path())}});
         } else if (k == "slot:folder") {
-            title = "Install folder";
-            body = "The game goes into " + slot_target() + ". Choose another place with the folder browser.";
+            title = tr("home.install_folder", "Install folder");
+            body = tr("home.folder_about", "The game goes into {folder}. Choose another place with the folder browser.",
+                      {{"folder", slot_target()}});
         } else {
             return;
         }
@@ -235,27 +254,39 @@ void App::notice_card() {
 
 // Home's UPDATE in the slab: the word and what it brings up to date ("launcher, game" / "+ fighters").
 SlabSpec App::update_slab() const {
-    std::vector<std::string> names;
-    for (const m::UpdatePart& p : view_.game.update) {
-        if (p.kind == "launcher") names.push_back("launcher");
-        else if (p.kind == "game") names.push_back("game");
-        else if (p.kind == "fighters") names.push_back("fighters");
+    std::vector<std::string> kinds;
+    for (const m::UpdatePart& p : view_.game.update)
+        if (p.kind == "launcher" || p.kind == "game" || p.kind == "fighters") kinds.push_back(p.kind);
+    const auto name = [](const std::string& kind) {
+        return kind == "launcher" ? tr("slab.launcher", "launcher")
+               : kind == "game"   ? tr("slab.game", "game")
+                                  : tr("slab.fighters", "fighters");
+    };
+    const std::string big = tr("slab.update", "Update");
+    if (kinds.size() == 1) {
+        const std::string one = kinds[0] == "launcher" ? tr("slab.the_launcher", "the launcher")
+                                : kinds[0] == "game"   ? tr("slab.the_game", "the game")
+                                                       : tr("slab.the_fighters", "the fighters");
+        return {big, one, tr("slab.then_play", "then play")};
     }
-    if (names.size() == 1) return {"Update", "the " + names[0], "then play"};
-    if (names.size() == 2) return {"Update", names[0] + " + " + names[1], "then play"};
-    return {"Update", names[0] + ", " + names[1], "+ " + names[2]};
+    if (kinds.size() == 2)
+        return {big, tr("slab.two", "{first} + {second}", {{"first", name(kinds[0])}, {"second", name(kinds[1])}}),
+                tr("slab.then_play", "then play")};
+    if (kinds.size() < 3) return {big, {}, {}};
+    return {big, tr("slab.three_first", "{first}, {second}", {{"first", name(kinds[0])}, {"second", name(kinds[1])}}),
+            tr("slab.three_last", "+ {third}", {{"third", name(kinds[2])}})};
 }
 
 // The focused UPDATE on the blue side: what it does, its parts in order (numbered), what it leaves for later.
 void App::update_list(const m::Action& a) {
     Ui& ui = *ui_;
-    describe_panel(ui, "home/xpl", "Update", a.describe.explain, fit({}, SeamFit::BlueSkewed));
+    describe_panel(ui, "home/xpl", tr("slab.update", "Update"), a.describe.explain, fit({}, SeamFit::BlueSkewed));
     if (!a.why.empty())
         note(ui, "home/why", Tone::Warn, a.why, fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect), "stroke:warn");
     int n = 0;
     for (const m::UpdatePart& p : view_.game.update) {
         if (p.kind == "later") {
-            note(ui, "home/later", Tone::Warn, p.title + ": " + p.text,
+            note(ui, "home/later", Tone::Warn, tr("common.title_detail", "{title}: {detail}", {{"title", p.title}, {"detail", p.text}}),
                  fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect), "stroke:warn");
             continue;
         }
@@ -285,12 +316,13 @@ void App::home_installed(const Box& crimson, const Box& blue) {
     home_primary_ = primary ? primary->id : std::string();
     {
         auto g = ui.open("home/crimson", crimson);
-        section_label(ui, "home/menu-label", "Menu", Half::Crimson, {},
+        section_label(ui, "home/menu-label", tr("home.menu", "Menu"), Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         if (primary) {
             SlabSpec s;
             if (primary->id == "update-everything") s = update_slab();
-            else if (primary->id == "update") s = {"Update", "then play", "a few minutes"};
+            else if (primary->id == "update")
+                s = {tr("slab.update", "Update"), tr("slab.then_play", "then play"), tr("slab.few_minutes", "a few minutes")};
             else s = {primary->label, "Tekken Tag", "Tournament 2"};
             s.mid = s.big.size() > 6;
             s.disabled = !primary->enabled;
@@ -305,27 +337,29 @@ void App::home_installed(const Box& crimson, const Box& blue) {
             menu_row(ui, "play", p, crimson_focus(false, !play->enabled), fit({}, SeamFit::CrimsonSkewed));
         }
         menu_row(ui, "fighters",
-                 {"stroke:users", "Fighters", f.status ? std::to_string(added) + " of " + std::to_string(total) : ""},
+                 {"stroke:users", tr("home.fighters", "Fighters"),
+                  f.status ? tr("progress.of", "{done} of {total}", {{"done", added}, {"total", total}}) : ""},
                  crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
-        menu_row(ui, "settings", {"stroke:gear", "Settings"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "settings", {"stroke:gear", tr("home.settings", "Settings")}, crimson_focus(),
+                 fit({}, SeamFit::CrimsonSkewed));
         for (const m::Action& a : view_.game.actions) {
             if (a.id == "update" && !a.primary) {
-                MenuRowSpec u{"stroke:update", "Update the game", "Ready"};
+                MenuRowSpec u{"stroke:update", tr("home.update_game", "Update the game"), tr("home.ready", "Ready")};
                 u.value_tone = Tone::Warn;
                 u.disabled = !a.enabled;
                 menu_row(ui, "update", u, crimson_focus(false, !a.enabled), fit({}, SeamFit::CrimsonSkewed));
             }
         }
         if (action("open-folder"))
-            menu_row(ui, "open-folder", {"stroke:folder", "Open the game folder"}, crimson_focus(),
+            menu_row(ui, "open-folder", {"stroke:folder", tr("home.open_folder", "Open the game folder")}, crimson_focus(),
                      fit({}, SeamFit::CrimsonSkewed));
         if (const m::Action* more = action("more")) {
-            MenuRowSpec s{"stroke:dots", "More", "Build, install, logs"};
+            MenuRowSpec s{"stroke:dots", tr("home.more", "More"), tr("home.more_value", "Build, install, logs")};
             s.disabled = !more->enabled;
             menu_row(ui, "more", s, crimson_focus(false, !more->enabled), fit({}, SeamFit::CrimsonSkewed));
         }
         if (const m::Action* un = action("uninstall")) {
-            MenuRowSpec s{"stroke:trash", "Uninstall"};
+            MenuRowSpec s{"stroke:trash", tr("home.uninstall", "Uninstall")};
             s.danger = true;
             s.disabled = !un->enabled;
             menu_row(ui, "uninstall", s, crimson_focus(false, !un->enabled), fit({}, SeamFit::CrimsonSkewed));
@@ -333,23 +367,26 @@ void App::home_installed(const Box& crimson, const Box& blue) {
     }
     auto g = ui.open("home/blue", blue);
     const std::string kick = f.game_built.empty()
-                                 ? std::string("Not built by this launcher")
-                                 : "Game " + std::string(launcher_version(f.game_built)) + " · built on this PC";
+                                 ? tr("home.not_built_here", "Not built by this launcher")
+                                 : tr("home.built_here", "Game {version} · built on this PC",
+                                      {{"version", launcher_version(f.game_built)}});
     game_head(kick);
     std::vector<Run> fighters_runs;
     if (f.status) {
-        fighters_runs.push_back({std::to_string(added) + " of " + std::to_string(total) + " added", kValue});
+        fighters_runs.push_back({tr("home.added_of", "{added} of {total} added", {{"added", added}, {"total", total}}), kValue});
         if (update) {
             fighters_runs.push_back({" · ", kValue});
-            fighters_runs.push_back({std::to_string(update) + " to update", c::kWarn});
+            fighters_runs.push_back({trn("home.to_update", update, "{n} to update", "{n} to update"), c::kWarn});
         }
     } else {
-        fighters_runs.push_back({f.status_loading ? "Looking…" : "Not known", c::kBlueDim});
+        fighters_runs.push_back({f.status_loading ? tr("home.looking", "Looking…") : tr("home.not_known", "Not known"),
+                                 c::kBlueDim});
     }
     const Fact list[] = {
-        {"Version", {{f.game_built.empty() ? "Unknown" : m::shown_build(f.game_built), kValue}}},
-        {"Folder", {{m::shown_path(f.install.folder), kValue}}},
-        {"Fighters", fighters_runs, false}};
+        {tr("home.version", "Version"),
+         {{f.game_built.empty() ? tr("home.unknown", "Unknown") : m::shown_build(f.game_built), kValue}}},
+        {tr("home.folder", "Folder"), {{m::shown_path(f.install.folder), kValue}}},
+        {tr("home.fighters", "Fighters"), fighters_runs, false}};
     // (Drilled into More: its entries and what the focused one does take the facts' place.)
     if (drilled() && drill_->opener == "more") return more_view();
     const std::string& fo = ui.focused();
@@ -382,42 +419,48 @@ void App::home_setup(const Box& crimson, const Box& blue) {
     const m::Action* setup = action("setup");
     {
         auto g = ui.open("home/crimson", crimson);
-        section_label(ui, "home/menu-label", "Set Up", Half::Crimson, {},
+        section_label(ui, "home/menu-label", tr("home.set_up", "Set Up"), Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         if (setup) {
-            SlabSpec s{"Set Up", "from your", "own .wua"};
+            SlabSpec s{tr("slab.set_up", "Set Up"), tr("slab.from_your", "from your"), tr("slab.own_wua", "own .wua")};
             s.mid = true;
             s.disabled = !setup->enabled;
             slab(ui, "setup", s, crimson_focus(true, !setup->enabled),
                  fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
-        menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
-        menu_row(ui, "settings", {"stroke:gear", "Settings"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "fighters", {"stroke:users", tr("home.fighters", "Fighters")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "settings", {"stroke:gear", tr("home.settings", "Settings")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
         if (const m::Action* more = action("more")) {
-            MenuRowSpec s{"stroke:dots", "More", "Build, install, logs"};
+            MenuRowSpec s{"stroke:dots", tr("home.more", "More"), tr("home.more_value", "Build, install, logs")};
             s.disabled = !more->enabled;
             menu_row(ui, "more", s, crimson_focus(false, !more->enabled), fit({}, SeamFit::CrimsonSkewed));
         }
     }
     auto g = ui.open("home/blue", blue);
-    game_head("Native PC port · built from your own copy");
+    game_head(tr("home.port_kick", "Native PC port · built from your own copy"));
     const auto folder = [&](const char* key) {
         const auto it = f.windows.folders.find(key);
         return it == f.windows.folders.end() ? std::string() : it->second;
     };
     const std::string source = folder("source"), install = folder("install");
-    section_label(ui, "home/needs-label", "What the setup needs", Half::Blue, {},
+    section_label(ui, "home/needs-label", tr("home.setup_needs", "What the setup needs"), Half::Blue, {},
                   fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
+    const std::string later = tr("home.chosen_later", "Chosen when you set up");
     const Fact list[] = {
-        {"Your copy", {{"TEKKEN TAG TOURNAMENT 2 WII U EDITION: European, update 16, as a .wua archive", kValue}}, false},
-        {"Archive", {{source.empty() ? "Chosen when you set up" : m::shown_path(utf8_path(source)), source.empty() ? c::kBlueDim
-                                                                                                      : kValue}},
+        {tr("home.your_copy", "Your copy"),
+         {{tr("home.your_copy_value", "{game}: European, update 16, as a .wua archive",
+              {{"game", "TEKKEN TAG TOURNAMENT 2 WII U EDITION"}}),
+           kValue}},
+         false},
+        {tr("home.archive", "Archive"),
+         {{source.empty() ? later : m::shown_path(utf8_path(source)), source.empty() ? c::kBlueDim : kValue}},
          !source.empty()},
-        {"Folder", {{install.empty() ? "Chosen when you set up" : m::shown_path(utf8_path(install)), install.empty() ? c::kBlueDim
-                                                                                                        : kValue}},
+        {tr("home.folder", "Folder"),
+         {{install.empty() ? later : m::shown_path(utf8_path(install)), install.empty() ? c::kBlueDim : kValue}},
          !install.empty()},
-        {"Space", {{"About 30 GB and internet: the tools are downloaded once", kValue}}, false}};
+        {tr("home.space", "Space"), {{tr("home.setup_space", "About 30 GB and internet: the tools are downloaded once"), kValue}},
+         false}};
     // (Drilled into More: its entries and what the focused one does take the facts' place.)
     if (drilled() && drill_->opener == "more") return more_view();
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
@@ -432,7 +475,7 @@ void App::home_setup(const Box& crimson, const Box& blue) {
 // Windows' More, drilled into from its row: its entries on the blue side (the crimson side locked).
 void App::more_view() {
     Ui& ui = *ui_;
-    section_label(ui, "more/label", "More", Half::Blue, {}, fit(Box{.margin = {0, 6, 0, 8}}, SeamFit::BlueRect));
+    section_label(ui, "more/label", tr("home.more", "More"), Half::Blue, {}, fit(Box{.margin = {0, 6, 0, 8}}, SeamFit::BlueRect));
     for (const m::Action& a : view_.game.more) screen_actions_[a.id] = a;
     more_describe();
     // (In rows that wrap: six entries never run below the plate.)
@@ -460,12 +503,13 @@ void App::more_describe() {
         std::string body = a->describe.explain.empty() ? a->tooltip : a->describe.explain;
         if (body.empty()) {
             const std::string& id = a->id;
-            body = id == "more:build"           ? "Builds the Windows game program again from the extracted game (a while)."
-                   : id == "more:install"       ? "Installs the built game into the installation folder."
-                   : id == "more:update"        ? "Puts the newest built program into the installed game."
-                   : id == "more:setup-again"   ? "Set Up Game again: another archive or folder."
-                   : id == "more:open-logs"     ? "Opens the folder of every task's log."
-                                                : "Opens the newest task's log.";
+            body = id == "more:build"
+                       ? tr("more.build_about", "Builds the Windows game program again from the extracted game (a while).")
+                   : id == "more:install"     ? tr("more.install_about", "Installs the built game into the installation folder.")
+                   : id == "more:update"      ? tr("more.update_about", "Puts the newest built program into the installed game.")
+                   : id == "more:setup-again" ? tr("more.setup_again_about", "Set Up Game again: another archive or folder.")
+                   : id == "more:open-logs"   ? tr("more.open_logs_about", "Opens the folder of every task's log.")
+                                              : tr("more.open_log_about", "Opens the newest task's log.");
         }
         describe_panel(ui, "more/xpl", a->label, body, fit({}, SeamFit::BlueSkewed));
         if (!a->enabled && !a->why.empty())
@@ -480,10 +524,10 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
     const m::Action* install = action("install");
     {
         auto g = ui.open("home/crimson", crimson);
-        section_label(ui, "home/menu-label", "Install", Half::Crimson, {},
+        section_label(ui, "home/menu-label", tr("home.install", "Install"), Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         if (install) {
-            SlabSpec s{"Install", "from your", "own .wua"};
+            SlabSpec s{tr("slab.install", "Install"), tr("slab.from_your", "from your"), tr("slab.own_wua", "own .wua")};
             s.mid = true;
             s.disabled = !install->enabled;
             slab(ui, "install", s, crimson_focus(true, !install->enabled),
@@ -492,33 +536,38 @@ void App::home_first_run(const Box& crimson, const Box& blue) {
         auto rows = ui.open("home/rows", Box{.gap = 10});
         MenuRowSpec one;
         one.number = 1;
-        one.caption = "Game file";
-        one.title = f.chosen_game.empty() ? "Choose your .wua" : path_utf8(f.chosen_game.filename());
+        one.caption = tr("home.game_file", "Game file");
+        one.title = f.chosen_game.empty() ? tr("home.choose_wua", "Choose your .wua") : path_utf8(f.chosen_game.filename());
         one.ok = !f.chosen_game.empty();
         one.mono_title = !f.chosen_game.empty();
         menu_row(ui, "slot:game", one, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
         MenuRowSpec two;
         two.number = 2;
-        two.caption = "Install folder";
+        two.caption = tr("home.install_folder", "Install folder");
         two.title = slot_target();
         two.mono_title = true;
         two.ok = true;
         menu_row(ui, "slot:folder", two, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
-        menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
-        menu_row(ui, "settings", {"stroke:gear", "Settings"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "fighters", {"stroke:users", tr("home.fighters", "Fighters")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "settings", {"stroke:gear", tr("home.settings", "Settings")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
     }
     auto g = ui.open("home/blue", blue);
-    game_head("Native PC port · built from your own copy");
-    section_label(ui, "home/needs-label", "What the install needs", Half::Blue, {},
+    game_head(tr("home.port_kick", "Native PC port · built from your own copy"));
+    section_label(ui, "home/needs-label", tr("home.install_needs", "What the install needs"), Half::Blue, {},
                   fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
     const Fact list[] = {
-        {"Your copy", {{"TEKKEN TAG TOURNAMENT 2 WII U EDITION: European, update 16, as a .wua archive", kValue}}, false},
-        {"Game file",
-         {{f.chosen_game.empty() ? "Not chosen yet" : path_utf8(f.chosen_game.filename()),
+        {tr("home.your_copy", "Your copy"),
+         {{tr("home.your_copy_value", "{game}: European, update 16, as a .wua archive",
+              {{"game", "TEKKEN TAG TOURNAMENT 2 WII U EDITION"}}),
+           kValue}},
+         false},
+        {tr("home.game_file", "Game file"),
+         {{f.chosen_game.empty() ? tr("home.not_chosen", "Not chosen yet") : path_utf8(f.chosen_game.filename()),
            f.chosen_game.empty() ? c::kWarn : kValue}},
          !f.chosen_game.empty()},
-        {"Space", {{"About 16 GB, plus 3 GB while building", kValue}}, false},
-        {"This PC", {{"A C++ compiler and an x86-64-v3 processor: checked first", kValue}}, false}};
+        {tr("home.space", "Space"), {{tr("home.install_space", "About 16 GB, plus 3 GB while building"), kValue}}, false},
+        {tr("home.this_pc", "This PC"),
+         {{tr("home.this_pc_value", "A C++ compiler and an x86-64-v3 processor: checked first"), kValue}}, false}};
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     for (const m::Line& l : view_.game.body) {
         if (l.tone != m::Tone::kError) continue;
@@ -538,30 +587,31 @@ void App::home_unfinished(const Box& crimson, const Box& blue) {
     const m::Facts& f = model_->facts();
     {
         auto g = ui.open("home/crimson", crimson);
-        section_label(ui, "home/menu-label", "Menu", Half::Crimson, {},
+        section_label(ui, "home/menu-label", tr("home.menu", "Menu"), Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         if (const m::Action* r = action("resume")) {
-            SlabSpec s{"Resume", "the install", "not finished"};
+            SlabSpec s{tr("slab.resume", "Resume"), tr("slab.the_install", "the install"), tr("slab.not_finished", "not finished")};
             s.mid = true;
             s.disabled = !r->enabled;
             slab(ui, "resume", s, crimson_focus(true, !r->enabled),
                  fit(Box{.margin = {0, 0, 0, 18}}, SeamFit::CrimsonSkewed));
         }
         auto rows = ui.open("home/rows", Box{.gap = 10});
-        menu_row(ui, "fighters", {"stroke:users", "Fighters"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
-        menu_row(ui, "settings", {"stroke:gear", "Settings"}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "fighters", {"stroke:users", tr("home.fighters", "Fighters")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
+        menu_row(ui, "settings", {"stroke:gear", tr("home.settings", "Settings")}, crimson_focus(), fit({}, SeamFit::CrimsonSkewed));
         if (const m::Action* un = action("uninstall")) {
-            MenuRowSpec s{"stroke:trash", "Uninstall"};
+            MenuRowSpec s{"stroke:trash", tr("home.uninstall", "Uninstall")};
             s.danger = true;
             s.disabled = !un->enabled;
             menu_row(ui, "uninstall", s, crimson_focus(false, !un->enabled), fit({}, SeamFit::CrimsonSkewed));
         }
     }
     auto g = ui.open("home/blue", blue);
-    game_head("Stopped before it was complete");
-    const Fact list[] = {{"Folder", {{m::shown_path(f.install.folder), kValue}}},
-                         {"Game file",
-                          {{f.install.game.empty() ? "Asked for when it resumes" : m::shown_path(f.install.game),
+    game_head(tr("home.stopped_kick", "Stopped before it was complete"));
+    const Fact list[] = {{tr("home.folder", "Folder"), {{m::shown_path(f.install.folder), kValue}}},
+                         {tr("home.game_file", "Game file"),
+                          {{f.install.game.empty() ? tr("home.asked_later", "Asked for when it resumes")
+                                                   : m::shown_path(f.install.game),
                             kValue}},
                           !f.install.game.empty()}};
     facts(ui, "home/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
@@ -598,12 +648,12 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
         if (l.kind == m::Line::Kind::kCheck) checks.push_back(&l);
     {
         auto g = ui.open("home/crimson", crimson);
-        section_label(ui, "pre/label", "Before the install", Half::Crimson,
-                      running ? "" : std::to_string(checks.size()) + " checks",
+        section_label(ui, "pre/label", tr("pre.before", "Before the install"), Half::Crimson,
+                      running ? "" : trn("pre.checks", static_cast<long long>(checks.size()), "{n} check", "{n} checks"),
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         auto rows = ui.open("pre/rows", Box{.gap = 8});
         if (running) {
-            MenuRowSpec s{"stroke:dots", "Checking this PC…"};
+            MenuRowSpec s{"stroke:dots", tr("pre.checking_pc", "Checking this PC…")};
             s.compact = true;
             menu_row(ui, "check:0", s, crimson_focus(true), fit({}, SeamFit::CrimsonSkewed));
         }
@@ -613,7 +663,8 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
         for (size_t i = 0; i < checks.size(); ++i) {
             const m::Line& l = *checks[i];
             const bool ok = l.icon_tone != m::Tone::kError;
-            MenuRowSpec s{ok ? "stroke:check" : "stroke:cross", l.title, ok ? "Ready" : "Missing"};
+            MenuRowSpec s{ok ? "stroke:check" : "stroke:cross", l.title,
+                          ok ? tr("home.ready", "Ready") : tr("pre.missing", "Missing")};
             s.value_tone = ok ? Tone::Ok : Tone::Bad;
             s.compact = true;
             menu_row(ui, "check:" + std::to_string(i), s,
@@ -625,13 +676,13 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
                                                  .line_gap = 12, .wrap = true},
                                              SeamFit::CrimsonRect));
             ButtonSpec again;
-            again.label = "Check Again";
+            again.label = tr("pre.check_again", "Check Again");
             again.kind = ButtonKind::Primary;
             again.prompt = Prompt::Accept;
             again.half = Half::Crimson;
             button(ui, "check-again", again, crimson_focus());
             ButtonSpec cancel;
-            cancel.label = "Cancel";
+            cancel.label = tr("common.cancel", "Cancel");
             cancel.prompt = Prompt::Back;
             cancel.half = Half::Crimson;
             button(ui, "preflight-cancel", cancel, crimson_focus());
@@ -648,12 +699,13 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
     readout_.show(key, last_dy_, ui.now());
     readout_.build(ui, "pre/ro", Box{}, [&](const std::string& k) {
         if (k == "running" || checks.empty()) {
-            section_label(ui, "pre/c-label", "Checking", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-            text(ui, "pre/c-title", TextSpec{.text = "This PC", .style = tx::kBig, .chroma = 3, .autofit_min = 30},
+            section_label(ui, "pre/c-label", tr("pre.checking", "Checking"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
+            text(ui, "pre/c-title",
+                 TextSpec{.text = tr("home.this_pc", "This PC"), .style = tx::kBig, .chroma = 3, .autofit_min = 30},
                  fit({}, SeamFit::BlueRect));
             text(ui, "pre/c-text",
-                 TextSpec{.text = "The game file, the processor, a C++ compiler and the free space are checked "
-                                  "before the install starts.",
+                 TextSpec{.text = tr("pre.checking_about", "The game file, the processor, a C++ compiler and the free "
+                                                           "space are checked before the install starts."),
                           .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
                  fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect));
             return;
@@ -661,9 +713,10 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
         const size_t i = std::min(checks.size() - 1, static_cast<size_t>(std::max(0, std::atoi(k.c_str() + 6))));
         const m::Line& l = *checks[i];
         const bool ok = l.icon_tone != m::Tone::kError;
-        section_label(ui, "pre/c-label", "Check " + std::to_string(i + 1) + " of " + std::to_string(checks.size()),
+        section_label(ui, "pre/c-label",
+                      tr("pre.check_of", "Check {i} of {n}", {{"i", i + 1}, {"n", checks.size()}}),
                       Half::Blue, {}, fit({}, SeamFit::BlueRect));
-        pill(ui, "pre/c-pill", ok ? "Ready" : "Missing", ok ? Tone::Ok : Tone::Bad, false,
+        pill(ui, "pre/c-pill", ok ? tr("home.ready", "Ready") : tr("pre.missing", "Missing"), ok ? Tone::Ok : Tone::Bad, false,
              fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::BlueRect));
         text(ui, "pre/c-title", TextSpec{.text = l.title, .style = tx::kBig, .chroma = 3, .autofit_min = 28},
              fit({}, SeamFit::BlueRect));
@@ -676,21 +729,21 @@ void App::home_preflight(const Box& crimson, const Box& blue) {
                  TextSpec{.text = command, .style = tx::kFactValue, .color = rgb(0xe9f1ff), .wrap = true},
                  fit(Box{.pad = {12, 10, 12, 10}, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
             ButtonSpec b;
-            b.label = "Copy";
+            b.label = tr("pre.copy", "Copy");
             b.kind = ButtonKind::Blue;
             b.size = ButtonSize::Small;
             button(ui, a.id, b, blue_focus(), fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         }
         if (!ok) {
             text(ui, "pre/c-then",
-                 TextSpec{.text = "Then Check Again: the install starts once everything is ready.",
+                 TextSpec{.text = tr("pre.then_again", "Then Check Again: the install starts once everything is ready."),
                           .style = tx::kParaSmall, .color = c::kBlueDim, .wrap = true},
                  fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
         }
     });
     if (f.preflight) {
-        const Fact list[] = {{"Game file", {{m::shown_path(f.preflight->game), kValue}}},
-                             {"Into", {{m::shown_path(f.preflight->folder), kValue}}}};
+        const Fact list[] = {{tr("home.game_file", "Game file"), {{m::shown_path(f.preflight->game), kValue}}},
+                             {tr("pre.into", "Into"), {{m::shown_path(f.preflight->folder), kValue}}}};
         facts(ui, "pre/facts", list, fit(Box{.margin = {0, 12, 0, 0}}, SeamFit::BlueRect));
     }
 }
@@ -740,22 +793,25 @@ void App::home_task(const Box& crimson, const Box& blue) {
     const double fraction = task_fraction();
     {
         auto g = ui.open("home/crimson", crimson);
-        const std::string steps_label = build ? std::to_string(steps.size()) + " steps" : std::string("Steps");
+        const std::string steps_label = build ? trn("task.steps_n", static_cast<long long>(steps.size()), "{n} step", "{n} steps")
+                                              : tr("task.steps", "Steps");
         section_label(ui, "task/steps-label",
                       !update       ? steps_label
-                      : chain.done ? "Last part · " + steps_label
-                                   : "Part " + std::to_string(chain.waiting ? chain.at - 1 : chain.at) + " of " +
-                                         std::to_string(chain.count) + " · " + steps_label,
+                      : chain.done ? tr("task.last_part", "Last part · {steps}", {{"steps", steps_label}})
+                                   : tr("task.part_of_steps", "Part {i} of {n} · {steps}",
+                                        {{"i", chain.waiting ? chain.at - 1 : chain.at},
+                                         {"n", chain.count},
+                                         {"steps", steps_label}}),
                       Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         {
             auto rows = ui.open("task/rows", Box{.gap = 6});
             for (size_t i = 0; i < steps.size(); ++i) {
                 StepRowSpec s;
                 s.name = steps[i].name;
-                s.count = steps[i].state == StepLine::State::kDone     ? std::string("Done")
-                          : steps[i].state == StepLine::State::kFailed ? std::string("Stopped")
+                s.count = steps[i].state == StepLine::State::kDone     ? tr("task.done", "Done")
+                          : steps[i].state == StepLine::State::kFailed ? tr("task.stopped", "Stopped")
+                          : !steps[i].slash.empty()                    ? steps[i].slash
                                                                        : steps[i].count;
-                if (const size_t of = s.count.find(" of "); of != std::string::npos) s.count.replace(of, 4, " / ");
                 s.fraction = static_cast<float>(steps[i].fraction);
                 s.number = static_cast<int>(i) + 1;
                 s.state = steps[i].state == StepLine::State::kDone      ? StepState::Done
@@ -776,7 +832,8 @@ void App::home_task(const Box& crimson, const Box& blue) {
             // (The new launcher opens and this one ends: nothing to press.)
         } else if (running || between) {
             ButtonSpec cancel;
-            cancel.label = !running || view_.task.button.label.empty() ? "Cancel" : view_.task.button.label;
+            cancel.label =
+                !running || view_.task.button.label.empty() ? tr("common.cancel", "Cancel") : view_.task.button.label;
             cancel.prompt = Prompt::Back;
             cancel.half = Half::Crimson;
             cancel.disabled = !view_.task.button.enabled;
@@ -784,7 +841,7 @@ void App::home_task(const Box& crimson, const Box& blue) {
         } else {
             if (can_play) {
                 ButtonSpec play;
-                play.label = "Play";
+                play.label = tr("game.play", "Play");
                 play.kind = ButtonKind::Primary;
                 play.prompt = Prompt::Accept;
                 play.half = Half::Crimson;
@@ -792,20 +849,20 @@ void App::home_task(const Box& crimson, const Box& blue) {
             }
             if (failed || stopped) {
                 ButtonSpec again;
-                again.label = "Try Again";
+                again.label = tr("task.try_again", "Try Again");
                 again.kind = ButtonKind::Primary;
                 again.prompt = Prompt::Accept;
                 again.half = Half::Crimson;
                 button(ui, "task/again", again, crimson_focus(true));
             }
             ButtonSpec close;
-            close.label = "Close";
+            close.label = tr("common.close", "Close");
             close.prompt = Prompt::Back;
             close.half = Half::Crimson;
             button(ui, "task/close", close, crimson_focus(!can_play && !failed && !stopped));
         }
         ButtonSpec details;
-        details.label = view_.task.details.checked ? "Hide Details" : "Details";
+        details.label = view_.task.details.checked ? tr("task.hide_details", "Hide Details") : tr("task.details", "Details");
         details.prompt = Prompt::Context2;
         details.half = Half::Crimson;
         button(ui, "details", details, crimson_focus());
@@ -819,31 +876,36 @@ void App::home_task(const Box& crimson, const Box& blue) {
                             : task_kind_ == m::TaskKind::kLauncherUpdate && appimage_    ? appimage_->parent_path()
                                                                                          : f.install.folder;
 #endif
-    section_label(ui, "task/label", running ? "Progress" : "What happened", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "task/label", running ? tr("task.progress", "Progress") : tr("task.what_happened", "What happened"),
+                  Half::Blue, {}, fit({}, SeamFit::BlueRect));
     {
         auto k = ui.open("task/kick", fit(Box{.layout = Layout::Row, .h = Size::fixed(26), .margin = {0, 0, 0, 8},
                                               .gap = 12, .align = Align::Center},
                                           SeamFit::BlueRect));
-        if (running) pill(ui, "task/pill", r.view().button.label == "Stopping…" ? "Stopping" : "Running", Tone::Blue, true);
-        else if (between && chain.waiting) pill(ui, "task/pill", "Running", Tone::Blue, true);
-        else pill(ui, "task/pill", ok ? "Done" : stopped ? "Stopped" : "Failed", ok ? Tone::Ok : stopped ? Tone::Warn : Tone::Bad);
+        const std::string running_text = tr("task.running", "Running");
+        if (running)
+            pill(ui, "task/pill", view_.task.stopping ? tr("task.stopping_pill", "Stopping") : running_text, Tone::Blue, true);
+        else if (between && chain.waiting) pill(ui, "task/pill", running_text, Tone::Blue, true);
+        else
+            pill(ui, "task/pill", ok ? tr("task.done", "Done") : stopped ? tr("task.stopped", "Stopped") : tr("task.failed_pill", "Failed"),
+                 ok ? Tone::Ok : stopped ? Tone::Warn : Tone::Bad);
         if (update) {
             // ("UPDATE · 2 OF 3 · THE GAME PROGRAM": the part that runs, or the one that starts next.)
-            std::string kick = "Update · " + std::to_string(chain.at) + " of " + std::to_string(chain.count) + " · " +
-                               (chain.waiting && !chain.next.empty() ? chain.next[0].title : chain.part);
-            if (chain.done) kick = "Update · all " + std::to_string(chain.count) + " parts";
-            for (char& ch : kick) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            std::string kick = tr("task.update_kick", "Update · {i} of {n} · {part}",
+                                  {{"i", chain.at}, {"n", chain.count},
+                                   {"part", chain.waiting && !chain.next.empty() ? chain.next[0].title : chain.part}});
+            if (chain.done) kick = tr("task.update_kick_all", "Update · all {n} parts", {{"n", chain.count}});
+            kick = upper(kick);
             text(ui, "task/folder", TextSpec{kick, tx::kKick, c::kCyan}, Box{.w = Size::grow()});
         } else {
             text(ui, "task/folder", TextSpec{m::shown_path(folder), tx::kKick, c::kBlueDim}, Box{.w = Size::grow()});
         }
     }
-    const char* doing = task_kind_ == m::TaskKind::kInstall      ? "Installing"
-                        : task_kind_ == m::TaskKind::kUpdate     ? "Updating"
-                        : task_kind_ == m::TaskKind::kUninstall  ? "Uninstalling"
-                                                                 : "Updating";
-    const std::string big = running || (between && chain.waiting) ? std::string(doing)
-                            : update && chain.done                ? std::string("Updated")
+    const std::string doing = task_kind_ == m::TaskKind::kInstall     ? tr("game.pill_installing", "Installing")
+                              : task_kind_ == m::TaskKind::kUninstall ? tr("game.pill_uninstalling", "Uninstalling")
+                                                                      : tr("game.pill_updating", "Updating");
+    const std::string big = running || (between && chain.waiting) ? doing
+                            : update && chain.done                ? tr("task.updated", "Updated")
                                                                   : last.title;
     text(ui, "task/title", TextSpec{.text = big, .style = tx::kBig, .chroma = 3, .autofit_min = 26},
          fit({}, SeamFit::BlueRect));
@@ -857,16 +919,17 @@ void App::home_task(const Box& crimson, const Box& blue) {
     // The big number with where it is beside it ("Step 4 of 7 / Compiling"), the bar, then what the step does.
     std::string where, step_name;
     if (build && at > 0) {
-        where = running ? "Step " + std::to_string(at) + " of " + std::to_string(steps.size())
-                : ok    ? "All " + std::to_string(steps.size()) + " steps"
-                        : "Stopped at step " + std::to_string(at) + " of " + std::to_string(steps.size());
-        step_name = ok ? std::string("Done") : steps[static_cast<size_t>(at - 1)].name;
+        const i18n::Args args = {{"i", at}, {"n", steps.size()}};
+        where = running ? tr("task.step_of", "Step {i} of {n}", args)
+                : ok    ? trn("task.all_steps", static_cast<long long>(steps.size()), "All {n} steps", "All {n} steps")
+                        : tr("task.stopped_at_step", "Stopped at step {i} of {n}", args);
+        step_name = ok ? tr("task.done", "Done") : steps[static_cast<size_t>(at - 1)].name;
     } else if (!running) {
-        where = ok ? "Done" : stopped ? "Stopped" : "Failed";
+        where = ok ? tr("task.done", "Done") : stopped ? tr("task.stopped", "Stopped") : tr("task.failed_pill", "Failed");
     }
     if (between && chain.waiting) {
-        where = "Part " + std::to_string(chain.at - 1) + " of " + std::to_string(chain.count) + " done";
-        step_name = "Next: " + (chain.next.empty() ? chain.part : chain.next[0].title);
+        where = tr("task.part_done", "Part {i} of {n} done", {{"i", chain.at - 1}, {"n", chain.count}});
+        step_name = tr("task.next_part", "Next: {part}", {{"part", chain.next.empty() ? chain.part : chain.next[0].title}});
     }
     {
         auto row = ui.open("task/numbers", fit(Box{.layout = Layout::Row, .gap = 22, .align = Align::Center},
@@ -891,20 +954,22 @@ void App::home_task(const Box& crimson, const Box& blue) {
     } else {
         if (build && at > 0 && !ok) {
             const StepLine& l = steps[static_cast<size_t>(at - 1)];
-            headline = "Stopped at: " + l.text + (l.count.empty() ? "" : "  ·  " + l.count);
+            headline = tr("task.stopped_at", "Stopped at: {step}", {{"step", l.text}}) + (l.count.empty() ? "" : "  ·  " + l.count);
         }
         detail = last.detail;
         if (between && chain.waiting) {
-            headline = "The next part starts by itself in a moment.";
+            headline = tr("task.next_soon", "The next part starts by itself in a moment.");
             detail.clear();
         } else if (between) {
-            headline = last.title + ": the new launcher opens and goes on with the rest.";
+            headline = tr("task.handed_over", "{title}: the new launcher opens and goes on with the rest.", {{"title", last.title}});
             detail.clear();
         } else if (update && chain.done) {
             headline = chain.summary;
             detail = chain.later;
         } else if (update && !ok) {
-            detail = last.detail + (chain.later.empty() ? "" : (last.detail.empty() ? "" : " ") + chain.later);
+            detail = chain.later.empty() || last.detail.empty()
+                         ? last.detail + chain.later
+                         : tr("common.two_sentences", "{first} {second}", {{"first", last.detail}, {"second", chain.later}});
         }
     }
     if (!headline.empty())
@@ -919,7 +984,7 @@ void App::home_task(const Box& crimson, const Box& blue) {
     }
     if (update && (running || between) && !chain.next.empty() && !chain.handed_over) {
         // What comes after this part, in order.
-        text(ui, "task/next-label", TextSpec{"Then", tx::kLabelEm, c::kCyan},
+        text(ui, "task/next-label", TextSpec{tr("task.then", "Then"), tx::kLabelEm, c::kCyan},
              fit(Box{.margin = {0, 12, 0, 0}}, SeamFit::BlueRect));
         int n = chain.waiting ? chain.at : chain.at + 1;
         for (size_t i = 0; i < chain.next.size(); ++i, ++n) {
@@ -927,28 +992,31 @@ void App::home_task(const Box& crimson, const Box& blue) {
                           fit(Box{.margin = {0, 8, 0, 0}}, SeamFit::BlueRect));
         }
     } else if (update && chain.done) {
-        describe_panel(ui, "task/xpl", "Next",
-                       "Play starts the game. Fighters has every character; Settings the display and the keys.",
+        describe_panel(ui, "task/xpl", tr("task.next", "Next"),
+                       tr("task.next_update_about", "Play starts the game. Fighters has every character; Settings the "
+                                                    "display and the keys."),
                        fit({}, SeamFit::BlueSkewed));
     } else if (update && (failed || stopped)) {
-        describe_panel(ui, "task/xpl", "What now",
-                       "Details has this part's own words. Try Again goes on from it: the parts done stay done. "
-                       "Close leaves the rest for Update on Home.",
+        describe_panel(ui, "task/xpl", tr("task.what_now", "What now"),
+                       tr("task.what_now_update", "Details has this part's own words. Try Again goes on from it: the "
+                                                  "parts done stay done. Close leaves the rest for Update on Home."),
                        fit({}, SeamFit::BlueSkewed));
     } else if (update) {
     } else if (running && task_kind_ == m::TaskKind::kInstall) {
-        describe_panel(ui, "task/xpl", "While it runs",
-                       "The game program is built for this PC from your game, then the game is copied into this "
-                       "folder. Stopping keeps what is copied: the install resumes from there.",
+        describe_panel(ui, "task/xpl", tr("task.while_it_runs", "While it runs"),
+                       tr("task.while_install", "The game program is built for this PC from your game, then the game is "
+                                                "copied into this folder. Stopping keeps what is copied: the install "
+                                                "resumes from there."),
                        fit({}, SeamFit::BlueSkewed));
     } else if (ok && (task_kind_ == m::TaskKind::kInstall || task_kind_ == m::TaskKind::kUpdate)) {
-        describe_panel(ui, "task/xpl", "Next",
-                       "Fighters adds Tekken 7's and Tekken 8's characters from your own games; Settings has the "
-                       "display and the keys.",
+        describe_panel(ui, "task/xpl", tr("task.next", "Next"),
+                       tr("task.next_install_about", "Fighters adds Tekken 7's and Tekken 8's characters from your own "
+                                                     "games; Settings has the display and the keys."),
                        fit({}, SeamFit::BlueSkewed));
     } else if (failed) {
-        describe_panel(ui, "task/xpl", "What now",
-                       "Details has the task's own words. Try Again starts it again; Close goes back.",
+        describe_panel(ui, "task/xpl", tr("task.what_now", "What now"),
+                       tr("task.what_now_about", "Details has the task's own words. Try Again starts it again; Close "
+                                                 "goes back."),
                        fit({}, SeamFit::BlueSkewed));
     }
 }
@@ -959,14 +1027,15 @@ void App::placeholder(const Box& crimson, const Box& blue) {
     const bool fighters = screen_ == Screen::kFighters;
     {
         auto g = ui.open("ph/crimson", crimson);
-        section_label(ui, "ph/label", fighters ? "Fighters" : "Settings", Half::Crimson, {},
-                      fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
-        MenuRowSpec s{fighters ? "stroke:users" : "stroke:gear", "Back to Home"};
+        section_label(ui, "ph/label", fighters ? tr("home.fighters", "Fighters") : tr("home.settings", "Settings"),
+                      Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
+        MenuRowSpec s{fighters ? "stroke:users" : "stroke:gear", tr("home.back_home", "Back to Home")};
         menu_row(ui, "ph/home", s, crimson_focus(true), fit({}, SeamFit::CrimsonSkewed));
     }
     auto g = ui.open("ph/blue", blue);
-    section_label(ui, "ph/b-label", fighters ? "Roster" : "Settings", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-    note(ui, "ph/note", Tone::Blue, "This screen is not built yet in this version of the launcher.",
+    section_label(ui, "ph/b-label", fighters ? tr("home.roster", "Roster") : tr("home.settings", "Settings"), Half::Blue,
+                  {}, fit({}, SeamFit::BlueRect));
+    note(ui, "ph/note", Tone::Blue, tr("home.not_built_yet", "This screen is not built yet in this version of the launcher."),
          fit({}, SeamFit::BlueRect), "stroke:info");
 }
 

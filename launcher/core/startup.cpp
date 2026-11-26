@@ -2,6 +2,8 @@
 
 #include "startup.h"
 
+#include "i18n.h"
+
 #include "payload.h"
 
 #ifdef _WIN32
@@ -238,14 +240,15 @@ Start begin(const std::vector<std::string>& args, const Program& program) {
                 break;
             case InstanceClaim::Result::kForwarded:
                 if (!start.files_digest.empty() && claim.other_files != start.files_digest) {
-                    tell("Another launcher is already running. Close it to switch to this one, then start this one "
-                         "again.");
+                    tell(i18n::tr("startup.other_running", "Another launcher is already running. Close it to switch "
+                                                           "to this one, then start this one again."));
                 }
                 start.exit = 0;
                 return start;
             case InstanceClaim::Result::kOldLauncher:
                 if (!claim.error.empty()) {
-                    tell("An older version of the launcher is running. Close it, then start this one again.");
+                    tell(i18n::tr("startup.older_running", "An older version of the launcher is running. Close it, "
+                                                           "then start this one again."));
                     start.exit = 1;
                 } else {
                     start.exit = 0;

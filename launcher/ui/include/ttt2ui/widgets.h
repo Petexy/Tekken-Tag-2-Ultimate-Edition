@@ -42,6 +42,8 @@ enum class Prompt : std::uint8_t {
     Tabs,      // TabPrev + TabNext
     Sections,  // SectionPrev + SectionNext
 };
+// The keyboard's "any key" prompt's key cap in the launcher's language (English "Any key" until set).
+void set_any_key_label(std::string label);
 // Width (points) of a prompt in a glyph set, and drawing it with its left edge at `left`, centred on `cy`.
 float prompt_width(TextEngine& text, Glyphs glyphs, Prompt p);
 float draw_prompt(Canvas& canvas, TextEngine& text, Icons& icons, Glyphs glyphs, Prompt p, float left, float cy,

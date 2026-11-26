@@ -192,6 +192,11 @@ struct GlyphPart {
     int ps = -1;        // PlayStation symbol 0 cross, 1 circle, 2 square, 3 triangle
 };
 
+std::string& any_key_label() {
+    static std::string label = "Any key";
+    return label;
+}
+
 std::vector<GlyphPart> glyph_parts(Glyphs g, Prompt p) {
     using P = Prompt;
     if (p == P::Tabs || p == P::Sections) {
@@ -213,7 +218,7 @@ std::vector<GlyphPart> glyph_parts(Glyphs g, Prompt p) {
         case P::Menu: return {{GlyphShape::Key, "Esc"}};
         case P::Move: return {{GlyphShape::Key, "WASD"}};
         case P::Change: return {{GlyphShape::Key, "\x01L"}, {GlyphShape::Key, "\x01R"}};
-        case P::AnyKey: return {{GlyphShape::Key, "Any key"}};
+        case P::AnyKey: return {{GlyphShape::Key, any_key_label()}};
         default: break;
         }
     }
@@ -358,6 +363,8 @@ float draw_keycap(Canvas& cv, TextEngine& text, std::string_view label, float le
     }
     return w;
 }
+
+void set_any_key_label(std::string label) { any_key_label() = std::move(label); }
 
 float prompt_width(TextEngine& text, Glyphs glyphs, Prompt p) {
     const auto parts = glyph_parts(glyphs, p);

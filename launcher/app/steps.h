@@ -16,6 +16,7 @@ struct StepLine {
     State state = State::kPending;
     double fraction = 0;  // of this step
     std::string count;    // "1,705 of 2,310", "" when none
+    std::string slash;    // the same in a row's room: "1,705 / 2,310"
 };
 
 // `ended`: the task is over (`ok`: it succeeded: every step done; else the current one failed, or stopped).

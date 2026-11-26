@@ -609,9 +609,11 @@ CharactersView characters_view(const Facts& facts) {
         v.lines.push_back(note_line(Icon::kWarning, older, true));
     }
 
-    const auto game_fact = [&](const char* name, bool usable, bool found, const std::string& path,
+    static constexpr const char* kTekken8Absent = "Tekken 8 is not installed in any Steam library";
+    const auto game_fact = [&](const char* id, const char* name, bool usable, bool found, const std::string& path,
                                const std::string& error, const std::string& absent, bool other_usable) {
         Fact fact;
+        fact.id = id;
         fact.name = name;
         fact.describe.title = name;
         if (usable) {
@@ -624,16 +626,17 @@ CharactersView characters_view(const Facts& facts) {
         } else {
             std::string text = found ? tr("chars.found_unusable", "Found, but it cannot be used")
                                      : tr("chars.not_installed", "Not installed");
-            if (!error.empty() && error != absent)
+            // (The worker's words in English too: one that found no catalog answers in English.)
+            if (!error.empty() && error != absent && !(std::string_view(id) == kTekken8 && error == kTekken8Absent))
                 text = tr("chars.fact_error", "{state}: {error}", {{"state", text}, {"error", error}});
             fact.lines.push_back(text_line(text, Tone::kError));
             fact.describe.state = text;
         }
         v.facts.push_back(fact);
     };
-    game_fact("Tekken 7", s.tekken7_usable(), s.tekken7_found, s.tekken7_path, s.tekken7_error, "", s.tekken8_usable());
+    game_fact(kTekken7, "Tekken 7", s.tekken7_usable(), s.tekken7_found, s.tekken7_path, s.tekken7_error, "", s.tekken8_usable());
     // (launcher.py's words for it, in the same language)
-    game_fact("Tekken 8", s.tekken8_usable(), s.tekken8_found, s.tekken8_path, s.tekken8_error,
+    game_fact(kTekken8, "Tekken 8", s.tekken8_usable(), s.tekken8_found, s.tekken8_path, s.tekken8_error,
               tr("worker.tekken8_absent", "Tekken 8 is not installed in any Steam library"), s.tekken7_usable());
 
     bool unsaved8 = false;
@@ -644,6 +647,7 @@ CharactersView characters_view(const Facts& facts) {
                               : for8         ? "Tekken 8"
                                              : "Tekken 7";
     Fact steam;
+    steam.id = "steam";
     steam.name = "Steam";
     steam.describe.title = "Steam";
     if (!s.steam_installed) {
@@ -670,6 +674,7 @@ CharactersView characters_view(const Facts& facts) {
 
     if (!s.game_error.empty() && facts.install.state == InstallState::kInstalled) {
         Fact game;
+        game.id = "game";
         game.name = tr("chars.game", "Game");
         game.describe.title = game.name;
         game.lines.push_back(text_line(tr("chars.game_unreadable", "The importer cannot read it: {error}",
@@ -719,6 +724,7 @@ CharactersView characters_view(const Facts& facts) {
         }
         if (!missing.empty()) {
             Fact needed;
+            needed.id = "missing";
             needed.name = tr("chars.missing", "Missing");
             needed.describe.title = needed.name;
             std::string text;

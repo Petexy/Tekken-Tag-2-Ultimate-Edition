@@ -697,7 +697,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         for (int i = 0; i < kInputs; ++i) {
             const Input& input = inputs()[i];
             const std::string group = input_text(input.group), full = input_full(input);
-            if (v.groups.empty() || v.groups.back().title != group) v.groups.push_back({group, {}});
+            if (v.groups.empty() || v.groups.back().id != input.group) v.groups.push_back({group, input.group, {}});
             KeyRow r;
             r.input = input.id;
             r.name = input_text(input.name);

@@ -27,7 +27,8 @@ PLURALS = {'en': ('one', 'other'), 'de': ('one', 'other'), 'fr': ('one', 'many',
            'pl': ('one', 'few', 'many', 'other')}
 CPP_FOLDERS = ('launcher/app', 'launcher/model', 'launcher/ui/src', 'launcher/ui/include', 'launcher/core',
                'launcher/backend')
-PYTHON_FILES = ('tools/characters/launcher.py', 'launcher/windows/backend.py', 'launcher/windows/main.py',
+PYTHON_FILES = ('tools/characters/launcher.py', 'tools/characters/import_character.py',
+                'tools/characters/ttt2char/python_packages.py', 'launcher/windows/backend.py', 'launcher/windows/main.py',
                 'launcher/windows/query.py', 'launcher/windows/self_update.py', 'launcher/windows/setup_game.py',
                 'launcher/windows/build_launcher.py')
 KEY = re.compile(r'^[A-Za-z0-9_.-]+$')

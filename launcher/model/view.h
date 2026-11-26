@@ -59,6 +59,7 @@ struct Pill {
     std::string text;
     PillKind kind = PillKind::kNeutral;
     std::string explain; // the GTK tooltip
+    bool live = false;   // something is going on (the game runs, the checks run): the pill pulses
     bool operator==(const Pill&) const = default;
 };
 
@@ -147,7 +148,8 @@ struct GameView {
 };
 
 struct Fact {
-    std::string name;        // "Tekken 7", "Steam", "Missing"
+    std::string id;          // "tekken7", "tekken8", "steam", "game", "missing"
+    std::string name;        // "Tekken 7", "Steam", "Missing" (in the launcher's language)
     std::vector<Line> lines; // its value(s)
     Describe describe;
     bool operator==(const Fact&) const = default;
@@ -226,7 +228,8 @@ struct KeyRow {
 };
 
 struct KeyGroup {
-    std::string title;
+    std::string title; // in the launcher's language
+    std::string id;    // keymap.h's group: "D-pad", "Face buttons", "Shoulders", "Left stick", "System"
     std::vector<KeyRow> rows;
     bool operator==(const KeyGroup&) const = default;
 };
