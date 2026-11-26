@@ -20,6 +20,19 @@ constexpr PolishLine kPolish[] = {
     {}, // (the end: the table may be empty)
 };
 
+constexpr PolishLine kStory[] = {
+#include "title/subtitles_story_polish.inc"
+    {}, // (the end: the table may be empty)
+};
+
+std::vector<Line> lines_of(std::span<const PolishLine> table) {
+    std::vector<Line> out;
+    for (const PolishLine& l : table) {
+        if (!l.key.empty()) out.push_back({l.key, {reinterpret_cast<const char*>(l.text.data()), l.text.size()}});
+    }
+    return out;
+}
+
 // A line's timing around its words (UTF-8): U+FFFB show U+FFFC hide U+FFF5 U+0001 before, U+FFFB U+0001 U+FFFC
 // U+FFFF after.
 constexpr std::string_view kShow = "\xEF\xBF\xBB", kStart = "\xEF\xBF\xB5\x01",
@@ -111,13 +124,12 @@ std::optional<std::vector<uint8_t>> container_in_polish(const std::vector<uint8_
 } // namespace
 
 std::span<const Line> polish_lines() {
-    static const std::vector<Line> lines = [] {
-        std::vector<Line> out;
-        for (const PolishLine& l : kPolish) {
-            if (!l.key.empty()) out.push_back({l.key, {reinterpret_cast<const char*>(l.text.data()), l.text.size()}});
-        }
-        return out;
-    }();
+    static const std::vector<Line> lines = lines_of(kPolish);
+    return lines;
+}
+
+std::span<const Line> story_lines() {
+    static const std::vector<Line> lines = lines_of(kStory);
     return lines;
 }
 

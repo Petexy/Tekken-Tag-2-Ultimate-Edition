@@ -1163,7 +1163,16 @@ an added fighter) shows it in entry 1's place; the title's own lines show
 ours (`title/subtitles_polish.inc`, by entry, `N.k` for the k-th text of
 an entry that has several) with the English line's timing; any other line
 stays English. The log says `ttt2: subtitles in Polish: <n> of the
-title's lines (ours), <m> of added fighters`.
+title's lines (ours), <m> of added fighters`. The Fight Lab story's lines
+(entry 9dc7a6fa) are a file of the same kind, a language container per
+movie (the story's two parts) whose banks hold one timed record per line.
+Every language plays the same movie, its captions (places, the time
+skip) in English in the picture; English's bank leaves those records
+empty and the others fill them. With Polish `presentation.cpp` serves the
+file with each record of the English bank in ours
+(`title/subtitles_story_polish.inc`, `movie` / `movie.record`), captions
+included, with the English timing; the log says `ttt2: Fight Lab story in
+Polish: <n> of its movies' lines ours`.
 
 Japanese (`cafe.language` 0) is not offered: the title's Japanese menus
 draw, but the port's own texts have no Japanese (the frame data panels'

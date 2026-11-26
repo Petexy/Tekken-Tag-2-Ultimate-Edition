@@ -19,6 +19,15 @@
 // importer writes it to entry 10: a timed text there), else ours for the
 // title's own lines (subtitles_polish.inc, by entry), with the English
 // line's timing (roster.h: prepare_subtitles serves it).
+//
+// The Fight Lab story's lines (entry 9dc7a6fa) are a file of the same kind:
+// per movie (the story's two parts) a language container whose banks hold
+// that movie's lines, one timed record each. There is one movie for every
+// language, its captions (places, the time skip) in English in the
+// picture; English's bank leaves those records empty, the others' fill them.
+// With Polish each record of entry 1 shows ours (subtitles_story_polish.inc,
+// "movie" / "movie.record"), captions included, with the English timing
+// (presentation.cpp serves it).
 
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +41,9 @@ namespace cafe::title::subtitles {
 // The subtitle file's entry in the title's archives.
 inline constexpr uint32_t kFile = 0x917395EB;
 
+// The Fight Lab story's subtitle file's.
+inline constexpr uint32_t kStoryFile = 0x9DC7A6FA;
+
 // The container entry an added fighter's Polish line is in.
 inline constexpr size_t kPolishEntry = 10;
 
@@ -42,6 +54,9 @@ struct Line {
 
 // Our Polish for the title's own lines (subtitles_polish.inc).
 std::span<const Line> polish_lines();
+
+// Our Polish for the Fight Lab story's lines (subtitles_story_polish.inc).
+std::span<const Line> story_lines();
 
 struct Polish {
     std::vector<uint8_t> file;

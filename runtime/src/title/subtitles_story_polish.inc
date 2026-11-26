@@ -1,0 +1,20 @@
+// Our Polish for the Fight Lab story's lines (the story subtitle file, title::subtitles::story_lines):
+// by movie ("0", its k-th line "0.k"), UTF-8, the line only (its timing stays the English line's;
+// the lines English leaves empty are captions its picture shows in English).
+{"0", u8"REZYDENCJA VIOLETA, BAHAMY"},
+{"0.1", u8"Wejść."},
+{"0.2", u8"Przygotowania idą zgodnie z planem."},
+{"0.3", u8"\"PROJEKT SUPER COMBOT DX\""},
+{"0.4", u8"Zespół operacyjny w gotowości."},
+{"0.5", u8"PO 2 TYGODNIACH..."},
+{"0.6", u8"CENTRUM BADAWCZE VIOLET SYSTEMS, BRAZYLIA"},
+{"0.7", u8"Dobrze, czas na test w symulacji!"},
+{"0.8", u8"\"UWOLNIJ\""},
+{"1", u8"Doskonale!"},
+{"1.1", u8"Wyniki są znakomite."},
+{"1.2", u8"Naturalnie."},
+{"1.3", u8"Moje plany są zawsze perfekcyjne."},
+{"1.4", u8"Czas to dokończyć."},
+{"1.5", u8"\"USUŃ\""},
+{"1.6", u8"\"INICJALIZACJA\""},
+{"1.7", u8"Doskonale!"},

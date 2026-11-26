@@ -9,6 +9,7 @@
 #include "title/font.h"
 #include "title/image.h"
 #include "title/language.h"
+#include "title/subtitles.h"
 #include "title/text.h"
 #include "title/title_screen.h"
 
@@ -556,6 +557,16 @@ void prepare_presentation() {
         const bool renamed = icons && text::show_button_icons(b.contents) != 0;
         rewritten += renamed;
         if (renamed || filled[i]) changed[b.archive][b.hash] = archive::pack(b.contents, b.hash, b.flags);
+    }
+    if (language::place() == language::kPolish) {
+        // the Fight Lab story's lines in our Polish (subtitles.h)
+        uint8_t flags[8] = {};
+        const auto story = game_entry(kFontArchive, subtitles::kStoryFile, &flags);
+        const auto polish = story ? subtitles::in_polish(*story, subtitles::story_lines()) : std::nullopt;
+        if (polish && polish->ours > 0) {
+            changed[kFontArchive][subtitles::kStoryFile] = archive::pack(polish->file, subtitles::kStoryFile, flags);
+        }
+        std::fprintf(stderr, "ttt2: Fight Lab story in Polish: %zu of its movies' lines ours\n", polish ? polish->ours : 0);
     }
     for (const auto& [archive_name, entries] : changed) {
         if (!entries.empty() && !vfs::set_archive_entries(archive_name, entries)) {

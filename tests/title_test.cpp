@@ -1001,6 +1001,37 @@ void test_subtitles() {
     const auto only_added = subtitles::in_polish(file, {});
     check(only_added && only_added->ours == 0 && only_added->added == 1 && parts_of(only_added->file)[0] == lines[0],
           "subtitles: without ours, only the added fighters' own");
+
+    // the Fight Lab story's file: a movie's lines in one bank, English's empty where its picture has the words
+    const std::vector<std::vector<uint8_t>> movies = {
+        line_container({timed("", 'A', 'B'), timed("Spoken", 'C', 'D'), timed("Not ours", 'E', 'F')}, false, ""),
+        line_container({timed("Later", 'G', 'H')}, false, "")};
+    const subtitles::Line story[] = {{"0", "NAPIS"}, {"0.1", "Mówione"}, {"1", "Potem"}};
+    const auto in_polish = subtitles::in_polish(table_of(movies, {0, 1}), story);
+    const auto movie = [&](size_t m, size_t k) {
+        const auto records = in_polish ? indexed(parts_of(parts_of(in_polish->file)[m])[1]) : std::vector<Numbered>{};
+        return k < records.size() ? records[k].text : std::string("?");
+    };
+    check(in_polish && in_polish->ours == 2 && movie(0, 0) == timed("NAPIS", 'A', 'B') &&
+              movie(0, 1) == timed("Mówione", 'C', 'D') && movie(0, 2) == timed("Not ours", 'E', 'F') &&
+              movie(1, 0) == timed("Potem", 'G', 'H'),
+          "subtitles: the story's lines in ours, the empty ones (captions) too, with the English timing");
+    // the tables: "N" / "N.k" keys, each once, a line of words (no control codes, no typographic quotes)
+    bool well_formed = true;
+    for (const auto table : {subtitles::polish_lines(), subtitles::story_lines()}) {
+        std::set<std::string_view> keys;
+        for (const subtitles::Line& l : table) {
+            const bool key = !l.key.empty() && std::all_of(l.key.begin(), l.key.end(), [](char c) {
+                return (c >= '0' && c <= '9') || c == '.';
+            });
+            well_formed = well_formed && key && keys.insert(l.key).second && !l.text.empty();
+            for (const char32_t c : code_points(l.text)) {
+                well_formed = well_formed && c >= 0x20 && c < 0xE000 && c != U'\u00AB' && c != U'\u201E' &&
+                              c != U'\u201D' && c != U'\u2026' && c != U'\u2013';
+            }
+        }
+    }
+    check(well_formed && !subtitles::story_lines().empty(), "subtitles: our tables' keys and lines well formed");
 }
 
 void test_language() {
