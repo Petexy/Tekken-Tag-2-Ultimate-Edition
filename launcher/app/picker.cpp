@@ -117,7 +117,7 @@ void App::open_picker(bool folder, const std::string& purpose) {
     stage_->note_input(now());
 }
 
-void App::picker_dir(const fs::path& dir, const std::vector<fs::path>& fallbacks, const fs::path& refocus) {
+void App::picker_dir(fs::path dir, const std::vector<fs::path>& fallbacks, fs::path refocus) {
     if (!picker_) return;
     Picker& p = *picker_;
     const bool again = !refocus.empty() && dir == p.dir;
@@ -248,7 +248,10 @@ void App::close_picker() {
     ui_->focus(back, true);
 }
 
-void App::picker_chosen(const fs::path& path) {
+// `path` is a copy: it is often the picker's own entry or folder, gone once close_picker() resets the picker (read
+// after that, the archive's path reached the model with its first letter overwritten in a French or Russian Windows
+// launcher: "\0:\users\...").
+void App::picker_chosen(fs::path path) {
     if (!picker_) return;
     const Picker p = *picker_;
     close_picker();

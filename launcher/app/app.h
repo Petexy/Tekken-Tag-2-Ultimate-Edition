@@ -268,7 +268,8 @@ private:
     // Lists `dir` off the UI thread (its answer posted back, an older one dropped). `fallbacks`: `dir` may not be
     // there (then its nearest parent that is, else the first of them). `refocus`: the same folder listed again (Show
     // hidden): its entries stay until the new list comes, and that entry keeps the focus.
-    void picker_dir(const fs::path& dir, const std::vector<fs::path>& fallbacks = {}, const fs::path& refocus = {});
+    // (`dir` and `refocus` by value: they are often one of the picker's own entries, cleared on the way.)
+    void picker_dir(fs::path dir, const std::vector<fs::path>& fallbacks = {}, fs::path refocus = {});
     struct Listing;
     void picker_listed(uint64_t generation, Listing listing);
     void picker_counted(uint64_t generation, std::vector<int> counts);
@@ -276,7 +277,8 @@ private:
     void picker_screen(const ui::Box& crimson, const ui::Box& blue);
     void picker_rows();
     bool picker_activate(const std::string& id);
-    void picker_chosen(const fs::path& path);
+    // (By value: the callers pass the picker's own entry or folder, and choosing closes the picker.)
+    void picker_chosen(fs::path path);
     void close_picker();
 
     // ---- tests (tests_hooks.cpp)
