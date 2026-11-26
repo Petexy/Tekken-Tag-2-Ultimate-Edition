@@ -131,7 +131,7 @@ class ProgramsPlace(unittest.TestCase):
         # (CMake puts the program in <build>/launcher; the one of 0.8.0 at the top is removed.)
         self.assertIn('RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher"',
                       (REPO / 'launcher/ui/CMakeLists.txt').read_text(encoding='utf-8'))
-        self.assertIn('`build-windows-tools/launcher/ttt2-launcher.exe`', (REPO / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('`build-windows-tools/launcher/ttt2-launcher.exe`', (REPO / 'docs/LAUNCHER.md').read_text(encoding='utf-8'))
         self.assertIn('build-windows-*/launcher/ttt2-launcher.exe',
                       (REPO / 'launcher/windows/make_launcher_exe.py').read_text(encoding='utf-8'))
         script = (REPO / 'tools/build_windows_tools.ps1').read_text(encoding='utf-8')

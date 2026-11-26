@@ -258,7 +258,7 @@ Ultimate Launcher now adds experimental support for **Windows**. Practice mode g
 
 ### The added fighters
 
-- **Bounds as in the Tekken 7 Bound Mod.** Screws, Tekken 8's tornados and Tekken 7's slams no longer become bounds. Each fighter bounds only with its own list of moves, once per juggle: for Tekken 7's fighters, the moves the Tekken 7 Bound Mod makes bounds. A screw no longer uses up the juggle's bound. The [README](https://github.com/Petexy/Golden-Fist-Launcher#bound-moves) lists every fighter's bound moves.
+- **Bounds as in the Tekken 7 Bound Mod.** Screws, Tekken 8's tornados and Tekken 7's slams no longer become bounds. Each fighter bounds only with its own list of moves, once per juggle: for Tekken 7's fighters, the moves the Tekken 7 Bound Mod makes bounds. A screw no longer uses up the juggle's bound. [Adding fighters](https://github.com/Petexy/Golden-Fist-Launcher/blob/main/docs/ADDING_FIGHTERS.md#bound-moves) lists every fighter's bound moves.
 - **Azucena from Tekken 8.** She has her own moves, voice, pictures, command list and bounds. Libertador evades highs and lows on its own, as in Tekken 8. Needs Tekken 8.
 - **Tekken 8 clothes swing:** Reina's jacket, Azucena's sleeves.
 - **Tekken 7 fighters' eyelids** close as in Tekken 7, instead of hanging down the cheeks.
