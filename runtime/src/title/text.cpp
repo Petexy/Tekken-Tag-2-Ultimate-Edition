@@ -739,12 +739,14 @@ Filled put_polish(std::vector<std::vector<uint8_t>*> banks, std::span<const Tran
     std::map<std::string_view, std::string_view> ours;
     for (const Translation& t : polish) ours.emplace(t.key, t.text);
     // ours by English text: a record without a text of its own takes that of another key with its English text
-    // (the first in the banks' order; copied: the records change below)
+    // (the first in the banks' order; copied: the records change below). One whose text is empty (a pin) stays
+    // English and gives none.
     std::map<std::string, std::string_view, std::less<>> by_english;
     for (const EnglishPart& part : parts) {
         for (const Indexed::Record& r : part.english.records) {
             if (!r.keyed || text_of(r).empty()) continue;
-            if (const auto our = ours.find(key_of(r)); our != ours.end()) by_english.emplace(std::string(text_of(r)), our->second);
+            const auto our = ours.find(key_of(r));
+            if (our != ours.end() && !our->second.empty()) by_english.emplace(std::string(text_of(r)), our->second);
         }
     }
     Filled filled;
@@ -753,6 +755,7 @@ Filled put_polish(std::vector<std::vector<uint8_t>*> banks, std::span<const Tran
         for (Indexed::Record& r : part.english.records) {
             if (!r.keyed || text_of(r).empty()) continue;
             const auto our = ours.find(key_of(r));
+            if (our != ours.end() && our->second.empty()) continue; // pinned: stays English
             const auto same = our == ours.end() ? by_english.find(text_of(r)) : by_english.end();
             if (our == ours.end() && same == by_english.end()) continue;
             const std::string_view text = our != ours.end() ? our->second : same->second;

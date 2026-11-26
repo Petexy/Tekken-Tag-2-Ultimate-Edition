@@ -1138,7 +1138,10 @@ the archive overlay like the Russian ones) with, for each record, our
 Polish of its key (`title/text_polish.inc`, `text::polish_texts`: only
 keys and our Polish, as for Russian), else our Polish of another record
 with the same English text in the player's banks (the first one in the
-banks' order that has an entry), else its English. The markup check is
+banks' order that has an entry), else its English. An entry without a
+text pins its record to English: it takes no other record's Polish of
+the same English text, and gives none (a name or a track title whose
+English another record shares, one we translate). The markup check is
 the Russian one without the line breaks: our Polish may break its lines
 where Polish needs, and the record's table 1 word then says its own count
 of lines (bits 4 to 7, at most 15; the title sizes text boxes by it). One

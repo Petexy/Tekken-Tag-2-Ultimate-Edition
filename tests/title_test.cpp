@@ -847,6 +847,18 @@ void test_polish_texts() {
     std::vector<std::vector<uint8_t>> untouched = three_parts();
     check(text::put_polish(pointers_to(untouched), {}).banks.empty() && untouched == before,
           "polish: no texts, no change");
+    // a pin (no text): that record stays English, takes no other key's text of its English text and gives none
+    const auto english_before = indexed(before[1]);
+    std::vector<std::vector<uint8_t>> pinned = three_parts(), pin_first = three_parts();
+    const text::Translation later_pinned[] = {{"practice_1", "Pierwsze"}, {"practice_3", ""}};
+    const text::Translation first_pinned[] = {{"practice_1", ""}, {"practice_3", "Trzecie"}};
+    text::put_polish(pointers_to(pinned), later_pinned);
+    text::put_polish(pointers_to(pin_first), first_pinned);
+    const auto a = indexed(pinned[1]), b = indexed(pin_first[1]);
+    check(english_before.size() == 5 && english_before[0].text == english_before[2].text && a.size() == 5 &&
+              a[0].text == "Pierwsze" && a[2].text == english_before[2].text && b.size() == 5 &&
+              b[0].text == english_before[0].text && b[2].text == "Trzecie",
+          "polish: a pinned record stays English, the other of its English text takes its own");
 
     // Polish button names are the buttons' icons, as the English ones are
     check(text::markup("Wciśnij przycisk A, potem krzyżakiem wybierz.") ==
@@ -859,14 +871,14 @@ void test_polish_texts() {
     check(text::show_button_icons(named) == 1 && texts(named)[0].first == "Wciśnij ¥ lub ».",
           "polish: their icons in a bank");
 
-    // the table: keys of a part's records, each once, Polish texts without the icons' code points (the carriers,
-    // the plain font's boxes, ideographs) nor guillemets or braces, but as a control code's argument
+    // the table: keys of a part's records, each once, Polish texts (or none: a pin) without the icons' code points
+    // (the carriers, the plain font's boxes, ideographs) nor typographic quotes, dashes, ellipses or braces, but as a
+    // control code's argument
     std::set<std::string_view> keys;
     bool well_formed = true;
     for (const text::Translation& t : text::polish_texts()) {
         const size_t underscore = t.key.find('_');
-        well_formed = well_formed && underscore != std::string_view::npos && underscore > 0 && !t.text.empty() &&
-                      keys.insert(t.key).second;
+        well_formed = well_formed && underscore != std::string_view::npos && underscore > 0 && keys.insert(t.key).second;
         size_t arguments = 0;
         for (const char32_t c : code_points(t.text)) {
             if (arguments > 0) {
@@ -878,7 +890,10 @@ void test_polish_texts() {
                               c == text::kLeftButton || c == text::kStartButton || c == text::kSelectButton ||
                               c == text::kPad || c == 0x00DE || c == 0x0152 || c == 0x0158 || c == 0x00DD ||
                               (c >= 0x3400 && c < 0xE000);
-            well_formed = well_formed && !icon && c != U'«' && c != U'{' && c != U'}';
+            const bool typographic = c == U'\u00AB' || c == U'\u201E' || c == U'\u201D' || c == U'\u201C' ||
+                                     c == U'\u2018' || c == U'\u2019' || c == U'\u2026' || c == U'\u2013' ||
+                                     c == U'\u2014';
+            well_formed = well_formed && !icon && !typographic && c != U'{' && c != U'}';
         }
     }
     check(well_formed, "polish: our Polish texts by key, each once, none with an icon's code point");

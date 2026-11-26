@@ -242,7 +242,7 @@ constexpr TextPatch kRowTexts[] = {
 constexpr title::language::Text kRowLabel = {"ULTIMATE SETTINGS", "R\xC3\x89GLAGES ULTIMATE", "ULTIMATE-OPTIONEN",
     "IMPOSTAZIONI ULTIMATE", "AJUSTES ULTIMATE",
     "\xD0\x9D\xD0\x90\xD0\xA1\xD0\xA2\xD0\xA0\xD0\x9E\xD0\x99\xD0\x9A\xD0\x98 ULTIMATE",
-    "USTAWIENIA ULTIMATE"};
+    "OPCJE ULTIMATE"};
 
 // The ULTIMATE SETTINGS submenu: HUD Information's frame (FramePracticeMenu01-09-04)
 // with its header, its first rows' labels and their descriptions (the
@@ -251,7 +251,7 @@ constexpr title::language::Text kRowLabel = {"ULTIMATE SETTINGS", "R\xC3\x89GLAG
 constexpr TextPatch kSubmenuTexts[] = {
     {"practice_1039", {"ULTIMATE SETTINGS", "R\xC3\x89GLAGES ULTIMATE", "ULTIMATE-OPTIONEN", "IMPOSTAZIONI ULTIMATE",
                        "AJUSTES ULTIMATE", "\xD0\x9D\xD0\x90\xD0\xA1\xD0\xA2\xD0\xA0\xD0\x9E\xD0\x99\xD0\x9A\xD0\x98",
-    "USTAWIENIA"}},
+    "OPCJE ULTIMATE"}},
     {"practice_669", {"FRAME DATA", "DONN\xC3\x89" "ES DE FRAMES", "FRAME-DATEN", "DATI FRAME", "DATOS DE FRAMES",
                       "\xD0\xA4\xD0\xA0\xD0\x95\xD0\x99\xD0\x9C\xD0\x94\xD0\x90\xD0\xA2\xD0\x90",
     "FRAME DATA"}},
