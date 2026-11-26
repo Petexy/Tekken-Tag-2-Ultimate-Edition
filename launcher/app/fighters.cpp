@@ -374,7 +374,8 @@ void App::fighters(const Box& crimson, const Box& blue) {
                 else t.state = TileState::None;
                 if (f && f->outfits > 0 && t.state != TileState::NotOwned &&
                     ((f->added() && f->outfits_added) || m::wants_outfits(model_->facts(), *f)))
-                    t.tag = tr("fighters.outfits", "Outfits");
+                    // (A tag on the tile's top edge, before its badge: a short form of "Outfits" in a longer language.)
+                    t.tag = tr("fighters.outfits_tag", "Outfits");
                 t.busy = fighter_task(r->name).in;
                 // An added fighter: their portrait in place of the letters.
                 if (f && f->installed && t.state != TileState::NotOwned) {

@@ -59,6 +59,11 @@ def cpp_string(source, i):
                 out.append(bytes([int(digits, 16)]).decode('latin-1'))
                 i += 2 + len(digits)
                 continue
+            if c in 'uU':
+                size = 4 if c == 'u' else 8
+                out.append(chr(int(source[i + 2:i + 2 + size], 16)))
+                i += 2 + size
+                continue
             out.append(ESCAPES.get(c, c))
             i += 2
             continue

@@ -123,6 +123,7 @@ void App::game_head(const std::string& kick) {
         const bool live = view_.game.pill.live;
         pill(ui, "home/pill", view_.game.pill.text, live ? Tone::Blue : pill_tone(view_.game.pill.kind), live);
         TextSpec ks{kick, tx::kKick, c::kBlueDim};
+        ks.autofit_min = 12;  // (a longer language beside a longer pill: a little smaller before it is cut)
         text(ui, "home/kv", ks, Box{.w = Size::grow()});
     }
     text(ui, "home/t1", TextSpec{.text = "Tekken Tag", .style = tx::kTitleLine, .chroma = 4, .autofit_min = 30},
@@ -804,10 +805,14 @@ void App::home_task(const Box& crimson, const Box& blue) {
                                          {"steps", steps_label}}),
                       Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         {
+            std::vector<std::string> names;
+            for (const StepLine& step : steps) names.push_back(step.name);
+            const float name_width = step_name_width(ui.text(), names);
             auto rows = ui.open("task/rows", Box{.gap = 6});
             for (size_t i = 0; i < steps.size(); ++i) {
                 StepRowSpec s;
                 s.name = steps[i].name;
+                s.name_width = name_width;
                 s.count = steps[i].state == StepLine::State::kDone     ? tr("task.done", "Done")
                           : steps[i].state == StepLine::State::kFailed ? tr("task.stopped", "Stopped")
                           : !steps[i].slash.empty()                    ? steps[i].slash

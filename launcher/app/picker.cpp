@@ -32,7 +32,7 @@ Box fit(Box b, SeamFit f) {
 }
 
 const Color kValue = rgb(0xdbe3f1);
-constexpr float kPlacesWidth = 176;
+constexpr float kPlacesWidth = 176, kPlacesMaxWidth = 224; // (wider for a language's longer place names)
 constexpr float kRowGap = 6; // between the rows of a list
 
 Focus crimson_focus(bool is_default = false) {
@@ -448,15 +448,28 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         auto cols = ui.open("pk/cols", Box{.layout = Layout::Row, .margin = {0, 12, 0, 0}, .gap = 18,
                                            .align = Align::Start});
         {
-            auto pl = ui.open("pk/places", Box{.w = Size::fixed(kPlacesWidth), .gap = kRowGap});
+            // (As wide as its longest row needs, "Téléchargements", "Домашняя папка": 176 to 224 points.)
+            TextEngine& te = ui.text();
+            // (A file row: icon, name, 12 points, its kind, the ends; the slanted rows lower down a little narrower.)
+            auto row_width = [&te](const std::string& name, const std::string& meta) {
+                return std::ceil(16 + 18 + 12 + te.width(tx::kFileName, name) + 12 + te.width(tx::kFileMeta, meta) +
+                                 16 + 8);
+            };
+            float places_width = kPlacesWidth;
+            for (const Place& place : p.places) places_width = std::max(places_width, row_width(place.name, place.kind));
+#ifndef _WIN32
+            places_width = std::max(places_width, row_width(tr("picker.show_hidden", "Show hidden"), ""));
+#endif
+            places_width = std::min(places_width, kPlacesMaxWidth);
+            auto pl = ui.open("pk/places", Box{.w = Size::fixed(places_width), .gap = kRowGap});
             // (Each as wide as the column, narrower where the seam comes closer: a small window, a long list.)
             text(ui, "pk/places-h", TextSpec{tr("picker.places", "Places"), tx::kLabel, c::kRedLabel},
-                 fit(Box{.max_w = kPlacesWidth, .margin = {0, 0, 0, 4}}, SeamFit::CrimsonRect));
+                 fit(Box{.max_w = places_width, .margin = {0, 0, 0, 4}}, SeamFit::CrimsonRect));
             for (size_t i = 0; i < p.places.size(); ++i) {
                 FileRowSpec r{p.places[i].icon, p.places[i].name, p.places[i].kind};
                 if (p.places[i].path == p.dir) r.tone = Tone::Ok;
                 file_row(ui, "pp:" + std::to_string(i), r, crimson_focus(),
-                         fit(Box{.max_w = kPlacesWidth}, SeamFit::CrimsonSkewed));
+                         fit(Box{.max_w = places_width}, SeamFit::CrimsonSkewed));
             }
 #ifndef _WIN32
             // Folders whose names start with a dot (.local, .steam, .var): a row the pad reaches (and Ctrl+H, X).
@@ -464,7 +477,7 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
             FileRowSpec hid{picker_hidden_ ? "stroke:check" : "stroke:dots", tr("picker.show_hidden", "Show hidden"), ""};
             hid.tone = picker_hidden_ ? Tone::Ok : Tone::Neutral;
             file_row(ui, "pk/hidden", hid, crimson_focus(),
-                     fit(Box{.max_w = kPlacesWidth, .margin = {6, 0, 0, 0}}, SeamFit::CrimsonSkewed));
+                     fit(Box{.max_w = places_width, .margin = {6, 0, 0, 0}}, SeamFit::CrimsonSkewed));
 #endif
         }
         auto en = ui.open("pk/entries", Box{.w = Size::grow(), .gap = kRowGap});

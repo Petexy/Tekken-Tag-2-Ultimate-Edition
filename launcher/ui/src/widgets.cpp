@@ -26,6 +26,17 @@ Box with_height(Box b, float h) {
 
 float centred_y(TextEngine& text, const TextStyle& st, const Rect& r) { return r.y + (r.h - text.line_height(st)) / 2; }
 
+// A row's one-line title in `room` points: its letters closer (down to none between them), then smaller (down to
+// 70 % of its size), and only then cut with an ellipsis: a long word at a large Text size or in a small window
+// ("Eingabeverzögerung", "Разрешение") keeps all its letters.
+TextStyle squeezed(TextEngine& text, TextStyle st, std::string_view s, float room) {
+    if (text.width(st, s) <= room + .01f) return st;
+    const float least = st.size * .7f;
+    while (st.tracking > 0 && text.width(st, s) > room + .01f) st.tracking = std::max(0.f, st.tracking - .02f);
+    while (st.size > least && text.width(st, s) > room + .01f) st.size = std::max(least, st.size - .5f);
+    return st;
+}
+
 struct ToneColors {
     Color fill, border, text;
 };
@@ -456,8 +467,8 @@ void runs(Ui& ui, const std::string& id, const TextStyle& style, std::vector<Run
 
 namespace {
 // A section label in `room` points (a large Text size or a narrow column): its letters closer
-// together (down to a third of their spacing), then without its bar, then cut with an ellipsis; never over the
-// neighbour's. `lead`: where the label starts (32 with the bar, 0 without).
+// together (down to a third of their spacing), then without its bar, then smaller (down to 80 %), then cut with an
+// ellipsis; never over the neighbour's. `lead`: where the label starts (32 with the bar, 0 without).
 struct FittedLabel {
     TextStyle style;
     std::string text;
@@ -468,6 +479,8 @@ FittedLabel fit_label(TextEngine& te, const std::string& label, float room) {
     while (f.lead + te.width(f.style, label) > room && f.style.tracking > tx::kLabel.tracking / 3 + .001f)
         f.style.tracking = std::max(tx::kLabel.tracking / 3, f.style.tracking - .04f);
     if (f.lead + te.width(f.style, label) > room) f.lead = 0;
+    const float least = tx::kLabel.size * .8f;
+    while (f.style.size > least && te.width(f.style, label) > room) f.style.size = std::max(least, f.style.size - .5f);
     if (te.width(f.style, label) > room) f.text = te.ellipsize(f.style, label, std::max(0.f, room));
     return f;
 }
@@ -812,24 +825,39 @@ void caption_buttons(Ui& ui, const std::string& id, bool minimise, bool fullscre
     if (close) one("close", "stroke:close", true);
 }
 
-void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const Box& box) {
-    Box b = box;
-    b.layout = Layout::Row;
-    b.gap = 22;
-    b.align = Align::Center;
-    auto g = ui.open(id, b);
+void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const Box& box, float room) {
     TextEngine& te = ui.text();
     const Glyphs gl = ui.glyphs();
-    for (std::size_t i = 0; i < hints.size(); ++i) {
+    TextStyle st = tx::kHint;
+    float gap = 22;
+    std::size_t n = hints.size();
+    auto total = [&] {
+        float w = 0;
+        for (std::size_t i = 0; i < n; ++i) w += prompt_width(te, gl, hints[i].prompt) + 8 + te.width(st, hints[i].label);
+        return w + gap * static_cast<float>(n > 0 ? n - 1 : 0);
+    };
+    if (room > 0) {
+        while (gap > 12 && total() > room) gap -= 2;
+        const float least = st.size * .85f;
+        while (st.tracking > 0 && total() > room) st.tracking = std::max(0.f, st.tracking - .02f);
+        while (st.size > least && total() > room) st.size = std::max(least, st.size - .5f);
+        while (n > 1 && total() > room) --n;
+    }
+    Box b = box;
+    b.layout = Layout::Row;
+    b.gap = gap;
+    b.align = Align::Center;
+    auto g = ui.open(id, b);
+    for (std::size_t i = 0; i < n; ++i) {
         const Hint h = hints[i];
         ui.leaf(
             id + "/" + std::to_string(i), Box{},
-            [&te, h, gl](float) { return Vec2{prompt_width(te, gl, h.prompt) + 8 + te.width(tx::kHint, h.label), 24}; },
-            [h](PaintContext& ctx) {
+            [&te, h, gl, st](float) { return Vec2{prompt_width(te, gl, h.prompt) + 8 + te.width(st, h.label), 24}; },
+            [h, st](PaintContext& ctx) {
                 const float cy = ctx.rect.y + ctx.rect.h / 2;
                 const float w = draw_prompt(ctx.canvas, ctx.text, ctx.icons, ctx.glyphs, h.prompt, ctx.rect.x, cy);
-                ctx.text.draw(ctx.canvas, tx::kHint, h.label,
-                              {ctx.rect.x + w + 8, centred_y(ctx.text, tx::kHint, ctx.rect)}, rgb(0xd9dee9));
+                ctx.text.draw(ctx.canvas, st, h.label, {ctx.rect.x + w + 8, centred_y(ctx.text, st, ctx.rect)},
+                              rgb(0xd9dee9));
             });
     }
 }
@@ -904,16 +932,19 @@ void slab(Ui& ui, const std::string& id, const SlabSpec& spec, Focus focus, cons
             cv.fill(shaped_part(r, {r.x, r.bottom() - 3, r.w, 3}, Shape::StraightLeft, kSeamTan), rgba(0, 0, 0, .25f));
             // Content (upright): the word, two small lines, the Accept glyph when focused. The glyph's place stays
             // free, focused or not; a narrow slab (a small window, a large Text size) makes the word smaller (down to
-            // 60 %) before the small lines are cut.
+            // 60 %) before the small lines are cut, and a word that does not fit alone smaller still.
             TextStyle big = spec.mid ? TextStyle{tx::kSlabBig.font, 78, tx::kSlabBig.tracking, true, 1} : tx::kSlabBig;
             const float pw = prompt_width(ctx.text, ctx.glyphs, Prompt::Accept);
             const float end = r.right() - 30 - pw - 14;  // (where the glyph's place begins)
             const float bx = r.x + 40;
             const float lines_w = std::max(ctx.text.width(tx::kSlabSmall, spec.line1),
                                            ctx.text.width(tx::kSlabSmall, spec.line2));
-            const float least = big.size * .6f;
+            const float least = big.size * .6f, last = big.size * .4f;
             while (big.size > least && bx + ctx.text.width(big, spec.big) + 18 + lines_w > end)
                 big.size = std::max(least, big.size - 4);
+            // (A word too long for the slab even alone at 60 %, "INSTALLIEREN" in a small window: smaller still,
+            // down to 40 %, the small lines left out; never under the glyph.)
+            while (big.size > last && bx + ctx.text.width(big, spec.big) > end) big.size = std::max(last, big.size - 2);
             const float by = r.y + (r.h - ctx.text.line_height(big)) / 2;
             ctx.text.draw(cv, big, spec.big, {bx, by + 4}, rgba(0, 0, 0, .22f));
             const float bw = ctx.text.draw(cv, big, spec.big, {bx, by}, rgb(0xffffff));
@@ -998,12 +1029,18 @@ void menu_row(Ui& ui, const std::string& id, const MenuRowSpec& spec, Focus focu
                 const float h = ctx.text.line_height(kCap) + 5 + ctx.text.line_height(ts);
                 const float y = cy - h / 2;
                 ctx.text.draw(cv, kCap, spec.caption, {x, y}, mix(c::kRedDim, rgb(0xffe3e9), f));
+                // (A path is cut in its middle as it is; a name is squeezed first.)
+                const TextStyle shown = spec.mono_title ? ts : squeezed(ctx.text, ts, spec.title, right - x);
                 ctx.text.draw(
-                    cv, ts,
-                    ctx.text.ellipsize(ts, spec.title, right - x, spec.mono_title ? Ellipsis::Middle : Ellipsis::End),
-                    {x, y + ctx.text.line_height(kCap) + 5}, title_col);
+                    cv, shown,
+                    ctx.text.ellipsize(shown, spec.title, right - x, spec.mono_title ? Ellipsis::Middle : Ellipsis::End),
+                    {x, y + ctx.text.line_height(kCap) + 5 + (ctx.text.line_height(ts) - ctx.text.line_height(shown)) / 2},
+                    title_col);
             } else {
-                const TextStyle ts = spec.compact ? TextStyle{tx::kMenuTitle.font, 19, .06f, true, 1} : tx::kMenuTitle;
+                const TextStyle ts = squeezed(ctx.text,
+                                              spec.compact ? TextStyle{tx::kMenuTitle.font, 19, .06f, true, 1}
+                                                           : tx::kMenuTitle,
+                                              spec.title, right - x);
                 ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x), {x, centred_y(ctx.text, ts, r)},
                               title_col);
             }
@@ -1136,11 +1173,14 @@ void fighter_tile(Ui& ui, const std::string& id, const TileSpec& spec, Focus foc
             cv.stroke(bq, 1.5f, bc);
             icon(cv, ctx.icons, ic, {br.x + 5, br.y + 5, 12, 12}, bc);
             if (!spec.tag.empty()) {
-                const float tw = ctx.text.width(tx::kTileTag, spec.tag) + 8;
+                // (Between the tile's left edge and its badge: a longer word, "КОСТЮМЫ", closer and smaller first.)
+                const float room = br.x - 4 - (r.x + 4) - 8;
+                const TextStyle ts = squeezed(ctx.text, tx::kTileTag, spec.tag, room);
+                const std::string tag = ctx.text.ellipsize(ts, spec.tag, room);
+                const float tw = ctx.text.width(ts, tag) + 8;
                 const Rect tr{r.x + 4, r.y - 4, tw, 14};
                 cv.fill(skewed(tr, kSeamTan), rgb(0xf1e4e8));
-                ctx.text.draw(cv, tx::kTileTag, spec.tag, {tr.x + 4, centred_y(ctx.text, tx::kTileTag, tr)},
-                              rgb(0x0b0d14));
+                ctx.text.draw(cv, ts, tag, {tr.x + 4, centred_y(ctx.text, ts, tr)}, rgb(0x0b0d14));
             }
         },
         &focus);
@@ -1277,13 +1317,16 @@ void setting_row(Ui& ui, const std::string& id, const SettingRowSpec& spec, Focu
                 constexpr TextStyle kCode{theme::Font::Mono, 12.5f, 0, false, 1};
                 const float hh = ctx.text.line_height(tx::kSettingTitle) + 6 + ctx.text.line_height(kCode);
                 const float y = cy - hh / 2;
-                ctx.text.draw(cv, tx::kSettingTitle, ctx.text.ellipsize(tx::kSettingTitle, spec.title, right - x),
-                              {x, y}, c::kText);
+                const TextStyle ts = squeezed(ctx.text, tx::kSettingTitle, spec.title, right - x);
+                ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x),
+                              {x, y + (ctx.text.line_height(tx::kSettingTitle) - ctx.text.line_height(ts)) / 2},
+                              c::kText);
                 ctx.text.draw(cv, kCode, ctx.text.ellipsize(kCode, spec.detail, right - x, Ellipsis::Middle),
                               {x, y + ctx.text.line_height(tx::kSettingTitle) + 6}, mix(c::kRedDim, rgb(0xffe3e9), f));
             } else {
-                ctx.text.draw(cv, tx::kSettingTitle, ctx.text.ellipsize(tx::kSettingTitle, spec.title, right - x),
-                              {x, centred_y(ctx.text, tx::kSettingTitle, r)}, c::kText);
+                const TextStyle ts = squeezed(ctx.text, tx::kSettingTitle, spec.title, right - x);
+                ctx.text.draw(cv, ts, ctx.text.ellipsize(ts, spec.title, right - x), {x, centred_y(ctx.text, ts, r)},
+                              c::kText);
             }
             if (spec.disabled) cv.pop_layer();
         },
@@ -1421,11 +1464,18 @@ void key_row(Ui& ui, const std::string& id, const KeyRowSpec& spec, Focus focus,
         &focus);
 }
 
+float step_name_width(TextEngine& text, const std::vector<std::string>& names) {
+    float w = StepRowSpec::kStepNameWidth;
+    for (const std::string& n : names) w = std::max(w, std::ceil(text.width(tx::kStepName, n)));
+    return w;
+}
+
 void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box& box) {
     Box b = with_height(box, m::kStepRowHeight);
     if (zero(b.margin)) b.margin.bottom = 8;
-    ui.leaf(id, b, [](float) { return Vec2{20 + 24 + 14 + 118 + 14 + 30 + 14 + 96 + 20, m::kStepRowHeight}; },
-            [spec](PaintContext& ctx) {
+    const float name_w = std::max(StepRowSpec::kStepNameWidth, spec.name_width);
+    ui.leaf(id, b, [name_w](float) { return Vec2{20 + 24 + 14 + name_w + 14 + 30 + 14 + 96 + 20, m::kStepRowHeight}; },
+            [spec, name_w](PaintContext& ctx) {
                 Canvas& cv = ctx.canvas;
                 const Rect r = ctx.rect;
                 const StepState st = spec.state;
@@ -1475,9 +1525,12 @@ void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box&
                     ctx.text.draw(cv, kNum, n, {ib.center().x - w / 2, centred_y(ctx.text, kNum, ib)}, icon_col);
                 }
                 const float nx = ib.right() + 14;
-                ctx.text.draw(cv, tx::kStepName, ctx.text.ellipsize(tx::kStepName, spec.name, 118),
+                // (The column the list gives, as far as the row leaves the bar its 30 points.)
+                const float room = std::max(StepRowSpec::kStepNameWidth,
+                                            std::min(name_w, r.right() - 20 - 96 - 14 - 30 - 14 - nx));
+                ctx.text.draw(cv, tx::kStepName, ctx.text.ellipsize(tx::kStepName, spec.name, room),
                               {nx, centred_y(ctx.text, tx::kStepName, r)}, name_col);
-                const float bx = nx + 118 + 14, bw = std::max(30.f, r.right() - 20 - 96 - 14 - bx);
+                const float bx = nx + room + 14, bw = std::max(30.f, r.right() - 20 - 96 - 14 - bx);
                 const Rect bar{bx, cy - 3, bw, 6};
                 cv.fill(skewed(bar, kSeamTan), rgba(255, 255, 255, .08f));
                 const float fr = std::clamp(st == StepState::Done ? 1 : spec.fraction, 0.f, 1.f);
@@ -2168,6 +2221,12 @@ constexpr TextStyle kWhatText{theme::Font::Body, 14, 0, false, 1.4f};
 constexpr TextStyle kWhatMono{theme::Font::Mono, 13, 0, false, 1.4f};
 constexpr TextStyle kWhatKey{theme::Font::DisplayExtraBoldItalic, 13, .14f, true, 1};
 constexpr float kWhatKeyWidth = 62, kWhatGap = 12, kWhatLineGap = 9;
+// The keys' column: as wide as its widest key ("SPEICHERDATEN"), at least 62 points, at most 40 % of the list.
+float what_key_width(TextEngine& te, std::span<const WhatLine> lines, float width) {
+    float w = kWhatKeyWidth;
+    for (const WhatLine& l : lines) w = std::max(w, std::ceil(te.width(kWhatKey, l.key)));
+    return std::max(kWhatKeyWidth, std::min(w, width * .4f));
+}
 
 std::vector<WhatWord> what_words(TextEngine& te, const WhatLine& line) {
     std::vector<WhatWord> out;
@@ -2244,7 +2303,8 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
     ui.leaf(
         id, box,
         [&te, copy](float max_w) {
-            const float room = std::max(40.f, max_w - kWhatKeyWidth - kWhatGap);
+            const float key_w = what_key_width(te, copy, max_w);
+            const float room = std::max(40.f, max_w - key_w - kWhatGap);
             const float lh = te.line_height(kWhatText);
             float h = 0, w = 0;
             for (std::size_t i = 0; i < copy.size(); ++i) {
@@ -2254,13 +2314,14 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
                 for (const WhatWord& word : words) natural += word.width + (word.space_before ? 4 : 0);
                 what_layout(te, words, room, n);
                 h += n * lh + (i ? kWhatLineGap : 0);
-                w = std::max(w, kWhatKeyWidth + kWhatGap + natural);
+                w = std::max(w, key_w + kWhatGap + natural);
             }
             return Vec2{std::min(max_w, w), h};
         },
         [copy, mirrored = ui.mirrored()](PaintContext& ctx) {
             const Rect r = ctx.rect;
-            const float room = std::max(40.f, r.w - kWhatKeyWidth - kWhatGap);
+            const float key_w = what_key_width(ctx.text, copy, r.w);
+            const float room = std::max(40.f, r.w - key_w - kWhatGap);
             const float lh = ctx.text.line_height(kWhatText);
             float y = r.y;
             for (const WhatLine& l : copy) {
@@ -2268,8 +2329,9 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
                                  : l.tone == WhatTone::Kept  ? c::kOk
                                                              : c::kBlueFaint;
                 // (Mirrored: the keys in a column at the right edge, each line of words right-aligned before it.)
-                const float kx = mirrored ? r.right() - ctx.text.width(kWhatKey, l.key) : r.x;
-                ctx.text.draw(ctx.canvas, kWhatKey, l.key, {kx, y + (19 - ctx.text.line_height(kWhatKey)) / 2}, kc);
+                const std::string key = ctx.text.ellipsize(kWhatKey, l.key, key_w);
+                const float kx = mirrored ? r.right() - ctx.text.width(kWhatKey, key) : r.x;
+                ctx.text.draw(ctx.canvas, kWhatKey, key, {kx, y + (19 - ctx.text.line_height(kWhatKey)) / 2}, kc);
                 int n = 1;
                 const auto placed = what_layout(ctx.text, what_words(ctx.text, l), room, n);
                 std::vector<float> line_end(static_cast<std::size_t>(n), 0);
@@ -2282,7 +2344,7 @@ void what_list(Ui& ui, const std::string& id, std::span<const WhatLine> lines, c
                     // (Mono words sit on the same baseline as the text around them.)
                     const float dy = p.mono ? ctx.text.ascent(kWhatText) - ctx.text.ascent(kWhatMono) : 0;
                     const float x = mirrored ? r.x + room - line_end[static_cast<std::size_t>(p.line)] + p.x
-                                             : r.x + kWhatKeyWidth + kWhatGap + p.x;
+                                             : r.x + key_w + kWhatGap + p.x;
                     ctx.text.draw(ctx.canvas, st, p.text, {x, y + p.line * lh + dy},
                                   p.mono ? rgb(0xffffff) : rgb(0xd6e2f5));
                 }

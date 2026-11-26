@@ -44,6 +44,17 @@ Focus crimson_focus(bool is_default = false) {
 
 std::string u8(const fs::path& p) { return win32::narrow(p.native()); }
 
+// What the start script is doing, in the launcher's language: its "@step <id> <text>" lines are English (a .cmd
+// file has one language), so the known ids are said from the catalog; another id keeps the script's own words.
+std::string bootstrap_now(const BootstrapProgress& p) {
+    if (p.step == "check") return tr("ready.now_check", "Checking the launcher's tools");
+    if (p.step == "download") return tr("ready.now_download", "Downloading Python for the launcher");
+    if (p.step == "verify") return tr("ready.now_verify", "Checking the download");
+    if (p.step == "unpack") return tr("ready.now_unpack", "Unpacking Python");
+    if (p.step == "ready") return tr("ready.now_ready", "The launcher's Python is ready");
+    return p.text;
+}
+
 } // namespace
 
 // Until the model can be made: the first start's Python, the state. False: the window was closed.
@@ -245,7 +256,7 @@ void App::ready_declare() {
             const char* id;
             std::string name;
         };
-        // (Short: a step row's name has a narrow column; the blue side says each step whole.)
+        // (Short: the step rows' name column is as wide as their longest name; the blue side says each step whole.)
         const S kSteps[] = {{"check", tr("ready.step_tools", "Tools")},
                             {"download", tr("ready.step_download", "Download")},
                             {"verify", tr("ready.step_verify", "Check it")},
@@ -259,10 +270,14 @@ void App::ready_declare() {
                 if (p.step == kSteps[i].id) at = i;
             if (p.step == "ready") at = 4;
         }
+        std::vector<std::string> names;
+        for (int i = bootstrap ? 0 : 4; i < 5; ++i) names.push_back(kSteps[i].name);
+        const float name_width = step_name_width(ui.text(), names);
         auto rows = ui.open("ready/rows", Box{.gap = 6});
         for (int i = bootstrap ? 0 : 4; i < 5; ++i) {
             StepRowSpec s;
             s.name = kSteps[i].name;
+            s.name_width = name_width;
             s.number = bootstrap ? i + 1 : 1;
             s.state = i < at ? StepState::Done : i > at ? StepState::Pending : failed ? StepState::Failed
                                                                                       : StepState::Current;
@@ -322,7 +337,7 @@ void App::ready_declare() {
                  TextSpec{.text = r.failure().detail, .style = tx::kFactValue, .color = c::kBlueFaint, .wrap = true},
                  fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         if (bootstrap && !failed && !r.progress().text.empty())
-            text(ui, "ready/now", TextSpec{.text = r.progress().text, .style = tx::kKick, .color = c::kCyan},
+            text(ui, "ready/now", TextSpec{.text = bootstrap_now(r.progress()), .style = tx::kKick, .color = c::kCyan},
                  fit({}, SeamFit::BlueRect));
     }
     {
@@ -340,7 +355,7 @@ void App::ready_declare() {
             hs.push_back({Prompt::Accept, focused_label().empty() ? tr("hint.choose", "Choose") : focused_label()});
         }
         hs.push_back({Prompt::Back, tr("dialog.quit", "Quit")});
-        hint_bar(ui, "hints", hs);
+        hint_bar(ui, "hints", hs, {}, size.x - bottom.pad.left - bottom.pad.right);
     }
 }
 

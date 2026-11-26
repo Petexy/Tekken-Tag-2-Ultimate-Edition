@@ -984,7 +984,7 @@ void App::bottom_band() {
     bottom.pad = {34, 0, 26, 0};
     auto g = ui.open("bottom", bottom);
     const std::vector<Hint> hs = hints();
-    hint_bar(ui, "hints", hs);
+    hint_bar(ui, "hints", hs, {}, size.x - bottom.pad.left - bottom.pad.right);
 }
 
 // The task strip: a task that does not fill the screen (adding characters, shaders before Play, numpy and Pillow),
@@ -1054,7 +1054,10 @@ void App::dialog_band() {
     const float yc = (theme::kTopBand + size.y - theme::kBottomBand) / 2;
     const bool uninstall = d.id == "uninstall";
     const float height = uninstall ? 360 : 300;
-    const BandLayout L = band_layout(size, std::round(yc - height / 2), height);
+    BandLayout L = band_layout(size, std::round(yc - height / 2), height);
+    // (A small window, a large Text size or a longer language can need more than the band: each half scrolls, the
+    // focus keeping its buttons in view.)
+    L.crimson.scroll = L.blue.scroll = true;
     auto g = ttt2::ui::dialog_band(ui, "dlg", L);
     const std::string label = d.id == "uninstall"       ? tr("home.uninstall", "Uninstall")
                               : d.id == "stop-and-quit" ? tr("dialog.quit", "Quit")
