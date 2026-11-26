@@ -42,7 +42,7 @@ can be replaced ([see below](#changing-the-game)).
   [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#presentation-on-a-computer)),
   and the added fighters from their character packs.
 - `tools/characters/`: the importer that makes a character pack from the
-  player's own Tekken 7 and Tekken Tag Tournament 2
+  player's own Tekken 7 or Tekken 8 and Tekken Tag Tournament 2
   ([`docs/ARCHITECTURE.md`](ARCHITECTURE.md#added-fighters); how to use it:
   [Adding fighters](ADDING_FIGHTERS.md)).
 - `launcher/`: Golden Fist Launcher ([what it does](LAUNCHER.md)).

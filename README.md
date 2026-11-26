@@ -124,7 +124,7 @@ Get the newest version from the **[latest release](https://github.com/Petexy/Gol
 
 | System | File | How |
 | --- | --- | --- |
-| Linux | `Golden_Fist_Launcher-x86_64.AppImage` | Make it executable and start it. Needs glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and newer, rolling distributions). |
+| Linux | `Golden_Fist_Launcher-x86_64.AppImage` | Make it executable and start it. The launcher runs on glibc 2.39 or newer; the game it builds needs the libraries under [What you need](#what-you-need). |
 | Windows 10/11 (x64) | `Golden_Fist_Launcher-x86_64.exe` | Put it in a folder of your own (not Program Files: it replaces itself when it updates) and double-click it. |
 | Steam Deck | `Golden_Fist_Launcher-x86_64.AppImage` | In Desktop Mode, as on Linux. SteamOS can't install packages, so the launcher tells you which tools must come from a toolbox or distrobox container. |
 
@@ -134,8 +134,8 @@ The `.exe` is not code-signed, so Windows Defender may flag a new release by gue
 ## What you need
 
 - **Your own Tekken Tag Tournament 2 Wii U Edition**: the European release with update v16, dumped from your
-  console as a `.wua` archive (Cemu can create one from an installed title) or as a folder with the game's `code/`,
-  `content/` and `meta/`. Other versions have different code and are not supported
+  console as a `.wua` archive, which is what the launcher installs from (Cemu can create one from an installed
+  title). Other versions have different code and are not supported
   ([how to check yours](docs/PLAYING.md#your-copy-of-the-game)).
 - **A PC** with an x86-64-v3 processor (AVX2 and FMA: Intel Haswell, AMD Excavator or newer), a Vulkan 1.3 graphics
   driver, and room for the installed game (16 GB) and its build (on Windows, with the tools, plan about 30 GB).
@@ -177,7 +177,8 @@ Not done yet:
   ([the full list](docs/ADDING_FIGHTERS.md#what-they-bring-and-what-is-left-out)).
 
 Found a bug? [Open an issue](https://github.com/Petexy/Golden-Fist-Launcher/issues) and attach the game's log
-(`~/.cache/ttt2/game.log` on Linux; on Windows, **More** > **Open Latest Log** on Home), never game files.
+(`~/.cache/ttt2/game.log` on Linux; on Windows, `game-latest.log` in **More** > **Open Logs Folder** on Home), never
+game files.
 
 ## Documentation
 

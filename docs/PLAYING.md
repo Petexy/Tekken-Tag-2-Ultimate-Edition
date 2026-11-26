@@ -27,7 +27,9 @@ You need **TEKKEN TAG TOURNAMENT 2 Wii U EDITION**, European release, with
 update v16, as a `.wua` archive (Cemu can create one from an installed title;
 the update may be merged into the game's folder or stored beside it), or as
 a folder with the game's `code/`, `content/` and `meta/` and the update's
-files over them.
+files over them. The launcher's **Install** (**Set Up** on Windows) takes the
+`.wua`; a folder works when you
+[start the game without the launcher](#starting-the-game-without-the-launcher).
 
 | Property | Value |
 | --- | --- |
