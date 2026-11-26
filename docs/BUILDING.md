@@ -111,7 +111,8 @@ python3 launcher/windows/make_launcher_exe.py Golden_Fist_Launcher-x86_64.exe
 It is the launcher's own program cross-built for Windows by CMake with
 MinGW-w64 (`cmake/toolchain-mingw64.cmake`; it needs CMake, Ninja and SDL 3's
 source: `python3 tools/setup_deps.py --launcher`), SDL 3 built in, with the
-project's tracked files (nothing of the game) as a resource of the program, and
+project's tracked files (nothing of the game; the README's pictures in
+`docs/images/` stay out) as a resource of the program, and
 its icon and version details (the icon needs `rsvg-convert`); the same commit
 makes the same bytes. `--cxx COMPILER` makes the Python launcher's `.exe` of
 0.4.0 to 0.8.0 instead (`launcher/windows/entry.cpp`), and `--stub` appends the
