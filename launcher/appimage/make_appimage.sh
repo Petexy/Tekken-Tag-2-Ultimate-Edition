@@ -184,6 +184,8 @@ unexpected() {
             # (the importer's C parts, compiled on the player's PC for Tekken 8's import: ttt2char/native.py)
             ./usr/share/ttt2/characters/ttt2char/tekken8/oodle.c | ./usr/share/ttt2/characters/ttt2char/tekken8/oodle_windows.h) ;;
             ./usr/share/ttt2/characters/ttt2char/convert/decimate.c) ;;
+            # (the launcher's texts in every language and their reader, for the importer's texts: ttt2char/texts.py)
+            ./usr/share/ttt2/i18n/*.txt | ./usr/share/ttt2/i18n/launcher_texts.py) ;;
             "./usr/share/applications/$app_id.desktop") ;;
             "./usr/share/icons/hicolor/scalable/apps/$app_id.svg") ;;
             ./usr/share/licenses/ttt2-launcher/*)
