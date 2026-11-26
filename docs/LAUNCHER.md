@@ -24,6 +24,7 @@ source](BUILDING.md#building-the-launcher).
   - [The launcher Set Up Game builds](#the-launcher-set-up-game-builds)
   - [Windows' own parts](#windows-own-parts)
   - [Folders and logs](#folders-and-logs)
+- [Languages](#languages)
 - [Known limits](#known-limits)
 
 ## The three screens
@@ -61,7 +62,8 @@ launcher shows), the language the game shows its texts and menus in (English, Fr
 Russian: those the European Wii U game has; or Polish, the port's own translation), whether the game starts fullscreen, the resolution it draws at, its 120
 frames per second, whether fighters wait the Wii U version's two frames
 before acting on a button, whether its shaders are compiled in the background and prepared before it starts,
-its keyboard keys ([Playing](PLAYING.md#keyboard)), and the launcher's own sounds, motion, button prompts and text size.
+its keyboard keys ([Playing](PLAYING.md#keyboard)), and the launcher's own language ([Languages](#languages)), sounds,
+motion, button prompts and text size.
 Where the game keeps these settings: [Settings](PLAYING.md#settings).
 
 ### Fighters
@@ -266,6 +268,58 @@ Import cancellation requests cleanup and
 keeps completed extraction data. Only the release `.exe` updates itself (a
 project ZIP is updated as a whole); the Linux uninstall is not part of the
 Windows launcher.
+
+## Languages
+
+The launcher shows its texts in English, French, German, Italian, Spanish, Russian or Polish: **Settings > Launcher >
+Language**, each named in its own language. **System** (the default) is your system's language when the launcher has
+it, else English (Linux: `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`, in that order; Windows: the display language).
+It changes at once and is kept in `launcher.ini` (`language=`, beside `display.ini`). The game's own language is the
+other setting, Settings > Game > Language. What the launcher writes to its logs and to a terminal stays English, and
+so do messages the system or another program gives it (a folder that cannot be read, a compiler's error), names, and
+key names such as Enter and Esc.
+
+Every text has a key and its English, which is the source: the English is in the code where the text is used, as
+`tr("home.play", "Play")` or, for a text that changes with a number, `trn("fighters.added", n, "{n} fighter added",
+"{n} fighters added")`. The Python programs the launcher starts (the Windows setup and updates, the importer's
+progress lines) do the same with `launcher/i18n/launcher_texts.py`, in the language the launcher passes them
+(`TTT2_TEXT_LANGUAGE`). `launcher/i18n/en.txt` lists every key with its English; it is made from the code:
+
+```sh
+python3 launcher/i18n/extract.py            # en.txt anew, after a text was added or changed
+python3 launcher/i18n/extract.py --check    # what the tests run: en.txt is current, every catalog fits it
+python3 launcher/i18n/extract.py --json     # every text with where it is used
+```
+
+Each other language is a catalog, `launcher/i18n/<code>.txt` (UTF-8), built into the launcher:
+
+```
+# comments and blank lines
+home.play = Spielen
+fighters.added[one] = {n} Kämpfer hinzugefügt
+fighters.added[other] = {n} Kämpfer hinzugefügt
+```
+
+One text per line: its key, `=`, the text. `{name}` is a value the launcher puts in (a number, a name, a folder),
+by name and in any order the sentence needs; `{{` and `}}` are braces; `\n` is a new line, `\\` a backslash and
+`\s` a space at a text's start or end. A text that changes with a number has one line per plural form the
+language has, as CLDR counts them: English and German `one` and `other`; French, Italian and Spanish `one`, `many`
+and `other`; Russian and Polish `one`, `few`, `many` and `other` (`one` is also 21, 31 ... in Russian, so it says
+`{n}` too). A key a catalog lacks shows in English. The check fails on a key `en.txt` does not have, on other
+placeholders than the English, on a plural text without each of the language's forms, and on a line it cannot read.
+
+To try a catalog without building: `TTT2_LAUNCHER_I18N_DIR=<folder with code.txt files>` makes the launcher read the
+catalogs there instead of its own, and `TTT2_LAUNCHER_LANGUAGE=<code>` starts it in that language without changing
+Settings. `TTT2_LAUNCHER_LANGUAGE=qps` is the test language: every English text marked with brackets, its letters
+accented and a third longer, to see on the screen a text that does not go through the catalog (it shows plain) or
+does not fit.
+
+To add a language: its code and own name in `kLanguages` (`launcher/core/i18n.h`; the game's languages are in
+`runtime/src/host/game_settings.h`), its plural rules in `plural_category()` (`launcher/core/i18n.cpp`),
+`launcher_texts.py` and `extract.py`'s `PLURALS` and `LANGUAGES`, an empty `launcher/i18n/<code>.txt` in
+`TTT2_LAUNCHER_CATALOGS` (`launcher/core/CMakeLists.txt`: the catalogs built in), and the letters it needs in the
+fonts: Barlow has Latin letters, Fira Sans Cyrillic ([fonts](../launcher/ui/fonts/README.md)); a script neither has
+needs a font of its own beside them.
 
 ## Known limits
 
