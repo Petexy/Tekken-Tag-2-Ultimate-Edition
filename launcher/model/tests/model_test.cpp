@@ -197,6 +197,13 @@ void intended(Dump& golden, const Dump& model, const std::string& display_ini) {
         const auto add = [&](Element e) { settings.push_back(std::move(e)); };
         add({"label", {{"t", "Golden Fist Launcher"}, {"tone", "heading"}}, {}});
         add({"label", {{"t", "How this launcher looks and sounds."}, {"tone", "dim"}}, {}});
+        add({"label", {{"t", "Language"}}, {}});
+        add({"label",
+             {{"t", "The language of this launcher's texts. System: the one your system shows, when the launcher has "
+                    "it, else English."},
+              {"tone", "dim"}},
+             {}});
+        add({"choice", {{"id", "launcher-language"}, {"t", "System (English)"}}, {{"s", true}}});
         add({"label", {{"t", "Sounds"}}, {}});
         add({"label", {{"t", "Short sounds when moving between and choosing items."}, {"tone", "dim"}}, {}});
         add({"switch", {{"id", "sounds"}}, {{"on", true}, {"s", true}}});
@@ -388,7 +395,9 @@ const TkDifference kTkDifferences[] = {
     {true, "settings", "L|R|ZL|ZR", "W0"},
     // I2 The launcher's own settings.
     {false, "settings",
-     "Golden Fist Launcher|How this launcher looks and sounds\\.|Sounds|Short sounds when moving between and choosing "
+     "Golden Fist Launcher|How this launcher looks and sounds\\.|Language|The language of this launcher's texts\\. "
+     "System: the one your system shows, when the launcher has it, else English\\.|System \\(English\\)|Sounds|Short "
+     "sounds when moving between and choosing "
      "items\\.|Reduce motion|No moving backgrounds, and pages change without sliding\\.|Button prompts|The buttons "
      "the prompts show: those of the last device used, or always these\\.|Automatic|Text size|How large this "
      "launcher's text is\\.|100 %",
@@ -544,6 +553,10 @@ int main(int argc, char** argv) {
         return 2;
     }
     const fs::path golden = argv[1], scratch = argv[2];
+    // (The launcher's texts in English, the goldens' language, whatever this PC's is: Settings' "System (English)".)
+    for (const char* name : {"LANGUAGE", "LC_ALL", "LC_MESSAGES"}) unsetenv(name);
+    setenv("LANG", "C", 1);
+    launcher::i18n::set_language("en");
     std::string only;
     fs::path write;
     for (int i = 3; i + 1 < argc; i += 2) {

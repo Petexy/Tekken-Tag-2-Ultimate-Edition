@@ -4,6 +4,7 @@
 #include "utf8_path.h"
 
 #include "files.h"
+#include "i18n.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,15 +24,17 @@ bool save_display(const fs::path& file, const display::Settings& settings, std::
 
 std::string resolution_label(display::Resolution resolution) {
     const float scale = display::scale_of(resolution);
-    return scale > 0 ? size_text(scale) : "Automatic";
+    return scale > 0 ? size_text(scale) : i18n::tr("settings.automatic", "Automatic");
 }
 
 std::string automatic_size(uint32_t display_height) { return size_text(display::auto_scale(display_height)); }
 
 std::string automatic_note(const std::vector<Monitor>& monitors) {
-    if (monitors.size() > 1) return "Automatic: enough to cover the main display.";
-    if (monitors.empty() || !monitors[0].height) return "Automatic: enough to cover the display.";
-    return "Automatic: enough to cover the display (" + automatic_size(monitors[0].height) + " on this one).";
+    using i18n::tr;
+    if (monitors.size() > 1) return tr("display.auto_main", "Automatic: enough to cover the main display.");
+    if (monitors.empty() || !monitors[0].height) return tr("display.auto", "Automatic: enough to cover the display.");
+    return tr("display.auto_size", "Automatic: enough to cover the display ({size} on this one).",
+              {{"size", automatic_size(monitors[0].height)}});
 }
 
 std::string refresh_note(const std::vector<Monitor>& monitors) {
@@ -41,12 +44,16 @@ std::string refresh_note(const std::vector<Monitor>& monitors) {
         most = std::max(most, m.refresh);
     }
     if (monitors.empty()) return {};
+    using i18n::tr;
     const std::string rate = hertz_text(most);
-    if (monitors.size() == 1) return "This display refreshes at " + rate + " Hz: the game stays at 60 fps there.";
+    const i18n::Args args = {{"rate", i18n::decimal(rate)}};
+    if (monitors.size() == 1)
+        return tr("display.refresh_one", "This display refreshes at {rate} Hz: the game stays at 60 fps there.", args);
     const bool same = std::all_of(monitors.begin(), monitors.end(),
                                   [&](const Monitor& m) { return hertz_text(m.refresh) == rate; });
-    return "These displays refresh at " + std::string(same ? "" : "up to ") + rate +
-           " Hz: the game stays at 60 fps.";
+    return same ? tr("display.refresh_all", "These displays refresh at {rate} Hz: the game stays at 60 fps.", args)
+                : tr("display.refresh_most", "These displays refresh at up to {rate} Hz: the game stays at 60 fps.",
+                     args);
 }
 
 std::string hertz_text(int millihertz) {

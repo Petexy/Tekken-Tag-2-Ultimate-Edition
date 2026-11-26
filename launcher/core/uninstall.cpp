@@ -4,6 +4,8 @@
 
 #include "uninstall.h"
 
+#include "i18n.h"
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -31,8 +33,8 @@ public:
         struct stat s {};
         if (::fstatat(dir, name.c_str(), &s, AT_SYMLINK_NOFOLLOW) != 0) return errno == ENOENT || problem(shown);
         if (!S_ISDIR(s.st_mode)) return ::unlinkat(dir, name.c_str(), 0) == 0 || errno == ENOENT || problem(shown);
-        if (s.st_dev != device) return problem(shown, "another file system is mounted there");
-        if (depth > kMaxDepth) return problem(shown, "folders nested too deep");
+        if (s.st_dev != device) return problem(shown, i18n::tr("uninstall.mounted", "another file system is mounted there"));
+        if (depth > kMaxDepth) return problem(shown, i18n::tr("uninstall.too_deep", "folders nested too deep"));
         const int fd = ::openat(dir, name.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
         if (fd < 0) return problem(shown);
         DIR* folder = ::fdopendir(fd);
@@ -162,24 +164,25 @@ UninstallReport uninstall(const Places& places, const fs::path& folder_path, con
     const fs::path folder = normal(folder_path);
     // (The reasons leave the folder out: the window shows it.)
     if (precious(folder_path, places)) {
-        report.refused = "This is not a folder the game can be uninstalled from.";
+        report.refused = i18n::tr("uninstall.not_folder", "This is not a folder the game can be uninstalled from.");
         return report;
     }
     const int dir = ::open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dir < 0) {
-        report.refused = std::string("The folder cannot be opened: ") + std::strerror(errno) + ".";
+        report.refused = i18n::tr("uninstall.cannot_open", "The folder cannot be opened: {error}.",
+                                  {{"error", std::strerror(errno)}});
         return report;
     }
     if (!regular_at(dir, kMarker) && !regular_at(dir, kStarted)) {
         ::close(dir);
-        report.refused = "The folder holds no install of the game.";
+        report.refused = i18n::tr("uninstall.no_install", "The folder holds no install of the game.");
         return report;
     }
     // (Its files are read as it plays: deleted under it, it would fail at
     // its next load and write its saves into a folder made again.)
     if (program_running(folder)) {
         ::close(dir);
-        report.refused = "The game is running: quit it, then uninstall.";
+        report.refused = i18n::tr("uninstall.running", "The game is running: quit it, then uninstall.");
         return report;
     }
     struct stat s {};
@@ -221,7 +224,7 @@ UninstallReport uninstall(const Places& places, const fs::path& folder_path, con
         const bool link = ::lstat(folder.c_str(), &l) == 0 && S_ISLNK(l.st_mode);
         const fs::path real = link ? fs::canonical(folder, ec) : folder;
         if (ec || ::stat(real.c_str(), &r) != 0 || r.st_dev != s.st_dev || r.st_ino != s.st_ino) {
-            deleter.problem(folder, "it is no longer the folder that was emptied");
+            deleter.problem(folder, i18n::tr("uninstall.changed", "it is no longer the folder that was emptied"));
         } else if (::rmdir(real.c_str()) == 0) {
             report.folder_removed = !link || ::unlink(folder.c_str()) == 0 || deleter.problem(folder);
         } else if (errno != EBUSY) {
@@ -252,7 +255,7 @@ UninstallReport uninstall(const Places& places, const fs::path& folder_path, con
 
     if (options.saves) {
         if (precious(places.saves, places)) {
-            deleter.problem(places.saves, "not deleted: not a folder of saves alone");
+            deleter.problem(places.saves, i18n::tr("uninstall.not_saves", "not deleted: not a folder of saves alone"));
         } else {
             remove_saves(deleter, normal(places.saves), same_folder(places.saves, places.default_saves()));
         }

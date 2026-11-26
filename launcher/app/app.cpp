@@ -267,6 +267,9 @@ void App::make_model() {
     // The launcher's own settings (launcher.ini beside display.ini).
     launcher_ini_ = parts.display_file.parent_path() / "launcher.ini";
     applied_ = read_launcher_ini(launcher_ini_);
+    // (TTT2_LAUNCHER_LANGUAGE: a test's or a translator's language for this run, saved only when chosen in Settings.)
+    if (const char* forced = std::getenv("TTT2_LAUNCHER_LANGUAGE"); forced && *forced) applied_.language = forced;
+    apply_language(applied_.language);
     model_->set_launcher_settings(applied_);
     sounds_ = applied_.sounds;
     if (applied_.prompts > 0 && !forced_glyphs_) apply_prompts(applied_.prompts);
@@ -1163,6 +1166,19 @@ void App::go(Screen to) {
     ui_->focus(it != saved_focus_.end() ? it->second : std::string(), true);
 }
 
+// The launcher's texts in the language of launcher.ini's setting, at once (every frame's view is built anew); the
+// Python workers it starts get it too (launcher_texts.py: TTT2_TEXT_LANGUAGE in the environment they inherit).
+void App::apply_language(const std::string& setting) {
+    const std::string code = launcher::i18n::resolve(setting);
+    launcher::i18n::set_language(code);
+#ifdef _WIN32
+    _putenv_s("TTT2_TEXT_LANGUAGE", code.c_str());
+    SetEnvironmentVariableA("TTT2_TEXT_LANGUAGE", code.c_str()); // (what CreateProcessW's environment is made of)
+#else
+    setenv("TTT2_TEXT_LANGUAGE", code.c_str(), 1);
+#endif
+}
+
 void App::apply_prompts(int prompts) {
     static const Glyphs kGlyphs[] = {Glyphs::Keyboard, Glyphs::Keyboard, Glyphs::Xbox, Glyphs::PlayStation,
                                      Glyphs::Nintendo};
@@ -1176,6 +1192,7 @@ void App::apply_launcher_settings() {
     if (s == applied_) return;
     if (s.prompts != applied_.prompts && !forced_glyphs_) apply_prompts(s.prompts);
     if (s.text_size != applied_.text_size) window_.set_user_text_scale(s.text_size / 100.f);
+    if (s.language != applied_.language) apply_language(s.language);
     applied_ = s;
     std::string error;
     if (!write_launcher_ini(launcher_ini_, s, &error)) toast("Not saved", error);

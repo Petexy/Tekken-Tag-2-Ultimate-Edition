@@ -2,6 +2,7 @@
 
 #include "system.h"
 
+#include "i18n.h"
 #include "paths.h"
 
 #include <fcntl.h>
@@ -85,7 +86,7 @@ std::optional<Compiler> find_compiler(std::string* why) {
         std::string first;
         words >> first;
         if (const auto path = find_in_path(first)) return Compiler{*path, cxx};
-        if (why) *why = "$CXX is " + std::string(cxx) + ", which is not installed";
+        if (why) *why = i18n::tr("system.cxx_missing", "$CXX is {cxx}, which is not installed", {{"cxx", cxx}});
         return std::nullopt;
     }
     // In the builder's order (launcher/builder/src/host.cpp): Clang, then
@@ -103,10 +104,11 @@ std::optional<Compiler> find_compiler(std::string* why) {
         const std::string version = version_of(*program, clang ? "-dumpversion" : "-dumpfullversion");
         if (major_version(version) >= needed) return Compiler{*program, name + " " + version};
         if (too_old.empty()) {
-            too_old = name + " " + version + " is too old (" + std::to_string(needed) + " or newer is needed)";
+            too_old = i18n::tr("system.compiler_old", "{compiler} is too old ({needed} or newer is needed)",
+                               {{"compiler", name + " " + version}, {"needed", needed}});
         }
     }
-    if (why) *why = too_old.empty() ? "no C++ compiler is installed" : too_old;
+    if (why) *why = too_old.empty() ? i18n::tr("system.no_compiler", "no C++ compiler is installed") : too_old;
     return std::nullopt;
 }
 

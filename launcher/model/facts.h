@@ -7,6 +7,7 @@
 // say what the player sees. Nothing here draws, starts a process or reads a
 // file.
 
+#include "i18n.h"
 #include "command.h"
 #include "display.h"
 #include "keymap.h"
@@ -23,6 +24,11 @@
 #include <vector>
 
 namespace launcher::model {
+
+// Every text a player reads goes through these (i18n.h).
+using i18n::tr;
+using i18n::trn;
+
 
 // ---------------------------------------------------------------- the OS
 
@@ -164,6 +170,8 @@ struct LauncherSettings {
     bool reduce_motion = false; // (the app sets it from the OS where readable, until chosen)
     int text_size = 100;        // percent (kTextSizes)
     int prompts = 0;            // the button prompts shown: an index into kPrompts (0: from the last device used)
+    std::string language = "system"; // the launcher's texts: "system" (the system's, i18n::resolve) or a code of
+                                     // i18n::kLanguages
     bool operator==(const LauncherSettings&) const = default;
 };
 

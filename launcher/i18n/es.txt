@@ -1,0 +1,2 @@
+# Golden Fist Launcher: its texts in Español (es). Keys and their English: en.txt; format: docs/LAUNCHER.md#languages.
+# A key missing here shows in English.

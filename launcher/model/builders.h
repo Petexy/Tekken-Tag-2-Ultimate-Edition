@@ -41,6 +41,6 @@ Dialog message_view(const std::string& title, const std::string& text); // a ref
 // The command (or hint) that installs `packages` on this distribution: a
 // command line, or a text when there is none (image_based_hint / fallback).
 Line install_hint(const Distro& distro, const std::vector<Package>& packages, const std::string& what,
-                  const char* fallback);
+                  const std::string& fallback);
 
 } // namespace launcher::model

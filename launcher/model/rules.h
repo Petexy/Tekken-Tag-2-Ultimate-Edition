@@ -15,7 +15,7 @@
 namespace launcher::model {
 
 // A build of Tekken 8 its helper does not know (a game update).
-extern const char* const kUnknownBuild;
+std::string unknown_build();
 
 const char* game_name(std::string_view game);  // "Tekken 7", "Tekken 8"
 const char* other_game(std::string_view game); // kTekken8 for kTekken7 ...

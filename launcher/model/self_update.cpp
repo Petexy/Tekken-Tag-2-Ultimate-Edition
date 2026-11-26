@@ -9,7 +9,7 @@
 namespace launcher::model {
 
 std::string full_sentence(std::string text) {
-    if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = static_cast<char>(text[0] - 'a' + 'A');
+    text = i18n::capitalized(std::move(text));
     if (!text.empty() && text.back() != '.') text += '.';
     return text;
 }
@@ -37,30 +37,38 @@ std::optional<Command> SelfUpdate::check_command() {
 std::optional<SelfUpdate::Refusal> SelfUpdate::start(double now, bool go_on) {
     now_ = now;
     if (!config_.appimage) {
-        return Refusal{"Cannot update the launcher",
-                       "Only the launcher's AppImage updates itself, and this launcher does not run from one."};
+        return Refusal{tr("model.cannot_update_launcher", "Cannot update the launcher"),
+                       tr("model.not_appimage",
+                          "Only the launcher's AppImage updates itself, and this launcher does not run from one.")};
     }
-    if (runner_.running()) return Refusal{"Another task is running", "Wait for it to end, then update the launcher."};
+    if (runner_.running())
+        return Refusal{tr("common.task_running", "Another task is running"),
+                       tr("self.wait", "Wait for it to end, then update the launcher.")};
     if (const std::string why = files_.cannot_replace(*config_.appimage); !why.empty()) {
-        return Refusal{"Cannot update the launcher", "Its folder, " + path_utf8(config_.appimage->parent_path()) +
-                                                         ", cannot be written to (" + why +
-                                                         "): move the AppImage to a folder of yours, then update it."};
+        return Refusal{tr("model.cannot_update_launcher", "Cannot update the launcher"),
+                       tr("self.folder_read_only",
+                          "Its folder, {folder}, cannot be written to ({why}): move the AppImage to a folder of yours, "
+                          "then update it.",
+                          {{"folder", path_utf8(config_.appimage->parent_path())}, {"why", why}})};
     }
     const auto downloader = files_.find_downloader();
     if (!downloader) {
         const std::string command = install_command(files_.distro(), {Package::kCurl});
-        return Refusal{"Cannot update the launcher",
-                       "Downloading needs curl or wget: install curl" +
-                           (command.empty() ? std::string(" with your distribution's packages.") : " with " + command)};
+        return Refusal{tr("model.cannot_update_launcher", "Cannot update the launcher"),
+                       command.empty() ? tr("self.no_downloader", "Downloading needs curl or wget: install curl with "
+                                                                  "your distribution's packages.")
+                                       : tr("self.no_downloader_command", "Downloading needs curl or wget: install curl "
+                                                                          "with {command}",
+                                            {{"command", command}})};
     }
     downloader_ = *downloader;
     opened_ = false;
     go_on_ = go_on;
     TaskSpec spec;
     spec.kind = TaskKind::kLauncherUpdate;
-    spec.title = "Updating the launcher";
+    spec.title = tr("model.updating_launcher", "Updating the launcher");
     runner_.begin(spec, now);
-    runner_.step("Looking for a newer version");
+    runner_.step(tr("self.looking", "Looking for a newer version"));
     state_ = State::kAsking;
     run({download_command(downloader_, config_.releases, true, {}, config_.user_agent), {}, {}, {}, {}}, false,
         [this](int code, const std::string& out, const std::string& err) { answered(code, out, err); });
@@ -83,21 +91,26 @@ void SelfUpdate::run(Command command, bool log_out,
                                    if (serial != serial_ || state_ == State::kIdle) return;
                                    const auto task = runner_.facts();
                                    if (task && task->cancelled) {
-                                       return failed("Update cancelled", "The launcher is as it was.", true);
+                                       return failed(tr("task.update_cancelled", "Update cancelled"),
+                                                     tr("task.launcher_as_it_was", "The launcher is as it was."), true);
                                    }
                                    then(code, *out, *err);
                                }},
                               &error);
-    if (!job) return failed("Update failed", "Cannot start " + command.argv[0] + ": " + error);
+    if (!job)
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.cannot_start", "Cannot start {program}: {error}",
+                         {{"program", command.argv[0]}, {"error", error}}));
     runner_.set_job(std::move(job));
 }
 
 void SelfUpdate::answered(int code, const std::string& out, const std::string& err) {
     if (code != 0 && !json::parse(out)) {
-        return failed("Update failed",
-                      "GitHub cannot be reached: " +
-                          (err.empty() ? "the download ended with code " + std::to_string(code) : last_error(err)) +
-                          ".");
+        return failed(tr("task.update_failed", "Update failed"),
+                      err.empty() ? tr("self.github_code", "GitHub cannot be reached: the download ended with code {code}.",
+                                       {{"code", code}})
+                                  : tr("self.github_said", "GitHub cannot be reached: {error}.",
+                                       {{"error", last_error(err)}}));
     }
     const ReleaseAnswer answer = parse_release(out);
     if (on_release) on_release(answer);
@@ -106,13 +119,16 @@ void SelfUpdate::answered(int code, const std::string& out, const std::string& e
         runner_.add_log(answer.none ? "No release is published yet."
                                     : "The newest release is " + answer.release->tag + ".");
         state_ = State::kIdle;
-        runner_.finish(true, "The launcher is up to date", "Version " + config_.version + " is the newest.", false,
+        runner_.finish(true, tr("task.launcher_up_to_date", "The launcher is up to date"),
+                       tr("self.newest", "Version {version} is the newest.", {{"version", config_.version}}), false,
                        now_);
         return;
     }
-    if (!answer.release) return failed("Update failed", full_sentence(answer.error));
+    if (!answer.release) return failed(tr("task.update_failed", "Update failed"), full_sentence(answer.error));
     if (!config_.custom_releases && !answer.release->url.starts_with("https://")) {
-        return failed("Update failed", "Version " + answer.release->version + " is not offered over HTTPS.");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.not_https", "Version {version} is not offered over HTTPS.",
+                         {{"version", answer.release->version}}));
     }
     release_ = *answer.release;
     download(now_);
@@ -121,8 +137,8 @@ void SelfUpdate::answered(int code, const std::string& out, const std::string& e
 void SelfUpdate::download(double now) {
     file_ = update_file(*config_.appimage);
     files_.remove(file_); // (one stopped half-way)
-    runner_.set_title("Updating the launcher to " + release_.version);
-    runner_.step("Downloading version " + release_.version);
+    runner_.set_title(tr("self.updating_to", "Updating the launcher to {version}", {{"version", release_.version}}));
+    runner_.step(tr("self.downloading", "Downloading version {version}", {{"version", release_.version}}));
     state_ = State::kDownloading;
     watch_at_ = release_.size > 0 ? now + kWatchSeconds : -1;
     run({download_command(downloader_, release_.url, false, file_, config_.user_agent), {}, {}, {}, {}}, true,
@@ -133,26 +149,33 @@ void SelfUpdate::downloaded(int code, const std::string& err) {
     watch_at_ = -1;
     const std::string version = release_.version;
     if (code != 0) {
-        return failed("Update failed", "Version " + version + " cannot be downloaded: " +
-                                           (err.empty() ? "code " + std::to_string(code) : last_error(err)) + ".");
+        return failed(tr("task.update_failed", "Update failed"),
+                      err.empty() ? tr("self.download_code", "Version {version} cannot be downloaded: code {code}.",
+                                       {{"version", version}, {"code", code}})
+                                  : tr("self.download_said", "Version {version} cannot be downloaded: {error}.",
+                                       {{"version", version}, {"error", last_error(err)}}));
     }
     const auto size = files_.size(file_);
     if (!size || (release_.size > 0 && *size != release_.size)) {
-        return failed("Update failed", "The download of version " + version + " is incomplete (" +
-                                           std::to_string(size.value_or(0)) + " of " + std::to_string(release_.size) +
-                                           " bytes).");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.incomplete", "The download of version {version} is incomplete ({got} of {size} bytes).",
+                         {{"version", version}, {"got", size.value_or(0)}, {"size", release_.size}}));
     }
     if (!release_.sha256.empty() && files_.sha256(file_) != release_.sha256) {
-        return failed("Update failed",
-                      "The download of version " + version + " is damaged: its SHA-256 is not GitHub's.");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.damaged", "The download of version {version} is damaged: its SHA-256 is not GitHub's.",
+                         {{"version", version}}));
     }
     if (!files_.is_appimage(file_)) {
-        return failed("Update failed", "What was downloaded for version " + version + " is not an AppImage.");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.not_appimage", "What was downloaded for version {version} is not an AppImage.",
+                         {{"version", version}}));
     }
     if (const std::string why = files_.make_executable(file_, *config_.appimage); !why.empty()) {
-        return failed("Update failed", "The download cannot be made executable (" + why + ").");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.not_executable", "The download cannot be made executable ({why}).", {{"why", why}}));
     }
-    runner_.step("Checking version " + version);
+    runner_.step(tr("self.checking", "Checking version {version}", {{"version", version}}));
     state_ = State::kChecking;
     timed_out_ = false;
     deadline_ = now_ + kVersionSeconds;
@@ -164,15 +187,19 @@ void SelfUpdate::started(int code, const std::string& out) {
     deadline_ = -1;
     const std::string version = release_.version, said = version_in(out);
     if (timed_out_) {
-        return failed("Update failed", "Version " + version + " does not start: it did not answer within " +
-                                           std::to_string(static_cast<int>(kVersionSeconds)) + " seconds.");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.no_answer", "Version {version} does not start: it did not answer within {seconds} seconds.",
+                         {{"version", version}, {"seconds", static_cast<int>(kVersionSeconds)}}));
     }
     if (code != 0 || said.empty()) {
-        return failed("Update failed", "Version " + version + " does not start on this PC (code " +
-                                           std::to_string(code) + ", see Details).");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.does_not_start", "Version {version} does not start on this PC (code {code}, see Details).",
+                         {{"version", version}, {"code", code}}));
     }
     if (compare_versions(said, version).value_or(1) != 0) {
-        return failed("Update failed", "The AppImage released as version " + version + " is version " + said + ".");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.wrong_version", "The AppImage released as version {version} is version {said}.",
+                         {{"version", version}, {"said", said}}));
     }
     // (This version stays beside it until the new one drew its first frame, the way back when it cannot.)
     const fs::path previous = previous_file(*config_.appimage);
@@ -180,7 +207,9 @@ void SelfUpdate::started(int code, const std::string& out) {
         runner_.add_log("No copy of this version is kept to go back to (" + why + ").");
     if (const std::string why = files_.replace(file_, *config_.appimage); !why.empty()) {
         files_.remove(previous);
-        return failed("Update failed", "It cannot replace " + path_utf8(*config_.appimage) + " (" + why + ").");
+        return failed(tr("task.update_failed", "Update failed"),
+                      tr("self.cannot_replace", "It cannot replace {path} ({why}).",
+                         {{"path", path_utf8(*config_.appimage)}, {"why", why}}));
     }
     state_ = State::kIdle;
     runner_.add_log("Version " + version + " is in " + path_utf8(*config_.appimage) + ".");
@@ -190,13 +219,16 @@ void SelfUpdate::started(int code, const std::string& out) {
     if (go_on_) open.env[kContinueVariable] = "update";
     auto job = starter_.start(open, {}, &error);
     if (!job) {
-        runner_.finish(false, "Updated to " + version + ", but it cannot be opened",
-                       full_sentence(error) + " Start the launcher again.", false, now_);
+        runner_.finish(false, tr("model.updated_not_opened", "Updated to {version}, but it cannot be opened", {{"version", version}}),
+                       tr("common.two_sentences", "{first} {second}",
+                          {{"first", full_sentence(error)}, {"second", tr("model.start_again", "Start the launcher again.")}}),
+                       false, now_);
         return;
     }
     runner_.add_log("Opening version " + version + "…");
     opened_ = true;
-    runner_.finish(true, "Updated to " + version, "Opening it…", false, now_);
+    runner_.finish(true, tr("task.updated_to", "Updated to {version}", {{"version", version}}),
+                   tr("task.opening", "Opening it…"), false, now_);
 }
 
 void SelfUpdate::failed(const std::string& title, const std::string& why, bool cancelled) {

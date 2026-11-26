@@ -256,6 +256,7 @@ private:
     void set_folder(const std::string& key, const std::string& value);
     // The launcher's own settings changed (Sounds, Reduce motion, Button prompts, Text size): applied and saved.
     void apply_launcher_settings();
+    void apply_language(const std::string& setting);
     void apply_prompts(int prompts);
 
     // ---- the in-app browser (picker.cpp)

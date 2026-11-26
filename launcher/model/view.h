@@ -7,12 +7,18 @@
 // of the screen shows for the focused item: nothing lives only in a
 // tooltip. A disabled item stays in the view with its why.
 
+#include "i18n.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace launcher::model {
+
+// Every text a player reads: i18n.h.
+using i18n::tr;
+using i18n::trn;
 
 // How a text reads: the old apps' style classes (error-text, warning-text,
 // dim, path, the headings), for the look to map to its own.
@@ -254,34 +260,38 @@ struct NameEditView {
 
 struct SettingsView {
     // Game (game.ini: the player's name, the language; Input delay: display.ini)
-    std::string game_title = "Game";
-    std::string game_about = "Your name in the game, the language of its texts, and how it takes your presses. The "
-                             "game uses these when it starts.";
+    std::string game_title = tr("settings.game", "Game");
+    std::string game_about = tr("settings.game_about",
+                                "Your name in the game, the language of its texts, and how it takes your presses. The "
+                                "game uses these when it starts.");
     std::vector<Line> game_notes; // error / unreadable note
     std::vector<SettingRow> game;
     std::optional<NameEditView> name_edit; // the player's name being typed
     // Display (display.ini)
-    std::string display_title = "Display", display_about = "The game uses these when it starts.";
+    std::string display_title = tr("settings.display", "Display"),
+                display_about = tr("settings.display_about", "The game uses these when it starts.");
     std::vector<Line> display_notes; // error / unreadable note
     std::vector<SettingRow> display;
     // Keyboard (keyboard.ini)
-    std::string keys_title = "Keyboard";
-    std::string keys_about = "Keys by position on the keyboard; the game uses them as the Wii U GamePad's buttons. "
-                             "Changes apply at once, also while the game runs.";
+    std::string keys_title = tr("settings.keyboard", "Keyboard");
+    std::string keys_about = tr("settings.keyboard_about",
+                                "Keys by position on the keyboard; the game uses them as the Wii U GamePad's buttons. "
+                                "Changes apply at once, also while the game runs.");
     std::vector<Line> keys_notes;
     std::vector<KeyGroup> groups;
     std::vector<Action> keys_actions; // restore-keys (+ Windows: open-keyboard-file)
     // Folders (Windows)
     bool folders_shown = false;
-    std::string folders_title = "Folders";
-    std::string folders_about =
-        "Where the launcher finds your game and keeps its tools, characters and saves (Windows).";
+    std::string folders_title = tr("settings.folders", "Folders");
+    std::string folders_about = tr("settings.folders_about",
+                                   "Where the launcher finds your game and keeps its tools, characters and saves "
+                                   "(Windows).");
     std::vector<FolderRow> folders;
     std::vector<Action> folders_actions; // save-folders
     std::vector<Line> folders_notes;
     // The launcher's own (launcher.ini): new.
     std::string launcher_title = "Golden Fist Launcher";
-    std::string launcher_about = "How this launcher looks and sounds.";
+    std::string launcher_about = tr("settings.launcher_about", "How this launcher looks and sounds.");
     std::vector<SettingRow> launcher;
     bool operator==(const SettingsView&) const = default;
 };
@@ -293,6 +303,7 @@ struct TaskView {
     bool running = false; // spinner and progress bar
     std::string title, detail;
     bool failed = false;            // the title in red
+    bool stopping = false;          // cancelled, not ended yet
     double fraction = -1;           // below 0: unknown (pulsing)
     Action button;                  // task: Cancel / Stopping… / Close
     std::optional<Action> open_log; // Windows: Open Log
