@@ -4,7 +4,8 @@
 // spacing, capitals, UTF-8 with invalid bytes as U+FFFD (drawn by us: the built-in faces lack it), baselines on
 // whole pixels, measuring / wrapping (cached) / ellipsis at the end or in the middle (paths), outlined glyphs
 // (from a distance field) and slanted drawing. No shaping or bidi: every character is drawn on its own, left to
-// right (written down in the README; such names still measure and draw without breaking the rest of a line).
+// right (written down in docs/LAUNCHER.md, Known limits; such names still measure and draw without breaking the
+// rest of a line).
 #pragma once
 
 #include <cstdint>

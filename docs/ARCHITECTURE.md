@@ -2759,7 +2759,7 @@ has loaded, then quits:
   mismatches. One oracle correction: Dolphin's `addme`/`subfme` carry is
   wrong when CA=1 (architecture and Cemu agree on CA=1); the test documents it.
   Branches, `lwarx`/`stwcx.`, `dcbz` and traps are not covered by it yet.
-- Reference checkouts (sparse, read-only, never shipped; the README's Tests
+- Reference checkouts (sparse, read-only, never shipped; docs/BUILDING.md's Tests
   section has the commands for Dolphin's, a non-cone sparse checkout), at
   these revisions:
   Dolphin `771fb154059c5812d6a715a23226249cc42877a2` into
