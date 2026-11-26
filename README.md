@@ -117,6 +117,8 @@ its graphics on Vulkan, at up to 120 frames per second and 5K ([how it works](do
   or a controller.
 - **Linux, Windows and the Steam Deck**: an AppImage and a Windows `.exe`, both updating themselves.
 - **One button to update**: the launcher, the game program and your added fighters, in one go.
+- **In your language**: the launcher in English, French, German, Italian, Spanish, Russian or Polish (Settings >
+  Launcher > Language; your system's by default).
 
 ## Download
 

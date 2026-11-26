@@ -1,6 +1,7 @@
 // game.ini (see game_ini.h).
 
 #include "game_ini.h"
+#include "i18n.h"
 #include "utf8_path.h"
 
 #include "files.h"
@@ -162,8 +163,11 @@ std::string_view own_name(std::string_view language) {
 }
 
 std::string name_rule() {
-    return "Up to " + std::to_string(kNameMost) +
-           " characters: the letters A to Z, digits, spaces and the punctuation of an English keyboard but #.";
+    return i18n::trn("name.rule", static_cast<long long>(kNameMost),
+                     "Up to {n} character: the letters A to Z, digits, spaces and the punctuation of an English "
+                     "keyboard but #.",
+                     "Up to {n} characters: the letters A to Z, digits, spaces and the punctuation of an English "
+                     "keyboard but #.");
 }
 
 std::string tidy_name(std::string_view name) { return std::string(trim(name)); }
@@ -183,13 +187,14 @@ std::string name_problem(std::string_view name) {
     const std::string tidy = tidy_name(name);
     if (const std::string refused = first_refused(tidy); !refused.empty()) {
         const auto b = static_cast<unsigned char>(refused[0]);
-        const std::string shown = b < 0x20 || b == 0x7F ? std::string("a control character")
-                                  : refused == " "      ? std::string("a space")
-                                                        : "“" + refused + "”";
-        return "It has " + shown + ", which a name cannot have.";
+        if (b < 0x20 || b == 0x7F)
+            return i18n::tr("name.has_control", "It has a control character, which a name cannot have.");
+        if (refused == " ") return i18n::tr("name.has_space", "It has a space, which a name cannot have.");
+        return i18n::tr("name.has", "It has “{character}”, which a name cannot have.", {{"character", refused}});
     }
     if (const size_t n = characters(tidy); n > kNameMost) {
-        return "It has " + std::to_string(n) + " characters: " + std::to_string(kNameMost) + " at most.";
+        return i18n::trn("name.too_long", static_cast<long long>(n), "It has {n} character: {most} at most.",
+                         "It has {n} characters: {most} at most.", {{"most", kNameMost}});
     }
     return {};
 }

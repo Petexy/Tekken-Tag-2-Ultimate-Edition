@@ -1,6 +1,7 @@
 // Where things are (see paths.h).
 
 #include "paths.h"
+#include "i18n.h"
 
 #include <dirent.h>
 #include <limits.h>
@@ -134,11 +135,13 @@ std::optional<fs::path> install_target(const fs::path& chosen, std::string* erro
     if (usable(folder)) return folder;
     std::error_code ec;
     if (!fs::is_directory(folder, ec)) {
-        if (error) *error = "is not a folder";
+        if (error) *error = i18n::tr("paths.not_folder", "is not a folder");
         return std::nullopt;
     }
     if (usable(folder / kProgramName)) return folder / kProgramName;
-    if (error) *error = std::string("holds a \"") + kProgramName + "\" that is not an install of the game";
+    if (error)
+        *error = i18n::tr("paths.not_install", "holds a \"{name}\" that is not an install of the game",
+                          {{"name", kProgramName}});
     return std::nullopt;
 }
 

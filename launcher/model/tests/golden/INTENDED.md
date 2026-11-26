@@ -18,7 +18,8 @@ they differ in just that.
   Install and Resume too, because Settings now also has the launcher's own
   section.
 - **I2 The launcher's own settings**: a section "Golden Fist
-  Launcher" after Keyboard with Sounds (on by default), Reduce motion and
+  Launcher" after Keyboard with Language (System by default: the system's when
+  the launcher has it, else English), Sounds (on by default), Reduce motion and
   Text size (100 %, 125 %, 150 %).
 - **I3 Play reads display.ini when it is pressed.** The old app used what
   Settings had last read, so "Prepare shaders before playing" set by hand (or

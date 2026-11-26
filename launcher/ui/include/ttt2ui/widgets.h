@@ -42,6 +42,8 @@ enum class Prompt : std::uint8_t {
     Tabs,      // TabPrev + TabNext
     Sections,  // SectionPrev + SectionNext
 };
+// The keyboard's "any key" prompt's key cap in the launcher's language (English "Any key" until set).
+void set_any_key_label(std::string label);
 // Width (points) of a prompt in a glyph set, and drawing it with its left edge at `left`, centred on `cy`.
 float prompt_width(TextEngine& text, Glyphs glyphs, Prompt p);
 float draw_prompt(Canvas& canvas, TextEngine& text, Icons& icons, Glyphs glyphs, Prompt p, float left, float cy,
@@ -107,12 +109,13 @@ void icon_button(Ui& ui, const std::string& id, const IconButtonSpec& spec, cons
 // window cannot offer under gamescope are left out.
 void caption_buttons(Ui& ui, const std::string& id, bool minimise, bool fullscreen_toggle, bool is_fullscreen,
                      bool close = true, const Box& box = {});
-// The bottom band's prompts.
+// The bottom band's prompts. `room` (points, 0: not known): short of it, the gaps narrow, then the labels close up and
+// get a little smaller (85 %), and only then the last hints are left out (never one over another).
 struct Hint {
     Prompt prompt;
     std::string label{};
 };
-void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const Box& box = {});
+void hint_bar(Ui& ui, const std::string& id, std::span<const Hint> hints, const Box& box = {}, float room = 0);
 
 // ---- crimson lists --------------------------------------------------------------------------------------------------
 // The big slab (PLAY / INSTALL / UPDATE).
@@ -199,7 +202,13 @@ struct StepRowSpec {
     float fraction = 0;
     StepState state = StepState::Pending;
     int number = 1;
+    // The name column: the widest name of the list's rows (step_name_width), so that their bars line up; the bar
+    // keeps 30 points at least (a name longer than that leaves is cut).
+    float name_width = kStepNameWidth;
+    static constexpr float kStepNameWidth = 118;
 };
+// The name column for a list of step rows: their widest name, at least StepRowSpec::kStepNameWidth.
+float step_name_width(TextEngine& text, const std::vector<std::string>& names);
 void step_row(Ui& ui, const std::string& id, const StepRowSpec& spec, const Box& box = {});
 // A file browser row.
 struct FileRowSpec {

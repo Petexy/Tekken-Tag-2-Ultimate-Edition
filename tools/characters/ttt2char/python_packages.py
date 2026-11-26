@@ -31,6 +31,7 @@ import urllib.request
 import zipfile
 
 from . import InputError, paths, signals
+from .texts import tr
 
 LOCK = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'python_packages.lock.json')
 PACKAGES = ('numpy', 'Pillow')
@@ -169,16 +170,17 @@ def get(folder=None, lock=LOCK, log=print, progress=lambda *words: None):
     log('%s for Python %s: %.1f MB from PyPI (pypi.org), into %s' % (names, python(), total / 1e6, folder))
     work = tempfile.mkdtemp(prefix='.get-', dir=parent)
     try:
-        progress('step', 'download', 'Downloading ' + names)
+        progress('step', 'download', tr('worker.downloading_packages', 'Downloading {names}',
+                                        names=' / '.join('%s %s' % (e['name'], e['version']) for e in entries)))
         done = 0
         for e in entries:
             log('Downloading %s' % e['url'])
             done = _download(e, os.path.join(work, os.path.basename(e['url'])), done, total, progress)
-        progress('step', 'unpack', 'Unpacking them')
+        progress('step', 'unpack', tr('worker.unpacking', 'Unpacking them'))
         packages = os.path.join(work, 'packages')
         for e in entries:
             _unpack(os.path.join(work, os.path.basename(e['url'])), packages)
-        progress('step', 'check', 'Checking that they work')
+        progress('step', 'check', tr('worker.checking_packages', 'Checking that they work'))
         checked = subprocess.run([sys.executable, '-c', CHECK, packages], capture_output=True, text=True)
         if checked.returncode != 0:
             raise InputError('numpy and Pillow do not work with this Python after all: %s'

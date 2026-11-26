@@ -45,19 +45,20 @@ Focus blue_focus(bool disabled = false) {
 }
 
 std::string value_of(const m::Action& a) {
-    if (a.kind == m::ActionKind::kSwitch || a.kind == m::ActionKind::kCheck) return a.checked ? "On" : "Off";
+    if (a.kind == m::ActionKind::kSwitch || a.kind == m::ActionKind::kCheck)
+        return a.checked ? tr("settings.on", "On") : tr("settings.off", "Off");
     if (a.kind == m::ActionKind::kChoice && a.chosen >= 0 && static_cast<size_t>(a.chosen) < a.choices.size())
         return a.choices[static_cast<size_t>(a.chosen)];
     return a.label;
 }
 
 // A section's name, as the switcher and the blue side say it.
-const char* section_name(const std::string& s) {
-    return s == "game"       ? "Game"
-           : s == "display"  ? "Display"
-           : s == "keyboard" ? "Keyboard"
-           : s == "launcher" ? "Launcher"
-                             : "Folders";
+std::string section_name(const std::string& s) {
+    return s == "game"       ? tr("settings.game", "Game")
+           : s == "display"  ? tr("settings.display", "Display")
+           : s == "keyboard" ? tr("settings.keyboard", "Keyboard")
+           : s == "launcher" ? tr("settings.launcher", "Launcher")
+                             : tr("settings.folders", "Folders");
 }
 
 // SDL scancodes (USB HID usages) of the keys that edit a name being typed (the router hands them over).
@@ -284,7 +285,7 @@ void App::settings(const Box& crimson, const Box& blue) {
             for (const m::FolderRow& r : sv.folders) {
                 SettingRowSpec s;
                 s.title = r.name;
-                s.detail = r.value.empty() ? std::string("Not set") : m::shown_path(utf8_path(r.value));
+                s.detail = r.value.empty() ? tr("settings.not_set", "Not set") : m::shown_path(utf8_path(r.value));
                 s.chevron = true;
                 Focus f = crimson_focus(first);
                 if (first) f.up = up;
@@ -317,7 +318,13 @@ void App::settings_keys_crimson(const m::SettingsView& sv, const std::string& up
         note(ui, "st/knote", l.tone == m::Tone::kError ? Tone::Bad : Tone::Warn, l.text,
              fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect), "stroke:warn");
     const char* columns[3][2] = {{"D-pad", "Left stick"}, {"Face buttons", "System"}, {"Shoulders", nullptr}};
-    auto heading = [](const char* g) { return std::string(g) == "Shoulders" ? std::string("L / R / ZL / ZR") : g; };
+    // (The columns by keymap.h's groups; their headings in the launcher's language.)
+    auto heading = [&sv](const char* g) {
+        if (std::string(g) == "Shoulders") return std::string("L / R / ZL / ZR");
+        for (const m::KeyGroup& kg : sv.groups)
+            if (kg.id == g) return kg.title;
+        return std::string(g);
+    };
     // (The room shared in proportion to what each column needs, its headings and its rows with their whole names:
     // a narrow window or a large Text size never puts one heading over the next; a heading still too wide closes up
     // its letters.)
@@ -335,7 +342,7 @@ void App::settings_keys_crimson(const m::SettingsView& sv, const std::string& up
             if (!g) continue;
             need = std::max(need, 32 + ui.text().width(tx::kLabel, heading(g)) + 12);
             for (const m::KeyGroup& kg : sv.groups)
-                if (kg.title == g)
+                if (kg.id == g)
                     for (const m::KeyRow& k : kg.rows) need = std::max(need, key_row_width(ui.text(), spec_of(k)));
         }
         weights[c] = need;
@@ -349,7 +356,7 @@ void App::settings_keys_crimson(const m::SettingsView& sv, const std::string& up
             if (!gname) continue;
             const m::KeyGroup* group = nullptr;
             for (const m::KeyGroup& g : sv.groups)
-                if (g.title == gname) group = &g;
+                if (g.id == gname) group = &g;
             if (!group) continue;
             const std::string label = heading(gname);
             section_label(ui, std::string("st/kl-") + gname, label, Half::Crimson, {},
@@ -414,13 +421,14 @@ void App::settings_blue(const Box& blue, const m::SettingsView& sv) {
         if (k == "name-edit") return name_edit_view(sv, blue);
         if (k.starts_with("sec:")) {
             const std::string s = k.substr(4);
-            section_label(ui, "sv/label", "Settings", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+            section_label(ui, "sv/label", tr("home.settings", "Settings"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
             text(ui, "sv/title", TextSpec{.text = section_name(s), .style = tx::kBig, .chroma = 3, .autofit_min = 28},
                  fit({}, SeamFit::BlueRect));
             const std::string about = s == "game"       ? sv.game_about
                                       : s == "display"  ? sv.display_about
                                       : s == "keyboard" ? sv.keys_about
-                                      : s == "launcher" ? std::string("The launcher's own settings: they apply at once.")
+                                      : s == "launcher" ? tr("settings.launcher_section_about",
+                                                             "The launcher's own settings: they apply at once.")
                                                         : sv.folders_about;
             text(ui, "sv/about", TextSpec{.text = about, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
                  fit(Box{.margin = {0, 10, 0, 0}}, SeamFit::BlueRect));
@@ -445,7 +453,7 @@ void App::setting_view(const m::SettingsView& sv, const std::string& id) {
     const std::string value = a.kind == m::ActionKind::kEntry ? a.describe.state : value_of(a);
     if (a.kind != m::ActionKind::kButton) {
         auto r = ui.open("sv/now", fit(Box{.layout = Layout::Row, .margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
-        pill(ui, "sv/now-pill", "Now: " + value,
+        pill(ui, "sv/now-pill", tr("settings.now_value", "Now: {value}", {{"value", value}}),
              a.kind == m::ActionKind::kSwitch && a.checked ? Tone::Blue : Tone::Neutral, false, {},
              a.kind == m::ActionKind::kEntry && !a.label.empty());
     }
@@ -461,7 +469,7 @@ void App::setting_view(const m::SettingsView& sv, const std::string& id) {
              TextSpec{.text = l.text, .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
              fit(Box{.margin = {0, 0, 0, 6}}, SeamFit::BlueRect));
     if (a.kind == m::ActionKind::kSwitch) {
-        const std::string opts[] = {"Off", "On"};
+        const std::string opts[] = {tr("settings.off", "Off"), tr("settings.on", "On")};
         chips(ui, "sv/chips", opts, a.checked ? 1 : 0, fit(Box{.margin = {0, 4, 0, 10}}, SeamFit::BlueRect));
     } else if (a.kind == m::ActionKind::kChoice) {
         chips(ui, "sv/chips", a.choices, a.chosen, fit(Box{.margin = {0, 4, 0, 10}}, SeamFit::BlueRect));
@@ -471,12 +479,14 @@ void App::setting_view(const m::SettingsView& sv, const std::string& id) {
             note(ui, "sv/dnote" + std::to_string(n++), l.tone == m::Tone::kError ? Tone::Bad : Tone::Warn, l.text,
                  fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::BlueRect), "stroke:warn");
     }
-    const std::string hint = a.kind == m::ActionKind::kButton ? "Enter uses it."
-                             : a.kind == m::ActionKind::kEntry
-                                 ? "Enter, then type it on the keyboard, or with a pad on the keys that come up here. "
-                                   "The game uses it when it starts."
-                             : game || display ? "The game uses it when it starts. Left and right change it on the row."
-                                               : "It applies at once. Left and right change it on the row.";
+    const std::string hint =
+        a.kind == m::ActionKind::kButton ? tr("settings.hint_button", "Enter uses it.")
+        : a.kind == m::ActionKind::kEntry
+            ? tr("settings.hint_entry", "Enter, then type it on the keyboard, or with a pad on the keys that come up "
+                                        "here. The game uses it when it starts.")
+        : game || display
+            ? tr("settings.hint_game", "The game uses it when it starts. Left and right change it on the row.")
+            : tr("settings.hint_launcher", "It applies at once. Left and right change it on the row.");
     text(ui, "sv/hint", TextSpec{.text = hint, .style = tx::kParaSmall, .color = c::kBlueFaint, .wrap = true},
          fit(Box{.margin = {0, 4, 0, 0}}, SeamFit::BlueRect));
 }
@@ -495,9 +505,10 @@ void App::name_edit_view(const m::SettingsView& sv, const Box& blue) {
     const m::NameEditView& e = *name_edit_shown_;
     const bool live = sv.name_edit.has_value();
     std::string how = router_.glyphs() == Glyphs::Keyboard
-                          ? "On the keyboard, Enter keeps the name and Esc leaves it as it was; Ctrl+V pastes."
+                          ? tr("name.keyboard_how", "On the keyboard, Enter keeps the name and Esc leaves it as it "
+                                                    "was; Ctrl+V pastes.")
                           : std::string();
-    section_label(ui, "ne/label", "Player name", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+    section_label(ui, "ne/label", tr("settings.player_name", "Player name"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
     TextFieldSpec field;
     field.text = e.draft;
     field.placeholder = e.placeholder;
@@ -568,7 +579,7 @@ void App::key_view(const m::SettingsView& sv, const std::string& id) {
         }
     if (!row) return;
     const bool capturing = row->keycap.checked;
-    section_label(ui, "kv/label", "Input", Half::Blue, std::to_string(index) + "/" + std::to_string(total),
+    section_label(ui, "kv/label", tr("keys.input", "Input"), Half::Blue, std::to_string(index) + "/" + std::to_string(total),
                   fit({}, SeamFit::BlueRect));
     const std::string lit = row->input;
     {
@@ -608,12 +619,13 @@ void App::key_view(const m::SettingsView& sv, const std::string& id) {
             [](PaintContext& ctx) {
                 surface(ctx.canvas, ctx.rect, rgba(255, 200, 67, .14f), rgba(255, 200, 67, .7f));
             });
-        text(ui, "kv/cap-title", TextSpec{"Press a key", tx::kExplainTitle, c::kWarn});
+        text(ui, "kv/cap-title", TextSpec{tr("keys.press_title", "Press a key"), tx::kExplainTitle, c::kWarn});
         const m::KeyCapture& keys = model_->keys();
         const std::string now_key = keys.label(keys.keymap().key(input_index(row->input)));
         text(ui, "kv/cap-text",
-             TextSpec{.text = "For " + row->full + ". A key another input has is swapped with it. Esc (or the pad's B) "
-                              "keeps " + now_key + ".",
+             TextSpec{.text = tr("keys.capture_about", "For {input}. A key another input has is swapped with it. Esc "
+                                                       "(or the pad's B) keeps {key}.",
+                                 {{"input", row->full}, {"key", now_key}}),
                       .style = tx::kParaSmall, .color = c::kBlueDim, .wrap = true});
         const float share = static_cast<float>(left / kCaptureSeconds);
         ui.leaf("kv/cap-bar", Box{.h = Size::fixed(6), .margin = {0, 4, 0, 0}}, {}, [share](PaintContext& ctx) {
@@ -624,10 +636,13 @@ void App::key_view(const m::SettingsView& sv, const std::string& id) {
             ctx.animate();
         });
         text(ui, "kv/cap-left",
-             TextSpec{std::to_string(static_cast<int>(std::ceil(left))) + " s", tx::kKick, c::kWarn});
+             TextSpec{tr("keys.seconds", "{n} s", {{"n", static_cast<int>(std::ceil(left))}}), tx::kKick, c::kWarn});
     } else {
         text(ui, "kv/explain",
-             TextSpec{.text = "Enter, then press the key for it. " + sv.keys_about, .style = tx::kPara,
+             TextSpec{.text = tr("common.two_sentences", "{first} {second}",
+                                 {{"first", tr("keys.enter_then", "Enter, then press the key for it.")},
+                                  {"second", sv.keys_about}}),
+                      .style = tx::kPara,
                       .color = c::kBlueDim, .wrap = true},
              fit(Box{.margin = {0, 0, 0, 6}}, SeamFit::BlueRect));
     }
@@ -636,7 +651,7 @@ void App::key_view(const m::SettingsView& sv, const std::string& id) {
              fit(Box{.margin = {0, 0, 0, 8}}, SeamFit::BlueRect),
              row->note_tone == m::Tone::kError ? "stroke:warn" : "stroke:check");
     text(ui, "kv/f11",
-         TextSpec{.text = "F11 and Super stay with the game and the desktop.", .style = tx::kParaSmall,
+         TextSpec{.text = tr("keys.f11_super", "F11 and Super stay with the game and the desktop."), .style = tx::kParaSmall,
                   .color = c::kBlueFaint, .wrap = true},
          fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
     auto b = ui.open("kv/btns", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
@@ -658,24 +673,24 @@ void App::folder_view(const m::SettingsView& sv, const std::string& key) {
     for (size_t i = 0; i < sv.folders.size(); ++i)
         if (sv.folders[i].key == key) row = &sv.folders[i], index = static_cast<int>(i) + 1;
     if (!row) return;
-    section_label(ui, "fv/label", "Folders", Half::Blue,
+    section_label(ui, "fv/label", tr("settings.folders", "Folders"), Half::Blue,
                   std::to_string(index) + "/" + std::to_string(sv.folders.size()), fit({}, SeamFit::BlueRect));
     text(ui, "fv/title", TextSpec{.text = row->name, .style = tx::kBig, .chroma = 3, .autofit_min = 24},
          fit({}, SeamFit::BlueRect));
     text(ui, "fv/hint", TextSpec{.text = row->hint + ".", .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
          fit(Box{.margin = {0, 8, 0, 10}}, SeamFit::BlueRect));
     const std::string def = folder_default(key);
-    const Fact list[] = {{"Now", {{row->value.empty() ? std::string("Not set") : row->value, rgb(0xdbe3f1)}}},
-                         {"Default", {{def.empty() ? std::string("None") : def, rgb(0xdbe3f1)}}}};
+    const Fact list[] = {{tr("folders.now", "Now"), {{row->value.empty() ? tr("settings.not_set", "Not set") : row->value, rgb(0xdbe3f1)}}},
+                         {tr("folders.default", "Default"), {{def.empty() ? tr("fighters.none", "None") : def, rgb(0xdbe3f1)}}}};
     facts(ui, "fv/facts", list, fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
     auto b = ui.open("fv/btns", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
     ButtonSpec browse;
-    browse.label = "Browse…";
+    browse.label = tr("folders.browse", "Browse…");
     browse.kind = ButtonKind::Blue;
     browse.size = ButtonSize::Small;
     button(ui, row->browse.id, browse, blue_focus());
     ButtonSpec d;
-    d.label = "Default";
+    d.label = tr("folders.default", "Default");
     d.size = ButtonSize::Small;
     d.disabled = def.empty() || def == row->value;
     button(ui, "folder-default:" + key, d, blue_focus(d.disabled));

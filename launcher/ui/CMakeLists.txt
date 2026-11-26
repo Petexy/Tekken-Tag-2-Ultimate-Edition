@@ -36,7 +36,14 @@ set(TTT2_LAUNCHER_FONTS
     Barlow/Barlow-SemiBold.ttf
     Barlow/Barlow-Bold.ttf
     JetBrainsMono/JetBrainsMono-Regular.ttf
-    JetBrainsMono/JetBrainsMono-Bold.ttf)
+    JetBrainsMono/JetBrainsMono-Bold.ttf
+    FiraSans/FiraSansCondensed-BlackItalic.ttf
+    FiraSans/FiraSansCondensed-ExtraBoldItalic.ttf
+    FiraSans/FiraSansCondensed-BoldItalic.ttf
+    FiraSans/FiraSansCondensed-ExtraBold.ttf
+    FiraSans/FiraSans-Medium.ttf
+    FiraSans/FiraSans-SemiBold.ttf
+    FiraSans/FiraSans-Bold.ttf)
 list(TRANSFORM TTT2_LAUNCHER_FONTS PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/fonts/")
 ttt2_embed_files(ttt2_launcher_fonts NAMESPACE ttt2_fonts BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fonts"
     FILES ${TTT2_LAUNCHER_FONTS})

@@ -2,6 +2,7 @@
 // system.h): the processor features a cpuinfo text lacks, os-release, and
 // the package manager's commands for the hints. (system.cpp: Linux's own.)
 
+#include "i18n.h"
 #include "system.h"
 
 #include <array>
@@ -100,8 +101,10 @@ bool image_based(const Distro& d) {
 
 std::string image_based_hint(const std::string& what) {
     // (Word for word the builder's: the player may see both.)
-    return "This system's own files cannot be changed with a package manager: " + what +
-           " must come from a toolbox or distrobox container, or from the system's own way of adding software.";
+    return i18n::tr("distro.image_based",
+                    "This system's own files cannot be changed with a package manager: {what} must come from a toolbox "
+                    "or distrobox container, or from the system's own way of adding software.",
+                    {{"what", what}});
 }
 
 std::string install_command(const Distro& distro, const std::vector<Package>& packages) {

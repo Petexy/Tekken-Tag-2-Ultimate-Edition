@@ -3,6 +3,8 @@
 
 #include "single_instance.h"
 
+#include "i18n.h"
+
 #include "win32.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -220,7 +222,8 @@ InstanceClaim claim_instance(const InstanceOptions& options) {
         }
         if (seconds_since(t0) >= patience) {
             claim.result = options.after ? InstanceClaim::Result::kFailed : InstanceClaim::Result::kAlone;
-            claim.error = options.after ? "Another launcher is still running: close it, then start this one again."
+            claim.error = options.after ? i18n::tr("startup.still_running", "Another launcher is still running: close "
+                                                                            "it, then start this one again.")
                                         : "the running launcher does not listen";
             return claim;
         }

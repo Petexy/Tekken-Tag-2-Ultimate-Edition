@@ -1,6 +1,6 @@
 #pragma once
 
-// The launcher's own settings (Settings > Launcher: Sounds, Reduce motion, Button prompts, Text size) in
+// The launcher's own settings (Settings > Launcher: Language, Sounds, Reduce motion, Button prompts, Text size) in
 // launcher.ini beside the game's display.ini: "key=value" lines. What cannot be read keeps its default.
 
 #include "facts.h"

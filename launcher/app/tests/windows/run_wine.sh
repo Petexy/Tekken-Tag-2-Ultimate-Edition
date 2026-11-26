@@ -133,9 +133,12 @@ if want_case setup; then
         printf 'x' > "$u/Downloads/Tekken Tag Tournament 2 [EUR] (update 16).wua"
         rm -rf "$u/New folder"
     done
+    # (New Folder names the folder in the launcher's language: any folder the run made counts.)
+    folders() { ls -d "$WINEPREFIX"/drive_c/users/*/*/ 2>/dev/null | sort; }
+    before=$(folders)
     run setup 0 "focus:setup;press:Return;wait:0.6;press:Return;wait:0.6;focus:pk/new;press:Return;wait:0.6;focus:pk/choose-here;press:Return;wait:0.8"
     expect setup "@test press:Return ok"
-    ls -d "$WINEPREFIX"/drive_c/users/*/"New folder" >/dev/null 2>&1 || fail setup "New Folder made no folder"
+    [ -n "$(comm -13 <(printf '%s\n' "$before") <(folders))" ] || fail setup "New Folder made no folder"
     expect setup "@test focus:pk/choose-here ok"
 fi
 

@@ -356,11 +356,14 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
     from ttt2char import InputError, importer
     from ttt2char.tekken7 import autodump, subtitles
     from ttt2char.tekken7.pak import Paks
+    from ttt2char.texts import tr
     # only fighters the player owns, whichever movesets are already saved (DLC fighters: as Steam tells)
     ids = [importer.definition(f).TEKKEN7_ID for f in fighters]
     if any(fid in autodump.DLC for fid in ids):
-        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden %s)'
-                 % ('in the background' if os.name == 'nt' else 'in Tekken 7\'s Proton prefix'))
+        progress('step', 'dump', tr('worker.asking_steam', 'Asking Steam which DLC you own (a helper runs hidden in the '
+                                                           'background)') if os.name == 'nt' else
+                 tr('worker.asking_steam_proton', 'Asking Steam which DLC you own (a helper runs hidden in Tekken 7\'s '
+                                                  'Proton prefix)'))
     try:
         skipped = autodump.unowned(ids)
     except autodump.DumpError as error:
@@ -399,8 +402,8 @@ def tekken7_ready(fighters, tekken7, movesets, files_folder, progress, alone=Tru
     if needed or files or subs:
         print('Saving %d Tekken 7 moveset(s), %d fighter(s)\' encrypted files and %d fighter(s)\' subtitles first '
               '(Tekken 7 runs hidden in the background for a minute or two) ...' % (len(needed), len(files), len(subs)))
-        progress('step', 'dump', 'Saving what Tekken 7 has only while it runs (it runs hidden in the background for a '
-                 'minute or two)')
+        progress('step', 'dump', tr('worker.saving_tekken7', 'Saving what Tekken 7 has only while it runs (it runs '
+                                                             'hidden in the background for a minute or two)'))
         try:
             _, skipped = autodump.dump(needed, movesets, files=files, paks=paks, subtitles=subs, saved=files_folder)
         except autodump.DumpError as error:
@@ -487,8 +490,9 @@ def tekken8_ready(fighters, movesets, progress):
     ids = [importer.definition(f).TEKKEN8_ID for f in missing]
     print('Saving %d Tekken 8 moveset(s) first (Tekken 8 runs hidden in the background for a minute) ...'
           % len(missing))
-    progress('step', 'dump', 'Saving what Tekken 8 has only while it runs (it runs hidden in the background for a '
-             'minute)')
+    from ttt2char.texts import tr
+    progress('step', 'dump', tr('worker.saving_tekken8', 'Saving what Tekken 8 has only while it runs (it runs hidden '
+                                                         'in the background for a minute)'))
     try:
         _, skipped = dump8.dump(ids, movesets, references=[fid for fid in dump8.ROSTER if fid not in ids])
     except dump8.DumpError as error:

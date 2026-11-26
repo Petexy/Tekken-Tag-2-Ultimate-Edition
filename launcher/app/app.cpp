@@ -156,6 +156,11 @@ bool App::open_window() {
 #ifndef _WIN32
     wo.no_window = appimage_no_window; // (back to the version before an update)
 #endif
+    wo.cannot_open = [](const std::string& error, const std::string& url) {
+        return tr("app.no_window", "Golden Fist Launcher cannot open its window ({error}).\n\nThe newest launcher is "
+                                   "at {url}",
+                  {{"error", error}, {"url", url}});
+    };
     if (!window_.open(wo)) return false;
     if (o_.testing && o_.scale > 0) SDL_SetWindowSize(window_.sdl(), w, h);
     window_.update_scale();
@@ -267,6 +272,9 @@ void App::make_model() {
     // The launcher's own settings (launcher.ini beside display.ini).
     launcher_ini_ = parts.display_file.parent_path() / "launcher.ini";
     applied_ = read_launcher_ini(launcher_ini_);
+    // (TTT2_LAUNCHER_LANGUAGE: a test's or a translator's language for this run, saved only when chosen in Settings.)
+    if (const char* forced = std::getenv("TTT2_LAUNCHER_LANGUAGE"); forced && *forced) applied_.language = forced;
+    apply_language(applied_.language);
     model_->set_launcher_settings(applied_);
     sounds_ = applied_.sounds;
     if (applied_.prompts > 0 && !forced_glyphs_) apply_prompts(applied_.prompts);
@@ -308,23 +316,32 @@ int App::run() {
     if (!ready_->restored().empty()) {
         // (A test build's Update got files of a newer program: they were put back.)
         const std::string& branch = model_->facts().windows.branch;
-        model_->tell("Update needs a new test build",
-                     "The files Update got" + (branch.empty() ? std::string() : " from " + branch) +
-                         " are for a newer launcher program than this .exe's (their protocol " + ready_->restored() +
-                         ", this one's " + std::to_string(backend::kQueryProtocol) +
-                         "), so it put its own files back. " +
-                         (branch.empty() ? std::string("Get the newest launcher from the releases page.")
-                                         : "Ask for a new test build of " + branch + " to get those changes."),
+        const i18n::Args args = {{"branch", branch},
+                                 {"theirs", ready_->restored()},
+                                 {"ours", backend::kQueryProtocol}};
+        model_->tell(tr("app.new_test_build", "Update needs a new test build"),
+                     branch.empty()
+                         ? tr("app.files_newer", "The files Update got are for a newer launcher program than this "
+                                                 ".exe's (their protocol {theirs}, this one's {ours}), so it put its "
+                                                 "own files back. Get the newest launcher from the releases page.",
+                              args)
+                         : tr("app.files_newer_branch", "The files Update got from {branch} are for a newer launcher "
+                                                        "program than this .exe's (their protocol {theirs}, this "
+                                                        "one's {ours}), so it put its own files back. Ask for a new "
+                                                        "test build of {branch} to get those changes.",
+                              args),
                      t0);
         std::fprintf(stderr, "@ready restored its own files (their protocol %s)\n", ready_->restored().c_str());
     }
 #endif
     if (!o_.rolled_back.empty()) {
         // (The version an update opened ended before its first frame, and this one was put back.)
-        model_->tell("Version " + o_.rolled_back + " did not start",
-                     "Version " + o_.rolled_back + " of the launcher ended before it could open its window on this " +
-                         "PC, so the launcher went back to this version (" + TTT2_LAUNCHER_VERSION +
-                         "). Update offers it again; if it fails again, please tell us on the releases page.",
+        model_->tell(tr("app.rolled_back", "Version {version} did not start", {{"version", o_.rolled_back}}),
+                     tr("app.rolled_back_about",
+                        "Version {version} of the launcher ended before it could open its window on this PC, so the "
+                        "launcher went back to this version ({this}). Update offers it again; if it fails again, "
+                        "please tell us on the releases page.",
+                        {{"version", o_.rolled_back}, {"this", TTT2_LAUNCHER_VERSION}}),
                      t0);
         std::fprintf(stderr, "ttt2-launcher: Version %s did not start: this version (%s) was put back\n",
                      o_.rolled_back.c_str(), TTT2_LAUNCHER_VERSION);
@@ -787,16 +804,17 @@ void App::top_band() {
     if (const auto& s = model_->facts().status) {
         for (const Fighter& f : s->fighters) to_update += f.added() && f.update;
     }
-    const Tab tabs[] = {{"tab:home", "Home", ""},
-                        {"tab:fighters", "Fighters", to_update ? std::to_string(to_update) : ""},
-                        {"tab:settings", "Settings", ""}};
+    const Tab tabs[] = {{"tab:home", tr("tab.home", "Home"), ""},
+                        {"tab:fighters", tr("home.fighters", "Fighters"), to_update ? std::to_string(to_update) : ""},
+                        {"tab:settings", tr("home.settings", "Settings"), ""}};
     tab_bar(ui, "tabs", tabs, static_cast<int>(screen_));
     ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
-    TextSpec version{std::string("Launcher ") + TTT2_LAUNCHER_VERSION, tx::kVersion, c::kFaint};
+    TextSpec version{tr("app.version", "Launcher {version}", {{"version", TTT2_LAUNCHER_VERSION}}), tx::kVersion, c::kFaint};
     version.drop = true;
     text(ui, "version", version, Box{.margin = {0, 0, 16, 0}, .shrink_order = 3});
     icon_button(ui, "sound",
-                {sounds_ ? "stroke:sound-on" : "stroke:sound-off", sounds_ ? "Sound on" : "Sound off", sounds_},
+                {sounds_ ? "stroke:sound-on" : "stroke:sound-off",
+                 sounds_ ? tr("app.sound_on", "Sound on") : tr("app.sound_off", "Sound off"), sounds_},
                 Box{.margin = {0, 0, 18, 0}});
     // Quit is the window's close button (X) in the top-right corner, where Windows puts it.
     caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(), true,
@@ -812,7 +830,7 @@ std::string App::focused_label() const {
 std::vector<Hint> App::hints() const {
     std::vector<Hint> h;
     const std::string& f = ui_->focused();
-    h.push_back({Prompt::Move, "Move"});
+    h.push_back({Prompt::Move, tr("hint.move", "Move")});
     auto accept = [&](std::string label) {
         // ("Install…" opens something first: the prompt says what, without the dots.)
         if (label.ends_with("…")) label.resize(label.size() - std::string("…").size());
@@ -825,7 +843,7 @@ std::vector<Hint> App::hints() const {
         for (const m::Line& l : view_.dialog->lines)
             for (const m::Action& b : l.actions)
                 if (b.id == f) a = &b;
-        if (a) accept(a->kind == m::ActionKind::kCheck ? "Tick" : a->label);
+        if (a) accept(a->kind == m::ActionKind::kCheck ? tr("hint.tick", "Tick") : a->label);
         for (const m::Action& b : view_.dialog->buttons)
             if (b.id == view_.dialog->cancel && b.id != f) h.push_back({Prompt::Back, b.label});
         return h;
@@ -833,26 +851,26 @@ std::vector<Hint> App::hints() const {
     if (f == "strip/task") {
         // (The task strip's button: Cancel, or what the task's end offers.)
         if (view_.task.button.enabled) accept(view_.task.button.label);
-        if (picker_) h.push_back({Prompt::Back, "Back"});
-        else if (screen_ != Screen::kHome) h.push_back({Prompt::Back, "Home"});
-        h.push_back({Prompt::Tabs, "Tabs"});
+        if (picker_) h.push_back({Prompt::Back, tr("hint.back", "Back")});
+        else if (screen_ != Screen::kHome) h.push_back({Prompt::Back, tr("hint.home", "Home")});
+        h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
         return h;
     }
     if (picker_) {
-        if (f.starts_with("pp:") || f == "pk/here") accept(f == "pk/here" && picker_->folder ? "Choose" : "Open");
+        if (f.starts_with("pp:") || f == "pk/here") accept(f == "pk/here" && picker_->folder ? tr("hint.choose", "Choose") : tr("hint.open", "Open"));
         else if (f.starts_with("pe:")) {
             const size_t i = std::strtoul(f.c_str() + 3, nullptr, 10);
             if (i < picker_->entries.size()) {
                 const Entry& e = picker_->entries[i];
-                accept(e.kind != Entry::Kind::kFile ? "Open" : e.wua ? "Choose" : "");
+                accept(e.kind != Entry::Kind::kFile ? tr("hint.open", "Open") : e.wua ? tr("hint.choose", "Choose") : "");
             }
-        } else if (f == "pk/choose" || f == "pk/choose-here") accept("Choose");
-        else if (f == "pk/system") accept("Open");
-        else if (f == "pk/hidden") accept(picker_hidden_ ? "Hide Hidden" : "Show Hidden");
+        } else if (f == "pk/choose" || f == "pk/choose-here") accept(tr("hint.choose", "Choose"));
+        else if (f == "pk/system") accept(tr("hint.open", "Open"));
+        else if (f == "pk/hidden") accept(picker_hidden_ ? tr("hint.hide_hidden", "Hide Hidden") : tr("hint.show_hidden", "Show Hidden"));
 #ifndef _WIN32
-        if (f != "pk/hidden") h.push_back({Prompt::Context1, picker_hidden_ ? "Hide Hidden" : "Show Hidden"});
+        if (f != "pk/hidden") h.push_back({Prompt::Context1, picker_hidden_ ? tr("hint.hide_hidden", "Hide Hidden") : tr("hint.show_hidden", "Show Hidden")});
 #endif
-        h.push_back({Prompt::Back, "Back"});
+        h.push_back({Prompt::Back, tr("hint.back", "Back")});
         return h;
     }
     const bool disabled = [&] {
@@ -863,94 +881,94 @@ std::vector<Hint> App::hints() const {
         // (Each prompt once: the focused button's as Enter, the others by their own keys. Stopping: none.)
         const bool running = model_->task().running();
         const bool can_cancel = running && view_.task.button.enabled && model_->task().cancellable();
-        std::string back = can_cancel ? "Cancel" : running ? "" : "Close";
+        std::string back = can_cancel ? tr("common.cancel", "Cancel") : running ? "" : tr("common.close", "Close");
         if (f == "task" && running) {
-            if (can_cancel) accept("Cancel");
+            if (can_cancel) accept(tr("common.cancel", "Cancel"));
             back.clear();
-        } else if (f == "task/play") accept("Play");
-        else if (f == "task/again") accept("Try Again");
+        } else if (f == "task/play") accept(tr("game.play", "Play"));
+        else if (f == "task/again") accept(tr("task.try_again", "Try Again"));
         else if (f == "task/close") {
-            accept("Close");
+            accept(tr("common.close", "Close"));
             back.clear();
         }
-        const std::string details = view_.task.details.checked ? "Hide Details" : "Details";
+        const std::string details = view_.task.details.checked ? tr("task.hide_details", "Hide Details") : tr("task.details", "Details");
         if (f == "details") accept(details);
         if (!back.empty()) h.push_back({Prompt::Back, back});
         if (f != "details") h.push_back({Prompt::Context2, details});
-        h.push_back({Prompt::Tabs, "Tabs"});
+        h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
         return h;
     }
     if (router_.texting()) {
         // The name being typed: the keyboard types (Enter keeps it, Esc leaves it); a pad presses the keys shown.
         if (router_.glyphs() == Glyphs::Keyboard) {
-            h = {{Prompt::AnyKey, "Type"}, {Prompt::Accept, "Done"}, {Prompt::Back, "Cancel"}};
+            h = {{Prompt::AnyKey, tr("hint.type", "Type")}, {Prompt::Accept, tr("hint.done", "Done")}, {Prompt::Back, tr("common.cancel", "Cancel")}};
             return h;
         }
         const m::Action* a = action(f);
-        accept(f.starts_with("name-key:") ? std::string("Type") : a ? a->label : std::string());
-        h.push_back({Prompt::Context1, "Delete"});
-        h.push_back({Prompt::Context2, "Space"});
-        h.push_back({Prompt::Menu, "Done"});
-        h.push_back({Prompt::Back, "Cancel"});
+        accept(f.starts_with("name-key:") ? tr("hint.type", "Type") : a ? a->label : std::string());
+        h.push_back({Prompt::Context1, tr("name.delete", "Delete")});
+        h.push_back({Prompt::Context2, tr("name.space", "Space")});
+        h.push_back({Prompt::Menu, tr("hint.done", "Done")});
+        h.push_back({Prompt::Back, tr("common.cancel", "Cancel")});
         return h;
     }
     if (drilled()) {
-        if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? "Copy" : focused_label());
-        h.push_back({Prompt::Back, "Back"});
-        h.push_back({Prompt::Tabs, "Tabs"});
+        if (!disabled) accept(focused_label().empty() && f.starts_with("copy:") ? tr("pre.copy", "Copy") : focused_label());
+        h.push_back({Prompt::Back, tr("hint.back", "Back")});
+        h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
         return h;
     }
     if (screen_ == Screen::kSettings && !drilled()) {
         if (model_->keys().picking() >= 0) {
             h.clear();
-            h.push_back({Prompt::AnyKey, "Press a key"});
-            h.push_back({Prompt::Back, "Keep"});
+            h.push_back({Prompt::AnyKey, tr("keys.press_title", "Press a key")});
+            h.push_back({Prompt::Back, tr("hint.keep", "Keep")});
             return h;
         }
         const m::Action* a = action(f);
         if (a && (a->kind == m::ActionKind::kSwitch || a->kind == m::ActionKind::kChoice)) {
             if (a->enabled) {
-                h.push_back({Prompt::Change, "Change"});
-                accept(a->kind == m::ActionKind::kSwitch ? "Switch" : "Next");
+                h.push_back({Prompt::Change, tr("hint.change", "Change")});
+                accept(a->kind == m::ActionKind::kSwitch ? tr("hint.switch", "Switch") : tr("hint.next", "Next"));
             }
         } else if (f.starts_with("key:")) {
-            accept("Change Key");
+            accept(tr("hint.change_key", "Change Key"));
         } else if (a && a->kind == m::ActionKind::kEntry) {
-            if (a->enabled) accept("Change Name");
+            if (a->enabled) accept(tr("hint.change_name", "Change Name"));
         } else if (f.starts_with("fold:")) {
-            accept("Options");
+            accept(tr("hint.options", "Options"));
         } else if (a && a->enabled) {
             accept(a->label);
         }
-        if (settings_sections().size() > 1) h.push_back({Prompt::Sections, "Section"});
-        h.push_back({Prompt::Back, "Home"});
-        h.push_back({Prompt::Tabs, "Tabs"});
+        if (settings_sections().size() > 1) h.push_back({Prompt::Sections, tr("hint.section", "Section")});
+        h.push_back({Prompt::Back, tr("hint.home", "Home")});
+        h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
         return h;
     }
     if (screen_ == Screen::kFighters) {
         if (f.starts_with("tile:")) {
-            accept("Options");
+            accept(tr("hint.options", "Options"));
             if (const m::Action* o = action("outfits:" + f.substr(5)); o && o->enabled)
-                h.push_back({Prompt::Context1, "Outfits"});
+                h.push_back({Prompt::Context1, tr("fighters.outfits", "Outfits")});
         } else if (f == "fx:needs" || f == "fx:early") {
-            accept("Options");
+            accept(tr("hint.options", "Options"));
         } else if (const m::Action* a = action(f); a && a->enabled) {
-            accept(a->kind == m::ActionKind::kCheck ? (a->checked ? "Untick" : "Tick") : a->label);
+            accept(a->kind == m::ActionKind::kCheck ? (a->checked ? tr("hint.untick", "Untick") : tr("hint.tick", "Tick")) : a->label);
         }
-        h.push_back({Prompt::Back, "Home"});
-        h.push_back({Prompt::Tabs, "Tabs"});
+        h.push_back({Prompt::Back, tr("hint.home", "Home")});
+        h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
         return h;
     }
     if (!disabled) {
-        if (f == "fighters" || f == "settings") accept("Open");
-        else if (f == "slot:game" || f == "slot:folder") accept("Choose");
-        else if (f.starts_with("check:")) accept(check_has_copy(f) ? "Commands" : "");
+        if (f == "fighters" || f == "settings") accept(tr("hint.open", "Open"));
+        else if (f == "slot:game" || f == "slot:folder") accept(tr("hint.choose", "Choose"));
+        else if (f.starts_with("check:")) accept(check_has_copy(f) ? tr("hint.commands", "Commands") : "");
         else accept(focused_label());
     }
-    if (screen_ != Screen::kHome) h.push_back({Prompt::Back, "Home"});
+    if (screen_ != Screen::kHome) h.push_back({Prompt::Back, tr("hint.home", "Home")});
     else if (view_.game.state == m::GameState::kChecking || view_.game.state == m::GameState::kCannotInstall)
-        h.push_back({Prompt::Back, "Cancel"});
-    h.push_back({Prompt::Tabs, "Tabs"});
+        h.push_back({Prompt::Back, tr("common.cancel", "Cancel")});
+    h.push_back({Prompt::Tabs, tr("hint.tabs", "Tabs")});
     return h;
 }
 
@@ -966,7 +984,7 @@ void App::bottom_band() {
     bottom.pad = {34, 0, 26, 0};
     auto g = ui.open("bottom", bottom);
     const std::vector<Hint> hs = hints();
-    hint_bar(ui, "hints", hs);
+    hint_bar(ui, "hints", hs, {}, size.x - bottom.pad.left - bottom.pad.right);
 }
 
 // The task strip: a task that does not fill the screen (adding characters, shaders before Play, numpy and Pillow),
@@ -1036,26 +1054,29 @@ void App::dialog_band() {
     const float yc = (theme::kTopBand + size.y - theme::kBottomBand) / 2;
     const bool uninstall = d.id == "uninstall";
     const float height = uninstall ? 360 : 300;
-    const BandLayout L = band_layout(size, std::round(yc - height / 2), height);
+    BandLayout L = band_layout(size, std::round(yc - height / 2), height);
+    // (A small window, a large Text size or a longer language can need more than the band: each half scrolls, the
+    // focus keeping its buttons in view.)
+    L.crimson.scroll = L.blue.scroll = true;
     auto g = ttt2::ui::dialog_band(ui, "dlg", L);
-    const char* label = d.id == "uninstall"       ? "Uninstall"
-                        : d.id == "stop-and-quit" ? "Quit"
-                        : d.id == "remove-all"    ? "Remove all"
-                        : d.id == "setup"         ? "Set Up"
-                                                  : "Message";
+    const std::string label = d.id == "uninstall"       ? tr("home.uninstall", "Uninstall")
+                              : d.id == "stop-and-quit" ? tr("dialog.quit", "Quit")
+                              : d.id == "remove-all"    ? tr("dialog.remove_all_label", "Remove all")
+                              : d.id == "setup"         ? tr("home.set_up", "Set Up")
+                                                        : tr("dialog.message", "Message");
     {
         auto cg = ui.open("dlg/crimson", L.crimson);
         section_label(ui, "dlg/label", label, Half::Crimson, {}, fitted({}, SeamFit::CrimsonRect));
         // (Set Up Game asks a question, its OK named for what it starts; the Tk window's words stay the model's.)
         const bool setup = d.id == "setup";
         const bool sub = d.id == "stop-and-quit" || setup;
-        text(ui, "dlg/title", TextSpec{.text = setup ? "Set up the game now?" : d.title, .style = tx::kDialogTitle,
+        text(ui, "dlg/title", TextSpec{.text = setup ? tr("dialog.setup_now", "Set up the game now?") : d.title, .style = tx::kDialogTitle,
                                        .wrap = true},
              fitted(Box{.margin = {0, 0, 0, sub ? 6.f : 14.f}}, SeamFit::CrimsonRect));
         if (sub)
             text(ui, "dlg/sub",
-                 TextSpec{.text = setup ? "It needs internet, at least 30 GB of free space, and a while."
-                                        : "The task is not finished.",
+                 TextSpec{.text = setup ? tr("dialog.setup_needs", "It needs internet, at least 30 GB of free space, and a while.")
+                                        : tr("dialog.not_finished", "The task is not finished."),
                           .style = tx::kParaSmall, .color = c::kRedDim, .wrap = true},
                  fitted(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         for (const m::Line& l : d.lines) {
@@ -1070,7 +1091,7 @@ void App::dialog_band() {
                                              SeamFit::CrimsonRect));
         for (const m::Action& a : d.buttons) {
             ButtonSpec b;
-            b.label = a.id == "setup-confirm" ? std::string("Set Up Game") : a.label;
+            b.label = a.id == "setup-confirm" ? tr("dialog.set_up_game", "Set Up Game") : a.label;
             b.half = Half::Crimson;
             b.disabled = !a.enabled;
             if (a.id == d.cancel) b.prompt = Prompt::Back;
@@ -1082,7 +1103,17 @@ void App::dialog_band() {
         }
     }
     auto bg = ui.open("dlg/blue", L.blue);
-    section_label(ui, "dlg/what-label", "What happens", Half::Blue, {}, fitted({}, SeamFit::BlueRect));
+    section_label(ui, "dlg/what-label", tr("dialog.what_happens", "What happens"), Half::Blue, {}, fitted({}, SeamFit::BlueRect));
+    // (A sentence with a path in the mono font: the parts before and after its {path}.)
+    const auto with_path = [](const std::string& text, const std::string& path) {
+        std::vector<WhatPart> parts;
+        const size_t at = text.find("{path}");
+        if (at == std::string::npos) return std::vector<WhatPart>{{text}, {path, true}};
+        if (at > 0) parts.push_back({text.substr(0, at)});
+        parts.push_back({path, true});
+        if (at + 6 < text.size()) parts.push_back({text.substr(at + 6)});
+        return parts;
+    };
     std::vector<WhatLine> what;
     if (uninstall) {
         bool saves = false, chars = false;
@@ -1092,36 +1123,43 @@ void App::dialog_band() {
                 if (a.id == "uninstall-characters") chars = a.checked;
             }
         const m::Facts& f = model_->facts();
-        what.push_back({"Deleted",
-                        WhatTone::Removed,
-                        {{"The game, its program and its menu entry, from "}, {m::shown_path(f.install.folder), true}}});
-        what.push_back({"Stays", WhatTone::Kept, {{"Anything else in that folder."}}});
-        what.push_back({"Saves",
-                        saves ? WhatTone::Removed : WhatTone::Kept,
-                        {{saves ? "Deleted too: " : "Kept: "}, {m::shown_path(f.saves), true}}});
+        what.push_back({tr("dialog.deleted", "Deleted"), WhatTone::Removed,
+                        with_path(tr("dialog.deleted_game", "The game, its program and its menu entry, from {path}"),
+                                  m::shown_path(f.install.folder))});
+        what.push_back({tr("dialog.stays", "Stays"), WhatTone::Kept, {{tr("dialog.anything_else", "Anything else in that folder.")}}});
+        what.push_back({tr("dialog.saves", "Saves"), saves ? WhatTone::Removed : WhatTone::Kept,
+                        with_path(saves ? tr("dialog.saves_deleted", "Deleted too: {path}") : tr("dialog.saves_kept", "Kept: {path}"),
+                                  m::shown_path(f.saves))});
         what.push_back(
-            {"Fighters",
+            {tr("home.fighters", "Fighters"),
              chars ? WhatTone::Removed : WhatTone::Kept,
-             {{chars ? "The added characters and what was saved from Tekken 7 and Tekken 8 are deleted too."
-                     : "The added characters are kept, for when it is installed again."}}});
+             {{chars ? tr("dialog.fighters_deleted", "The added characters and what was saved from Tekken 7 and Tekken 8 "
+                                                     "are deleted too.")
+                     : tr("dialog.fighters_kept", "The added characters are kept, for when it is installed again.")}}});
     } else if (d.id == "stop-and-quit") {
         const std::string title = model_->task().spec().title;
         const double done = task_fraction();
-        what.push_back({"Task",
+        what.push_back({tr("dialog.task", "Task"),
                         WhatTone::Neutral,
-                        {{done >= 0 ? title + ": " + std::to_string(static_cast<int>(done * 100)) + "% done."
-                                    : title + " is not finished."}}});
-        what.push_back({"Stop", WhatTone::Removed, {{"Stop and Quit stops it, then the launcher closes."}}});
-        what.push_back({"Keep", WhatTone::Kept, {{"Keep Running goes back: the task goes on."}}});
+                        {{done >= 0 ? tr("dialog.task_done", "{task}: {percent}% done.",
+                                         {{"task", title}, {"percent", static_cast<int>(done * 100)}})
+                                    : tr("dialog.task_not_finished", "{task} is not finished.", {{"task", title}})}}});
+        what.push_back({tr("dialog.stop", "Stop"), WhatTone::Removed,
+                        {{tr("dialog.stop_about", "Stop and Quit stops it, then the launcher closes.")}}});
+        what.push_back({tr("hint.keep", "Keep"), WhatTone::Kept,
+                        {{tr("dialog.keep_about", "Keep Running goes back: the task goes on.")}}});
     } else if (d.id == "remove-all") {
         // (Remove All exists only while that game is gone: its characters cannot be made again until it is back.)
         std::vector<std::string> shown;
         const std::string game = d.title.find("Tekken 8") != std::string::npos ? kTekken8 : kTekken7;
         for (const std::string& n : m::to_remove_all(model_->facts(), game))
             shown.push_back(m::display_name(model_->facts(), n));
-        what.push_back({"Removed", WhatTone::Removed, {{m::joined_most(shown, 8) + ": their packs, from the game."}}});
-        what.push_back({"Stays", WhatTone::Kept, {{"The game's own fighters and the other game's characters."}}});
-        what.push_back({"Later", WhatTone::Neutral, {{d.text}}});
+        what.push_back({tr("dialog.removed", "Removed"), WhatTone::Removed,
+                        {{tr("dialog.removed_packs", "{names}: their packs, from the game.",
+                             {{"names", m::joined_most(shown, 8)}})}}});
+        what.push_back({tr("dialog.stays", "Stays"), WhatTone::Kept,
+                        {{tr("dialog.stays_others", "The game's own fighters and the other game's characters.")}}});
+        what.push_back({tr("dialog.later", "Later"), WhatTone::Neutral, {{d.text}}});
     } else if (d.id == "setup") {
         // (Windows: the archive and the folder just chosen, and what the setup does with them.)
         const auto& folders = model_->facts().windows.folders;
@@ -1129,11 +1167,15 @@ void App::dialog_band() {
             const auto it = folders.find(key);
             return it == folders.end() ? std::string() : it->second;
         };
-        what.push_back({"Archive", WhatTone::Kept, {{"Read, never changed: "}, {m::shown_path(utf8_path(folder("source"))), true}}});
-        what.push_back({"Folder", WhatTone::Neutral, {{"The game goes into "}, {m::shown_path(utf8_path(folder("install"))), true}}});
-        what.push_back({"Needs",
+        what.push_back({tr("home.archive", "Archive"), WhatTone::Kept,
+                        with_path(tr("dialog.archive_read", "Read, never changed: {path}"),
+                                  m::shown_path(utf8_path(folder("source"))))});
+        what.push_back({tr("home.folder", "Folder"), WhatTone::Neutral,
+                        with_path(tr("dialog.goes_into", "The game goes into {path}"),
+                                  m::shown_path(utf8_path(folder("install"))))});
+        what.push_back({tr("dialog.needs", "Needs"),
                         WhatTone::Neutral,
-                        {{"Internet for its tools (downloaded once), at least 30 GB free, and a while."}}});
+                        {{tr("dialog.needs_about", "Internet for its tools (downloaded once), at least 30 GB free, and a while.")}}});
     } else {
         what.push_back({"", WhatTone::Neutral, {{d.text}}});
         for (const m::Line& l : d.lines)
@@ -1163,6 +1205,20 @@ void App::go(Screen to) {
     ui_->focus(it != saved_focus_.end() ? it->second : std::string(), true);
 }
 
+// The launcher's texts in the language of launcher.ini's setting, at once (every frame's view is built anew); the
+// Python workers it starts get it too (launcher_texts.py: TTT2_TEXT_LANGUAGE in the environment they inherit).
+void App::apply_language(const std::string& setting) {
+    const std::string code = launcher::i18n::resolve(setting);
+    launcher::i18n::set_language(code);
+    ttt2::ui::set_any_key_label(tr("keys.any_key", "Any key"));
+#ifdef _WIN32
+    _putenv_s("TTT2_TEXT_LANGUAGE", code.c_str());
+    SetEnvironmentVariableA("TTT2_TEXT_LANGUAGE", code.c_str()); // (what CreateProcessW's environment is made of)
+#else
+    setenv("TTT2_TEXT_LANGUAGE", code.c_str(), 1);
+#endif
+}
+
 void App::apply_prompts(int prompts) {
     static const Glyphs kGlyphs[] = {Glyphs::Keyboard, Glyphs::Keyboard, Glyphs::Xbox, Glyphs::PlayStation,
                                      Glyphs::Nintendo};
@@ -1176,9 +1232,10 @@ void App::apply_launcher_settings() {
     if (s == applied_) return;
     if (s.prompts != applied_.prompts && !forced_glyphs_) apply_prompts(s.prompts);
     if (s.text_size != applied_.text_size) window_.set_user_text_scale(s.text_size / 100.f);
+    if (s.language != applied_.language) apply_language(s.language);
     applied_ = s;
     std::string error;
-    if (!write_launcher_ini(launcher_ini_, s, &error)) toast("Not saved", error);
+    if (!write_launcher_ini(launcher_ini_, s, &error)) toast(tr("app.not_saved", "Not saved"), error);
 }
 
 void App::cue(ttt2::app::Cue c) {
@@ -1394,7 +1451,7 @@ void App::refused(const std::string& id) {
         toast(a->describe.title.empty() ? a->label : a->describe.title, a->why);
         return;
     }
-    if (id == "pk/choose") toast("Not a .wua", "Choose the game's .wua archive.");
+    if (id == "pk/choose") toast(tr("picker.not_wua", "Not a .wua"), tr("picker.choose_wua", "Choose the game's .wua archive."));
 }
 
 void App::activate(const std::string& id, ttt2::ui::Device device) {
@@ -1498,11 +1555,11 @@ void App::handle(std::vector<m::Effect> effects) {
                 break;
             }
             std::string error;
-            if (!open_with_desktop(url, &error)) toast("Cannot open it", error);
+            if (!open_with_desktop(url, &error)) toast(tr("app.cannot_open", "Cannot open it"), error);
             break;
         }
         case m::Effect::Kind::kCopy:
-            if (copy_text(e.text)) toast("Copied", e.text, false);
+            if (copy_text(e.text)) toast(tr("app.copied", "Copied"), e.text, false);
             break;
         case m::Effect::Kind::kSaveOwned:
             if (!owned_cache_.empty()) save_ownership(owned_cache_, e.text);

@@ -77,6 +77,7 @@ from ttt2char.tekken7 import subtitles as subtitles7            # noqa: E402
 from ttt2char.tekken7.pak import pak_names                     # noqa: E402
 from ttt2char.tekken7.tkmvst import saved_movesets             # noqa: E402
 from ttt2char.tekken8 import autodump as dump8                 # noqa: E402
+from ttt2char.texts import tr                                  # noqa: E402
 from ttt2char.ttt2 import title_folder                         # noqa: E402
 
 MINGW = 'x86_64-w64-mingw32-gcc'
@@ -105,9 +106,11 @@ def tekken7():
     found = path is not None and os.path.isdir(path)
     readable = found and bool(pak_names(os.path.join(path, 'TekkenGame', 'Content', 'Paks')))
     if path is not None and not found:
-        error = 'Steam lists Tekken 7 in %s, but it is not there: install it again from Steam' % path
+        error = tr('worker.tekken7_gone', 'Steam lists Tekken 7 in {folder}, but it is not there: install it again '
+                                          'from Steam', folder=path)
     elif found and error is None and not readable:
-        error = 'Tekken 7 has no pak files in %s: let Steam verify its files' % path
+        error = tr('worker.tekken7_no_paks', 'Tekken 7 has no pak files in {folder}: let Steam verify its files',
+                   folder=path)
     return {'found': found, 'path': path, 'error': error, 'readable': readable}
 
 
@@ -118,11 +121,13 @@ def tekken8():
     (status adds build_known.)"""
     path = source.find_tekken8()
     if path is None:
-        return {'found': False, 'path': None, 'error': 'Tekken 8 is not installed in any Steam library',
+        return {'found': False, 'path': None,
+                'error': tr('worker.tekken8_absent', 'Tekken 8 is not installed in any Steam library'),
                 'run_error': None}
     if not os.path.isdir(os.path.join(path, 'Polaris', 'Content', 'Paks')):
         return {'found': False, 'path': path,
-                'error': 'Tekken 8 has no Polaris/Content/Paks in %s: verify its files in Steam' % path,
+                'error': tr('worker.tekken8_no_paks', 'Tekken 8 has no Polaris/Content/Paks in {folder}: verify its '
+                                                      'files in Steam', folder=path),
                 'run_error': None}
     try:
         dump8.find_tekken8()
@@ -278,8 +283,9 @@ def github(path):
         except ValueError:
             message = ''
         if 'rate limit' in message.lower():
-            raise LookupError('GitHub answers only so many questions from one network an hour: try again later')
-        raise LookupError(message or 'GitHub answered %d' % error.code)
+            raise LookupError(tr('worker.rate_limit', 'GitHub answers only so many questions from one network an '
+                                                      'hour: try again later'))
+        raise LookupError(message or tr('worker.github_answered', 'GitHub answered {code}', code=error.code))
 
 
 def revision_in(text):
@@ -293,8 +299,8 @@ def main_news(commit, branch='main'):
             compare = json.loads(github('compare/%s...%s' % (urllib.parse.quote(commit), urllib.parse.quote(branch))))
         except LookupError as error:
             if str(error) != 'Not Found': raise
-            raise LookupError('GitHub does not know commit %s: this launcher was built from changes never pushed'
-                              % commit)
+            raise LookupError(tr('worker.unknown_commit', 'GitHub does not know commit {commit}: this launcher was '
+                                                          'built from changes never pushed', commit=commit))
         ahead, commits = int(compare.get('ahead_by', 0)), compare.get('commits') or []
         out = {'ahead': ahead, 'head': commits[-1]['sha'] if commits else commit, 'page': compare.get('html_url', ''),
                'changes': [c['commit']['message'].split('\n')[0] for c in reversed(commits)][:5],
@@ -321,7 +327,8 @@ def main_news(commit, branch='main'):
     except LookupError as error:
         return {'error': str(error)}
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return {'error': 'GitHub cannot be asked: %s' % (getattr(error, 'reason', None) or error)}
+        return {'error': tr('worker.github_unasked', 'GitHub cannot be asked: {why}',
+                            why=getattr(error, 'reason', None) or error)}
 
 
 def main():

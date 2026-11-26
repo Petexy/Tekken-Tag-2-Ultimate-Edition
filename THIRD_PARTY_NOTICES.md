@@ -14,6 +14,7 @@ wrote them. `Golden_Fist_Launcher-x86_64.exe` carries all files of this reposito
 | nanosvg.h, nanosvgrast.h (Mikko Mononen) | `launcher/ui/third_party/` | zlib (text at the start of each file and in `licenses/nanosvg.txt`) | https://github.com/memononen/nanosvg (`239e102ec2c691f2902e20ace2ed36ee4a35cfe6`) |
 | Barlow, Barlow Condensed (The Barlow Project Authors) | `launcher/ui/fonts/Barlow`, `launcher/ui/fonts/BarlowCondensed` | SIL Open Font License 1.1 (`OFL.txt` beside the fonts) | https://github.com/jpt/barlow (`dc2940e2e04ef4ec96c07e23e0f02aefbddd343b`) |
 | JetBrains Mono (The JetBrains Mono Project Authors) | `launcher/ui/fonts/JetBrainsMono` | SIL Open Font License 1.1 (`OFL.txt` beside the fonts) | https://github.com/JetBrains/JetBrainsMono (`19371302b95d218af43299bce79ddbddd0bc364d`) |
+| Fira Sans, Fira Sans Condensed (The Mozilla Foundation and Telefonica S.A.), cut to their Cyrillic letters | `launcher/ui/fonts/FiraSans` | SIL Open Font License 1.1 (`OFL.txt` beside the fonts) | https://github.com/google/fonts (`def3b65c3d785d3b917af277975636915b2ad0a1`, `ofl/firasans`, `ofl/firasanscondensed`) |
 
 The fonts and these libraries are built into the launcher program. File checksums: `launcher/ui/third_party/README.md`,
 `launcher/ui/fonts/README.md`.

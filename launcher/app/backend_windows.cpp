@@ -1,5 +1,7 @@
 #include "backend_windows.h"
 
+#include "i18n.h"
+
 #include "paths.h"
 #include "release.h"
 #include "system.h"
@@ -18,6 +20,8 @@
 #include <fstream>
 
 namespace launcher::app {
+
+using i18n::tr;
 
 namespace {
 
@@ -183,8 +187,9 @@ void WindowsReady::start(double now) {
     fs::create_directories(files_.root / "local", ec);
     job_ = starter_.start(bootstrap_command(files_), std::move(ev), &error);
     if (!job_)
-        fail({"Cannot get the launcher ready", "Windows' command processor did not start: " + error + ".", {},
-              files_.bootstrap_log(), true});
+        fail({tr("ready.cannot_ready", "Cannot get the launcher ready"),
+              tr("ready.cmd_not_started", "Windows' command processor did not start: {error}.", {{"error", error}}),
+              {}, files_.bootstrap_log(), true});
 }
 
 void WindowsReady::run_state(double now) {
@@ -201,14 +206,18 @@ void WindowsReady::run_state(double now) {
         code_ = code;
     };
     if (!there(files_.python)) {
-        return fail({"Python is missing",
-                     files_.release ? "The launcher's Python is not in " + u8(files_.python.parent_path()) +
-                                          ". Start the launcher again to get it."
-                                    : "Install Python 3 from python.org, or set TTT2_PYTHON to its python.exe.",
+        return fail({tr("ready.python_missing", "Python is missing"),
+                     files_.release ? tr("ready.python_not_in", "The launcher's Python is not in {folder}. Start the "
+                                                                "launcher again to get it.",
+                                         {{"folder", u8(files_.python.parent_path())}})
+                                    : tr("ready.install_python", "Install Python 3 from python.org, or set TTT2_PYTHON "
+                                                                 "to its python.exe."),
                      {}, {}, true});
     }
     job_ = starter_.start(first_state_query(files_), std::move(ev), &error);
-    if (!job_) fail({"The launcher's files did not start", "Python did not start: " + error + ".", {}, {}, true});
+    if (!job_)
+        fail({tr("ready.files_not_started", "The launcher's files did not start"),
+              tr("app.python_not_started", "Python did not start: {error}.", {{"error", error}}), {}, {}, true});
 }
 
 void WindowsReady::tick(double now) {
@@ -239,9 +248,9 @@ void WindowsReady::tick(double now) {
                     said += line + "\n";
                 line.clear();
             }
-            return fail({"Cannot get the launcher ready",
-                         "Its Python could not be downloaded and checked. Check your internet connection, then try "
-                         "again.",
+            return fail({tr("ready.cannot_ready", "Cannot get the launcher ready"),
+                         tr("ready.python_download", "Its Python could not be downloaded and checked. Check your "
+                                                     "internet connection, then try again."),
                          last_lines(said, 4), files_.bootstrap_log(), true});
         }
         files_.python_needed = false;
@@ -264,21 +273,24 @@ void WindowsReady::tick(double now) {
             why = restore_files();
             if (why.empty()) return run_state(now);
         }
-        return fail({"These files are another version's",
-                     "The launcher's files in " + u8(files_.root) +
-                         " are not the ones this launcher came with. Close every other launcher window, then start "
-                         "this one again; if this stays, get the newest one from the releases page.",
-                     "Their answers' protocol is " + error.text + ", this launcher's " +
-                         std::to_string(backend::kQueryProtocol) + "." +
-                         (why.empty() ? std::string() : " Its own files could not be put back: " + why),
+        const std::string protocol = tr("ready.protocols", "Their answers' protocol is {theirs}, this launcher's {ours}.",
+                                        {{"theirs", error.text}, {"ours", backend::kQueryProtocol}});
+        return fail({tr("ready.other_version", "These files are another version's"),
+                     tr("ready.other_version_about", "The launcher's files in {folder} are not the ones this launcher "
+                                                     "came with. Close every other launcher window, then start this "
+                                                     "one again; if this stays, get the newest one from the releases "
+                                                     "page.",
+                        {{"folder", u8(files_.root)}}),
+                     why.empty() ? protocol
+                                 : protocol + " " + tr("ready.not_put_back", "Its own files could not be put back: {why}",
+                                                       {{"why", why}}),
                      {}, false});
     }
     const std::string said = last_lines(err_.empty() ? out_ : err_, 6);
-    fail({"The launcher's files did not answer",
-          "Python stopped before it said what is installed" + std::string(code_ > 0 ? " (exit code " +
-                                                                                       std::to_string(code_) + ")"
-                                                                                 : std::string()) +
-              ".",
+    fail({tr("ready.no_answer", "The launcher's files did not answer"),
+          code_ > 0 ? tr("ready.python_stopped_code", "Python stopped before it said what is installed (exit code {code}).",
+                         {{"code", code_}})
+                    : tr("ready.python_stopped", "Python stopped before it said what is installed."),
           said.empty() ? error.text : said, files_.root / "local" / "windows-launcher-errors.log", true});
 }
 

@@ -1,5 +1,6 @@
 #include "steps.h"
 
+#include "i18n.h"
 #include "protocol.h"
 
 #include <algorithm>
@@ -10,30 +11,30 @@ namespace launcher::app {
 
 namespace {
 
-// The builder's steps (core/protocol.cpp's table: the same ids and, when the builder gives no words, these).
+using i18n::tr;
+
+// The builder's steps (core/protocol.cpp's table: the same ids and, when the builder gives no words or the launcher's
+// language is not English, these).
 struct Known {
     const char* id;
-    const char* name;
-    const char* text;
+    std::string name, text;
 };
-constexpr Known kSteps[] = {{"check", "Checking", "Checking the game"},
-                            {"extract", "Extracting", "Reading the game's code"},
-                            {"recompile", "Recompiling", "Translating the game's code"},
-                            {"compile", "Compiling", "Compiling the game program"},
-                            {"link", "Linking", "Linking the game program"},
-                            {"copy", "Copying", "Copying the game"},
-                            {"finish", "Finishing", "Finishing"}};
-
-std::string capitalised(std::string s) {
-    if (!s.empty() && s[0] >= 'a' && s[0] <= 'z') s[0] = static_cast<char>(s[0] - 'a' + 'A');
-    return s;
+std::vector<Known> known_steps() {
+    return {{"check", tr("step.check_short", "Checking"), tr("step.check", "Checking the game")},
+            {"extract", tr("step.extract_short", "Extracting"), tr("step.extract", "Reading the game's code")},
+            {"recompile", tr("step.recompile_short", "Recompiling"), tr("step.recompile", "Translating the game's code")},
+            {"compile", tr("step.compile_short", "Compiling"), tr("step.compile", "Compiling the game program")},
+            {"link", tr("step.link_short", "Linking"), tr("step.link", "Linking the game program")},
+            {"copy", tr("step.copy_short", "Copying"), tr("step.copy", "Copying the game")},
+            {"finish", tr("step.finish", "Finishing"), tr("step.finish", "Finishing")}};
 }
 
 } // namespace
 
 std::vector<StepLine> build_steps(const std::vector<std::string>& log, bool ended, bool ok) {
     std::vector<StepLine> steps;
-    for (const Known& k : kSteps) steps.push_back({k.id, k.name, k.text, StepLine::State::kPending, 0, {}});
+    const std::vector<Known> known = known_steps();
+    for (const Known& k : known) steps.push_back({k.id, k.name, k.text, StepLine::State::kPending, 0, {}, {}});
     int at = -1;
     for (const std::string& text : log) {
         const Line l = parse_line(text);
@@ -42,11 +43,14 @@ std::vector<StepLine> build_steps(const std::vector<std::string>& log, bool ende
             for (size_t i = 0; i < steps.size(); ++i)
                 if (steps[i].id == l.word) found = static_cast<int>(i);
             if (found < 0) {
-                steps.push_back({l.word, capitalised(l.word), l.text.empty() ? capitalised(l.word) : l.text,
-                                 StepLine::State::kPending, 0, {}});
+                steps.push_back({l.word, i18n::capitalized(l.word), l.text.empty() ? i18n::capitalized(l.word) : l.text,
+                                 StepLine::State::kPending, 0, {}, {}});
                 found = static_cast<int>(steps.size()) - 1;
             }
-            if (!l.text.empty()) steps[static_cast<size_t>(found)].text = l.text;
+            // (The builder's words are English: its own only when the launcher's language is; a worker's are in
+            // the launcher's language already, for steps the launcher does not know.)
+            if (!l.text.empty() && (i18n::english() || static_cast<size_t>(found) >= known.size()))
+                steps[static_cast<size_t>(found)].text = l.text;
             // Steps before it are done (the builder skips some: an update has no copy of the game).
             for (int i = 0; i < found; ++i) {
                 steps[static_cast<size_t>(i)].state = StepLine::State::kDone;
@@ -56,10 +60,12 @@ std::vector<StepLine> build_steps(const std::vector<std::string>& log, bool ende
             steps[static_cast<size_t>(found)].state = StepLine::State::kCurrent;
             steps[static_cast<size_t>(found)].fraction = 0;
             steps[static_cast<size_t>(found)].count.clear();
+            steps[static_cast<size_t>(found)].slash.clear();
         } else if (l.kind == Line::Kind::kProgress && at >= 0 && l.total > 0) {
             StepLine& s = steps[static_cast<size_t>(at)];
             s.fraction = std::min(1.0, static_cast<double>(l.done) / static_cast<double>(l.total));
-            s.count = thousands(l.done) + " of " + thousands(l.total);
+            s.count = tr("progress.of", "{done} of {total}", {{"done", thousands(l.done)}, {"total", thousands(l.total)}});
+            s.slash = thousands(l.done) + " / " + thousands(l.total);
         }
     }
     if (ended) {

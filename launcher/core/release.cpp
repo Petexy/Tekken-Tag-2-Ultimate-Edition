@@ -3,6 +3,7 @@
 #include "release.h"
 #include "utf8_path.h"
 
+#include "i18n.h"
 #include "json.h"
 
 #include <algorithm>
@@ -88,7 +89,8 @@ ReleaseAnswer parse_release(std::string_view text) {
     std::string why;
     const auto json = json::parse(text, &why);
     if (!json || !json->is_object()) {
-        answer.error = "GitHub's answer is not readable (" + (json ? std::string("not an object") : why) + ")";
+        answer.error = i18n::tr("release.unreadable", "GitHub's answer is not readable ({why})",
+                                {{"why", json ? std::string("not an object") : why}});
         return answer;
     }
     const json::Value& root = *json;
@@ -97,9 +99,12 @@ ReleaseAnswer parse_release(std::string_view text) {
         const std::string message = root["message"].string();
         if (message == "Not Found") answer.none = true;
         else if (has(lower(message), "rate limit")) {
-            answer.error = "GitHub answers only so many questions from one network an hour: try again later";
-        } else if (!message.empty()) answer.error = "GitHub answered \"" + message + "\"";
-        else answer.error = "GitHub's answer names no release";
+            answer.error = i18n::tr("release.rate_limit",
+                                    "GitHub answers only so many questions from one network an hour: try again later");
+        } else if (!message.empty())
+            answer.error = i18n::tr("release.answered", "GitHub answered \"{message}\"", {{"message", message}});
+        else
+            answer.error = i18n::tr("release.no_release", "GitHub's answer names no release");
         return answer;
     }
     Release r;
@@ -108,7 +113,8 @@ ReleaseAnswer parse_release(std::string_view text) {
     r.version = r.tag;
     if (!r.version.empty() && (r.version.front() == 'v' || r.version.front() == 'V')) r.version.erase(0, 1);
     if (!version_numbers(r.version)) {
-        answer.error = "the newest release, " + r.tag + ", is not named as a version (such as v0.2.0)";
+        answer.error = i18n::tr("release.not_version", "the newest release, {tag}, is not named as a version (such as v0.2.0)",
+                                {{"tag", r.tag}});
         return answer;
     }
     // Its AppImage for this kind of PC: one named for x86-64, else the only
@@ -129,7 +135,8 @@ ReleaseAnswer parse_release(std::string_view text) {
     }
     const json::Value* chosen = named ? named : plain.size() == 1 ? plain[0] : nullptr;
     if (!chosen) {
-        answer.error = "version " + r.version + " has no AppImage to download";
+        answer.error = i18n::tr("release.no_appimage", "version {version} has no AppImage to download",
+                                {{"version", r.version}});
         return answer;
     }
     r.asset = (*chosen)["name"].string();

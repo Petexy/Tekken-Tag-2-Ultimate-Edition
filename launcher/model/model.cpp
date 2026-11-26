@@ -320,12 +320,15 @@ void LauncherModel::tick(double now) {
             said_ = "The update has nothing more to do";
         } else {
             Chain c;
-            c.parts.push_back({"launcher", "Golden Fist Launcher " + facts_.launcher_version, "Done."});
+            c.parts.push_back({"launcher",
+                               tr("model.launcher_version", "Golden Fist Launcher {version}",
+                                  {{"version", facts_.launcher_version}}),
+                               tr("model.done", "Done.")});
             for (UpdatePart& p : update_parts(without, plan))
                 if (p.kind != "later") c.parts.push_back(std::move(p));
             c.at = 1;
             c.launcher_to = facts_.launcher_version;
-            c.results.push_back("launcher " + facts_.launcher_version);
+            c.results.push_back(tr("model.result_launcher", "launcher {version}", {{"version", facts_.launcher_version}}));
             c.later = plan.later;
             chain_ = std::move(c);
             start_part(now);
@@ -355,8 +358,8 @@ bool LauncherModel::settled() const {
 }
 
 void LauncherModel::start_update_all(double now) {
-    if (runner_.running() || before_) return refuse("Another task is running", "Wait for it to end, then update.", now);
-    if (facts_.game_running) return refuse("The game is running", "Quit it, then update.", now);
+    if (runner_.running() || before_) return refuse(tr("common.task_running", "Another task is running"), tr("game.wait_update", "Wait for it to end, then update."), now);
+    if (facts_.game_running) return refuse(tr("game.running_title", "The game is running"), tr("game.quit_update", "Quit it, then update."), now);
     const UpdatePlan plan = update_plan(facts_);
     if (plan.empty()) {
         said_ = "Everything is up to date";
@@ -379,10 +382,12 @@ void LauncherModel::start_part(double now) {
     const std::string kind = c.parts[c.at].kind;
     if (kind == "launcher") {
         if (facts_.caps.windows) {
-            start_worker(TaskKind::kLauncherUpdate, "Updating the launcher", now);
+            start_worker(TaskKind::kLauncherUpdate, tr("model.updating_launcher", "Updating the launcher"), now);
         } else if (!self_update_) {
-            refuse("Cannot update the launcher",
-                   "Only the launcher's AppImage updates itself, and this launcher does not run from one.", now);
+            refuse(tr("model.cannot_update_launcher", "Cannot update the launcher"),
+                   tr("model.not_appimage",
+                      "Only the launcher's AppImage updates itself, and this launcher does not run from one."),
+                   now);
         } else if (const auto refusal = self_update_->start(now, c.at + 1 < c.parts.size())) {
             refuse(refusal->title, refusal->why, now);
         }
@@ -427,20 +432,21 @@ void LauncherModel::part_ended(const TaskResult& r) {
     const std::string kind = c.parts[c.at].kind;
     if (kind == "launcher") {
         const std::string version = !r.updated.empty() ? r.updated : c.launcher_to;
-        c.results.push_back("launcher " + version);
+        c.results.push_back(tr("model.result_launcher", "launcher {version}", {{"version", version}}));
         // (Opened: it goes on with the rest, this one quits.)
         if ((self_update_ && self_update_->opened()) || !r.updated.empty()) {
             c.handed_over = true;
             return;
         }
     } else if (kind == "game") {
-        c.results.push_back("the game program");
+        c.results.push_back(tr("model.result_game", "the game program"));
         // (Built: the game is this launcher's now, also before Windows' state says so.)
         facts_.game_built = facts_.this_build;
     } else {
         const size_t n = runner_.spec().names.size();
         c.results.push_back(n == 1 ? display_name(facts_, runner_.spec().names[0])
-                                   : std::to_string(n) + " fighters");
+                                   : trn("model.result_fighters", static_cast<long long>(n), "{n} fighter",
+                                         "{n} fighters"));
     }
     part_done();
 }
@@ -501,7 +507,10 @@ void LauncherModel::load_status(double now) {
                  std::string last = status_err_;
                  while (!last.empty() && last.back() == '\n') last.pop_back();
                  if (const size_t at = last.rfind('\n'); at != std::string::npos) last.erase(0, at + 1);
-                 facts_.status_error = code != 0 && !last.empty() ? last : "its answer is not readable (" + why + ")";
+                 facts_.status_error = code != 0 && !last.empty()
+                                           ? last
+                                           : tr("model.answer_unreadable", "its answer is not readable ({why})",
+                                                {{"why", why}});
              }
              // Steam closed: asked again once it runs again (as another
              // account, maybe); its answer is still shown meanwhile.
@@ -517,7 +526,7 @@ void LauncherModel::load_status(double now) {
     if (!status_job_) {
         facts_.status_loading = false;
         facts_.status.reset();
-        facts_.status_error = "Python cannot start: " + error;
+        facts_.status_error = tr("model.python_cannot_start", "Python cannot start: {error}", {{"error", error}});
     }
     (void)now;
 }
@@ -643,7 +652,7 @@ void LauncherModel::refuse(const std::string& title, const std::string& why, dou
 }
 
 void LauncherModel::start_task(TaskSpec spec, double now) {
-    if (runner_.running() || before_) return refuse("Another task is running", "Wait for it to end.", now);
+    if (runner_.running() || before_) return refuse(tr("common.task_running", "Another task is running"), tr("common.wait", "Wait for it to end."), now);
     if (parts_.read_check && parts_.read_save) {
         before_ = Before{std::move(spec), 0, false};
         return before_next(now);
@@ -681,7 +690,8 @@ void LauncherModel::before_next(double now) {
     if (!before_job_) {
         const std::string title = b.spec.title;
         before_.reset();
-        refuse(title + ": not started", "Python did not start: " + error + ".", now);
+        refuse(tr("model.not_started", "{task}: not started", {{"task", title}}),
+               tr("model.python_did_not_start", "Python did not start: {error}.", {{"error", error}}), now);
     }
 }
 
@@ -701,11 +711,14 @@ void LauncherModel::before_answered(double now) {
             std::string last = before_err_;
             while (!last.empty() && last.back() == '\n') last.pop_back();
             if (const size_t at = last.rfind('\n'); at != std::string::npos) last.erase(0, at + 1);
-            why = "The launcher's files did not answer" + (last.empty() ? " (" + error + ")" : ": " + last) + ".";
+            why = last.empty() ? tr("model.files_no_answer", "The launcher's files did not answer ({error}).",
+                                    {{"error", error}})
+                               : tr("model.files_no_answer_said", "The launcher's files did not answer: {last}.",
+                                    {{"last", last}});
         } else {
             why = save ? save_problem_text(*problem) : setup_problem_text(*problem);
         }
-        refuse(title + ": not started", why, now);
+        refuse(tr("model.not_started", "{task}: not started", {{"task", title}}), why, now);
         return;
     }
     before_next(now);
@@ -713,8 +726,8 @@ void LauncherModel::before_answered(double now) {
 
 void LauncherModel::start_import(const std::vector<std::string>& names, double now) {
     std::string why;
-    if (runner_.running()) return refuse("Another task is running", "Wait for it to end, then add characters.", now);
-    if (!can_import(facts_, &why)) return refuse("Cannot add characters", why, now);
+    if (runner_.running()) return refuse(tr("common.task_running", "Another task is running"), tr("chars.wait_add", "Wait for it to end, then add characters."), now);
+    if (!can_import(facts_, &why)) return refuse(tr("model.cannot_add", "Cannot add characters"), why, now);
     // (Each from its own game: only the games of the characters asked for.)
     bool tekken7 = false, tekken8 = false;
     for (const Fighter& f : facts_.status->fighters) {
@@ -722,7 +735,7 @@ void LauncherModel::start_import(const std::vector<std::string>& names, double n
         (f.of(kTekken8) ? tekken8 : tekken7) = true;
     }
     if ((tekken7 && !game_usable(facts_, kTekken7, &why)) || (tekken8 && !game_usable(facts_, kTekken8, &why))) {
-        return refuse("Cannot add characters", why, now);
+        return refuse(tr("model.cannot_add", "Cannot add characters"), why, now);
     }
     // (Their outfits as their boxes say.)
     std::string outfits;
@@ -739,49 +752,53 @@ void LauncherModel::start_import(const std::vector<std::string>& names, double n
     TaskSpec spec;
     spec.kind = TaskKind::kImport;
     spec.subject = names_text(facts_, names);
-    spec.title = (update ? "Updating " : "Adding ") + spec.subject;
+    spec.title = update ? tr("model.updating", "Updating {what}", {{"what", spec.subject}})
+                        : tr("model.adding", "Adding {what}", {{"what", spec.subject}});
     spec.command = parts_.commands.import(facts_, names, outfits);
     spec.update = update;
     spec.names = names;
-    spec.hidden = tekken7 && tekken8 ? "Tekken 7 or Tekken 8" : tekken8 ? "Tekken 8" : "Tekken 7";
+    spec.hidden = tekken7 && tekken8 ? tr("model.either_game", "Tekken 7 or Tekken 8") : tekken8 ? "Tekken 8" : "Tekken 7";
     start_task(std::move(spec), now);
 }
 
 void LauncherModel::start_remove(const std::vector<std::string>& names, double now) {
-    if (runner_.running()) return refuse("Another task is running", "Wait for it to end, then remove characters.", now);
+    if (runner_.running()) return refuse(tr("common.task_running", "Another task is running"), tr("chars.wait_remove", "Wait for it to end, then remove characters."), now);
     if (facts_.importer.empty() || facts_.python.empty() || facts_.install.state != InstallState::kInstalled) {
-        return refuse("Cannot remove characters", "The importer, Python 3 or the installed game is missing.", now);
+        return refuse(tr("model.cannot_remove", "Cannot remove characters"),
+                      tr("chars.remove_missing", "The importer, Python 3 or the installed game is missing."), now);
     }
     TaskSpec spec;
     spec.kind = TaskKind::kRemove;
     spec.subject = names_text(facts_, names);
-    spec.title = "Removing " + spec.subject;
+    spec.title = tr("model.removing", "Removing {what}", {{"what", spec.subject}});
     spec.command = parts_.commands.remove(facts_, names);
     spec.names = names;
     start_task(std::move(spec), now);
 }
 
 void LauncherModel::start_update(double now) {
-    if (runner_.running()) return refuse("Another task is running", "Wait for it to end, then update.", now);
-    if (!facts_.builder) return refuse("Cannot update", "The game builder is missing from this launcher.", now);
-    if (facts_.game_running) return refuse("The game is running", "Quit it, then update.", now);
+    if (runner_.running()) return refuse(tr("common.task_running", "Another task is running"), tr("game.wait_update", "Wait for it to end, then update."), now);
+    if (!facts_.builder) return refuse(tr("model.cannot_update", "Cannot update"), tr("game.builder_missing", "The game builder is missing from this launcher."), now);
+    if (facts_.game_running) return refuse(tr("game.running_title", "The game is running"), tr("game.quit_update", "Quit it, then update."), now);
     facts_.game_error.clear();
     TaskSpec spec;
     spec.kind = TaskKind::kUpdate;
-    spec.title = "Updating the game program";
+    spec.title = tr("model.updating_game", "Updating the game program");
     spec.command = parts_.commands.update(facts_);
     if (facts_.caps.windows) {
         const auto worker = parts_.commands.worker(facts_, TaskKind::kUpdate);
-        if (!worker) return refuse("Cannot update", "The launcher's files are incomplete.", now);
+        if (!worker) return refuse(tr("model.cannot_update", "Cannot update"), tr("model.files_incomplete", "The launcher's files are incomplete."), now);
         spec.command = *worker;
     }
     start_task(std::move(spec), now);
 }
 
 void LauncherModel::start_worker(TaskKind kind, std::string title, double now) {
-    if (runner_.running()) return refuse("Another task is running", "Wait for it to end.", now);
+    if (runner_.running()) return refuse(tr("common.task_running", "Another task is running"), tr("common.wait", "Wait for it to end."), now);
     const auto command = parts_.commands.worker(facts_, kind);
-    if (!command) return refuse("Cannot start " + title, "The launcher's files are incomplete.", now);
+    if (!command)
+        return refuse(tr("model.cannot_start", "Cannot start {task}", {{"task", title}}),
+                      tr("model.files_incomplete", "The launcher's files are incomplete."), now);
     TaskSpec spec;
     spec.kind = kind;
     spec.title = std::move(title);
@@ -792,18 +809,18 @@ void LauncherModel::start_worker(TaskKind kind, std::string title, double now) {
 std::vector<Effect> LauncherModel::play(double now) {
     // (Two would share the saves and the shader cache.)
     if (facts_.game_running) {
-        refuse("The game is running", "Only one can run at a time.", now);
+        refuse(tr("game.running_title", "The game is running"), tr("game.only_one", "Only one can run at a time."), now);
         return {};
     }
     if (const std::string older = older_game(facts_); !older.empty()) {
-        refuse("Update the game first", older, now);
+        refuse(tr("model.update_first", "Update the game first"), older, now);
         return {};
     }
     if (facts_.caps.windows && !facts_.windows.play_problem.empty()) {
-        refuse("Cannot start the game",
+        refuse(tr("model.cannot_start_game", "Cannot start the game"),
                facts_.windows.play_problem == "exe"
-                   ? "The installed game's program is missing: set it up again."
-                   : "This development build has no Wii U source: choose it in Settings.",
+                   ? tr("model.exe_missing", "The installed game's program is missing: set it up again.")
+                   : tr("model.no_source", "This development build has no Wii U source: choose it in Settings."),
                now);
         return {};
     }
@@ -814,7 +831,7 @@ std::vector<Effect> LauncherModel::play(double now) {
         facts_.game_error.clear();
         TaskSpec spec;
         spec.kind = TaskKind::kShaders;
-        spec.title = "Preparing shaders";
+        spec.title = tr("model.preparing_shaders", "Preparing shaders");
         spec.command = parts_.commands.shaders(facts_);
         if (facts_.caps.windows) {
             if (const auto worker = parts_.commands.worker(facts_, TaskKind::kShaders)) spec.command = *worker;
@@ -848,7 +865,7 @@ void LauncherModel::launch_game(double now) {
          }},
         &error);
     if (!game_job_) {
-        facts_.game_error = "The game cannot start: " + error;
+        facts_.game_error = tr("model.game_cannot_start", "The game cannot start: {error}", {{"error", error}});
         return;
     }
     facts_.game_running = facts_.game_started_here = true;
@@ -881,17 +898,17 @@ void LauncherModel::task_ended(const TaskResult& r) {
 std::vector<Effect> LauncherModel::uninstall_confirmed(double now) {
     dialog_.reset();
     if (runner_.running()) {
-        refuse("Another task is running", "Wait for it to end, then uninstall.", now);
+        refuse(tr("common.task_running", "Another task is running"), tr("game.wait_uninstall", "Wait for it to end, then uninstall."), now);
         return {};
     }
     // (The uninstall looks again right before it deletes anything.)
     if (facts_.game_running) {
-        refuse("The game is running", "Quit it, then uninstall.", now);
+        refuse(tr("game.running_title", "The game is running"), tr("game.quit_uninstall", "Quit it, then uninstall."), now);
         return {};
     }
     TaskSpec spec;
     spec.kind = TaskKind::kUninstall;
-    spec.title = "Uninstalling Tekken Tag Tournament 2";
+    spec.title = tr("model.uninstalling", "Uninstalling Tekken Tag Tournament 2");
     runner_.begin(spec, now);
     runner_.add_log("Uninstalling from " + path_utf8(facts_.install.folder));
     sync();
@@ -907,34 +924,45 @@ void LauncherModel::uninstall_done(const UninstallReport& r, double now) {
     for (const std::string& p : problems) runner_.add_log("Not deleted: " + p);
     for (const std::string& l : left) runner_.add_log("Left in the folder: " + l);
     if (!r.refused.empty()) {
-        runner_.finish(false, "Not uninstalled", r.refused, false, now);
+        runner_.finish(false, tr("model.not_uninstalled", "Not uninstalled"), r.refused, false, now);
         return;
     }
     std::string detail;
     if (!r.folder_removed && !left.empty()) {
-        detail =
-            "Left in " + path_utf8(facts_.install.folder) + ", as they are not the game's: " + joined_most(left, 6) + ".";
+        detail = tr("model.left_in", "Left in {folder}, as they are not the game's: {list}.",
+                    {{"folder", path_utf8(facts_.install.folder)}, {"list", joined_most(left, 6)}});
     }
-    if (!problems.empty())
-        detail += (detail.empty() ? "" : " ") + std::string("Not deleted: ") + joined_most(problems, 3) + ".";
+    if (!problems.empty()) {
+        const std::string not_deleted = tr("model.not_deleted", "Not deleted: {list}.", {{"list", joined_most(problems, 3)}});
+        detail = detail.empty() ? not_deleted
+                                : tr("common.two_sentences", "{first} {second}", {{"first", detail}, {"second", not_deleted}});
+    }
     if (detail.empty()) {
         const UninstallChoice& o = uninstall_;
-        detail = o.saves && o.characters ? "Your saves, the added characters and what was saved from Tekken 7 "
-                                           "and Tekken 8 are deleted too."
-                 : o.saves               ? "Your saves are deleted too; the added characters are kept."
-                 : o.characters          ? "The added characters and what was saved from Tekken 7 and Tekken 8 "
-                                           "are deleted too; your saves are kept."
-                                         : "Your saves and the added characters are kept.";
+        detail = o.saves && o.characters ? tr("model.deleted_all", "Your saves, the added characters and what was saved "
+                                                                   "from Tekken 7 and Tekken 8 are deleted too.")
+                 : o.saves               ? tr("model.deleted_saves", "Your saves are deleted too; the added characters "
+                                                                     "are kept.")
+                 : o.characters          ? tr("model.deleted_characters", "The added characters and what was saved from "
+                                                                          "Tekken 7 and Tekken 8 are deleted too; your "
+                                                                          "saves are kept.")
+                                         : tr("model.deleted_none", "Your saves and the added characters are kept.");
     }
-    runner_.finish(r.problems.empty(), r.problems.empty() ? "Uninstalled" : "Uninstalled, but not everything", detail,
-                   false, now);
+    runner_.finish(r.problems.empty(),
+                   r.problems.empty() ? tr("model.uninstalled", "Uninstalled")
+                                      : tr("model.uninstalled_partly", "Uninstalled, but not everything"),
+                   detail, false, now);
 }
 
 void LauncherModel::opened_updated(const std::string& error, double now) {
     if (error.empty()) return;
     const bool handed = chain_ && chain_->handed_over;
-    runner_.finish(false, "Updated to " + runner_.last().updated + ", but it cannot be opened",
-                   full_sentence(error) + " Start the launcher again.", false, now);
+    runner_.finish(false,
+                   tr("model.updated_not_opened", "Updated to {version}, but it cannot be opened",
+                      {{"version", runner_.last().updated}}),
+                   tr("common.two_sentences", "{first} {second}",
+                      {{"first", full_sentence(error)}, {"second", tr("model.start_again", "Start the launcher again.")}}),
+                   false, now);
     if (handed) {
         // (Nothing goes on with the rest: it stops here, the new launcher's UPDATE does it.)
         chain_->handed_over = false;
@@ -962,18 +990,20 @@ std::vector<Effect> LauncherModel::chosen_folder(const fs::path& chosen, double 
         return {};
     }
     if (runner_.running()) {
-        refuse("Another task is running", "Wait for it to end, then install.", now);
+        refuse(tr("common.task_running", "Another task is running"), tr("game.wait_install", "Wait for it to end, then install."), now);
         return {};
     }
     if (!facts_.builder) {
-        refuse("Cannot install", "The game builder is missing from this launcher.", now);
+        refuse(tr("model.cannot_install", "Cannot install"), tr("game.builder_missing", "The game builder is missing from this launcher."), now);
         return {};
     }
     std::string error;
     const auto folder = parts_.environment.install_target(chosen, &error);
     if (!folder) {
-        refuse("Cannot install into this folder",
-               path_utf8(chosen.lexically_normal()) + " " + error + ": choose another folder.", now);
+        refuse(tr("model.cannot_install_here", "Cannot install into this folder"),
+               tr("model.choose_another", "{folder} {error}: choose another folder.",
+                  {{"folder", path_utf8(chosen.lexically_normal())}, {"error", error}}),
+               now);
         return {};
     }
     facts_.game_error.clear();
@@ -993,7 +1023,7 @@ std::vector<Effect> LauncherModel::preflight_done(const std::vector<Check>& chec
     }
     // (A task began while the checks ran: they stay on Home, Check Again starts the install once it has ended.)
     if (runner_.running()) {
-        refuse("Another task is running", "Wait for it to end, then install.", now);
+        refuse(tr("common.task_running", "Another task is running"), tr("game.wait_install", "Wait for it to end, then install."), now);
         return {};
     }
     const fs::path game = facts_.preflight->game, folder = facts_.preflight->folder;
@@ -1002,7 +1032,7 @@ std::vector<Effect> LauncherModel::preflight_done(const std::vector<Check>& chec
     facts_.installing = folder;
     TaskSpec spec;
     spec.kind = TaskKind::kInstall;
-    spec.title = "Installing Tekken Tag Tournament 2";
+    spec.title = tr("model.installing", "Installing Tekken Tag Tournament 2");
     spec.command = parts_.commands.install(facts_, game, folder);
     start_task(std::move(spec), now);
     return {};
@@ -1043,6 +1073,9 @@ std::vector<Effect> LauncherModel::choose(const std::string& id, int index, doub
             said_ = "no language " + std::to_string(index);
         else if (!game_.set_language(cafe::host::game::kLanguages[index].code))
             said_ = game_.error();
+    } else if (id == "launcher-language" && index >= 0 && static_cast<size_t>(index) <= std::size(i18n::kLanguages)) {
+        // (0: the system's; then i18n::kLanguages in order. The app applies it: i18n::set_language.)
+        launcher_.language = index == 0 ? std::string(i18n::kSystem) : std::string(i18n::kLanguages[index - 1].code);
     } else if (id == "text-size" && index >= 0 && static_cast<size_t>(index) < std::size(kTextSizes)) {
         launcher_.text_size = kTextSizes[index];
     } else if (id == "prompts" && index >= 0 && static_cast<size_t>(index) < std::size(kPrompts)) {
@@ -1116,7 +1149,7 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
             }
         } else if (id == "setup-confirm") {
             dialog_.reset();
-            start_worker(TaskKind::kSetup, "Setting up the game", now);
+            start_worker(TaskKind::kSetup, tr("model.setting_up", "Setting up the game"), now);
         } else if (id == dialog_->cancel || id == "message-ok" || id == "keep-running" || id == "remove-all-cancel" ||
                    id == "uninstall-cancel" || id == "setup-cancel") {
             dialog_.reset();
@@ -1148,10 +1181,13 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     } else if (id == "update-launcher" || id == "notice-update") {
         if (facts_.caps.windows) {
             const bool files = !facts_.newer && !facts_.windows.branch.empty();
-            start_worker(files ? TaskKind::kLauncherFiles : TaskKind::kLauncherUpdate, "Updating the launcher", now);
+            start_worker(files ? TaskKind::kLauncherFiles : TaskKind::kLauncherUpdate,
+                         tr("model.updating_launcher", "Updating the launcher"), now);
         } else if (!self_update_) {
-            refuse("Cannot update the launcher",
-                   "Only the launcher's AppImage updates itself, and this launcher does not run from one.", now);
+            refuse(tr("model.cannot_update_launcher", "Cannot update the launcher"),
+                   tr("model.not_appimage",
+                      "Only the launcher's AppImage updates itself, and this launcher does not run from one."),
+                   now);
         } else if (const auto refusal = self_update_->start(now)) {
             refuse(refusal->title, refusal->why, now);
         }
@@ -1160,14 +1196,14 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         if (!page.empty()) effects.push_back({Effect::Kind::kOpenUrl, page, {}, {}, {}});
     } else if (id == "install" || id == "setup" || id == "more:setup-again") {
         if (task)
-            refuse("Another task is running", "Wait for it to end, then install.", now);
+            refuse(tr("common.task_running", "Another task is running"), tr("game.wait_install", "Wait for it to end, then install."), now);
         else if (!facts_.caps.setup_game && !facts_.builder) {
-            refuse("Cannot install", "The game builder is missing from this launcher.", now);
+            refuse(tr("model.cannot_install", "Cannot install"), tr("game.builder_missing", "The game builder is missing from this launcher."), now);
         } else
             effects.push_back({Effect::Kind::kChooseGame, {}, {}, {}, {}});
     } else if (id == "resume") {
         if (task)
-            refuse("Another task is running", "Wait for it to end, then install.", now);
+            refuse(tr("common.task_running", "Another task is running"), tr("game.wait_install", "Wait for it to end, then install."), now);
         else if (parts_.environment.exists(facts_.install.game)) {
             facts_.chosen_game = facts_.install.game;
             return chosen_folder(facts_.install.folder, now);
@@ -1187,9 +1223,9 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         facts_.preflight.reset();
     } else if (id == "uninstall") {
         if (task)
-            refuse("Another task is running", "Wait for it to end, then uninstall.", now);
+            refuse(tr("common.task_running", "Another task is running"), tr("game.wait_uninstall", "Wait for it to end, then uninstall."), now);
         else if (facts_.game_running)
-            refuse("The game is running", "Quit it, then uninstall.", now);
+            refuse(tr("game.running_title", "The game is running"), tr("game.quit_uninstall", "Quit it, then uninstall."), now);
         else {
             uninstall_ = {};
             dialog_ = uninstall_view(facts_, facts_.saves, facts_.saves_custom, uninstall_);
@@ -1212,13 +1248,15 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         effects.push_back({Effect::Kind::kOpenPath, {}, facts_.install.folder, {}, {}});
     } else if (id == "get-packages") {
         if (task)
-            refuse("Another task is running", "Wait for it to end, then download numpy and Pillow.", now);
+            refuse(tr("common.task_running", "Another task is running"),
+                   tr("chars.wait_download", "Wait for it to end, then download numpy and Pillow."), now);
         else if (facts_.importer.empty() || facts_.python.empty()) {
-            refuse("Cannot download numpy and Pillow", "The character importer or Python 3 is missing.", now);
+            refuse(tr("model.cannot_download", "Cannot download numpy and Pillow"),
+                   tr("rules.no_importer", "The character importer or Python 3 is missing."), now);
         } else {
             TaskSpec spec;
             spec.kind = TaskKind::kPackages;
-            spec.title = "Downloading numpy and Pillow";
+            spec.title = tr("model.downloading", "Downloading numpy and Pillow");
             spec.command = parts_.commands.packages(facts_);
             start_task(std::move(spec), now);
         }
@@ -1322,6 +1360,11 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         launcher_.reduce_motion = !launcher_.reduce_motion;
     else if (id == "prompts")
         return choose(id, (launcher_.prompts + 1) % static_cast<int>(std::size(kPrompts)), now);
+    else if (id == "launcher-language") {
+        const i18n::Language* l = i18n::find_language(launcher_.language);
+        const int at = l ? static_cast<int>(l - std::begin(i18n::kLanguages)) + 1 : 0;
+        return choose(id, (at + 1) % static_cast<int>(std::size(i18n::kLanguages) + 1), now);
+    }
     else if (id == "text-size") {
         const auto at = std::find(std::begin(kTextSizes), std::end(kTextSizes), launcher_.text_size);
         return choose(id, static_cast<int>((at - std::begin(kTextSizes) + 1) % std::size(kTextSizes)), now);
@@ -1330,11 +1373,11 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
     else if (id == "more")
         effects.push_back({Effect::Kind::kOpenMenu, {}, {}, {}, {}});
     else if (id == "more:build")
-        start_worker(TaskKind::kBuild, "Building the game", now);
+        start_worker(TaskKind::kBuild, tr("model.building", "Building the game"), now);
     else if (id == "more:install")
-        start_worker(TaskKind::kInstallSource, "Installing the game", now);
+        start_worker(TaskKind::kInstallSource, tr("model.installing_game", "Installing the game"), now);
     else if (id == "more:update")
-        start_worker(TaskKind::kUpdateInstalled, "Updating the installed game", now);
+        start_worker(TaskKind::kUpdateInstalled, tr("model.updating_installed", "Updating the installed game"), now);
     else if (id == "more:open-logs")
         effects.push_back({Effect::Kind::kOpenPath, {}, facts_.windows.logs, {}, {}});
     else if (id == "more:latest-log") {
@@ -1350,10 +1393,11 @@ std::vector<Effect> LauncherModel::activate(const std::string& id, double now) {
         effects.push_back({Effect::Kind::kChooseFolder, *key, {}, {}, {}});
     } else if (id == "save-folders") {
         if (task)
-            refuse("Folders not saved", "Wait for the task to end before changing folders.", now);
+            refuse(tr("model.folders_not_saved", "Folders not saved"),
+                   tr("folders.save_why", "Wait for the task to end before changing folders."), now);
         else {
             effects.push_back({Effect::Kind::kSaveFolders, {}, {}, {}, {}});
-            folders_note_ = "Saved.";
+            folders_note_ = tr("model.saved", "Saved.");
             folders_note_until_ = now + 4;
         }
     } else if (id == "open-keyboard-file") {
@@ -1448,7 +1492,9 @@ View LauncherModel::view() const {
         ch.count = static_cast<int>(c.parts.size());
         ch.at = static_cast<int>(c.at) + 1;
         const std::string& kind = c.parts[c.at].kind;
-        ch.part = kind == "launcher" ? "The launcher" : kind == "game" ? "The game program" : "Fighters";
+        ch.part = kind == "launcher" ? tr("model.part_launcher", "The launcher")
+                  : kind == "game"   ? tr("update.game_title", "The game program")
+                                     : tr("update.fighters_title", "Fighters");
         for (size_t i = c.at + (c.next ? 0 : 1); i < c.parts.size() && !c.done; ++i) ch.next.push_back(c.parts[i]);
         ch.waiting = c.next;
         ch.handed_over = c.handed_over;
@@ -1458,14 +1504,16 @@ View LauncherModel::view() const {
             std::vector<std::string> brought;
             for (const std::string& r : c.results)
                 if (r != "no fighters") brought.push_back(r);
-            ch.summary = brought.empty() ? std::string("Everything is up to date") : "Updated: " + joined(brought);
+            ch.summary = brought.empty() ? tr("model.up_to_date", "Everything is up to date")
+                                         : tr("model.updated_list", "Updated: {list}", {{"list", joined(brought)}});
         }
+        std::string later;
         for (const auto& [name, why] : c.later) {
             std::string w = why;
             while (!w.empty() && (w.back() == '.' || w.back() == ' ')) w.pop_back();
-            ch.later += (ch.later.empty() ? "Left for later: " : "; ") + name + " (" + w + ")";
+            later += (later.empty() ? "" : "; ") + tr("update.later_item", "{name} ({why})", {{"name", name}, {"why", w}});
         }
-        if (!ch.later.empty()) ch.later += ".";
+        if (!later.empty()) ch.later = tr("model.left_for_later", "Left for later: {list}.", {{"list", later}});
     }
     v.dialog = dialog_;
     if (dialog_ && dialog_->id == "uninstall")

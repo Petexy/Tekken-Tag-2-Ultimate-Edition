@@ -4,8 +4,10 @@
 
 namespace launcher::model {
 
-const char* const kUnknownBuild =
-    "Tekken 8 was updated to a version that Golden Fist Launcher cannot save moves from yet";
+std::string unknown_build() {
+    return tr("rules.unknown_build", "Tekken 8 was updated to a version that Golden Fist Launcher cannot save moves "
+                                     "from yet");
+}
 
 const char* game_name(std::string_view game) { return game == kTekken8 ? "Tekken 8" : "Tekken 7"; }
 const char* other_game(std::string_view game) { return game == kTekken8 ? kTekken7 : kTekken8; }
@@ -17,14 +19,21 @@ std::string sentence(std::string text) {
 
 std::string joined(const std::vector<std::string>& items) {
     std::string out;
-    for (size_t i = 0; i < items.size(); ++i) out += (i == 0 ? "" : i + 1 == items.size() ? " and " : ", ") + items[i];
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i == 0) out = items[i];
+        else if (i + 1 == items.size()) out = tr("common.list_and", "{list} and {last}", {{"list", out}, {"last", items[i]}});
+        else out = tr("common.list_comma", "{list}, {next}", {{"list", out}, {"next", items[i]}});
+    }
     return out;
 }
 
 std::string joined_most(const std::vector<std::string>& items, size_t most) {
     std::string out;
-    for (size_t i = 0; i < items.size() && i < most; ++i) out += (i ? ", " : "") + items[i];
-    if (items.size() > most) out += " and " + std::to_string(items.size() - most) + " more";
+    for (size_t i = 0; i < items.size() && i < most; ++i)
+        out = i ? tr("common.list_comma", "{list}, {next}", {{"list", out}, {"next", items[i]}}) : items[i];
+    if (items.size() > most)
+        out = trn("common.list_more", static_cast<long long>(items.size() - most), "{list} and {n} more",
+                  "{list} and {n} more", {{"list", out}});
     return out;
 }
 
@@ -43,15 +52,17 @@ std::string display_name(const Facts& facts, const std::string& name) {
 
 std::string names_text(const Facts& facts, const std::vector<std::string>& names) {
     if (names.size() == 1) return display_name(facts, names[0]);
-    return std::to_string(names.size()) + " characters";
+    return trn("common.characters", static_cast<long long>(names.size()), "{n} character", "{n} characters");
 }
 
 std::string older_game(const Facts& facts) {
     if (facts.install.state != InstallState::kInstalled) return {};
     if (!built_older(facts.game_built, facts.this_build)) return {};
-    return "The game is from an older version of the launcher (" + std::string(launcher_version(facts.game_built)) +
-           "; this one is " + std::string(launcher_version(facts.this_build)) +
-           "): update it to play and to add or update characters, which need the newer game.";
+    return tr("rules.older_game",
+              "The game is from an older version of the launcher ({game}; this one is {this}): update it to play and "
+              "to add or update characters, which need the newer game.",
+              {{"game", std::string(launcher_version(facts.game_built))},
+               {"this", std::string(launcher_version(facts.this_build))}});
 }
 
 bool update_ready(const Facts& facts) {
@@ -69,11 +80,13 @@ std::string shown_build(const std::string& build) {
 }
 
 std::string set_up_first(const Facts& facts, bool long_form) {
-    const char* const verb = facts.caps.setup_game ? "Set up" : "Install";
-    return std::string(verb) + (long_form
-                                    ? " the game first: the characters are made from it and from your Tekken 7 or "
-                                      "Tekken 8."
-                                    : " the game first: characters are made from it.");
+    if (facts.caps.setup_game)
+        return long_form ? tr("rules.setup_first_long", "Set up the game first: the characters are made from it and "
+                                                        "from your Tekken 7 or Tekken 8.")
+                         : tr("rules.setup_first", "Set up the game first: characters are made from it.");
+    return long_form ? tr("rules.install_first_long", "Install the game first: the characters are made from it and "
+                                                      "from your Tekken 7 or Tekken 8.")
+                     : tr("rules.install_first", "Install the game first: characters are made from it.");
 }
 
 MovesBlock moves_block(const Facts& facts) {
@@ -102,29 +115,33 @@ bool can_import(const Facts& facts, std::string* why) {
         if (why) *why = reason;
         return false;
     };
-    if (facts.importer.empty() || facts.python.empty()) return no("The character importer or Python 3 is missing.");
+    if (facts.importer.empty() || facts.python.empty())
+        return no(tr("rules.no_importer", "The character importer or Python 3 is missing."));
     if (facts.install.state != InstallState::kInstalled) {
         return no(set_up_first(facts, false));
     }
     if (const std::string older = older_game(facts); !older.empty()) return no(older);
-    if (!facts.status) return no("The importer cannot tell what this PC has: " + facts.status_error);
+    if (!facts.status)
+        return no(tr("rules.status_failed", "The importer cannot tell what this PC has: {error}",
+                     {{"error", facts.status_error}}));
     // (Windows: the worker gets numpy and Pillow itself.)
     if (facts.caps.prerequisites_listed && (!facts.status->numpy || !facts.status->pillow)) {
-        return no("Python needs numpy and Pillow to add characters.");
+        return no(tr("rules.no_packages", "Python needs numpy and Pillow to add characters."));
     }
     if (!facts.status->game_error.empty()) {
-        return no("The importer cannot read the installed game: " + facts.status->game_error);
+        return no(tr("rules.game_unreadable", "The importer cannot read the installed game: {error}",
+                     {{"error", facts.status->game_error}}));
     }
     return true;
 }
 
 std::string shared_needs(std::string_view other) {
     const std::string name = game_name(other);
-    return "The " + name + " characters added need " + name +
-           " whenever a character is added: what all of them "
-           "share is made again, and neither their packs (made by an older version) nor what they share now have "
-           "their pictures. Install " +
-           name + " again, or remove them first.";
+    return tr("rules.shared_needs",
+              "The {game} characters added need {game} whenever a character is added: what all of them share is made "
+              "again, and neither their packs (made by an older version) nor what they share now have their pictures. "
+              "Install {game} again, or remove them first.",
+              {{"game", name}});
 }
 
 std::string shared_blocker(const Facts& facts, const std::string& game) {
@@ -145,9 +162,12 @@ bool game_usable(const Facts& facts, const std::string& game, std::string* why) 
     if (!can_import(facts, why)) return false;
     const ImporterStatus& s = *facts.status;
     if (game == kTekken8) {
-        if (!s.tekken8_usable()) return no(s.tekken8_error.empty() ? "Tekken 8 is not installed." : s.tekken8_error);
+        if (!s.tekken8_usable())
+            return no(s.tekken8_error.empty() ? tr("rules.tekken8_missing", "Tekken 8 is not installed.")
+                                              : s.tekken8_error);
     } else if (!s.tekken7_usable()) {
-        return no(s.tekken7_error.empty() ? "Tekken 7 is not installed." : s.tekken7_error);
+        return no(s.tekken7_error.empty() ? tr("rules.tekken7_missing", "Tekken 7 is not installed.")
+                                          : s.tekken7_error);
     }
     if (const std::string other = shared_blocker(facts, game); !other.empty()) return no(shared_needs(other));
     return true;
@@ -179,31 +199,33 @@ bool addable(const Facts& facts, const Fighter& f) {
 }
 
 std::string not_addable_why(const Facts& facts, const Fighter& f) {
-    if (f.dlc != 0 && !f.of(kTekken8)) return "Start Steam: it checks that you own their DLC";
+    if (f.dlc != 0 && !f.of(kTekken8)) return tr("rules.steam_dlc", "Start Steam: it checks that you own their DLC");
     if (!f.of(kTekken8)) {
         return f.moveset_saved && facts.status && facts.status->heihachi_saved
-                   ? "Start Steam: Tekken 7 needs it to save their subtitles"
-                   : "Start Steam: Tekken 7 needs it to save their moves";
+                   ? tr("rules.steam_subtitles7", "Start Steam: Tekken 7 needs it to save their subtitles")
+                   : tr("rules.steam_moves7", "Start Steam: Tekken 7 needs it to save their moves");
     }
     switch (moves_block(facts)) {
-    case MovesBlock::kBuild: return kUnknownBuild;
+    case MovesBlock::kBuild: return unknown_build();
     case MovesBlock::kRun: return sentence(facts.status->tekken8_run_error);
-    case MovesBlock::kTools: return "Install what is missing above: it saves their moves";
-    default: return "Start Steam: Tekken 8 needs it to save their moves";
+    case MovesBlock::kTools: return tr("rules.install_missing", "Install what is missing above: it saves their moves");
+    default: return tr("rules.steam_moves8", "Start Steam: Tekken 8 needs it to save their moves");
     }
 }
 
 std::string unknown_owned_why(const Facts& facts, const Fighter& f) {
     const char* game = f.of(kTekken8) ? kTekken8 : kTekken7;
-    if (facts.status && !facts.status->steam_running) return "Start Steam: it tells which DLC you own";
+    if (facts.status && !facts.status->steam_running)
+        return tr("rules.steam_owned", "Start Steam: it tells which DLC you own");
     if (const auto failed = facts.owned.errors.find(game); failed != facts.owned.errors.end()) {
-        return "Steam could not be asked through " + std::string(game_name(game)) + " (" + failed->second +
-               "): Refresh asks it again";
+        return tr("rules.owned_game_failed", "Steam could not be asked through {game} ({error}): Refresh asks it again",
+                  {{"game", game_name(game)}, {"error", failed->second}});
     }
     if (facts.owned.state == OwnedState::kFailed) {
-        return "Steam could not tell which DLC you own (" + facts.owned.error + ")";
+        return tr("rules.owned_failed", "Steam could not tell which DLC you own ({error})",
+                  {{"error", facts.owned.error}});
     }
-    return "Which " + std::string(game_name(game)) + " DLC you own is not known yet";
+    return tr("rules.owned_unknown", "Which {game} DLC you own is not known yet", {{"game", game_name(game)}});
 }
 
 std::string removable(const Facts& facts, const Fighter& f) {
@@ -211,10 +233,13 @@ std::string removable(const Facts& facts, const Fighter& f) {
     for (const Fighter& o : facts.status->fighters) {
         if (o.name != f.name && o.added() && o.needs_game && !facts.status->readable(o.game)) {
             const char* name = game_name(o.game);
-            return std::string(name) + " is needed for the " + name +
-                   " characters that stay: what they share is made "
-                   "again from it" +
-                   (o.of(f.game) ? ". Remove All removes them all at once." : ".");
+            return o.of(f.game) ? tr("rules.needed_remove_all",
+                                     "{game} is needed for the {game} characters that stay: what they share is made "
+                                     "again from it. Remove All removes them all at once.",
+                                     {{"game", name}})
+                                : tr("rules.needed", "{game} is needed for the {game} characters that stay: what they "
+                                                     "share is made again from it.",
+                                     {{"game", name}});
         }
     }
     return {};
@@ -355,14 +380,14 @@ bool busy(const Facts& facts, bool release_checking, bool main_checking) {
 namespace {
 
 std::string folder_name(const std::string& key) {
-    if (key == "source") return "Wii U archive";
-    if (key == "title") return "extracted game";
-    if (key == "install") return "installation folder";
-    if (key == "data") return "data folder";
-    if (key == "packs") return "characters folder";
-    if (key == "saves") return "saves folder";
-    if (key == "tools") return "Windows tools folder";
-    return key + " folder";
+    if (key == "source") return tr("problem.folder_source", "Wii U archive");
+    if (key == "title") return tr("problem.folder_title", "extracted game");
+    if (key == "install") return tr("problem.folder_install", "installation folder");
+    if (key == "data") return tr("problem.folder_data", "data folder");
+    if (key == "packs") return tr("problem.folder_packs", "characters folder");
+    if (key == "saves") return tr("problem.folder_saves", "saves folder");
+    if (key == "tools") return tr("problem.folder_tools", "Windows tools folder");
+    return tr("problem.folder_other", "{key} folder", {{"key", key}});
 }
 
 } // namespace
@@ -370,46 +395,74 @@ std::string folder_name(const std::string& key) {
 std::string setup_problem_text(const SetupProblem& p) {
     const std::string& c = p.code;
     if (c.empty()) return {};
-    if (c == "inputs") return "Choose your Wii U archive (.wua) and an installation folder first.";
+    if (c == "inputs") return tr("problem.inputs", "Choose your Wii U archive (.wua) and an installation folder first.");
     if (c == "tools_folder")
-        return "Set Up Game builds into the project's build-windows-tools folder: start the launcher from its own "
-               "files, not from another build folder.";
+        return tr("problem.tools_folder", "Set Up Game builds into the project's build-windows-tools folder: start the "
+                                          "launcher from its own files, not from another build folder.");
     if (c == "installer_letters") {
-        const std::string what = p.what == "install" ? "installation folder" : p.what == "source" ? "Wii U archive"
-                                                                                                  : p.what;
-        return "The " + what + " (" + p.path + ") has letters the game's installer cannot be given on this PC: " +
-               p.letters + ". Choose one whose path has only plain letters, such as C:\\Games\\TTT2.";
+        const i18n::Args args = {{"path", p.path}, {"letters", p.letters}};
+        if (p.what == "install")
+            return tr("problem.installer_letters_install",
+                      "The installation folder ({path}) has letters the game's installer cannot be given on this PC: "
+                      "{letters}. Choose one whose path has only plain letters, such as C:\\Games\\TTT2.",
+                      args);
+        if (p.what == "source")
+            return tr("problem.installer_letters_source",
+                      "The Wii U archive ({path}) has letters the game's installer cannot be given on this PC: "
+                      "{letters}. Choose one whose path has only plain letters, such as C:\\Games\\TTT2.",
+                      args);
+        return tr("problem.installer_letters",
+                  "The {what} ({path}) has letters the game's installer cannot be given on this PC: {letters}. Choose "
+                  "one whose path has only plain letters, such as C:\\Games\\TTT2.",
+                  {{"what", p.what}, {"path", p.path}, {"letters", p.letters}});
     }
     if (c == "tools_letters") {
-        const std::string what = p.what == "project" ? "launcher's files folder" : "Windows tools folder";
-        return "The " + what + " (" + p.path + ") has letters the Windows build tools cannot read: " + p.letters +
-               ". Use a folder whose path has only plain letters, such as C:\\TTT2 (outside OneDrive); the "
-               "release Golden_Fist_Launcher-x86_64.exe keeps its files in such a folder by itself.";
+        const i18n::Args args = {{"path", p.path}, {"letters", p.letters}};
+        return p.what == "project"
+                   ? tr("problem.files_letters",
+                        "The launcher's files folder ({path}) has letters the Windows build tools cannot read: "
+                        "{letters}. Use a folder whose path has only plain letters, such as C:\\TTT2 (outside "
+                        "OneDrive); the release Golden_Fist_Launcher-x86_64.exe keeps its files in such a folder by "
+                        "itself.",
+                        args)
+                   : tr("problem.tools_letters",
+                        "The Windows tools folder ({path}) has letters the Windows build tools cannot read: {letters}. "
+                        "Use a folder whose path has only plain letters, such as C:\\TTT2 (outside OneDrive); the "
+                        "release Golden_Fist_Launcher-x86_64.exe keeps its files in such a folder by itself.",
+                        args);
     }
     if (c == "project_length")
-        return "The launcher's files are in a folder whose path is too long for the Windows build tools (" + p.path +
-               "). Put a fresh copy in a short folder such as D:\\TTT2, then set up again; your archive need not "
-               "move.";
+        return tr("problem.project_length",
+                  "The launcher's files are in a folder whose path is too long for the Windows build tools ({path}). "
+                  "Put a fresh copy in a short folder such as D:\\TTT2, then set up again; your archive need not "
+                  "move.",
+                  {{"path", p.path}});
     if (c == "tools_length")
-        return "The Windows tools folder's path is too long (" + p.path +
-               "): choose a shorter one in Settings > Folders.";
-    if (c == "no_build") return "Build the Windows game first: More > Build / Rebuild.";
-    if (c == "no_install") return "Choose a complete installation before updating it (Settings > Folders).";
+        return tr("problem.tools_length",
+                  "The Windows tools folder's path is too long ({path}): choose a shorter one in Settings > Folders.",
+                  {{"path", p.path}});
+    if (c == "no_build") return tr("problem.no_build", "Build the Windows game first: More > Build / Rebuild.");
+    if (c == "no_install")
+        return tr("problem.no_install", "Choose a complete installation before updating it (Settings > Folders).");
     if (c == "no_paths")
-        return "Choose the Wii U source and the installation folder first (Settings > Folders), then install.";
-    if (c == "no_fighters") return "Choose at least one character.";
+        return tr("problem.no_paths", "Choose the Wii U source and the installation folder first (Settings > "
+                                      "Folders), then install.");
+    if (c == "no_fighters") return tr("problem.no_fighters", "Choose at least one character.");
     if (c == "title")
-        return "The game's extracted files are not usable: set up the game again, or choose its folder in "
-               "Settings > Folders.";
-    return "The launcher's files refused it (" + c + ").";
+        return tr("problem.title", "The game's extracted files are not usable: set up the game again, or choose its "
+                                   "folder in Settings > Folders.");
+    return tr("problem.refused", "The launcher's files refused it ({code}).", {{"code", c}});
 }
 
 std::string save_problem_text(const SetupProblem& p) {
     if (p.code.empty()) return {};
     if (p.code == "data_name")
-        return "The data folder must end in TTT2Ultimate, so that the game and the launcher share their settings.";
-    if (p.code == "relative") return "The " + folder_name(p.what) + " must be a full path, with its drive.";
-    return "The launcher's files refused the folders (" + p.code + ").";
+        return tr("problem.data_name", "The data folder must end in TTT2Ultimate, so that the game and the launcher "
+                                       "share their settings.");
+    if (p.code == "relative")
+        return tr("problem.relative", "The {folder} must be a full path, with its drive.",
+                  {{"folder", folder_name(p.what)}});
+    return tr("problem.refused_folders", "The launcher's files refused the folders ({code}).", {{"code", p.code}});
 }
 
 } // namespace launcher::model

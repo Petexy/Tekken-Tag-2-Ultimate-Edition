@@ -44,6 +44,17 @@ Focus crimson_focus(bool is_default = false) {
 
 std::string u8(const fs::path& p) { return win32::narrow(p.native()); }
 
+// What the start script is doing, in the launcher's language: its "@step <id> <text>" lines are English (a .cmd
+// file has one language), so the known ids are said from the catalog; another id keeps the script's own words.
+std::string bootstrap_now(const BootstrapProgress& p) {
+    if (p.step == "check") return tr("ready.now_check", "Checking the launcher's tools");
+    if (p.step == "download") return tr("ready.now_download", "Downloading Python for the launcher");
+    if (p.step == "verify") return tr("ready.now_verify", "Checking the download");
+    if (p.step == "unpack") return tr("ready.now_unpack", "Unpacking Python");
+    if (p.step == "ready") return tr("ready.now_ready", "The launcher's Python is ready");
+    return p.text;
+}
+
 } // namespace
 
 // Until the model can be made: the first start's Python, the state. False: the window was closed.
@@ -202,7 +213,8 @@ void App::ready_declare() {
         auto g = ui.open("top", top);
         brand(ui, "brand", "Golden Fist", "Launcher");
         ui.leaf("top/space", Box{.w = Size::grow()}, {}, {});
-        TextSpec version{std::string("Launcher ") + TTT2_LAUNCHER_VERSION, tx::kVersion, c::kFaint};
+        TextSpec version{tr("app.version", "Launcher {version}", {{"version", TTT2_LAUNCHER_VERSION}}), tx::kVersion,
+                         c::kFaint};
         version.drop = true;
         text(ui, "version", version, Box{.margin = {0, 0, 18, 0}, .shrink_order = 3});
         caption_buttons(ui, "frame", window_.can_minimise(), window_.can_toggle_fullscreen(), window_.fullscreen(),
@@ -230,24 +242,26 @@ void App::ready_declare() {
                            (failed && r.files().python_needed);
     {
         auto g = ui.open("ready/crimson", crimson);
-        section_label(ui, "ready/label", bootstrap ? "First start" : "Starting", Half::Crimson, {},
+        section_label(ui, "ready/label", bootstrap ? tr("ready.first_start", "First start") : tr("ready.starting", "Starting"),
+                      Half::Crimson, {},
                       fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::CrimsonRect));
         text(ui, "ready/title",
-             TextSpec{.text = failed ? r.failure().title : bootstrap ? "Getting the launcher ready" : "Reading the "
-                                                                                                    "launcher's files",
+             TextSpec{.text = failed      ? r.failure().title
+                              : bootstrap ? tr("ready.getting_ready", "Getting the launcher ready")
+                                          : tr("ready.reading_files", "Reading the launcher's files"),
                       .style = tx::kBig, .chroma = 3, .autofit_min = 26},
              fit(Box{.margin = {0, 0, 0, 14}}, SeamFit::CrimsonRect));
         // The steps: the first start's (the .cmd's log), then reading the files.
         struct S {
             const char* id;
-            const char* name;
+            std::string name;
         };
-        // (Short: a step row's name has a narrow column; the blue side says each step whole.)
-        static const S kSteps[] = {{"check", "Tools"},
-                                   {"download", "Download"},
-                                   {"verify", "Check it"},
-                                   {"unpack", "Unpack"},
-                                   {"state", "Read files"}};
+        // (Short: the step rows' name column is as wide as their longest name; the blue side says each step whole.)
+        const S kSteps[] = {{"check", tr("ready.step_tools", "Tools")},
+                            {"download", tr("ready.step_download", "Download")},
+                            {"verify", tr("ready.step_verify", "Check it")},
+                            {"unpack", tr("ready.step_unpack", "Unpack")},
+                            {"state", tr("ready.step_state", "Read files")}};
         const BootstrapProgress& p = r.progress();
         int at = 4;
         if (r.stage() == WindowsReady::Stage::kBootstrap || (failed && bootstrap)) {
@@ -256,17 +270,22 @@ void App::ready_declare() {
                 if (p.step == kSteps[i].id) at = i;
             if (p.step == "ready") at = 4;
         }
+        std::vector<std::string> names;
+        for (int i = bootstrap ? 0 : 4; i < 5; ++i) names.push_back(kSteps[i].name);
+        const float name_width = step_name_width(ui.text(), names);
         auto rows = ui.open("ready/rows", Box{.gap = 6});
         for (int i = bootstrap ? 0 : 4; i < 5; ++i) {
             StepRowSpec s;
             s.name = kSteps[i].name;
+            s.name_width = name_width;
             s.number = bootstrap ? i + 1 : 1;
             s.state = i < at ? StepState::Done : i > at ? StepState::Pending : failed ? StepState::Failed
                                                                                       : StepState::Current;
             s.fraction = i < at ? 1.f : i == at && i == 1 && p.download >= 0 ? static_cast<float>(p.download) : 0.f;
-            s.count = i < at ? std::string("Done") : i == at && i == 1 && p.download >= 0
-                                                         ? std::to_string(static_cast<int>(p.download * 100)) + " %"
-                                                         : std::string();
+            s.count = i < at ? tr("hint.done", "Done")
+                      : i == at && i == 1 && p.download >= 0
+                          ? tr("ready.percent", "{percent} %", {{"percent", static_cast<int>(p.download * 100)}})
+                          : std::string();
             step_row(ui, "ready/step" + std::to_string(i), s, fit({}, SeamFit::CrimsonSkewed));
         }
         if (failed) {
@@ -275,25 +294,25 @@ void App::ready_declare() {
                                                SeamFit::CrimsonRect));
             if (r.failure().retry) {
                 ButtonSpec retry;
-                retry.label = "Try Again";
+                retry.label = tr("task.try_again", "Try Again");
                 retry.kind = ButtonKind::Primary;
                 retry.half = Half::Crimson;
                 button(ui, "ready:retry", retry, crimson_focus(true));
             } else {
                 ButtonSpec rel;
-                rel.label = "Releases Page";
+                rel.label = tr("ready.releases_page", "Releases Page");
                 rel.kind = ButtonKind::Primary;
                 rel.half = Half::Crimson;
                 button(ui, "ready:releases", rel, crimson_focus(true));
             }
             if (!r.failure().log.empty()) {
                 ButtonSpec log;
-                log.label = "Open Log";
+                log.label = tr("task.open_log", "Open Log");
                 log.half = Half::Crimson;
                 button(ui, "ready:log", log, crimson_focus());
             }
             ButtonSpec quit;
-            quit.label = "Quit";
+            quit.label = tr("dialog.quit", "Quit");
             quit.kind = ButtonKind::Ghost;
             quit.half = Half::Crimson;
             button(ui, "ready:quit", quit, crimson_focus());
@@ -305,10 +324,12 @@ void App::ready_declare() {
         const std::string about =
             failed ? r.failure().text
             : bootstrap
-                ? "Its first start gets the Python its tasks run with (about 30 MB, checked against the launcher's "
-                  "pinned copy) into " +
-                      u8(r.files().root / "local") + ". Only once: later starts open at once."
-                : "The launcher asks its files what is installed, where your folders are and how the game starts.";
+                ? tr("ready.bootstrap_about", "Its first start gets the Python its tasks run with (about 30 MB, "
+                                              "checked against the launcher's pinned copy) into {folder}. Only once: "
+                                              "later starts open at once.",
+                     {{"folder", u8(r.files().root / "local")}})
+                : tr("ready.state_about", "The launcher asks its files what is installed, where your folders are and "
+                                          "how the game starts.");
         text(ui, "ready/about", TextSpec{.text = about, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
              fit(Box{.margin = {0, 10, 0, 10}}, SeamFit::BlueRect));
         if (failed && !r.failure().detail.empty())
@@ -316,7 +337,7 @@ void App::ready_declare() {
                  TextSpec{.text = r.failure().detail, .style = tx::kFactValue, .color = c::kBlueFaint, .wrap = true},
                  fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
         if (bootstrap && !failed && !r.progress().text.empty())
-            text(ui, "ready/now", TextSpec{.text = r.progress().text, .style = tx::kKick, .color = c::kCyan},
+            text(ui, "ready/now", TextSpec{.text = bootstrap_now(r.progress()), .style = tx::kKick, .color = c::kCyan},
                  fit({}, SeamFit::BlueRect));
     }
     {
@@ -330,11 +351,11 @@ void App::ready_declare() {
         auto g = ui.open("bottom", bottom);
         std::vector<Hint> hs;
         if (failed) {
-            hs.push_back({Prompt::Move, "Move"});
-            hs.push_back({Prompt::Accept, focused_label().empty() ? std::string("Choose") : focused_label()});
+            hs.push_back({Prompt::Move, tr("hint.move", "Move")});
+            hs.push_back({Prompt::Accept, focused_label().empty() ? tr("hint.choose", "Choose") : focused_label()});
         }
-        hs.push_back({Prompt::Back, "Quit"});
-        hint_bar(ui, "hints", hs);
+        hs.push_back({Prompt::Back, tr("dialog.quit", "Quit")});
+        hint_bar(ui, "hints", hs, {}, size.x - bottom.pad.left - bottom.pad.right);
     }
 }
 
@@ -388,18 +409,20 @@ void App::save_folders() {
             backend::QueryError error;
             const auto saved = backend::parse_save_settings(save_out_, &error);
             if (!saved) {
-                toast("Folders not saved", error.text.empty() ? "The launcher's files did not answer." : error.text);
+                toast(tr("model.folders_not_saved", "Folders not saved"),
+                      error.text.empty() ? tr("app.files_no_answer", "The launcher's files did not answer.") : error.text);
                 cue(ttt2::app::Cue::TaskFailed);
                 return;
             }
             if (!saved->problem.code.empty()) {
-                toast("Folders not saved", m::save_problem_text(saved->problem));
+                toast(tr("model.folders_not_saved", "Folders not saved"), m::save_problem_text(saved->problem));
                 cue(ttt2::app::Cue::TaskFailed);
                 return;
             }
             model_->mutable_facts().windows.folders = saved->folders;
             folders_changed_ = false;
-            toast("Folders saved", "The launcher and the game use them from now on.", false);
+            toast(tr("app.folders_saved", "Folders saved"),
+                  tr("app.folders_saved_about", "The launcher and the game use them from now on."), false);
             cue(ttt2::app::Cue::TaskDone);
             windows_state_again();
         });
@@ -408,7 +431,9 @@ void App::save_folders() {
     auto& commands = static_cast<m::WindowsCommands&>(*commands_);
     save_job_ = starter_->start(commands.save_settings(model_->facts(), model_->facts().windows.folders),
                                 std::move(ev), &error);
-    if (!save_job_) toast("Folders not saved", "Python did not start: " + error + ".");
+    if (!save_job_)
+        toast(tr("model.folders_not_saved", "Folders not saved"),
+              tr("app.python_not_started", "Python did not start: {error}.", {{"error", error}}));
 }
 
 } // namespace launcher::app

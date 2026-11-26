@@ -50,8 +50,9 @@ const File file_${INDEX} = {\"${PATH}\", data_${INDEX}, ${size}};
     return()
 endif()
 
-include_guard(GLOBAL)
+# (Set before the guard: each directory that includes this file sees it.)
 set(TTT2_EMBED_FILES_SCRIPT "${CMAKE_CURRENT_LIST_FILE}")
+include_guard(GLOBAL)
 
 function(ttt2_embed_files target)
     cmake_parse_arguments(PARSE_ARGV 1 embed "" "NAMESPACE;BASE_DIR" "FILES")

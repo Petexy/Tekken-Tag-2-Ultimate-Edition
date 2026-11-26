@@ -6,6 +6,7 @@
 //   [--config FILE] [--ui-smoke-test FILE]
 
 #include "app.h"
+#include "launcher_ini.h"
 
 #include "paths.h"
 #include "release.h"
@@ -164,6 +165,19 @@ void log_to_file(const std::filesystem::path& file) {
 
 } // namespace
 
+// The language of what is told before the window opens (another launcher running, no window): launcher.ini's where
+// Linux keeps it, else the system's (TTT2_LAUNCHER_LANGUAGE first); App sets it again once it has read its settings.
+static void early_language() {
+    std::string setting = environment("TTT2_LAUNCHER_LANGUAGE");
+#ifndef _WIN32
+    if (setting.empty())
+        setting = launcher::app::read_launcher_ini(launcher::Places::from_environment().display().parent_path() /
+                                                   "launcher.ini")
+                      .language;
+#endif
+    launcher::i18n::set_language(launcher::i18n::resolve(setting.empty() ? "system" : setting));
+}
+
 static int launcher_main(int argc, char** argv) {
     namespace st = launcher::startup;
     const std::vector<std::string> args = st::arguments(argc, argv);
@@ -195,6 +209,7 @@ static int launcher_main(int argc, char** argv) {
         if (!quiet) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Golden Fist Launcher", text.c_str(), nullptr);
     };
 #endif
+    early_language();
     st::Start start = st::begin(args, program);
     if (start.exit >= 0) return start.exit;
 

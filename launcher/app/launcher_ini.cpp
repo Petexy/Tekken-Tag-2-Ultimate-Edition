@@ -1,4 +1,5 @@
 #include "launcher_ini.h"
+#include "i18n.h"
 #include "utf8_path.h"
 
 #include <algorithm>
@@ -32,6 +33,9 @@ model::LauncherSettings read_launcher_ini(const std::filesystem::path& file) {
             const int v = std::atoi(value.c_str());
             if (std::find(std::begin(model::kTextSizes), std::end(model::kTextSizes), v) != std::end(model::kTextSizes))
                 s.text_size = v;
+        } else if (key == "language") {
+            if (value == launcher::i18n::kSystem || launcher::i18n::find_language(value) || value == launcher::i18n::kPseudo)
+                s.language = value;
         } else if (key == "prompts") {
             for (size_t i = 0; i < std::size(model::kPrompts); ++i) {
                 std::string name = model::kPrompts[i];
@@ -51,7 +55,8 @@ bool write_launcher_ini(const std::filesystem::path& file, const model::Launcher
       << "sounds=" << (s.sounds ? "yes" : "no") << "\n"
       << "reduce_motion=" << (s.reduce_motion ? "yes" : "no") << "\n"
       << "prompts=" << prompts << "\n"
-      << "text_size=" << s.text_size << "\n";
+      << "text_size=" << s.text_size << "\n"
+      << "language=" << s.language << "\n";
     std::error_code ec;
     if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path(), ec);
     std::filesystem::path tmp = file;

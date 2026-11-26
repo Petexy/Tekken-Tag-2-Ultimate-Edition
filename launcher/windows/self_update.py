@@ -34,6 +34,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+from texts import tr, trn
+
 ROOT = Path(__file__).resolve().parents[2]
 # The newest release as GitHub's API gives it (drafts and pre-releases are
 # never it). $TTT2_LAUNCHER_RELEASES is asked instead when set (tests).
@@ -426,55 +428,64 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
     """Updates `exe` to the newest release. Its version, or None when this one
     is the newest. UpdateError says why it cannot; Cancelled when cancelled."""
     current = version()
-    say('@step update Looking for a newer version')
+    say('@step update ' + tr('update.looking', 'Looking for a newer version'))
     try:
         answer = ask()
     except OSError as error:
-        raise UpdateError('GitHub cannot be reached: %s.' % reason(error))
+        raise UpdateError(tr('update.github_unreachable', 'GitHub cannot be reached: {why}.', why=reason(error)))
     release = answer.release
     if answer.none or (release and not newer_release(release.version)):
         say('No release is published yet.' if answer.none else 'The newest release is %s.' % release.tag)
-        say('@step update The launcher is up to date: version %s is the newest.' % current)
+        say('@step update ' + tr('update.newest_version', 'The launcher is up to date: version {version} is the newest.',
+                                 version=current))
         return None
     if not release: raise UpdateError(sentence(answer.error))
     if not custom_releases() and not release.url.startswith('https://'):
-        raise UpdateError('Version %s is not offered over HTTPS.' % release.version)
+        raise UpdateError(tr('update.not_https', 'Version {version} is not offered over HTTPS.', version=release.version))
     if why := cannot_replace(exe):
-        raise UpdateError('Its folder, %s, cannot be written to (%s): move the launcher to a folder of yours, '
-                          'then update it.' % (exe.parent, why))
+        raise UpdateError(tr('update.folder_readonly', 'Its folder, {folder}, cannot be written to ({why}): move the '
+                                                       'launcher to a folder of yours, then update it.',
+                             folder=exe.parent, why=why))
     file = update_file(exe)
     try:
         with contextlib.suppress(FileNotFoundError): file.unlink()  # (one stopped half-way)
-        say('@step update Downloading version ' + release.version)
+        say('@step update ' + tr('update.downloading_version', 'Downloading version {version}', version=release.version))
         try:
             download(release, file, cancelled, say)
         except (OSError, ValueError) as error:
-            raise UpdateError('Version %s cannot be downloaded: %s.' % (release.version, reason(error)))
+            raise UpdateError(tr('update.cannot_download', 'Version {version} cannot be downloaded: {why}.',
+                                 version=release.version, why=reason(error)))
         size = file.stat().st_size
         if release.size and size != release.size:
-            raise UpdateError('The download of version %s is incomplete (%d of %d bytes).'
-                              % (release.version, size, release.size))
+            raise UpdateError(tr('update.incomplete', 'The download of version {version} is incomplete ({size} of '
+                                                      '{total} bytes).',
+                                 version=release.version, size=size, total=release.size))
         if release.sha256 and sha256_of(file) != release.sha256:
-            raise UpdateError("The download of version %s is damaged: its SHA-256 is not GitHub's." % release.version)
+            raise UpdateError(tr('update.damaged', "The download of version {version} is damaged: its SHA-256 is not "
+                                                   "GitHub's.", version=release.version))
         files = stored_files(file)
         if files is None:
-            raise UpdateError('What was downloaded for version %s is not a Windows launcher.' % release.version)
+            raise UpdateError(tr('update.not_launcher', 'What was downloaded for version {version} is not a Windows '
+                                                        'launcher.', version=release.version))
         # It is the version it was released as (else each update would download it again), as its files say.
         # (Not by starting it, as the Linux launcher asks the new AppImage: on Windows, a program never seen
         # before is where virus scanners step in, and its start can wait on them for as long as they take, with
         # this update stuck behind it.)
         said = files_version(files)
         if not said:
-            raise UpdateError('What was downloaded for version %s names no version.' % release.version)
+            raise UpdateError(tr('update.no_version', 'What was downloaded for version {version} names no version.',
+                                 version=release.version))
         if compare_versions(said, release.version) != 0:
-            raise UpdateError('The launcher released as version %s is version %s.' % (release.version, said))
+            raise UpdateError(tr('update.other_version', 'The launcher released as version {version} is version '
+                                                         '{said}.', version=release.version, said=said))
         if cancelled(): raise Cancelled()
         # (From here on it is never cancelled: the launcher hides Cancel once it says so.)
-        say('@step update Putting version %s in place' % release.version)
+        say('@replacing')   # (the launcher hides Cancel: whatever the step says in the player's language)
+        say('@step update ' + tr('update.putting_version', 'Putting version {version} in place', version=release.version))
         try:
             replace(file, exe)
         except OSError as error:
-            raise UpdateError('It cannot replace %s (%s).' % (exe, reason(error)))
+            raise UpdateError(tr('update.cannot_replace', 'It cannot replace {file} ({why}).', file=exe, why=reason(error)))
     except BaseException:
         with contextlib.suppress(OSError): file.unlink()
         raise
@@ -498,10 +509,11 @@ def github(path):
         except (ValueError, AttributeError):
             message = ''
         if 'rate limit' in message.lower():
-            raise UpdateError('GitHub answers only so many questions from one network an hour: try again later.')
-        raise UpdateError('GitHub answered "%s".' % (message or error.code))
+            raise UpdateError(tr('update.rate_limit', 'GitHub answers only so many questions from one network an '
+                                                      'hour: try again later.'))
+        raise UpdateError(tr('update.github_answered', 'GitHub answered "{message}".', message=message or error.code))
     except (OSError, ValueError) as error:
-        raise UpdateError('GitHub cannot be reached: %s.' % reason(error))
+        raise UpdateError(tr('update.github_unreachable', 'GitHub cannot be reached: {why}.', why=reason(error)))
 
 
 def archive_url(commit):
@@ -583,7 +595,7 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     current = build_commit(root)
     if not current or not (root / STAMP).is_file():
         raise UpdateError('These files were not unpacked from the launcher .exe: they cannot be updated in place.')
-    say('@step update Looking for newer changes on ' + branch)
+    say('@step update ' + tr('update.looking_branch', 'Looking for newer changes on {branch}', branch=branch))
     quoted = urllib.parse.quote(branch, safe='')
     try:
         compare = github('compare/%s...%s' % (current, quoted))
@@ -594,14 +606,16 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     ahead = compare.get('ahead_by') if isinstance(compare, dict) else None
     if not isinstance(ahead, int): raise UpdateError("GitHub's answer about %s is not readable." % branch)
     if not ahead:
-        say('@step update The launcher is up to date: %s has nothing newer than %s.' % (branch, current[:7]))
+        say('@step update ' + tr('update.newest_branch', 'The launcher is up to date: {branch} has nothing newer than '
+                                                         '{commit}.', branch=branch, commit=current[:7]))
         return None
     head = github('branches/' + quoted).get('commit', {}).get('sha', '')
     if not re.fullmatch(r'[0-9a-f]{40}', head): raise UpdateError("GitHub's answer names no commit of %s." % branch)
     url = archive_url(head)
     if not os.environ.get('TTT2_LAUNCHER_GITHUB') and not url.startswith('https://'):
         raise UpdateError('%s is not offered over HTTPS.' % head[:7])
-    say('@step update Downloading %d change%s of %s' % (ahead, '' if ahead == 1 else 's', branch))
+    say('@step update ' + trn('update.downloading_changes', ahead, 'Downloading {n} change of {branch}',
+                              'Downloading {n} changes of {branch}', branch=branch))
     file = root / 'local/launcher-update.zip'
     try:
         download(Release(version='', tag='', page='', asset='', url=url), file, cancelled, say)
@@ -628,7 +642,8 @@ def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(l
     files[BUILD_BRANCH] = (branch + '\n').encode()
     if cancelled(): raise Cancelled()
     # (From here on it is never cancelled: the launcher hides Cancel once it says so.)
-    say('@step update Putting %s in place' % head[:7])
+    say('@replacing')
+    say('@step update ' + tr('update.putting_commit', 'Putting {commit} in place', commit=head[:7]))
     try:
         install_files(root, files)
     except OSError as error:

@@ -32,7 +32,7 @@ Box fit(Box b, SeamFit f) {
 }
 
 const Color kValue = rgb(0xdbe3f1);
-constexpr float kPlacesWidth = 176;
+constexpr float kPlacesWidth = 176, kPlacesMaxWidth = 224; // (wider for a language's longer place names)
 constexpr float kRowGap = 6; // between the rows of a list
 
 Focus crimson_focus(bool is_default = false) {
@@ -55,14 +55,14 @@ std::string folder_name(const fs::path& p) {
 
 // Settings > Folders' names, as the picker's title says them.
 std::string folder_title(const std::string& key) {
-    if (key == "source") return "Wii U archive's folder";
-    if (key == "title") return "extracted game";
-    if (key == "install") return "installation folder";
-    if (key == "data") return "data folder";
-    if (key == "packs") return "characters folder";
-    if (key == "saves") return "saves folder";
-    if (key == "tools") return "Windows tools folder";
-    return key + " folder";
+    if (key == "source") return tr("picker.folder_source", "Wii U archive's folder");
+    if (key == "title") return tr("picker.folder_title", "extracted game");
+    if (key == "install") return tr("picker.folder_install", "installation folder");
+    if (key == "data") return tr("picker.folder_data", "data folder");
+    if (key == "packs") return tr("picker.folder_packs", "characters folder");
+    if (key == "saves") return tr("picker.folder_saves", "saves folder");
+    if (key == "tools") return tr("picker.folder_tools", "Windows tools folder");
+    return tr("picker.folder_other", "{key} folder", {{"key", key}});
 }
 
 // The entry an id names ("pe:<index>"), none for another id.
@@ -291,7 +291,9 @@ bool App::picker_activate(const std::string& id) {
     if (const Entry* e = entry(id)) {
         if (e->kind != Entry::Kind::kFile) picker_dir(e->path);
         else if (e->wua && !p.folder) picker_chosen(e->path);
-        else toast("Not a Wii U game archive", "The launcher needs a .wua archive of the European game with update 16.");
+        else
+            toast(tr("picker.not_archive", "Not a Wii U game archive"),
+                  tr("picker.needs_wua", "The launcher needs a .wua archive of the European game with update 16."));
         return true;
     }
     if (id == "pk/here") {
@@ -307,11 +309,13 @@ bool App::picker_activate(const std::string& id) {
         std::error_code ec;
         fs::path made;
         for (int n = 1; n < 100 && made.empty(); ++n) {
-            const fs::path f = p.dir / (n == 1 ? std::string("New folder") : "New folder " + std::to_string(n));
+            const fs::path f = p.dir / utf8_path(n == 1 ? tr("picker.new_folder_name", "New folder")
+                                                        : tr("picker.new_folder_n", "New folder {n}", {{"n", n}}));
             if (!fs::exists(f, ec) && fs::create_directory(f, ec)) made = f;
         }
         if (made.empty()) {
-            toast("No new folder", ec ? ec.message() : std::string("This folder cannot hold another one."));
+            toast(tr("picker.no_new_folder", "No new folder"),
+                  ec ? ec.message() : tr("picker.cannot_hold", "This folder cannot hold another one."));
             return true;
         }
         picker_dir(made);
@@ -333,7 +337,7 @@ bool App::picker_activate(const std::string& id) {
     }
     if (id == "pk/system") {
         if (o_.testing) {
-            toast("Not in tests", "The system's picker is not opened while the launcher is tested.");
+            toast("Not in tests", "The system's picker is not opened while the launcher is tested."); // (tests only)
             return true;
         }
         const bool folder = p.folder;
@@ -408,10 +412,10 @@ void App::picker_rows() {
             r.name = e.name;
             if (e.kind == Entry::Kind::kUp) {
                 r.icon = "stroke:up";
-                r.meta = "up";
+                r.meta = tr("picker.up_meta", "up");
             } else if (e.kind == Entry::Kind::kFolder) {
                 r.icon = "stroke:folder";
-                r.meta = e.items < 0 ? "" : std::to_string(e.items) + (e.items == 1 ? " item" : " items");
+                r.meta = e.items < 0 ? "" : trn("picker.items", e.items, "{n} item", "{n} items");
             } else {
                 r.icon = e.wua ? "stroke:disc" : "stroke:file";
                 r.meta = size_text(e.size);
@@ -428,13 +432,14 @@ void App::picker_rows() {
 void App::picker_screen(const Box& crimson, const Box& blue) {
     Ui& ui = *ui_;
     Picker& p = *picker_;
-    const std::string title = !p.folder                         ? "Choose the game's .wua"
-                              : p.purpose.starts_with("folder:") ? "Choose the " + folder_title(p.purpose.substr(7))
-                                                                 : "Choose where to install";
+    const std::string title = !p.folder ? tr("picker.choose_wua_title", "Choose the game's .wua")
+                              : p.purpose.starts_with("folder:")
+                                  ? tr("picker.choose_the", "Choose the {folder}", {{"folder", folder_title(p.purpose.substr(7))}})
+                                  : tr("picker.choose_where", "Choose where to install");
     {
         auto g = ui.open("pk/crimson", crimson);
         section_label(ui, "pk/label", title, Half::Crimson, {}, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::CrimsonRect));
-        MenuRowSpec here{"stroke:open", m::shown_path(p.dir), p.folder ? "Choose" : ""};
+        MenuRowSpec here{"stroke:open", m::shown_path(p.dir), p.folder ? tr("hint.choose", "Choose") : ""};
         here.compact = true;
         here.mono_title = true;
         menu_row(ui, "pk/here", here, crimson_focus(p.entries.empty()), fit({}, SeamFit::CrimsonSkewed));
@@ -443,41 +448,55 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         auto cols = ui.open("pk/cols", Box{.layout = Layout::Row, .margin = {0, 12, 0, 0}, .gap = 18,
                                            .align = Align::Start});
         {
-            auto pl = ui.open("pk/places", Box{.w = Size::fixed(kPlacesWidth), .gap = kRowGap});
+            // (As wide as its longest row needs, "Téléchargements", "Домашняя папка": 176 to 224 points.)
+            TextEngine& te = ui.text();
+            // (A file row: icon, name, 12 points, its kind, the ends; the slanted rows lower down a little narrower.)
+            auto row_width = [&te](const std::string& name, const std::string& meta) {
+                return std::ceil(16 + 18 + 12 + te.width(tx::kFileName, name) + 12 + te.width(tx::kFileMeta, meta) +
+                                 16 + 8);
+            };
+            float places_width = kPlacesWidth;
+            for (const Place& place : p.places) places_width = std::max(places_width, row_width(place.name, place.kind));
+#ifndef _WIN32
+            places_width = std::max(places_width, row_width(tr("picker.show_hidden", "Show hidden"), ""));
+#endif
+            places_width = std::min(places_width, kPlacesMaxWidth);
+            auto pl = ui.open("pk/places", Box{.w = Size::fixed(places_width), .gap = kRowGap});
             // (Each as wide as the column, narrower where the seam comes closer: a small window, a long list.)
-            text(ui, "pk/places-h", TextSpec{"Places", tx::kLabel, c::kRedLabel},
-                 fit(Box{.max_w = kPlacesWidth, .margin = {0, 0, 0, 4}}, SeamFit::CrimsonRect));
+            text(ui, "pk/places-h", TextSpec{tr("picker.places", "Places"), tx::kLabel, c::kRedLabel},
+                 fit(Box{.max_w = places_width, .margin = {0, 0, 0, 4}}, SeamFit::CrimsonRect));
             for (size_t i = 0; i < p.places.size(); ++i) {
                 FileRowSpec r{p.places[i].icon, p.places[i].name, p.places[i].kind};
                 if (p.places[i].path == p.dir) r.tone = Tone::Ok;
                 file_row(ui, "pp:" + std::to_string(i), r, crimson_focus(),
-                         fit(Box{.max_w = kPlacesWidth}, SeamFit::CrimsonSkewed));
+                         fit(Box{.max_w = places_width}, SeamFit::CrimsonSkewed));
             }
 #ifndef _WIN32
             // Folders whose names start with a dot (.local, .steam, .var): a row the pad reaches (and Ctrl+H, X).
             // (Ticked when on, as a check box.)
-            FileRowSpec hid{picker_hidden_ ? "stroke:check" : "stroke:dots", "Show hidden", ""};
+            FileRowSpec hid{picker_hidden_ ? "stroke:check" : "stroke:dots", tr("picker.show_hidden", "Show hidden"), ""};
             hid.tone = picker_hidden_ ? Tone::Ok : Tone::Neutral;
             file_row(ui, "pk/hidden", hid, crimson_focus(),
-                     fit(Box{.max_w = kPlacesWidth, .margin = {6, 0, 0, 0}}, SeamFit::CrimsonSkewed));
+                     fit(Box{.max_w = places_width, .margin = {6, 0, 0, 0}}, SeamFit::CrimsonSkewed));
 #endif
         }
         auto en = ui.open("pk/entries", Box{.w = Size::grow(), .gap = kRowGap});
         const bool nothing = p.entries.empty() || (p.entries.size() == 1 && p.entries[0].kind == Entry::Kind::kUp);
         text(ui, "pk/entries-h",
-             TextSpec{!p.error.empty() ? "Cannot read it: " + p.error
-                      : p.folder        ? "Folders"
-                                        : "Files and folders",
+             TextSpec{!p.error.empty() ? tr("picker.cannot_read", "Cannot read it: {error}", {{"error", p.error}})
+                      : p.folder        ? tr("settings.folders", "Folders")
+                                        : tr("picker.files_folders", "Files and folders"),
                       tx::kLabel, c::kRedLabel},
              fit(Box{.margin = {0, 0, 0, 4}}, SeamFit::CrimsonRect));
         if (p.loading && p.entries.empty())
-            text(ui, "pk/reading", TextSpec{"Reading this folder…", tx::kParaSmall, c::kRedDim},
+            text(ui, "pk/reading", TextSpec{tr("picker.reading", "Reading this folder…"), tx::kParaSmall, c::kRedDim},
                  fit(Box{.margin = {6, 4, 0, 0}}, SeamFit::CrimsonRect));
         else
             picker_rows();
         if (nothing && !p.loading && p.error.empty())
             text(ui, "pk/empty",
-                 TextSpec{p.folder ? "No folders in it: the row above chooses it." : "No files or folders in it.",
+                 TextSpec{p.folder ? tr("picker.no_folders", "No folders in it: the row above chooses it.")
+                                   : tr("picker.empty", "No files or folders in it."),
                           tx::kParaSmall, c::kRedDim},
                  fit(Box{.margin = {6, 4, 0, 0}}, SeamFit::CrimsonRect));
     }
@@ -489,7 +508,7 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
     readout_.build(ui, "pk/ro", Box{}, [&](const std::string&) {
         const std::string k = picker_key_;
         ButtonSpec sys;
-        sys.label = p.folder ? "System Folder Picker…" : "System File Picker…";
+        sys.label = p.folder ? tr("picker.system_folder", "System Folder Picker…") : tr("picker.system_file", "System File Picker…");
         sys.size = ButtonSize::Small;
         const auto big = [&](const std::string& id, const std::string& name) {
             // (As the mock's: the name big and split, smaller until it fits, then cut in the middle.)
@@ -499,14 +518,17 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
                  fit(Box{.margin = {0, 2, 0, 10}}, SeamFit::BlueRect));
         };
         if (k == "pk/hidden") {
-            section_label(ui, "pk/b-label", "Hidden folders", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-            big("pk/b-name", picker_hidden_ ? "Shown" : "Not shown");
-            const Fact list[] = {{"Now", {{picker_hidden_ ? "Listed too" : "Left out", kValue}}, false},
-                                 {"Keys", {{"Ctrl+H", kValue}}, false}};
+            section_label(ui, "pk/b-label", tr("picker.hidden_folders", "Hidden folders"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
+            big("pk/b-name", picker_hidden_ ? tr("picker.shown", "Shown") : tr("picker.not_shown", "Not shown"));
+            const Fact list[] = {{tr("folders.now", "Now"),
+                                  {{picker_hidden_ ? tr("picker.listed_too", "Listed too") : tr("picker.left_out", "Left out"), kValue}},
+                                  false},
+                                 {tr("picker.keys", "Keys"), {{"Ctrl+H", kValue}}, false}};
             facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
             text(ui, "pk/b-para",
-                 TextSpec{.text = "Names starting with a dot (.local, .steam, .var) are left out of the lists, as file "
-                                  "managers do. Accept shows them too; again hides them.",
+                 TextSpec{.text = tr("picker.hidden_about", "Names starting with a dot (.local, .steam, .var) are left "
+                                                            "out of the lists, as file managers do. Accept shows them "
+                                                            "too; again hides them."),
                           .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
                  fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
             button(ui, "pk/system", sys, blue_focus(), fit({}, SeamFit::BlueRect));
@@ -515,12 +537,14 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         if (k.starts_with("pp:")) {
             const size_t i = std::strtoul(k.c_str() + 3, nullptr, 10);
             if (i < p.places.size()) {
-                section_label(ui, "pk/b-label", p.places[i].kind.empty() ? "Place" : p.places[i].kind + " place",
+                section_label(ui, "pk/b-label",
+                              p.places[i].kind.empty() ? tr("picker.place", "Place")
+                                                       : tr("picker.kind_place", "{kind} place", {{"kind", p.places[i].kind}}),
                               Half::Blue, {}, fit({}, SeamFit::BlueRect));
                 big("pk/b-name", p.places[i].name);
-                const Fact list[] = {{"Where", {{m::shown_path(p.places[i].path), kValue}}}};
+                const Fact list[] = {{tr("picker.where", "Where"), {{m::shown_path(p.places[i].path), kValue}}}};
                 facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
-                text(ui, "pk/b-para", TextSpec{.text = "Accept opens it in the list.", .style = tx::kPara,
+                text(ui, "pk/b-para", TextSpec{.text = tr("picker.opens_in_list", "Accept opens it in the list."), .style = tx::kPara,
                                                .color = c::kBlueDim, .wrap = true},
                      fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
                 button(ui, "pk/system", sys, blue_focus(), fit({}, SeamFit::BlueRect));
@@ -532,18 +556,18 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
             if (i < p.entries.size()) {
                 const Entry& e = p.entries[i];
                 if (e.kind == Entry::Kind::kUp || e.kind == Entry::Kind::kFolder) {
-                    section_label(ui, "pk/b-label", "Folder", Half::Blue, {}, fit({}, SeamFit::BlueRect));
-                    big("pk/b-name", e.kind == Entry::Kind::kUp ? "Up" : e.name);
-                    std::vector<Fact> list = {{e.kind == Entry::Kind::kUp ? "To" : "Where",
+                    section_label(ui, "pk/b-label", tr("home.folder", "Folder"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
+                    big("pk/b-name", e.kind == Entry::Kind::kUp ? tr("picker.up", "Up") : e.name);
+                    std::vector<Fact> list = {{e.kind == Entry::Kind::kUp ? tr("picker.to", "To") : tr("picker.where", "Where"),
                                                {{m::shown_path(e.path), kValue}}}};
                     if (e.kind == Entry::Kind::kFolder && e.items >= 0)
-                        list.push_back({"Holds", {{std::to_string(e.items) + " items", kValue}}, false});
+                        list.push_back({tr("picker.holds", "Holds"), {{trn("picker.items", e.items, "{n} item", "{n} items"), kValue}}, false});
                     else if (e.kind == Entry::Kind::kFolder && e.items == kNotCounted)
-                        list.push_back({"Holds", {{"Counting…", kValue}}, false});
+                        list.push_back({tr("picker.holds", "Holds"), {{tr("picker.counting", "Counting…"), kValue}}, false});
                     facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
-                    const std::string para = e.kind == Entry::Kind::kUp ? "Goes up one folder."
-                                             : p.folder ? "Accept opens it; Choose takes it as it is."
-                                                        : "Accept opens it.";
+                    const std::string para = e.kind == Entry::Kind::kUp ? tr("picker.goes_up", "Goes up one folder.")
+                                             : p.folder ? tr("picker.folder_para", "Accept opens it; Choose takes it as it is.")
+                                                        : tr("picker.accept_opens", "Accept opens it.");
                     text(ui, "pk/b-para", TextSpec{.text = para, .style = tx::kPara, .color = c::kBlueDim,
                                                    .wrap = true},
                          fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
@@ -551,35 +575,35 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
                                        fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
                     if (p.folder && e.kind == Entry::Kind::kFolder) {
                         ButtonSpec ch;
-                        ch.label = "Choose";
+                        ch.label = tr("hint.choose", "Choose");
                         ch.kind = ButtonKind::Blue;
                         ch.size = ButtonSize::Small;
                         button(ui, "pk/choose", ch, blue_focus());
                     }
                     ButtonSpec op;
-                    op.label = "Open";
+                    op.label = tr("hint.open", "Open");
                     op.size = ButtonSize::Small;
                     button(ui, "pk/open", op, blue_focus());
                     return;
                 }
-                section_label(ui, "pk/b-label", "File", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+                section_label(ui, "pk/b-label", tr("picker.file", "File"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
                 big("pk/b-name", e.name);
-                pill(ui, "pk/b-pill", e.wua ? "A Wii U game archive" : "Not a Wii U game archive",
+                pill(ui, "pk/b-pill", e.wua ? tr("picker.archive", "A Wii U game archive") : tr("picker.not_archive", "Not a Wii U game archive"),
                      e.wua ? Tone::Ok : Tone::Dim, false, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
-                const Fact list[] = {{"Size", {{size_text(e.size), kValue}}, false},
-                                     {"Where", {{m::shown_path(p.dir), kValue}}}};
+                const Fact list[] = {{tr("picker.size", "Size"), {{size_text(e.size), kValue}}, false},
+                                     {tr("picker.where", "Where"), {{m::shown_path(p.dir), kValue}}}};
                 facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
                 const std::string why =
-                    e.wua ? "The launcher needs the European game with update 16 as a .wua: the install checks it "
-                            "fully before it builds anything."
-                          : "The launcher needs a .wua archive of the European game with update 16.";
+                    e.wua ? tr("picker.wua_about", "The launcher needs the European game with update 16 as a .wua: the "
+                                                   "install checks it fully before it builds anything.")
+                          : tr("picker.needs_wua", "The launcher needs a .wua archive of the European game with update 16.");
                 text(ui, "pk/b-para", TextSpec{.text = why, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
                      fit(Box{.margin = {0, 0, 0, 12}}, SeamFit::BlueRect));
                 auto row =
                     ui.open("pk/b-btns", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
                 if (e.wua) {
                     ButtonSpec ch;
-                    ch.label = "Choose";
+                    ch.label = tr("hint.choose", "Choose");
                     ch.kind = ButtonKind::Blue;
                     ch.size = ButtonSize::Small;
                     ch.prompt = Prompt::Accept;
@@ -590,30 +614,34 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
             }
         }
         // This folder.
-        section_label(ui, "pk/b-label", "This folder", Half::Blue, {}, fit({}, SeamFit::BlueRect));
+        section_label(ui, "pk/b-label", tr("picker.this_folder", "This folder"), Half::Blue, {}, fit({}, SeamFit::BlueRect));
         big("pk/b-name", folder_name(p.dir));
-        std::vector<Fact> list = {{"Where", {{m::shown_path(p.dir), kValue}}}};
-        if (p.free) list.push_back({"Free", {{size_text(*p.free), kValue}}, false});
+        std::vector<Fact> list = {{tr("picker.where", "Where"), {{m::shown_path(p.dir), kValue}}}};
+        if (p.free) list.push_back({tr("picker.free", "Free"), {{size_text(*p.free), kValue}}, false});
 #ifndef _WIN32
         // (Read with the listing, not each frame: install_target looks at the disk.)
         if (p.folder && p.purpose == "folder" && p.target_known) {
-            list.push_back({"The game",
+            list.push_back({tr("picker.the_game", "The game"),
                             {{p.target ? m::shown_path(*p.target) : p.target_why, p.target ? kValue : c::kWarn}}});
         }
 #endif
         facts(ui, "pk/b-facts", list, fit(Box{.margin = {0, 0, 0, 10}}, SeamFit::BlueRect));
-        std::string para = "Choose a .wua in the list on the left: the launcher marks the ones that can be the game.";
+        std::string para = tr("picker.choose_wua_para", "Choose a .wua in the list on the left: the launcher marks the "
+                                                        "ones that can be the game.");
         if (p.purpose.starts_with("folder:")) {
-            para = "Choose This Folder takes it as the " + folder_title(p.purpose.substr(7)) +
-                   "; New Folder makes an empty one in it.";
+            para = tr("picker.folder_choose_para", "Choose This Folder takes it as the {folder}; New Folder makes an "
+                                                   "empty one in it.",
+                      {{"folder", folder_title(p.purpose.substr(7))}});
         } else if (p.purpose == "setup-folder") {
-            para = "The game is installed into this folder: about 30 GB with its tools. New Folder makes an empty "
-                   "one in it.";
+            para = tr("picker.setup_folder_para", "The game is installed into this folder: about 30 GB with its tools. "
+                                                  "New Folder makes an empty one in it.");
         } else if (p.folder) {
 #ifndef _WIN32
             para = p.target && normal(*p.target) == normal(p.dir)
-                       ? "The game goes into this folder itself (it is empty): about 16 GB, plus 3 GB while building."
-                       : "The game goes into its own folder in here: about 16 GB, plus 3 GB while building.";
+                       ? tr("picker.into_itself", "The game goes into this folder itself (it is empty): about 16 GB, "
+                                                  "plus 3 GB while building.")
+                       : tr("picker.into_own", "The game goes into its own folder in here: about 16 GB, plus 3 GB "
+                                               "while building.");
 #endif
         }
         text(ui, "pk/b-para", TextSpec{.text = para, .style = tx::kPara, .color = c::kBlueDim, .wrap = true},
@@ -621,13 +649,13 @@ void App::picker_screen(const Box& crimson, const Box& blue) {
         auto row = ui.open("pk/b-btns", fit(Box{.layout = Layout::Row, .gap = 12, .wrap = true}, SeamFit::BlueRect));
         if (p.folder) {
             ButtonSpec ch;
-            ch.label = "Choose This Folder";
+            ch.label = tr("picker.choose_this", "Choose This Folder");
             ch.kind = ButtonKind::Blue;
             ch.size = ButtonSize::Small;
             ch.prompt = Prompt::Accept;
             button(ui, "pk/choose-here", ch, blue_focus());
             ButtonSpec nf;
-            nf.label = "New Folder";
+            nf.label = tr("picker.new_folder", "New Folder");
             nf.size = ButtonSize::Small;
             button(ui, "pk/new", nf, blue_focus());
         }

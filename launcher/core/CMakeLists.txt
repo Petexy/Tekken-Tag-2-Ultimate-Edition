@@ -14,11 +14,19 @@
 # found from here so that this folder also builds as a project's
 # subdirectory of its own): what the launcher writes is what the game reads.
 set(runtime_src ${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/src)
+# The launcher's translations (launcher/i18n/<code>.txt, see i18n.h), built into the program: ttt2_i18n::find("de.txt").
+# (English is in the code; en.txt only lists it for translators.)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/EmbedFiles.cmake")
+set(i18n_dir ${CMAKE_CURRENT_SOURCE_DIR}/../i18n)
+set(TTT2_LAUNCHER_CATALOGS fr.txt de.txt it.txt es.txt ru.txt pl.txt)
+list(TRANSFORM TTT2_LAUNCHER_CATALOGS PREPEND "${i18n_dir}/")
+ttt2_embed_files(ttt2_launcher_i18n NAMESPACE ttt2_i18n BASE_DIR "${i18n_dir}" FILES ${TTT2_LAUNCHER_CATALOGS})
 add_library(ttt2_launcher_core STATIC
     display.cpp
     distro.cpp
     files.cpp
     game_ini.cpp
+    i18n.cpp
     json.cpp
     keymap.cpp
     paths_common.cpp
@@ -46,6 +54,7 @@ target_compile_features(ttt2_launcher_core PUBLIC cxx_std_20)
 target_compile_options(ttt2_launcher_core PRIVATE -Wall -Wextra -Wpedantic)
 find_package(Threads REQUIRED)
 target_link_libraries(ttt2_launcher_core PUBLIC Threads::Threads)
+target_link_libraries(ttt2_launcher_core PRIVATE ttt2_launcher_i18n)
 
 # Match SDL's key-name inventory (keyboard.ini names keys as the game's SDL does): read from the SDL 3 headers the
 # game is built with (find_package(SDL3); on Windows the pinned mingw one), else the launcher's own SDL source
@@ -142,6 +151,19 @@ add_executable(launcher_core_test core_test.cpp)
 target_link_libraries(launcher_core_test PRIVATE ttt2_launcher_core_linux)
 target_compile_options(launcher_core_test PRIVATE -Wall -Wextra)
 add_test(NAME launcher_core_test COMMAND launcher_core_test ${CMAKE_CURRENT_BINARY_DIR})
+
+# The launcher's texts: i18n.cpp's rules, and every catalog against the code's texts (launcher/i18n/extract.py
+# --check: en.txt as the code says, no unknown key, the English's placeholders, each plural form of the language).
+add_executable(launcher_i18n_test i18n_test.cpp)
+target_link_libraries(launcher_i18n_test PRIVATE ttt2_launcher_core ttt2_launcher_i18n)
+target_compile_options(launcher_i18n_test PRIVATE -Wall -Wextra)
+add_test(NAME launcher_i18n_test COMMAND launcher_i18n_test)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME launcher_i18n_catalogs COMMAND ${Python3_EXECUTABLE} ${i18n_dir}/extract.py --check)
+    set_tests_properties(launcher_i18n_catalogs PROPERTIES LABELS launcher)
+endif()
+set_tests_properties(launcher_i18n_test PROPERTIES LABELS launcher)
 
 # The key tables are cross-checked against Linux's and SDL3's headers when
 # this computer has them (where they are looked for when the test runs).

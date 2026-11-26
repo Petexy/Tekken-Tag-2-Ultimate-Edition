@@ -42,6 +42,9 @@ namespace launcher::app {
 
 namespace ui = ttt2::ui;
 namespace m = launcher::model;
+// Every text a player reads goes through these (launcher/core/i18n.h).
+using i18n::tr;
+using i18n::trn;
 
 struct Options {
     fs::path game;                  // a .wua given on the command line
@@ -211,7 +214,8 @@ private:
         bool in = false;
         int index = 0, count = 0, state = 0;
         double fraction = 0;
-        const char* verb = "";
+        std::string verb;      // "Adding", "Updating", "Removing" (in the launcher's language)
+        bool removing = false;
         std::string detail;
     };
     std::vector<FighterGroup> fighter_groups() const;
@@ -256,6 +260,7 @@ private:
     void set_folder(const std::string& key, const std::string& value);
     // The launcher's own settings changed (Sounds, Reduce motion, Button prompts, Text size): applied and saved.
     void apply_launcher_settings();
+    void apply_language(const std::string& setting);
     void apply_prompts(int prompts);
 
     // ---- the in-app browser (picker.cpp)

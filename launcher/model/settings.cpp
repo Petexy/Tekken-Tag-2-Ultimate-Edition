@@ -32,6 +32,46 @@ size_t char_count(const std::string& s) {
     return n;
 }
 
+// The GamePad inputs' words (keymap.h's Input: group, name, full) in the launcher's language; the buttons' own names
+// (L, ZR, HOME) as they are.
+std::string input_text(std::string_view english) {
+    if (english == "D-pad") return tr("input.dpad", "D-pad");
+    if (english == "Face buttons") return tr("input.face_buttons", "Face buttons");
+    if (english == "Shoulders") return tr("input.shoulders", "Shoulders");
+    if (english == "Left stick") return tr("input.left_stick", "Left stick");
+    if (english == "System") return tr("input.system", "System");
+    if (english == "Up") return tr("input.up", "Up");
+    if (english == "Down") return tr("input.down", "Down");
+    if (english == "Left") return tr("input.left", "Left");
+    if (english == "Right") return tr("input.right", "Right");
+    if (english == "Top button") return tr("input.top_button", "Top button");
+    if (english == "Bottom button") return tr("input.bottom_button", "Bottom button");
+    if (english == "Left button") return tr("input.left_button", "Left button");
+    if (english == "Right button") return tr("input.right_button", "Right button");
+    if (english == "+ (Start)") return tr("input.plus", "+ (Start)");
+    if (english == "\u2212 (Select)") return tr("input.minus", "\u2212 (Select)");
+    if (english == "D-pad Up") return tr("input.dpad_up", "D-pad Up");
+    if (english == "D-pad Down") return tr("input.dpad_down", "D-pad Down");
+    if (english == "D-pad Left") return tr("input.dpad_left", "D-pad Left");
+    if (english == "D-pad Right") return tr("input.dpad_right", "D-pad Right");
+    if (english == "Left stick Up") return tr("input.stick_up", "Left stick Up");
+    if (english == "Left stick Down") return tr("input.stick_down", "Left stick Down");
+    if (english == "Left stick Left") return tr("input.stick_left", "Left stick Left");
+    if (english == "Left stick Right") return tr("input.stick_right", "Left stick Right");
+    return std::string(english);
+}
+
+std::string input_full(const Input& input) { return input_text(input.full); }
+
+// Why a key cannot be chosen (keymap.cpp's Bound::why) in the launcher's language.
+std::string key_refusal(int usage, const std::string& why) {
+    if (usage == 68) return tr("keys.f11", "F11 toggles full screen");
+    if (usage == kEscape) return tr("keys.esc", "Esc stops choosing a key");
+    if (usage == 227 || usage == 231) return tr("keys.super", "Super is the desktop's key");
+    if (why == "This key cannot be used") return tr("keys.unusable", "This key cannot be used");
+    return why;
+}
+
 } // namespace
 
 void GameController::load() {
@@ -45,9 +85,10 @@ void GameController::load() {
     language_note_.clear();
     unreadable_ = !loaded.error.empty();
     if (unreadable_) {
-        note_ = "game.ini cannot be read (" + unreadable_reason(loaded.error, file_) +
-                "): the game shows its own name (Player in English) and its texts in English. Saving a name or "
-                "choosing a language here writes it anew.";
+        note_ = tr("settings.game_ini_unreadable",
+                   "game.ini cannot be read ({why}): the game shows its own name (Player in English) and its texts in "
+                   "English. Saving a name or choosing a language here writes it anew.",
+                   {{"why", unreadable_reason(loaded.error, file_)}});
         return;
     }
     // (What the game makes of the file: its own reader's, so what is shown here is what it shows.)
@@ -55,12 +96,17 @@ void GameController::load() {
     shown_ = game.player_name;
     language_ = std::string(cafe::host::game::language_of(game).code);
     if (!settings_.player_name.empty() && shown_ != settings_.player_name)
-        note_ = "game.ini's player name “" + settings_.player_name + "” shows in the game as " +
-                (shown_.empty() ? std::string("its own name") : "“" + shown_ + "”") +
-                ". Saving a name here replaces it.";
+        note_ = shown_.empty()
+                    ? tr("settings.name_shows_own", "game.ini's player name “{name}” shows in the game as its own "
+                                                    "name. Saving a name here replaces it.",
+                         {{"name", settings_.player_name}})
+                    : tr("settings.name_shows_as", "game.ini's player name “{name}” shows in the game as “{shown}”. "
+                                                   "Saving a name here replaces it.",
+                         {{"name", settings_.player_name}, {"shown", shown_}});
     if (!settings_.language.empty() && !cafe::host::game::find_language(settings_.language))
-        language_note_ = "game.ini's language “" + settings_.language +
-                         "” is not one the game has: the game shows English. Choosing one here replaces it.";
+        language_note_ = tr("settings.language_unknown", "game.ini's language “{code}” is not one the game has: the "
+                                                         "game shows English. Choosing one here replaces it.",
+                            {{"code", settings_.language}});
 }
 
 bool GameController::set_name(std::string_view name) {
@@ -68,7 +114,7 @@ bool GameController::set_name(std::string_view name) {
     std::string error;
     if (!game_ini::save_name(file_, tidy, &error)) {
         // (What is shown is what the game reads.)
-        error_ = "The player name cannot be saved: " + error;
+        error_ = tr("settings.name_not_saved", "The player name cannot be saved: {error}", {{"error", error}});
         return false;
     }
     settings_.player_name = tidy;
@@ -87,13 +133,14 @@ bool GameController::set_name(std::string_view name) {
 bool GameController::set_language(std::string_view code) {
     const cafe::host::game::Language* language = cafe::host::game::find_language(code);
     if (!language) {
-        error_ = "The language cannot be saved: the game has no language “" + std::string(code) + "”.";
+        error_ = tr("settings.no_such_language", "The language cannot be saved: the game has no language “{code}”.",
+                    {{"code", std::string(code)}});
         return false;
     }
     std::string error;
     if (!game_ini::save_language(file_, language->code, &error)) {
         // (What is shown is what the game reads.)
-        error_ = "The language cannot be saved: " + error;
+        error_ = tr("settings.language_not_saved", "The language cannot be saved: {error}", {{"error", error}});
         return false;
     }
     if (unreadable_) {
@@ -142,13 +189,16 @@ void NameEditor::type(std::string_view text, double now) {
         at = to;
         if (!game_ini::first_refused(one).empty()) {
             const auto b = static_cast<unsigned char>(one[0]);
-            refuse((b < 0x20 || b == 0x7F ? std::string("A control character") : "\u201C" + one + "\u201D") +
-                       " cannot be in a name.",
+            refuse(b < 0x20 || b == 0x7F
+                       ? tr("settings.name_control", "A control character cannot be in a name.")
+                       : tr("settings.name_refused", "“{character}” cannot be in a name.", {{"character", one}}),
                    now);
             continue;
         }
         if (char_count(draft_) >= game_ini::kNameMost) {
-            refuse("A name has " + std::to_string(game_ini::kNameMost) + " characters at most.", now);
+            refuse(trn("settings.name_most", static_cast<long long>(game_ini::kNameMost),
+                       "A name has {n} character at most.", "A name has {n} characters at most."),
+                   now);
             break;
         }
         draft_.insert(caret_, one);
@@ -203,8 +253,10 @@ void DisplayController::load() {
     if (!loaded.error.empty()) log_.push_back("display: " + loaded.error);
     settings_ = loaded.settings;
     note_ = loaded.error.empty() ? std::string()
-                                 : "display.ini cannot be read (" + unreadable_reason(loaded.error, file_) +
-                                       "): the game uses its defaults. Changing a setting here writes it anew.";
+                                 : tr("settings.display_unreadable", "display.ini cannot be read ({why}): the game "
+                                                                     "uses its defaults. Changing a setting here "
+                                                                     "writes it anew.",
+                                      {{"why", unreadable_reason(loaded.error, file_)}});
     error_.clear();
 }
 
@@ -218,7 +270,7 @@ bool DisplayController::change(const display::Settings& wanted) {
         return true;
     }
     // (What is shown is what the game reads.)
-    error_ = "The display settings cannot be saved: " + error;
+    error_ = tr("settings.display_not_saved", "The display settings cannot be saved: {error}", {{"error", error}});
     return false;
 }
 
@@ -283,14 +335,17 @@ void KeyCapture::load() {
     note_.clear();
     error_.clear();
     if (!notes.error.empty()) {
-        note_ = "keyboard.ini cannot be read (" + notes.error +
-                "): the game uses its default keys, shown here. "
-                "Choosing a key, or Restore Defaults, writes the file anew.";
+        note_ = tr("settings.keyboard_unreadable", "keyboard.ini cannot be read ({why}): the game uses its default "
+                                                   "keys, shown here. Choosing a key, or Restore Defaults, writes the "
+                                                   "file anew.",
+                   {{"why", notes.error}});
     } else if (!notes.shared.empty()) {
         std::string keys;
         for (size_t i = 0; i < notes.shared.size(); ++i) keys += (i ? "; " : "") + notes.shared[i];
-        note_ = "keyboard.ini, changed by hand, gives a key to two inputs, which the game presses together (" + keys +
-                "). Here each input has a key of its own: choosing a key, or Restore Defaults, saves them as shown.";
+        note_ = tr("settings.keyboard_shared", "keyboard.ini, changed by hand, gives a key to two inputs, which the "
+                                               "game presses together ({keys}). Here each input has a key of its own: "
+                                               "choosing a key, or Restore Defaults, saves them as shown.",
+                   {{"keys", keys}});
     }
 }
 
@@ -365,7 +420,7 @@ void KeyCapture::take(int usage, double now) {
     const Keymap::Bound bound =
         key_by_usage(usage) ? keymap_.bind(input, usage) : Keymap::Bound{false, -1, "This key cannot be used"};
     if (!bound.ok) {
-        note_row(input, bound.why, Tone::kError, false, kRefusalSeconds, now);
+        note_row(input, key_refusal(usage, bound.why), Tone::kError, false, kRefusalSeconds, now);
         taken_ = {false, bound.why};
         return;
     }
@@ -378,8 +433,8 @@ void KeyCapture::take(int usage, double now) {
     rows_.erase(input); // (an older message of its own is not about this key: gone)
     std::string text = std::string(inputs()[input].full) + " is " + label(usage);
     if (bound.swapped >= 0) {
-        note_row(bound.swapped, std::string("Swapped with ") + inputs()[input].full, Tone::kOk, true, kSwappedSeconds,
-                 now);
+        note_row(bound.swapped, tr("settings.swapped_with", "Swapped with {input}", {{"input", input_full(inputs()[input])}}),
+                 Tone::kOk, true, kSwappedSeconds, now);
         text += std::string(", swapped with ") + inputs()[bound.swapped].full;
     }
     taken_ = {true, text};
@@ -406,7 +461,7 @@ bool KeyCapture::save(const Keymap& before) {
     }
     // (What is shown is what the game has.)
     keymap_ = before;
-    error_ = "The keys cannot be saved: " + error;
+    error_ = tr("settings.keys_not_saved", "The keys cannot be saved: {error}", {{"error", error}});
     return false;
 }
 
@@ -432,7 +487,8 @@ SettingRow setting(std::string id, ActionKind kind, std::string name, std::strin
     r.control.kind = kind;
     r.control.checked = on;
     r.control.describe.title = std::move(name);
-    r.control.describe.state = kind == ActionKind::kSwitch ? (on ? "On" : "Off") : "";
+    r.control.describe.state = kind == ActionKind::kSwitch ? (on ? tr("common.on", "On") : tr("common.off", "Off"))
+                                                           : std::string();
     r.control.describe.explain = std::move(about);
     return r;
 }
@@ -442,18 +498,25 @@ Line warning_note(const std::string& text) {
     return l;
 }
 
-const struct {
-    const char *key, *name, *hint;
-    bool folder;
-} kFolders[] = {
-    {"source", "Wii U archive", "Your European Wii U .wua with update v16", false},
-    {"title", "Extracted Wii U title", "For development imports, instead of an installed game", true},
-    {"install", "Installation folder", "Where Set Up Game installs the game", true},
-    {"data", "Data folder", "Settings, logs and saves: its name ends in TTT2Ultimate", true},
-    {"packs", "Fighter packs", "The characters added to the game", true},
-    {"saves", "Save files", "The game's saves", true},
-    {"tools", "Build tools", "The compiler and libraries Set Up Game downloads", true},
+struct FolderText {
+    const char* key;
+    std::string name, hint;
 };
+std::vector<FolderText> folder_texts() {
+    return {
+        {"source", tr("folders.source", "Wii U archive"), tr("folders.source_hint", "Your European Wii U .wua with update v16")},
+        {"title", tr("folders.title", "Extracted Wii U title"),
+         tr("folders.title_hint", "For development imports, instead of an installed game")},
+        {"install", tr("folders.install", "Installation folder"),
+         tr("folders.install_hint", "Where Set Up Game installs the game")},
+        {"data", tr("folders.data", "Data folder"),
+         tr("folders.data_hint", "Settings, logs and saves: its name ends in TTT2Ultimate")},
+        {"packs", tr("folders.packs", "Fighter packs"), tr("folders.packs_hint", "The characters added to the game")},
+        {"saves", tr("folders.saves", "Save files"), tr("folders.saves_hint", "The game's saves")},
+        {"tools", tr("folders.tools", "Build tools"),
+         tr("folders.tools_hint", "The compiler and libraries Set Up Game downloads")},
+    };
+}
 
 // The on-screen keyboard for typing the name with a pad: digits, letters, - and ., Shift and Delete, then Cancel,
 // Space and Done (every row ten key widths).
@@ -469,15 +532,16 @@ std::vector<std::vector<NameKey>> name_keys(bool shifted) {
     std::vector<std::vector<NameKey>> rows;
     for (const std::string_view line : {"1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm."}) {
         std::vector<NameKey> row;
-        if (line == "zxcvbnm.") row.push_back(key("name:shift", "Shift"));
+        if (line == "zxcvbnm.") row.push_back(key("name:shift", tr("name.shift", "Shift")));
         for (const char c : line) {
             const char shown = shifted && c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
             row.push_back(key("name-key:" + std::string(1, c), std::string(1, shown)));
         }
-        if (line == "zxcvbnm.") row.push_back(key("name:backspace", "Delete"));
+        if (line == "zxcvbnm.") row.push_back(key("name:backspace", tr("name.delete", "Delete")));
         rows.push_back(std::move(row));
     }
-    rows.push_back({key("name:cancel", "Cancel", 2), key("name:space", "Space", 5), key("name:done", "Done", 3)});
+    rows.push_back({key("name:cancel", tr("common.cancel", "Cancel"), 2), key("name:space", tr("name.space", "Space"), 5),
+                    key("name:done", tr("name.done", "Done"), 3)});
     rows.back().back().key.primary = true;
     return rows;
 }
@@ -497,24 +561,33 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         const std::string& name = g.shown();
         // The game's own name in its language, where the launcher's font can draw it.
         const std::string own(game_ini::own_name(g.language()));
-        SettingRow player = setting("player-name", ActionKind::kEntry, "Player name",
-                                    "The name the game shows for you, in place of Player.", false);
+        SettingRow player = setting("player-name", ActionKind::kEntry, tr("settings.player_name", "Player name"),
+                                    tr("settings.player_name_about", "The name the game shows for you, in place of "
+                                                                     "Player."),
+                                    false);
         player.control.label = name;
-        player.control.placeholder = own.empty() ? std::string("Game's own") : own;
+        player.control.placeholder = own.empty() ? tr("settings.name_placeholder", "Game's own") : own;
         player.control.describe.state = !name.empty() ? name
-                                        : own.empty() ? std::string("The game's own (Player in English)")
-                                                      : own + " (the game's own)";
+                                        : own.empty() ? tr("settings.name_own", "The game's own (Player in English)")
+                                                      : tr("settings.name_own_is", "{name} (the game's own)",
+                                                           {{"name", own}});
         const std::string rule =
-            game_ini::name_rule() + " Left empty, the game's own name in its language (Player in English).";
+            tr("common.two_sentences", "{first} {second}",
+               {{"first", game_ini::name_rule()},
+                {"second", tr("settings.name_empty", "Left empty, the game's own name in its language (Player in "
+                                                     "English).")}});
         player.notes.push_back(text_line(rule, Tone::kDim, true));
         player.control.describe.more.push_back(rule);
         v.game.push_back(player);
-        // The language of the game's texts: its languages by their English names (the launcher's font has no other
-        // scripts), the one the game will show chosen.
-        SettingRow language = setting("language", ActionKind::kChoice, "Language",
-                                      "The game's texts and menus show in this language.", false);
-        for (const cafe::host::game::Language& l : cafe::host::game::kLanguages)
-            language.control.choices.push_back(std::string(l.name));
+        // The language of the game's texts: its languages each by its own name, the one the game will show chosen.
+        SettingRow language = setting("language", ActionKind::kChoice, tr("settings.language", "Language"),
+                                      tr("settings.language_about", "The game's texts and menus show in this "
+                                                                    "language."),
+                                      false);
+        for (const cafe::host::game::Language& l : cafe::host::game::kLanguages) {
+            const i18n::Language* own_name = i18n::find_language(l.code);
+            language.control.choices.push_back(std::string(own_name ? own_name->name : l.name));
+        }
         const cafe::host::game::Language* chosen = cafe::host::game::find_language(g.language());
         language.control.chosen = chosen ? static_cast<int>(chosen - std::begin(cafe::host::game::kLanguages)) : 0;
         language.control.describe.state = language.control.choices[static_cast<size_t>(language.control.chosen)];
@@ -524,9 +597,10 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
             // (display.ini's: what is said of it goes with its setting here too.)
             if (!d.error().empty()) v.game_notes.push_back(text_line(d.error(), Tone::kError));
             if (!d.note().empty()) v.game_notes.push_back(warning_note(d.note()));
-            v.game.push_back(setting("input-delay", ActionKind::kSwitch, "Input delay",
-                                     "Two frames between a button press and the game acting on it, as on the Wii U. "
-                                     "Practice's own Input Delay works either way.",
+            v.game.push_back(setting("input-delay", ActionKind::kSwitch, tr("settings.input_delay", "Input delay"),
+                                     tr("settings.input_delay_about",
+                                        "Two frames between a button press and the game acting on it, as on the Wii "
+                                        "U. Practice's own Input Delay works either way."),
                                      d.settings().input_delay));
         }
         if (in.name && in.name->editing()) {
@@ -549,11 +623,13 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         const display::Settings& s = d.settings();
         if (!d.error().empty()) v.display_notes.push_back(text_line(d.error(), Tone::kError));
         if (!d.note().empty()) v.display_notes.push_back(warning_note(d.note()));
-        v.display.push_back(setting("fullscreen", ActionKind::kSwitch, "Fullscreen",
-                                    "Start the game fullscreen. F11 switches it in the game.", s.fullscreen));
-        SettingRow resolution = setting("resolution", ActionKind::kChoice, "Resolution",
-                                        "The size the game draws at; the picture is scaled to the window or the "
-                                        "screen.",
+        v.display.push_back(setting("fullscreen", ActionKind::kSwitch, tr("settings.fullscreen", "Fullscreen"),
+                                    tr("settings.fullscreen_about", "Start the game fullscreen. F11 switches it in the "
+                                                                    "game."),
+                                    s.fullscreen));
+        SettingRow resolution = setting("resolution", ActionKind::kChoice, tr("settings.resolution", "Resolution"),
+                                        tr("settings.resolution_about", "The size the game draws at; the picture is "
+                                                                        "scaled to the window or the screen."),
                                         false);
         for (const display::Resolution r : display::kResolutions)
             resolution.control.choices.push_back(resolution_label(r));
@@ -568,32 +644,39 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
             resolution.control.describe.more.push_back(note);
         }
         v.display.push_back(resolution);
-        SettingRow fps = setting("interpolation", ActionKind::kSwitch, "120 fps",
-                                 "A frame between each two of the game's 60 every second: smoother motion on displays "
-                                 "of 100 Hz and more.",
+        SettingRow fps = setting("interpolation", ActionKind::kSwitch, tr("settings.fps", "120 fps"),
+                                 tr("settings.fps_about", "A frame between each two of the game's 60 every second: "
+                                                          "smoother motion on displays of 100 Hz and more."),
                                  s.interpolation);
         if (const std::string note = refresh_note(in.monitors); !note.empty()) {
             fps.notes.push_back(text_line(note, Tone::kDim, true));
             fps.control.describe.more.push_back(note);
         }
         v.display.push_back(fps);
-        v.display.push_back(setting("async-shaders", ActionKind::kSwitch, "Shaders in the background",
-                                    "The first time something is shown, it may appear a few frames late instead of "
-                                    "the game stopping for a moment while its shader is made.",
+        v.display.push_back(setting("async-shaders", ActionKind::kSwitch,
+                                    tr("settings.async_shaders", "Shaders in the background"),
+                                    tr("settings.async_shaders_about",
+                                       "The first time something is shown, it may appear a few frames late instead of "
+                                       "the game stopping for a moment while its shader is made."),
                                     s.async_shaders));
-        v.display.push_back(setting("precompile-shaders", ActionKind::kSwitch, "Prepare shaders before playing",
-                                    "Play first makes ready the shaders the game has used on this PC so far, so that "
-                                    "it does not stop for them again, for instance after a graphics driver update. "
-                                    "What it has never shown yet is still made the first time.",
+        v.display.push_back(setting("precompile-shaders", ActionKind::kSwitch,
+                                    tr("settings.precompile", "Prepare shaders before playing"),
+                                    tr("settings.precompile_about",
+                                       "Play first makes ready the shaders the game has used on this PC so far, so "
+                                       "that it does not stop for them again, for instance after a graphics driver "
+                                       "update. What it has never shown yet is still made the first time."),
                                     s.precompile_shaders));
         if (facts.caps.performance_preset) {
-            SettingRow p = setting("performance", ActionKind::kButton, "Performance",
-                                   "1280 × 720 without 120 fps: for a slower graphics card.", false);
-            p.control.label = "Use";
+            SettingRow p = setting("performance", ActionKind::kButton, tr("settings.performance", "Performance"),
+                                   tr("settings.performance_about", "1280 × 720 without 120 fps: for a slower graphics "
+                                                                    "card."),
+                                   false);
+            p.control.label = tr("settings.use", "Use");
             v.display.push_back(p);
         }
         if (facts.windows.data_problem == "name") {
-            const std::string why = "The data folder must end in TTT2Ultimate so the game and launcher share settings.";
+            const std::string why = tr("settings.data_name", "The data folder must end in TTT2Ultimate so the game and "
+                                                             "launcher share settings.");
             for (auto [notes, rows] : {std::pair{&v.display_notes, &v.display}, std::pair{&v.game_notes, &v.game}}) {
                 if (rows->empty()) continue;
                 notes->insert(notes->begin(), text_line(why, Tone::kError));
@@ -613,22 +696,25 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         if (!k.note().empty()) v.keys_notes.push_back(warning_note(k.note()));
         for (int i = 0; i < kInputs; ++i) {
             const Input& input = inputs()[i];
-            if (v.groups.empty() || v.groups.back().title != input.group) v.groups.push_back({input.group, {}});
+            const std::string group = input_text(input.group), full = input_full(input);
+            if (v.groups.empty() || v.groups.back().id != input.group) v.groups.push_back({group, input.group, {}});
             KeyRow r;
             r.input = input.id;
-            r.name = input.name;
-            r.full = input.full;
+            r.name = input_text(input.name);
+            r.full = full;
             const std::string label = k.label(k.keymap().key(i));
             r.keycap.id = std::string("key:") + input.id;
             r.keycap.kind = ActionKind::kKeycap;
             r.keycap.checked = k.picking() == i;
-            r.keycap.label = r.keycap.checked ? "Press a key…" : label;
-            r.keycap.tooltip = std::string("Change the key for ") + input.full;
-            r.keycap.describe.title = input.full;
-            r.keycap.describe.state = r.keycap.checked ? "Press a key…" : label;
+            const std::string press = tr("keys.press", "Press a key…");
+            r.keycap.label = r.keycap.checked ? press : label;
+            r.keycap.tooltip = tr("keys.change", "Change the key for {input}", {{"input", full}});
+            r.keycap.describe.title = full;
+            r.keycap.describe.state = r.keycap.checked ? press : label;
             r.keycap.describe.explain =
-                r.keycap.checked ? "Press the key for " + std::string(input.full) + ", or Esc to keep " + label + "."
-                                 : r.keycap.tooltip;
+                r.keycap.checked
+                    ? tr("keys.press_for", "Press the key for {input}, or Esc to keep {key}.", {{"input", full}, {"key", label}})
+                    : r.keycap.tooltip;
             if (const auto it = k.row_notes().find(i); it != k.row_notes().end()) {
                 r.note = it->second.text;
                 r.note_tone = it->second.tone;
@@ -639,16 +725,16 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         }
         Action restore;
         restore.id = "restore-keys";
-        restore.label = "Restore Defaults";
+        restore.label = tr("keys.restore", "Restore Defaults");
         restore.enabled = k.restorable();
-        restore.why = restore.enabled ? "" : "The keys are the default ones.";
+        restore.why = restore.enabled ? "" : tr("keys.restore_why", "The keys are the default ones.");
         restore.describe.title = restore.label;
         restore.describe.why = restore.why;
         v.keys_actions.push_back(restore);
         if (facts.caps.windows) {
             Action open;
             open.id = "open-keyboard-file";
-            open.label = "Open keyboard.ini";
+            open.label = tr("keys.open_file", "Open keyboard.ini");
             open.flat = true;
             open.describe.title = open.label;
             v.keys_actions.push_back(open);
@@ -657,7 +743,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
 
     if (facts.caps.folders) {
         v.folders_shown = true;
-        for (const auto& f : kFolders) {
+        for (const FolderText& f : folder_texts()) {
             FolderRow r;
             r.key = f.key;
             r.name = f.name;
@@ -665,7 +751,7 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
             const auto it = facts.windows.folders.find(f.key);
             r.value = it != facts.windows.folders.end() ? it->second : "";
             r.browse.id = std::string("folder:") + f.key;
-            r.browse.label = "Browse…";
+            r.browse.label = tr("folders.browse", "Browse…");
             r.browse.describe.title = f.name;
             r.browse.describe.explain = f.hint;
             r.browse.describe.path = r.value;
@@ -673,10 +759,10 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
         }
         Action save;
         save.id = "save-folders";
-        save.label = "Save Folders";
+        save.label = tr("folders.save", "Save Folders");
         save.primary = true;
         save.enabled = !facts.task;
-        save.why = facts.task ? "Wait for the task to end before changing folders." : "";
+        save.why = facts.task ? tr("folders.save_why", "Wait for the task to end before changing folders.") : "";
         save.describe.title = save.label;
         save.describe.why = save.why;
         v.folders_actions.push_back(save);
@@ -684,25 +770,45 @@ SettingsView settings_view(const Facts& facts, const SettingsInput& in) {
     }
 
     // The launcher's own (new).
-    SettingRow sounds = setting("sounds", ActionKind::kSwitch, "Sounds",
-                                "Short sounds when moving between and choosing items.", in.launcher.sounds);
-    SettingRow motion = setting("reduce-motion", ActionKind::kSwitch, "Reduce motion",
-                                "No moving backgrounds, and pages change without sliding.", in.launcher.reduce_motion);
-    SettingRow prompts = setting("prompts", ActionKind::kChoice, "Button prompts",
-                                 "The buttons the prompts show: those of the last device used, or always these.",
+    SettingRow sounds = setting("sounds", ActionKind::kSwitch, tr("settings.sounds", "Sounds"),
+                                tr("settings.sounds_about", "Short sounds when moving between and choosing items."),
+                                in.launcher.sounds);
+    SettingRow motion = setting("reduce-motion", ActionKind::kSwitch, tr("settings.reduce_motion", "Reduce motion"),
+                                tr("settings.reduce_motion_about", "No moving backgrounds, and pages change without "
+                                                                   "sliding."),
+                                in.launcher.reduce_motion);
+    SettingRow prompts = setting("prompts", ActionKind::kChoice, tr("settings.prompts", "Button prompts"),
+                                 tr("settings.prompts_about", "The buttons the prompts show: those of the last device "
+                                                              "used, or always these."),
                                  false);
-    for (const char* p : kPrompts) prompts.control.choices.push_back(p);
+    for (const char* p : kPrompts)
+        prompts.control.choices.push_back(std::string_view(p) == "Automatic" ? tr("settings.automatic", "Automatic")
+                                                                             : std::string(p));
     prompts.control.chosen =
         std::clamp(in.launcher.prompts, 0, static_cast<int>(prompts.control.choices.size()) - 1);
     prompts.control.describe.state = prompts.control.choices[static_cast<size_t>(prompts.control.chosen)];
-    SettingRow text =
-        setting("text-size", ActionKind::kChoice, "Text size", "How large this launcher's text is.", false);
+    SettingRow text = setting("text-size", ActionKind::kChoice, tr("settings.text_size", "Text size"),
+                              tr("settings.text_size_about", "How large this launcher's text is."), false);
     for (const int size : kTextSizes) {
         text.control.choices.push_back(std::to_string(size) + " %");
         if (size == in.launcher.text_size) text.control.chosen = static_cast<int>(text.control.choices.size()) - 1;
     }
     if (text.control.chosen >= 0) text.control.describe.state = text.control.choices[text.control.chosen];
-    v.launcher = {sounds, motion, prompts, text};
+    // The launcher's language: the system's (the default) or one of i18n.h's, each by its own name.
+    SettingRow language = setting("launcher-language", ActionKind::kChoice, tr("settings.launcher_language", "Language"),
+                                  tr("settings.launcher_language_about",
+                                     "The language of this launcher's texts. System: the one your system shows, when "
+                                     "the launcher has it, else English."),
+                                  false);
+    language.control.choices.push_back(tr("settings.system_language", "System ({language})",
+                                          {{"language", i18n::find_language(i18n::system_language())->name}}));
+    language.control.chosen = 0;
+    for (const i18n::Language& l : i18n::kLanguages) {
+        language.control.choices.emplace_back(l.name);
+        if (in.launcher.language == l.code) language.control.chosen = static_cast<int>(language.control.choices.size()) - 1;
+    }
+    language.control.describe.state = language.control.choices[static_cast<size_t>(language.control.chosen)];
+    v.launcher = {language, sounds, motion, prompts, text};
     return v;
 }
 

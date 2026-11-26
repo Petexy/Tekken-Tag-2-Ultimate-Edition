@@ -96,6 +96,15 @@ constexpr const char* kFontFiles[] = {
     "Barlow/Barlow-Bold.ttf",                              "JetBrainsMono/JetBrainsMono-Regular.ttf",
     "JetBrainsMono/JetBrainsMono-Bold.ttf"};
 static_assert(sizeof kFontFiles / sizeof kFontFiles[0] == static_cast<int>(Font::Count));
+// Each role's Cyrillic letters (Russian; Barlow has none): Fira Sans (Condensed) of a matching weight and slant, cut
+// to the Cyrillic block (fonts/README.md). nullptr: the role's own font has them (JetBrains Mono).
+constexpr const char* kCyrillicFiles[] = {
+    "FiraSans/FiraSansCondensed-BlackItalic.ttf", "FiraSans/FiraSansCondensed-ExtraBoldItalic.ttf",
+    "FiraSans/FiraSansCondensed-BoldItalic.ttf",  "FiraSans/FiraSansCondensed-ExtraBold.ttf",
+    "FiraSans/FiraSans-Medium.ttf",               "FiraSans/FiraSans-SemiBold.ttf",
+    "FiraSans/FiraSans-Bold.ttf",                 nullptr,
+    nullptr};
+static_assert(sizeof kCyrillicFiles / sizeof kCyrillicFiles[0] == static_cast<int>(Font::Count));
 
 // Coverage gamma applied when glyphs are baked (light text on the dark look reads thin without it).
 constexpr float kTextGamma = 1.35f;
