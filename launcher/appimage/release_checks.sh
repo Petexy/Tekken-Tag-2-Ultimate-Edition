@@ -26,6 +26,7 @@ release_license_files=(
     launcher/ui/fonts/Barlow/OFL.txt
     launcher/ui/fonts/BarlowCondensed/OFL.txt
     launcher/ui/fonts/JetBrainsMono/OFL.txt
+    launcher/ui/fonts/FiraSans/OFL.txt
     licenses/SDL/LICENSE.txt
     licenses/SDL/edid.txt
     licenses/SDL/hidapi.txt

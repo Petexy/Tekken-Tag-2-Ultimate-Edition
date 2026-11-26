@@ -1163,6 +1163,16 @@ TEST(text_measure_ellipsis_wrap) {
     CHECK(t.width(st, "\xe4\xb8\xad") > 0);
     CHECK(to_upper(U'é') == U'É' && to_upper(U'α') == U'Α' && to_upper(U'ж') == U'Ж');
     CHECK(t.has_glyph_builtin(U'A'));
+    // Russian: each Barlow role draws Cyrillic letters with its matched Fira face (fonts/README.md), JetBrains Mono
+    // with its own; Polish letters stay Barlow's.
+    for (int role = 0; role < static_cast<int>(theme::Font::Count); ++role) {
+        TextStyle s = theme::text::kPara;
+        s.font = static_cast<theme::Font>(role);
+        s.upper = false;
+        const int cyrillic = theme::kCyrillicFiles[role] ? role + static_cast<int>(theme::Font::Count) : role;
+        CHECK(t.face_for(s, U'ж') == cyrillic && t.face_for(s, U'Ё') == cyrillic);
+        CHECK(t.face_for(s, U'ł') == role);
+    }
 }
 
 TEST(text_system_fallback) {

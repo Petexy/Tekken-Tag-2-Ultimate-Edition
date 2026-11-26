@@ -714,13 +714,18 @@ void tab_bar(Ui& ui, const std::string& id, std::span<const Tab> tabs, int activ
             [t, on](PaintContext& ctx) {
                 Canvas& cv = ctx.canvas;
                 const Rect r = ctx.rect;
-                const Vec2 pos{r.x + 17, centred_y(ctx.text, tx::kTab, r)};
+                // (Shrunk by a band short of room (a long name in another language, a large text size): smaller
+                // letters, down to 60 %, rather than over the next tab.)
+                theme::TextStyle style = tx::kTab;
+                const float need = ctx.text.width(style, t.label), room = r.w - 34;
+                if (need > room && need > 0) style.size *= std::max(.6f, room / need);
+                const Vec2 pos{r.x + 17, centred_y(ctx.text, style, r)};
                 if (on) {
-                    ctx.text.draw(cv, tx::kTab, t.label, {pos.x - 2, pos.y}, rgba(255, 42, 85, .7f));
-                    ctx.text.draw(cv, tx::kTab, t.label, {pos.x + 2, pos.y}, rgba(45, 128, 255, .7f));
-                    ctx.text.draw(cv, tx::kTab, t.label, pos, rgb(0xffffff));
+                    ctx.text.draw(cv, style, t.label, {pos.x - 2, pos.y}, rgba(255, 42, 85, .7f));
+                    ctx.text.draw(cv, style, t.label, {pos.x + 2, pos.y}, rgba(45, 128, 255, .7f));
+                    ctx.text.draw(cv, style, t.label, pos, rgb(0xffffff));
                 } else {
-                    ctx.text.draw(cv, tx::kTab, t.label, pos, mix(c::kTabIdle, c::kTabHover, ctx.hover_t));
+                    ctx.text.draw(cv, style, t.label, pos, mix(c::kTabIdle, c::kTabHover, ctx.hover_t));
                 }
                 if (!t.badge.empty()) {
                     const float bw = ctx.text.width(tx::kTabBadge, t.badge) + 14;

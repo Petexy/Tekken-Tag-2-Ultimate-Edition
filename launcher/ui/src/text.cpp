@@ -211,8 +211,10 @@ struct Run {
 
 struct TextEngine::Impl {
     TextureRegistry& textures;
-    std::vector<std::unique_ptr<Face>> faces;  // built-ins by theme::Font, then fallbacks
-    int builtin = static_cast<int>(theme::Font::Count);
+    // Built-ins by theme::Font, then each role's Cyrillic face (theme::kCyrillicFiles), then fallbacks.
+    std::vector<std::unique_ptr<Face>> faces;
+    static constexpr int kRoles = static_cast<int>(theme::Font::Count);
+    int builtin = 2 * kRoles;
     std::vector<std::string> extra_files;
     std::unordered_map<char32_t, int> fallback_for;
     std::unordered_map<std::string, int> face_by_file;
@@ -235,8 +237,9 @@ struct TextEngine::Impl {
         if (i < 0 || i >= static_cast<int>(faces.size())) return nullptr;
         if (i < builtin && !faces[static_cast<std::size_t>(i)]) {
             auto f = std::make_unique<Face>();
-            f->name = theme::kFontFiles[i];
-            if (const ttt2_fonts::File* file = ttt2_fonts::find(theme::kFontFiles[i])) init_face(*f, file->data, 0);
+            const char* name = i < kRoles ? theme::kFontFiles[i] : theme::kCyrillicFiles[i - kRoles];
+            f->name = name ? name : "";
+            if (const ttt2_fonts::File* file = name ? ttt2_fonts::find(name) : nullptr) init_face(*f, file->data, 0);
             faces[static_cast<std::size_t>(i)] = std::move(f);
         }
         Face* f = faces[static_cast<std::size_t>(i)].get();
@@ -269,7 +272,9 @@ struct TextEngine::Impl {
     int pick(int primary, char32_t c, bool system) {
         if (c == kReplacement) return has(primary, c) ? primary : -1;
         if (has(primary, c)) return primary;
-        // The other built-in families: Barlow (text) and JetBrains Mono (arrows, symbols, box drawing).
+        // The role's Cyrillic face, then the other built-in families: Barlow (text) and JetBrains Mono (arrows,
+        // symbols, box drawing).
+        if (primary >= 0 && primary < kRoles && has(primary + kRoles, c)) return primary + kRoles;
         for (int alt : {static_cast<int>(theme::Font::Body), static_cast<int>(theme::Font::Mono)})
             if (alt != primary && has(alt, c)) return alt;
         for (int i = builtin; i < static_cast<int>(faces.size()); ++i)
