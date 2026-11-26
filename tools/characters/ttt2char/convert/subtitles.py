@@ -21,6 +21,9 @@ first at 0x90; the title shows entry (text language - 1): 0 Japanese, 1 English 
 game's language (the port's game.ini `language`: English, French, German, Italian, Spanish or Russian), so a line has
 a bank in each language its source game has a text in (lines_of: the import reads source.SUBTITLE_LANGUAGES), and
 every entry without a text of its own points at the English bank (a line is English where its game has no text).
+Polish, which the title has none of, is entry 10 (its bank's language byte 11): the port, with game.ini's Polish,
+shows it in the English entry's place (runtime title/subtitles.h); Tekken 8 has its own, a Tekken 7 fighter's is
+ours (tekken7/polish.py: Tekken 7 has none).
 A text bank (NTXB) of one text: a 0x70-byte header ("NTXB", u16 2, u8 language + 1, u8 1, u32 bank size, the table
 offsets 0x30 0x30 0x50 0x60 0x70, the index of its one key with the key's offset at 0x38 and 0x3C, and words this
 copies from a bank of the title's own file: template), then the record at 0x70: u32 record size, u16 (a checksum of
@@ -51,7 +54,7 @@ LINES = 30                          # lines per fighter id (index = id * LINES +
 WIN_LINE = 10                       # line of rm_Dwi tone 0 (the title's own: Lars's 0x260A, Jun's 0x2A0A)
 LANGUAGES = 16                      # entries of a language container
 ENGLISH = 1                         # the entry every language without a text of its own shows
-ENTRY = {'ja': 0, 'en': 1, 'fr': 3, 'it': 4, 'de': 5, 'es': 6, 'ko': 7, 'zh': 8, 'ru': 9}
+ENTRY = {'ja': 0, 'en': 1, 'fr': 3, 'it': 4, 'de': 5, 'es': 6, 'ko': 7, 'zh': 8, 'ru': 9, 'pl': 10}  # (Polish: ours)
 STREAM_VALUE, WIN_STREAM = 0x0D000000, 0x1000   # a pose's streamed line (0x8300): rm_Dst n, rm_Dwi 0x1000 | n
 FONT = 0x46B70814                   # the glyph table the subtitles are drawn with
 FILE = 'subtitles.json'             # a pack's line list, in its source/

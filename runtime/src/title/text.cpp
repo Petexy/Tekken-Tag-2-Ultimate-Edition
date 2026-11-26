@@ -40,6 +40,7 @@ constexpr Rewrite kPrompts[] = {
     {"PLUS/START-KNOPF DR\xC3\x9C" "CKEN", "\x05-KNOPF DR\xC3\x9C" "CKEN"},
     {"PULSA EL BOT\xC3\x93N +", "PULSA \x05"},
     {"\xD0\x9D\xD0\x90\xD0\x96\xD0\x90\xD0\xA2\xD0\xAC START", "\xD0\x9D\xD0\x90\xD0\x96\xD0\x90\xD0\xA2\xD0\xAC \x05"},
+    {"NACI\xC5\x9ANIJ PRZYCISK +", "NACI\xC5\x9ANIJ \x05"}, // (our Polish)
 };
 
 // Button names within texts, each language's: the name becomes the icon
@@ -111,6 +112,25 @@ constexpr Rewrite kNames[] = {
     {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 X", "\x03"},
     {"\xD0\xBA\xD0\xBD\xD0\xBE\xD0\xBF\xD0\xBA\xD1\x83 Y", "\x04"},
     {"\xD0\xBA\xD1\x80\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB2\xD0\xB8\xD0\xBD\xD1\x83", "\x07"},
+    // Polish (our translations, text_polish.inc): "przycisk A" and the cases the texts use ("przycisku A",
+    // "przyciskiem A"), "przyciski A, B, X i Y" ..., "krzy\xC5\xBC" "ak" (the +Control Pad) and its cases
+    {"przycisk A", "\x01"}, {"przycisk B", "\x02"}, {"przycisk X", "\x03"}, {"przycisk Y", "\x04"},
+    {"przycisk +", "\x05"}, {"przycisk -", "\x06"}, {"przycisku A", "\x01"}, {"przycisku B", "\x02"},
+    {"przycisku X", "\x03"}, {"przycisku Y", "\x04"}, {"przycisku +", "\x05"}, {"przycisku -", "\x06"},
+    {"przyciskiem A", "\x01"}, {"przyciskiem B", "\x02"}, {"przyciskiem X", "\x03"}, {"przyciskiem Y", "\x04"},
+    {"przyciskiem +", "\x05"}, {"przyciskiem -", "\x06"}, {"Przycisk A", "\x01"}, {"Przycisk B", "\x02"},
+    {"Przycisk X", "\x03"}, {"Przycisk Y", "\x04"}, {"Przycisk +", "\x05"}, {"Przycisk -", "\x06"},
+    {"Przycisku A", "\x01"}, {"Przycisku B", "\x02"}, {"Przycisku X", "\x03"}, {"Przycisku Y", "\x04"},
+    {"Przycisku +", "\x05"}, {"Przycisku -", "\x06"}, {"Przyciskiem A", "\x01"}, {"Przyciskiem B", "\x02"},
+    {"Przyciskiem X", "\x03"}, {"Przyciskiem Y", "\x04"}, {"Przyciskiem +", "\x05"}, {"Przyciskiem -", "\x06"},
+    {"przyciski A, B, X i Y", "\x01, \x02, \x03 i \x04"},
+    {"przycisk\xC3\xB3w A, B, X i Y", "\x01, \x02, \x03 i \x04"},
+    {"przyciskami A, B, X i Y", "\x01, \x02, \x03 i \x04"}, {"Przyciski A, B, X i Y", "\x01, \x02, \x03 i \x04"},
+    {"Przycisk\xC3\xB3w A, B, X i Y", "\x01, \x02, \x03 i \x04"},
+    {"Przyciskami A, B, X i Y", "\x01, \x02, \x03 i \x04"}, {"krzy\xC5\xBC" "ak", "\x07"},
+    {"krzy\xC5\xBC" "aka", "\x07"}, {"krzy\xC5\xBC" "akiem", "\x07"}, {"krzy\xC5\xBC" "aku", "\x07"},
+    {"Krzy\xC5\xBC" "ak", "\x07"}, {"Krzy\xC5\xBC" "aka", "\x07"}, {"Krzy\xC5\xBC" "akiem", "\x07"},
+    {"Krzy\xC5\xBC" "aku", "\x07"},
 };
 
 // A text's space: its bytes and at least two zero bytes, to four. A key's:
@@ -548,10 +568,13 @@ std::string_view key_of(const Indexed::Record& r) {
 }
 
 // The English record with `text` in its English one's place (its header
-// that text's: hash and length); its English text, key and number stay,
-// and so do its index hashes (of its English text and of its key).
+// that text's: hash and length; table 1's word its line count: up to 15,
+// in bits 4-7); its English text, key and number stay, and so do its index
+// hashes (of its English text and of its key).
 Indexed::Record with_text(const Indexed::Record& english, std::string_view text) {
     Indexed::Record r = english;
+    const uint32_t lines = std::min<uint32_t>(static_cast<uint32_t>(std::count(text.begin(), text.end(), '\n')) + 1, 15);
+    r.word = (r.word & ~uint32_t{0xF0}) | lines << 4;
     const uint16_t hash = text_hash(text);
     const size_t count = characters(text);
     r.bytes = {static_cast<uint8_t>(hash), static_cast<uint8_t>(hash >> 8), static_cast<uint8_t>(count >> 8),
@@ -664,6 +687,106 @@ Filled fill_missing_texts(std::vector<std::vector<uint8_t>*> banks, std::span<co
         filled.banks.push_back(part.russian_at);
     }
     return filled;
+}
+
+namespace {
+
+struct PolishText {
+    std::string_view key;
+    std::u8string_view text;
+};
+
+constexpr PolishText kPolish[] = {
+#include "title/text_polish.inc"
+    {}, // (the end: the table may be empty)
+};
+
+// A text's markup without its line breaks (a translation may break its lines elsewhere).
+std::u32string markup_unbroken(std::string_view text) {
+    std::u32string marks = markup(text);
+    std::erase(marks, U'\n');
+    return marks;
+}
+
+} // namespace
+
+std::span<const Translation> polish_texts() {
+    static const std::vector<Translation> texts = [] {
+        std::vector<Translation> out;
+        for (const PolishText& t : kPolish) {
+            if (!t.key.empty()) out.push_back({t.key, {reinterpret_cast<const char*>(t.text.data()), t.text.size()}});
+        }
+        return out;
+    }();
+    return texts;
+}
+
+Filled put_polish(std::vector<std::vector<uint8_t>*> banks, std::span<const Translation> polish) {
+    constexpr size_t kLanguages = kBankRussian;
+    struct EnglishPart {
+        size_t at;
+        Indexed english;
+    };
+    std::vector<EnglishPart> parts;
+    for (size_t i = kLanguages - 1; i < banks.size(); ++i) {
+        // a part's banks, Japanese to Russian
+        bool part = true;
+        for (size_t l = 0; l < kLanguages && part; ++l) part = bank_language(*banks[i + 1 - kLanguages + l]) == l + 1;
+        if (!part) continue;
+        const size_t at = i + kBankEnglish - kLanguages;
+        if (auto english = read_index(*banks[at])) parts.push_back({at, std::move(*english)});
+    }
+    std::map<std::string_view, std::string_view> ours;
+    for (const Translation& t : polish) ours.emplace(t.key, t.text);
+    // ours by English text: a record without a text of its own takes that of another key with its English text
+    // (the first in the banks' order; copied: the records change below). One whose text is empty (a pin) stays
+    // English and gives none.
+    std::map<std::string, std::string_view, std::less<>> by_english;
+    for (const EnglishPart& part : parts) {
+        for (const Indexed::Record& r : part.english.records) {
+            if (!r.keyed || text_of(r).empty()) continue;
+            const auto our = ours.find(key_of(r));
+            if (our != ours.end() && !our->second.empty()) by_english.emplace(std::string(text_of(r)), our->second);
+        }
+    }
+    Filled filled;
+    for (EnglishPart& part : parts) {
+        bool changed = false;
+        for (Indexed::Record& r : part.english.records) {
+            if (!r.keyed || text_of(r).empty()) continue;
+            const auto our = ours.find(key_of(r));
+            if (our != ours.end() && our->second.empty()) continue; // pinned: stays English
+            const auto same = our == ours.end() ? by_english.find(text_of(r)) : by_english.end();
+            if (our == ours.end() && same == by_english.end()) continue;
+            const std::string_view text = our != ours.end() ? our->second : same->second;
+            if (markup_unbroken(text) != markup_unbroken(text_of(r))) {
+                if (our != ours.end()) filled.kept_english.emplace_back(our->first);
+                continue;
+            }
+            r = with_text(r, text);
+            changed = true;
+        }
+        if (!changed) continue;
+        *banks[part.at] = write_index(*banks[part.at], part.english);
+        filled.banks.push_back(part.at);
+    }
+    return filled;
+}
+
+std::optional<std::vector<uint8_t>> with_texts(
+    const std::vector<uint8_t>& bank,
+    const std::function<std::optional<std::string>(size_t record, std::string_view text)>& change) {
+    auto indexed = read_index(bank);
+    if (!indexed) return std::nullopt;
+    bool changed = false;
+    for (size_t i = 0; i < indexed->records.size(); ++i) {
+        Indexed::Record& r = indexed->records[i];
+        std::optional<std::string> text = change(i, text_of(r));
+        if (!text || *text == text_of(r)) continue;
+        r = with_text(r, *text);
+        changed = true;
+    }
+    return changed ? write_index(bank, *indexed) : bank;
 }
 
 void code_points(const std::vector<uint8_t>& bank, std::set<char32_t>& used) {

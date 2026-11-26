@@ -129,12 +129,14 @@ int main(int argc, char** argv) {
     const host::game::Language& language = host::game::language_of(game_settings.settings);
     os::set_system_language(language.wiiu);
     title::language::set(language);
-    std::fprintf(stderr, "ttt2: the console's language: %.*s (cafe.language %u)\n",
-                 static_cast<int>(language.name.size()), language.name.data(), language.wiiu);
+    std::fprintf(stderr, "ttt2: the console's language: %.*s (cafe.language %u%s)\n",
+                 static_cast<int>(language.name.size()), language.name.data(), language.wiiu,
+                 language.added ? "; the port's own texts over English's" : "");
     title::prepare_presentation();
     title::prepare_controllers();
     title::prepare_paint();
     title::prepare_roster();
+    title::prepare_subtitles();
     title::prepare_solo_ghost_battle();
     title::prepare_player_name(game_settings.settings.player_name);
     title::prepare_customize_select();

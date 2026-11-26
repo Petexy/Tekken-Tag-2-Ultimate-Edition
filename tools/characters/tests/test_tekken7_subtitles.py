@@ -258,10 +258,11 @@ class NotReadInTime(unittest.TestCase):
             self.assertFalse(subtitles.all_saved('abc', d) or subtitles.all_saved('xyz', d))
             # (the pack made now says which: character.ini subtitle_languages, launcher.py's partial_subtitles)
             src = source.Tekken7Source(types.SimpleNamespace(saved=d))
+            # (Polish, ours, with the English: never Tekken 7's to read)
             self.assertEqual(src.subtitle_languages(types.SimpleNamespace(TEKKEN7_CODE='abc')),
-                             ('en', 'de', 'it', 'es', 'ru'))
+                             ('en', 'de', 'it', 'es', 'ru', 'pl'))
             self.assertEqual(src.subtitle_languages(types.SimpleNamespace(TEKKEN7_CODE='xyz')),
-                             ('en', 'de', 'it', 'es', 'ru', 'ja'))
+                             ('en', 'de', 'it', 'es', 'ru', 'pl', 'ja'))
             self.assertEqual(game.asked[0], ('us', [25, 27]))
             # the next import or update: only the late ones are asked for, and saved now
             again = self.Game()

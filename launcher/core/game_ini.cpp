@@ -148,9 +148,10 @@ fs::path beside(const fs::path& display_file) { return display_file.parent_path(
 bool name_character(char32_t c) { return c >= 0x20 && c <= 0x7E && c != '#'; }
 
 std::string_view own_name(std::string_view language) {
-    // (The game's text common 1599 in each language's bank.)
+    // (The game's text common 1599 in each language's bank; Polish's is ours, over English's.)
     static constexpr std::pair<std::string_view, std::string_view> kWords[] = {
-        {"en", kDefaultName}, {"fr", "Joueur"}, {"de", "Spieler"}, {"it", "Giocatore"}, {"es", "Jugador"}, {"ru", ""},
+        {"en", kDefaultName}, {"fr", "Joueur"}, {"de", "Spieler"}, {"it", "Giocatore"},
+        {"es", "Jugador"},    {"ru", ""},       {"pl", "Gracz"},
     };
     const cafe::host::game::Language* l = cafe::host::game::find_language(language);
     const std::string_view code = l ? l->code : std::string_view("en");

@@ -860,7 +860,8 @@ void test_game_ini(const fs::path& root) {
         for (const char c : own) check(static_cast<unsigned char>(c) < 0x80 || l.code != "ru", "game.ini: drawable");
     }
     check(game_ini::own_name("") == "Player" && game_ini::own_name("Klingon") == "Player" &&
-              game_ini::own_name("FR") == "Joueur" && game_ini::own_name("ru").empty(),
+              game_ini::own_name("FR") == "Joueur" && game_ini::own_name("ru").empty() &&
+              game_ini::own_name("pl") == "Gracz",
           "game.ini: the game's own name, by code");
     // An overlong UTF-8 sequence is no letter: refused whole (the game shows "?" for it).
     check(game_ini::first_refused("\xC1\xA1" "bc") == "\xC1\xA1" && !game_ini::name_problem("\xC1\xA1" "bc").empty(),

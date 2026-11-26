@@ -32,10 +32,10 @@ build the helper knows, so Steam running saves it). A Tekken 7 fighter has "subt
 win subtitles are saved in every language an import reads them in (else the import has Tekken 7 read them, which
 needs Steam running, or makes the pack without them). "without_subtitles": the pack the game loads was made without
 them (no English: a Tekken 7 fighter added while Steam was not running); "partial_subtitles": it has them in English
-but was made without some other language (a Tekken 7 fighter added while Steam was not running, its English saved by
-an earlier version); "update" is true for both, and for a pack made without a language an import now reads (an
-earlier version's: character.ini subtitle_languages). With --game: whether that folder is an installed game the
-importer can read.
+but was made without some other language Tekken 7 has (a Tekken 7 fighter added while Steam was not running, its
+English saved by an earlier version); "update" is true for both, and for a pack made without a language an import now
+reads (an earlier version's: character.ini subtitle_languages; a Tekken 7 fighter's Polish is ours, which needs no
+Steam). With --game: whether that folder is an installed game the importer can read.
 
 owned: which DLC fighters the player's Steam account owns, as Steam tells the game ({"owned": {name: true|false}}):
 each game's helper runs hidden in that game's Proton prefix while Proton starts it and it asks (not the game): Tekken
@@ -155,7 +155,9 @@ def subtitles_made(p, tekken8_fighter):
     an older version made it."""
     languages = p['subtitle_languages']
     without = p['without_subtitles'] or (not tekken8_fighter and languages is not None and 'en' not in languages)
-    partial = not without and not tekken8_fighter and languages is not None and bool(subtitles_missing(p))
+    # (a language Tekken 7 has none of is ours, made without the game: one missing is only an older version's)
+    from_game = [lang for lang in subtitles_missing(p) if lang not in source.Tekken7Source.OWN_LANGUAGES]
+    partial = not without and not tekken8_fighter and languages is not None and bool(from_game)
     return without, partial
 
 

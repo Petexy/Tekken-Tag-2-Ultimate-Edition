@@ -9,6 +9,7 @@
 #include "title/font.h"
 #include "title/image.h"
 #include "title/language.h"
+#include "title/subtitles.h"
 #include "title/text.h"
 #include "title/title_screen.h"
 
@@ -158,8 +159,8 @@ struct TextFont {
     std::array<uint16_t, kCarried> boxes;
 };
 const TextFont kTextFonts[] = {
-    // The plain font (descriptions): £ ¥ Þ Œ ＼ Ź Ý.
-    {0x7C74E49A, 0x099AF947, 21, {0, 19, 22}, {0x00A3, 0x00A5, 0x00DE, 0x0152, 0xFF3C, 0x0179, 0x00DD}},
+    // The plain font (descriptions): £ ¥ Þ Œ ＼ Ř Ý (no Polish letter: our Polish texts are drawn with it too).
+    {0x7C74E49A, 0x099AF947, 21, {0, 19, 22}, {0x00A3, 0x00A5, 0x00DE, 0x0152, 0xFF3C, 0x0158, 0x00DD}},
     // The Korean and Japanese gothic fonts (help panels; they have Latin
     // letters too).
     {0xB1277EE3, 0xC4C9633E, 21, {0, 17, 22}, {}},
@@ -541,6 +542,14 @@ void prepare_presentation() {
             std::fprintf(stderr, "ttt2: Russian text %s left in English: it names a record the Russian banks lack\n",
                          key.c_str());
         }
+        // (Polish, which the Wii U has none of: our Polish over the English texts the title shows.)
+        if (language::place() != language::kPolish) continue;
+        const text::Filled polish = text::put_polish(of_archive);
+        for (const size_t i : polish.banks) filled[at[i]] = true;
+        for (const std::string& key : polish.kept_english) {
+            std::fprintf(stderr, "ttt2: Polish text %s left in English: its markup is not the English text's\n",
+                         key.c_str());
+        }
     }
     size_t rewritten = 0;
     for (size_t i = 0; i < banks.size(); ++i) {
@@ -548,6 +557,16 @@ void prepare_presentation() {
         const bool renamed = icons && text::show_button_icons(b.contents) != 0;
         rewritten += renamed;
         if (renamed || filled[i]) changed[b.archive][b.hash] = archive::pack(b.contents, b.hash, b.flags);
+    }
+    if (language::place() == language::kPolish) {
+        // the Fight Lab story's lines in our Polish (subtitles.h)
+        uint8_t flags[8] = {};
+        const auto story = game_entry(kFontArchive, subtitles::kStoryFile, &flags);
+        const auto polish = story ? subtitles::in_polish(*story, subtitles::story_lines()) : std::nullopt;
+        if (polish && polish->ours > 0) {
+            changed[kFontArchive][subtitles::kStoryFile] = archive::pack(polish->file, subtitles::kStoryFile, flags);
+        }
+        std::fprintf(stderr, "ttt2: Fight Lab story in Polish: %zu of its movies' lines ours\n", polish ? polish->ours : 0);
     }
     for (const auto& [archive_name, entries] : changed) {
         if (!entries.empty() && !vfs::set_archive_entries(archive_name, entries)) {

@@ -39,16 +39,20 @@ inline constexpr size_t kMaxNameLength = 16;
 std::string clean_name(std::string_view text);
 
 // The languages the game can be shown in: the European Wii U game has its
-// texts in these. `wiiu`: the console's language number for it (the
-// system setting cafe.language the title reads), `name`: in English, as
-// the launcher lists it. English first: the game's own.
+// texts in these, and the port adds Polish, which it has none in. `wiiu`:
+// the console's language number for it (the system setting cafe.language
+// the title reads), `name`: in English, as the launcher lists it, `added`:
+// the port's own language: the title runs in `wiiu`'s (English) and the
+// port puts its own translation over that language's texts (title/text.h,
+// polish_texts). English first: the game's own.
 struct Language {
     std::string_view code, name;
     uint32_t wiiu;
+    bool added = false;
 };
 inline constexpr Language kLanguages[] = {
-    {"en", "English", 1}, {"fr", "French", 2},  {"de", "German", 3},
-    {"it", "Italian", 4}, {"es", "Spanish", 5}, {"ru", "Russian", 10},
+    {"en", "English", 1}, {"fr", "French", 2},  {"de", "German", 3},    {"it", "Italian", 4},
+    {"es", "Spanish", 5}, {"ru", "Russian", 10}, {"pl", "Polish", 1, true},
 };
 
 // The language of `code` (any case, no spaces); nullptr when the game has

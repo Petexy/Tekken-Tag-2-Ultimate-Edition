@@ -177,7 +177,8 @@ class Status(unittest.TestCase):
 
     def test_packs_made_without_some_languages(self):
         """A pack whose subtitles are missing a language an import reads (source.SUBTITLE_LANGUAGES) is one to update:
-        one made before packs said which (English only then), a Tekken 7 fighter's made while some were not saved.
+        one made before packs said which (English only then) or before a language was added (Polish), a Tekken 7
+        fighter's made while some were not saved.
         Status tells which (update, without_subtitles: no English, partial_subtitles: English, not all the others),
         the C++ launcher's words for each."""
         with tempfile.TemporaryDirectory() as d, \
@@ -202,7 +203,9 @@ class Status(unittest.TestCase):
             everything = ' '.join(source.SUBTITLE_LANGUAGES)
             for name in ('kazumi', 'reina'):
                 self.assertEqual(state(name, everything), (False, False, False))
-                self.assertEqual(state(name, 'ru ja it es de fr en'), (False, False, False))     # (any order)
+                self.assertEqual(state(name, 'ru ja it pl es de fr en'), (False, False, False))  # (any order)
+                # (an earlier version's, before Polish: to update; a Tekken 7 fighter's Polish is ours, no Steam)
+                self.assertEqual(state(name, 'en fr de it es ru ja'), (True, False, False))
                 self.assertEqual(state(name, None), (True, False, False))   # (an earlier version's pack: to update)
                 self.assertEqual(state(name, 'en fr de it es ja'),
                                  (True, False, False) if name == 'reina' else (True, False, True))

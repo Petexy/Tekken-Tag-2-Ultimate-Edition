@@ -274,7 +274,7 @@ class RunStandIn(unittest.TestCase):
                               'alo', 'art', 'source'}, files)     # (source/: her pictures and name call for shared/)
         self.assertEqual((ini['donor'], ini['code'], ini['slot']), ('hei', 'rei', '0'))
         self.assertEqual(ini['stand_in'], 'hei')                    # (the launcher offers an update for her own)
-        self.assertEqual(ini['subtitle_languages'], 'en fr de it es ru ja')     # (her game's, all read)
+        self.assertEqual(ini['subtitle_languages'], 'en fr de it es ru pl ja')  # (her game's, all read)
         self.assertNotIn('without_subtitles', ini)
         self.assertTrue(any(line.startswith('WARNING: Reina\'s own moveset cannot be had: not saved') for line in lines))
         row = pack.place(0)['row']

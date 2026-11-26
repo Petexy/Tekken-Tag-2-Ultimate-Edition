@@ -775,6 +775,14 @@ void game_settings(const fs::path& golden, const fs::path& scratch) {
         // (Russian's word is Cyrillic, which the launcher's font has not.)
         CHECK_EQ(v.settings->game[0].control.describe.state, std::string("The game's own (Player in English)"));
         CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Game's own"));
+        // Polish (the port's own, over English): its word is ours, in letters the font has.
+        h.model.choose("language", 6, h.now);
+        CHECK(read(game_ini).ends_with("\nlanguage = pl\n"));
+        v = h.model.view();
+        CHECK_EQ(v.settings->game[1].control.describe.state, std::string("Polish"));
+        CHECK_EQ(v.settings->game[0].control.describe.state, std::string("Gracz (the game's own)"));
+        CHECK_EQ(v.settings->game[0].control.placeholder, std::string("Gracz"));
+        h.model.choose("language", 5, h.now);
         h.model.choose("language", 99, h.now);
         CHECK_EQ(h.model.said(), std::string("no language 99"));
         CHECK(read(game_ini).ends_with("\nlanguage = ru\n"));

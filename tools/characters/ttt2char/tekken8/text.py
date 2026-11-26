@@ -21,7 +21,7 @@ import struct
 from .voice import POSE_EVENT
 
 FOLDER = 'Polaris/Content/Localize/%s/'
-LANGUAGES = ('en', 'fr', 'de', 'it', 'es', 'ru', 'ja')  # its folders of the languages an import reads (source.py)
+LANGUAGES = ('en', 'fr', 'de', 'it', 'es', 'ru', 'pl', 'ja')  # its folders of the languages an import reads (source.py)
 MAGIC, RECORD = b'gbtd', b'text'
 RECORD_HEADER = 24
 

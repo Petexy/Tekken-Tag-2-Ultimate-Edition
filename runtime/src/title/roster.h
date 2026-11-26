@@ -31,6 +31,10 @@ void prepare_roster();
 // cells (title/customize_grid.h).
 void prepare_customize_select();
 
+// After prepare_roster: with game.ini's Polish, the fighters' subtitles
+// shown in Polish (title/subtitles.h).
+void prepare_subtitles();
+
 // The added fighter (its number: its pack's slot) a fighter (a player
 // struct) is, or -1.
 int added_slot(uint32_t player);

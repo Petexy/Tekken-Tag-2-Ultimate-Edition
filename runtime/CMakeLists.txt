@@ -110,6 +110,7 @@ add_library(cafe_title STATIC
     src/title/language.cpp
     src/title/menudata.cpp
     src/title/pictures.cpp
+    src/title/subtitles.cpp
     src/title/text.cpp
     src/title/title_screen.cpp)
 target_include_directories(cafe_title PUBLIC src)

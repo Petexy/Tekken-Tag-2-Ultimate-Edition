@@ -1,9 +1,9 @@
 // The title's file formats and the pictures made from them, on synthetic
 // data (no game files needed): archive scrambling, packing and rebuilding,
 // texture decoding, the font's glyph table and icon sets, the text banks'
-// button names, the copyright line without "Wii U Edition", a still
-// without the logo's subtitle getting none, and the Offline menu's SOLO
-// GHOST BATTLE row.
+// button names, our Russian and Polish texts and Polish subtitles, the
+// copyright line without "Wii U Edition", a still without the logo's
+// subtitle getting none, and the Offline menu's SOLO GHOST BATTLE row.
 
 #include "title/archive.h"
 #include "title/draw.h"
@@ -12,6 +12,7 @@
 #include "title/language.h"
 #include "title/menudata.h"
 #include "title/pictures.h"
+#include "title/subtitles.h"
 #include "title/text.h"
 #include "title/title_screen.h"
 
@@ -794,6 +795,245 @@ void test_markup() {
           "text: our Russian texts by key, each once, none with an icon's code point, references well formed");
 }
 
+
+// The code points of UTF-8 text.
+std::u32string code_points(std::string_view utf8) {
+    std::u32string out;
+    for (size_t i = 0; i < utf8.size();) {
+        const auto b = static_cast<unsigned char>(utf8[i]);
+        const size_t n = b < 0x80 ? 1 : b < 0xE0 ? 2 : b < 0xF0 ? 3 : 4;
+        char32_t c = n == 1 ? b : b & (0x3F >> (n - 1));
+        for (size_t k = 1; k < n && i + k < utf8.size(); ++k) c = c << 6 | (static_cast<unsigned char>(utf8[i + k]) & 0x3F);
+        out += c;
+        i += n;
+    }
+    return out;
+}
+
+// Table 1's word of a bank's record i (number << 16, line count << 4, low bits).
+uint32_t word_of(const std::vector<uint8_t>& bank, size_t i) { return get32(bank, 0x40 + 16 * i); }
+
+// Polish over the English banks (made-up texts): by key, else by the same English text, else English; markup
+// checked with the line breaks aside, table 1's line count the new text's.
+void test_polish_texts() {
+    std::vector<std::vector<uint8_t>> banks = three_parts();
+    const std::vector<std::vector<uint8_t>> before = banks;
+    const text::Translation ours[] = {{"practice_1", "Pierwsze\nsłowo"},       // (its English: one line)
+                                      {"practice_2", "Wciśnij przycisk A."},   // (its English names no button)
+                                      {"practice_5", "PIĘĆ"},
+                                      {"practice_9_2", "Według klucza"}};
+    const text::Filled filled = text::put_polish(pointers_to(banks), ours);
+    check(filled.banks == (std::vector<size_t>{1, 11, 21}) &&
+              filled.kept_english == (std::vector<std::string>{"practice_2", "practice_2", "practice_2"}),
+          "polish: the English banks only, those whose markup differs named");
+    const auto english = indexed(banks[1]);
+    check(english.size() == 5 && english[0].text == "Pierwsze\nsłowo" && english[0].english == "TEXT" &&
+              english[0].key == "practice_1" && english[1].text == "ENGLISH" && english[2].text == "Pierwsze\nsłowo" &&
+              english[2].key == "practice_3" && english[3].text == "PIĘĆ" && english[4].text == "Według klucza" &&
+              english[4].number == 0xFFFF,
+          "polish: ours by key, by another key's same English text, English where the markup differs");
+    check(english.size() == 5 && english[0].header_hash == text::text_hash("Pierwsze\nsłowo") &&
+              english[0].count == 14 && english[3].count == 4 && english[1].header_hash == 0x3412,
+          "polish: a Polish record's header its text's, an English one's as it was");
+    check(word_of(banks[1], 0) == (1u << 16 | 0x22) && word_of(banks[1], 1) == (2u << 16 | 0x12) &&
+              word_of(banks[1], 3) == (5u << 16 | 0x12) && word_of(before[1], 0) == (1u << 16 | 0x12),
+          "polish: table 1 counts the lines of the new text");
+    bool others = true;
+    for (size_t i = 0; i < banks.size(); ++i) {
+        if (i != 1 && i != 11 && i != 21) others = others && banks[i] == before[i];
+    }
+    check(others && indexed(banks[11]).size() == 5 && indexed(banks[11])[3].text == "PIĘĆ",
+          "polish: the other languages' banks stay; every part's English bank gets it");
+    std::vector<std::vector<uint8_t>> untouched = three_parts();
+    check(text::put_polish(pointers_to(untouched), {}).banks.empty() && untouched == before,
+          "polish: no texts, no change");
+    // a pin (no text): that record stays English, takes no other key's text of its English text and gives none
+    const auto english_before = indexed(before[1]);
+    std::vector<std::vector<uint8_t>> pinned = three_parts(), pin_first = three_parts();
+    const text::Translation later_pinned[] = {{"practice_1", "Pierwsze"}, {"practice_3", ""}};
+    const text::Translation first_pinned[] = {{"practice_1", ""}, {"practice_3", "Trzecie"}};
+    text::put_polish(pointers_to(pinned), later_pinned);
+    text::put_polish(pointers_to(pin_first), first_pinned);
+    const auto a = indexed(pinned[1]), b = indexed(pin_first[1]);
+    check(english_before.size() == 5 && english_before[0].text == english_before[2].text && a.size() == 5 &&
+              a[0].text == "Pierwsze" && a[2].text == english_before[2].text && b.size() == 5 &&
+              b[0].text == english_before[0].text && b[2].text == "Trzecie",
+          "polish: a pinned record stays English, the other of its English text takes its own");
+
+    // Polish button names are the buttons' icons, as the English ones are
+    check(text::markup("Wciśnij przycisk A, potem krzyżakiem wybierz.") ==
+                  text::markup("Press the A Button, then choose with the +Control Pad.") &&
+              text::markup("Przytrzymaj przycisk +.") == text::markup("Hold the + Button.") &&
+              text::markup("Użyj przycisków A, B, X i Y.") == text::markup("Use the A, B, X, and Y Buttons.") &&
+              text::markup("Przycisku Aby") == U"" && text::markup("krzyżaki") == U"",
+          "polish: button names as icons, whole words only");
+    std::vector<uint8_t> named = make_bank({{"common_1", "Wciśnij przycisk B lub krzyżak.", "Press"}});
+    check(text::show_button_icons(named) == 1 && texts(named)[0].first == "Wciśnij ¥ lub ».",
+          "polish: their icons in a bank");
+
+    // the table: keys of a part's records, each once, Polish texts (or none: a pin) without the icons' code points
+    // (the carriers, the plain font's boxes, ideographs) nor typographic quotes, dashes, ellipses or braces, but as a
+    // control code's argument
+    std::set<std::string_view> keys;
+    bool well_formed = true;
+    for (const text::Translation& t : text::polish_texts()) {
+        const size_t underscore = t.key.find('_');
+        well_formed = well_formed && underscore != std::string_view::npos && underscore > 0 && keys.insert(t.key).second;
+        size_t arguments = 0;
+        for (const char32_t c : code_points(t.text)) {
+            if (arguments > 0) {
+                --arguments;
+                continue;
+            }
+            if (c >= 0xFFF0 && c <= 0xFFFE) arguments = c == 0xFFF2 ? 2 : 1;
+            const bool icon = c == text::kRightButton || c == text::kBottomButton || c == text::kTopButton ||
+                              c == text::kLeftButton || c == text::kStartButton || c == text::kSelectButton ||
+                              c == text::kPad || c == 0x00DE || c == 0x0152 || c == 0x0158 || c == 0x00DD ||
+                              (c >= 0x3400 && c < 0xE000);
+            const bool typographic = c == U'\u00AB' || c == U'\u201E' || c == U'\u201D' || c == U'\u201C' ||
+                                     c == U'\u2018' || c == U'\u2019' || c == U'\u2026' || c == U'\u2013' ||
+                                     c == U'\u2014';
+            well_formed = well_formed && !icon && !typographic && c != U'{' && c != U'}';
+        }
+    }
+    check(well_formed, "polish: our Polish texts by key, each once, none with an icon's code point");
+}
+
+// A timed subtitle line (show and hide frames as code points below U+0800, then the words).
+std::string timed(const std::string& words, char32_t show, char32_t hide) {
+    const auto utf8 = [](char32_t c) {
+        return c < 0x80 ? std::string(1, static_cast<char>(c))
+                        : std::string{static_cast<char>(0xC0 | (c >> 6)), static_cast<char>(0x80 | (c & 0x3F))};
+    };
+    return "\xEF\xBF\xBB" + utf8(show) + "\xEF\xBF\xBC" + utf8(hide) + "\xEF\xBF\xB5\x01" + words +
+           "\xEF\xBF\xBB\x01\xEF\xBF\xBC\xEF\xBF\xBF";
+}
+
+// A table (a u32 count, then {offset, size} pairs) of `parts`, each 16-aligned after it; one of `use` per entry
+// (shared parts share their bytes).
+std::vector<uint8_t> table_of(const std::vector<std::vector<uint8_t>>& parts, const std::vector<size_t>& use) {
+    std::vector<uint8_t> out(4 + 8 * use.size(), 0);
+    put32(out, 0, static_cast<uint32_t>(use.size()));
+    out.resize(to16(out.size()), 0);
+    std::vector<size_t> at;
+    for (const auto& p : parts) {
+        at.push_back(out.size());
+        out.insert(out.end(), p.begin(), p.end());
+        out.resize(to16(out.size()), 0);
+    }
+    for (size_t i = 0; i < use.size(); ++i) {
+        put32(out, 4 + 8 * i, static_cast<uint32_t>(at[use[i]]));
+        put32(out, 8 + 8 * i, static_cast<uint32_t>(parts[use[i]].size()));
+    }
+    return out;
+}
+
+// The parts of a table (table_of's inverse).
+std::vector<std::vector<uint8_t>> parts_of(const std::vector<uint8_t>& t) {
+    std::vector<std::vector<uint8_t>> out;
+    for (size_t i = 0, n = get32(t, 0); i < n; ++i) {
+        const size_t at = get32(t, 4 + 8 * i), size = get32(t, 8 + 8 * i);
+        out.emplace_back(t.begin() + static_cast<ptrdiff_t>(at), t.begin() + static_cast<ptrdiff_t>(at + size));
+    }
+    return out;
+}
+
+// A line's container: a bank per entry (16), the title's own way (each its own, " " from 10 on) or an added
+// fighter's (English, French and maybe Polish of its own, the others English's).
+std::vector<uint8_t> line_container(const std::vector<std::string>& english, bool added, const std::string& polish) {
+    std::vector<std::vector<uint8_t>> banks;
+    std::vector<size_t> use;
+    const auto bank = [](uint8_t entry, const std::vector<std::string>& lines) {
+        std::vector<Numbered> records;
+        for (size_t k = 0; k < lines.size(); ++k) records.push_back({static_cast<uint32_t>(k), "", lines[k], ""});
+        return make_indexed(static_cast<uint8_t>(entry + 1), records);
+    };
+    if (!added) {
+        for (uint8_t e = 0; e < 16; ++e) {
+            banks.push_back(bank(e, e == 1 ? english : e >= 10 ? std::vector<std::string>{" "}
+                                                               : std::vector<std::string>{timed("Autre", 'A', 'Z')}));
+            use.push_back(e);
+        }
+        return table_of(banks, use);
+    }
+    banks = {bank(1, english), bank(3, {timed("Ligne", 'A', 'Z')})};
+    if (!polish.empty()) banks.push_back(bank(subtitles::kPolishEntry, {timed(polish, 'B', 'Y')}));
+    for (size_t e = 0; e < 16; ++e) use.push_back(e == 3 ? 1 : e == subtitles::kPolishEntry && !polish.empty() ? 2 : 0);
+    return table_of(banks, use);
+}
+
+void test_subtitles() {
+    const std::vector<std::vector<uint8_t>> lines = {
+        line_container({timed("Hello there", '@', 0x90)}, false, ""),                         // 0: the title's
+        {0xFF, 0xFF, 0xFF, 0xFF},                                                             // 1: empty
+        line_container({timed("Morning", '@', 'p')}, true, "Dzień dobry"),                    // 2: added, Polish
+        line_container({timed("Evening", '@', 'p')}, true, ""),                               // 3: added, no Polish
+        line_container({timed("First", 'A', 'B'), timed("then second", 'C', 0xC0)}, false, ""), // 4: two texts
+        line_container({timed("Not ours", 'A', 'B')}, false, ""),                             // 5: none of ours
+    };
+    const std::vector<uint8_t> file = table_of(lines, {0, 1, 2, 3, 4, 5});
+    const subtitles::Line ours[] = {{"0", "Cześć"}, {"4.1", "a potem drugi"}, {"9", "Nikt"}};
+    const auto polish = subtitles::in_polish(file, ours);
+    check(polish && polish->ours == 2 && polish->added == 1, "subtitles: ours in two lines, an added fighter's own");
+    if (!polish) return;
+    const auto entries = parts_of(polish->file);
+    const auto bank_of = [](const std::vector<uint8_t>& container, size_t entry) { return parts_of(container)[entry]; };
+    const auto text_of = [&](size_t line, size_t entry, size_t k) {
+        const auto records = indexed(bank_of(entries[line], entry));
+        return k < records.size() ? records[k].text : std::string("?");
+    };
+    check(entries.size() == 6 && text_of(0, 1, 0) == timed("Cześć", '@', 0x90) &&
+              indexed(bank_of(entries[0], 1))[0].header_hash == text::text_hash(timed("Cześć", '@', 0x90)),
+          "subtitles: the title's line in our Polish, with its English timing");
+    bool kept = entries.size() == 6;
+    for (size_t e = 0; kept && e < 16; ++e) kept = e == 1 || bank_of(entries[0], e) == bank_of(lines[0], e);
+    check(kept && entries[1] == lines[1] && entries[3] == lines[3] && entries[5] == lines[5],
+          "subtitles: the line's other languages, an empty line, an added fighter's without Polish, lines without "
+          "ours stay");
+    check(text_of(2, 1, 0) == timed("Dzień dobry", 'B', 'Y') && text_of(2, 3, 0) == timed("Ligne", 'A', 'Z'),
+          "subtitles: an added fighter's own Polish (entry 10) shown for English");
+    check(text_of(4, 1, 0) == timed("First", 'A', 'B') && text_of(4, 1, 1) == timed("a potem drugi", 'C', 0xC0),
+          "subtitles: a line's second text by its key");
+    std::vector<uint8_t> broken = file;
+    put32(broken, 8 + 8 * 2, 1u << 30); // an entry past the file's end
+    check(!subtitles::in_polish(broken, ours) && !subtitles::in_polish({1, 2}, ours),
+          "subtitles: a file not as described: nothing");
+    const auto only_added = subtitles::in_polish(file, {});
+    check(only_added && only_added->ours == 0 && only_added->added == 1 && parts_of(only_added->file)[0] == lines[0],
+          "subtitles: without ours, only the added fighters' own");
+
+    // the Fight Lab story's file: a movie's lines in one bank, English's empty where its picture has the words
+    const std::vector<std::vector<uint8_t>> movies = {
+        line_container({timed("", 'A', 'B'), timed("Spoken", 'C', 'D'), timed("Not ours", 'E', 'F')}, false, ""),
+        line_container({timed("Later", 'G', 'H')}, false, "")};
+    const subtitles::Line story[] = {{"0", "NAPIS"}, {"0.1", "Mówione"}, {"1", "Potem"}};
+    const auto in_polish = subtitles::in_polish(table_of(movies, {0, 1}), story);
+    const auto movie = [&](size_t m, size_t k) {
+        const auto records = in_polish ? indexed(parts_of(parts_of(in_polish->file)[m])[1]) : std::vector<Numbered>{};
+        return k < records.size() ? records[k].text : std::string("?");
+    };
+    check(in_polish && in_polish->ours == 2 && movie(0, 0) == timed("NAPIS", 'A', 'B') &&
+              movie(0, 1) == timed("Mówione", 'C', 'D') && movie(0, 2) == timed("Not ours", 'E', 'F') &&
+              movie(1, 0) == timed("Potem", 'G', 'H'),
+          "subtitles: the story's lines in ours, the empty ones (captions) too, with the English timing");
+    // the tables: "N" / "N.k" keys, each once, a line of words (no control codes, no typographic quotes)
+    bool well_formed = true;
+    for (const auto table : {subtitles::polish_lines(), subtitles::story_lines()}) {
+        std::set<std::string_view> keys;
+        for (const subtitles::Line& l : table) {
+            const bool key = !l.key.empty() && std::all_of(l.key.begin(), l.key.end(), [](char c) {
+                return (c >= '0' && c <= '9') || c == '.';
+            });
+            well_formed = well_formed && key && keys.insert(l.key).second && !l.text.empty();
+            for (const char32_t c : code_points(l.text)) {
+                well_formed = well_formed && c >= 0x20 && c < 0xE000 && c != U'\u00AB' && c != U'\u201E' &&
+                              c != U'\u201D' && c != U'\u2026' && c != U'\u2013';
+            }
+        }
+    }
+    check(well_formed && !subtitles::story_lines().empty(), "subtitles: our tables' keys and lines well formed");
+}
+
 void test_language() {
     const language::Text t = {"English", "Fran\xC3\xA7" "ais", nullptr, "", "Espa\xC3\xB1ol", "\xD0\xA0\xD1\x83\xD1\x81"};
     check(language::in(t, language::kEnglish) == "English" && language::in(t, language::kFrench) == "Français" &&
@@ -802,6 +1042,10 @@ void test_language() {
     check(language::in(t, language::kGerman) == "English" && language::in(t, language::kItalian) == "English" &&
               language::in(t, language::kPlaces) == "English",
           "language: English where one has none");
+    const language::Text polish = {"Player", nullptr, nullptr, nullptr, nullptr, nullptr, "Gracz"};
+    check(language::in(polish, language::kPolish) == "Gracz" && language::in(t, language::kPolish) == "English" &&
+              language::place_of("pl") == language::kPolish,
+          "language: Polish, the port's own, in its place");
     check(language::place_of("ru") == language::kRussian && language::place_of("de") == language::kGerman &&
               language::place_of("en") == language::kEnglish && language::place_of("ja") == language::kPlaces &&
               language::place_of("") == language::kPlaces,
@@ -1026,6 +1270,8 @@ int main() {
     test_text();
     test_missing_texts();
     test_markup();
+    test_polish_texts();
+    test_subtitles();
     test_language();
     test_copyright_line();
     test_logo();

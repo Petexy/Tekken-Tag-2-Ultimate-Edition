@@ -1062,8 +1062,9 @@ each line of the file it leaves out or changes.
 
 The European Wii U game has its texts in English, French, German, Italian
 and Spanish, and the Russian texts of the PlayStation 3 and Xbox 360
-versions; `game.ini`'s `language` (`host::game::kLanguages`: en, fr, de,
-it, es, ru; none: English) chooses the one shown. `main.cpp` reads
+versions; the port adds Polish, its own translation (below). `game.ini`'s
+`language` (`host::game::kLanguages`: en, fr, de, it, es, ru, pl; none:
+English) chooses the one shown. `main.cpp` reads
 game.ini once before the title runs and makes the language the console's
 (`cafe.language` of `UCReadSysConfig`, `os/system_config.cpp`: 1 English,
 2 French, 3 German, 4 Italian, 5 Spanish, 10 Russian; the console stays a
@@ -1128,6 +1129,50 @@ none), chosen by `language::in_current`; non-ASCII characters are written
 as `\x` escapes (the Russian table above as UTF-8). A text written over one
 of the title's fits that text's space in that language's bank (in Russian,
 for the texts the Wii U lacks, our translation's).
+
+**Polish**, which no version of the game has, runs as English
+(`cafe.language` 1; `kLanguages` marks it `added`, and the log line says
+the port's texts go over English's) with our Polish in English's place:
+`text::put_polish` rebuilds each English bank (byte 6 = 2; served through
+the archive overlay like the Russian ones) with, for each record, our
+Polish of its key (`title/text_polish.inc`, `text::polish_texts`: only
+keys and our Polish, as for Russian), else our Polish of another record
+with the same English text in the player's banks (the first one in the
+banks' order that has an entry), else its English. An entry without a
+text pins its record to English: it takes no other record's Polish of
+the same English text, and gives none (a name or a track title whose
+English another record shares, one we translate). The markup check is
+the Russian one without the line breaks: our Polish may break its lines
+where Polish needs, and the record's table 1 word then says its own count
+of lines (bits 4 to 7, at most 15; the title sizes text boxes by it). One
+whose markup differs stays English and is logged `ttt2: Polish text <key>
+left in English: its markup is not the English text's`. The Polish texts
+name buttons in Polish (przycisk A, przycisku A, przyciskiem A, krzyżak,
+...), which `text.cpp`'s button names turn into the icons as they do the
+English names. The plain font (7C74E49A) drew one of its icons over Ź,
+an unused glyph until Polish: its boxes are now `£ ¥ Þ Œ ＼ Ř Ý`, none of
+them a letter of any language offered. The port's own texts
+(`language::Text`) have a Polish place too (in the English records'
+space where they go over the title's, as Polish runs on English's banks).
+The fighters' intro and win subtitles (title entry 917395eb, one
+container of language banks per line, the English bank at entry 1) are in
+Polish too (`title/subtitles.h`, `roster.cpp`'s `prepare_subtitles`, which
+serves the file in its place): a line whose container has a Polish bank
+of its own at entry 10 (its language byte 11; the importer writes it for
+an added fighter) shows it in entry 1's place; the title's own lines show
+ours (`title/subtitles_polish.inc`, by entry, `N.k` for the k-th text of
+an entry that has several) with the English line's timing; any other line
+stays English. The log says `ttt2: subtitles in Polish: <n> of the
+title's lines (ours), <m> of added fighters`. The Fight Lab story's lines
+(entry 9dc7a6fa) are a file of the same kind, a language container per
+movie (the story's two parts) whose banks hold one timed record per line.
+Every language plays the same movie, its captions (places, the time
+skip) in English in the picture; English's bank leaves those records
+empty and the others fill them. With Polish `presentation.cpp` serves the
+file with each record of the English bank in ours
+(`title/subtitles_story_polish.inc`, `movie` / `movie.record`), captions
+included, with the English timing; the log says `ttt2: Fight Lab story in
+Polish: <n> of its movies' lines ours`.
 
 Japanese (`cafe.language` 0) is not offered: the title's Japanese menus
 draw, but the port's own texts have no Japanese (the frame data panels'
@@ -1478,9 +1523,16 @@ language its source game has a text in: an import reads English, French,
 German, Italian, Spanish, Russian and Japanese (Tekken 8's text banks; Tekken
 7's subtitle files, which the hidden Tekken 7 reads and the importer saves per
 language), and every language entry without a text of its own shows the
-English one. A pack keeps the languages it was read in (character.ini
+English one. Polish is entry 10 (the title leaves 10 to 15 unused; the
+port shows it with game.ini's Polish, see Language): Tekken 8's own Polish,
+which an import reads with the others, and for a Tekken 7 fighter (Tekken 7
+has no Polish) our translation of each of its lines that Tekken 7 has in
+English (`tekken7/polish.py`, by fighter code and the line's key), which
+needs nothing of Tekken 7: such a pack lists `pl` whenever it has English,
+and Tekken 7 is never asked for it. A pack keeps the languages it was read in (character.ini
 `subtitle_languages`): a pack of an earlier version, which has English only, or
-a Tekken 7 fighter's made while Steam was not running, is offered as an update,
+a Tekken 7 fighter's made while Steam was not running, is offered as an update
+(one made before Polish too, its update needing no Steam for it),
 as is one whose file in some language the hidden Tekken 7 had not read in time
 (the helper answers `late` for it, unlike the game's "none", which is saved as
 an empty file): nothing is saved for that language, so the update asks again.

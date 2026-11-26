@@ -165,8 +165,11 @@ void test_language() {
         check(parsed.warnings.empty() && parsed.settings.language == (l.code == "en" ? "" : code) &&
                   game::language_of(parsed.settings).code == l.code,
               "language = " + upper + ": \"" + parsed.settings.language + "\"");
+        // (a language the port adds runs the title in English: its console language is English's)
+        check(!l.added || l.wiiu == game::kLanguages[0].wiiu, "added over English: " + code);
         for (const game::Language& other : game::kLanguages) {
-            check(&other == &l || (other.code != l.code && other.wiiu != l.wiiu), "one of each: " + code);
+            check(&other == &l || (other.code != l.code && (other.added || l.added || other.wiiu != l.wiiu)),
+                  "one of each: " + code);
         }
     }
     for (const char* none : {"", " fr", "fra", "f", "french", "nl", "pt", "jp"}) {
