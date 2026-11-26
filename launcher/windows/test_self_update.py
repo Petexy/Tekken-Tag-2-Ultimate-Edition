@@ -182,6 +182,26 @@ def archive(files, commit=HEAD, others=()):
         for name in others: z.writestr(name, b'x')
     return data.getvalue()
 
+class NotPacked(unittest.TestCase):
+    """The README's pictures stay out of a player's launcher folder: the .exe leaves them out (here), and a test
+    build's update does not write them (Files.test_the_readmes_pictures_stay_out)."""
+    def test_the_exe_leaves_them_out(self):
+        import make_launcher_exe
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'docs/images').mkdir(parents=True)
+            (root / 'docs/images/1-select.jpg').write_bytes(b'picture')
+            (root / 'docs/USE.md').write_bytes(b'text')
+            listing = b''.join(b'100644 %d 0\t%s\0' % (n, path) for n, path in
+                               enumerate([b'docs/images/1-select.jpg', b'docs/USE.md']))
+            def git(*args): return b'' if args[0] == 'status' else listing
+            with mock.patch.object(make_launcher_exe, 'REPO', root), mock.patch.object(make_launcher_exe, 'git', git):
+                self.assertEqual(make_launcher_exe.tracked(False), {'docs/USE.md': b'text'})
+    def test_only_the_pictures(self):
+        self.assertFalse(self_update.packed('docs/images/a.jpg'))
+        for path in ('docs/ARCHITECTURE.md', 'docs/imagesx.md', 'README.md', 'launcher/app/images/a.png'):
+            self.assertTrue(self_update.packed(path), path)
+
 class OpenUpdated(unittest.TestCase):
     """The new .exe waits for the launcher's window to end: the new launcher names it (TTT2_LAUNCHER_UI_PID), as
     its update runs in a worker program of its own; the Tk window updated in its own process."""
@@ -251,6 +271,14 @@ class Files(unittest.TestCase):
         self.assertEqual(sorted(stamp[1:]), sorted(set(PROJECT) | {self_update.BUILD_COMMIT, self_update.BUILD_BRANCH}))
         self.assertIn('@launcher-updated bbbbbbb', self.lines)
         self.assertEqual(sorted(p.name for p in (self.root / 'local').iterdir()), ['launcher-files.txt'])
+    def test_the_readmes_pictures_stay_out(self):
+        self.github(data=archive(dict(PROJECT, **{'docs/images/1-select.jpg': b'picture', 'docs/USE.md': b'text'})))
+        self.assertEqual(self.update(), HEAD)
+        self.assertFalse((self.root / 'docs/images').exists())
+        self.assertEqual((self.root / 'docs/USE.md').read_bytes(), b'text')
+        stamp = (self.root / self_update.STAMP).read_text().splitlines()
+        self.assertNotIn('docs/images/1-select.jpg', stamp)
+        self.assertIn('docs/USE.md', stamp)
     def test_nothing_newer(self):
         self.github(ahead=0)
         self.assertIsNone(self.update()); self.assertUnchanged()

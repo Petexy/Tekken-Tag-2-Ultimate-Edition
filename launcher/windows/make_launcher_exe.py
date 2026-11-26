@@ -6,8 +6,8 @@
 
 OUTPUT is the .exe to write (Golden_Fist_Launcher-x86_64.exe for a release). It is
 the launcher's program for 64-bit Windows with this project's files in it:
-Git's tracked files as they are in the working tree, batch files with Windows
-line ends, as resource 100 (RCDATA; appended after the program for a --stub,
+Git's tracked files as they are in the working tree (but the README's pictures,
+docs/images), batch files with Windows line ends, as resource 100 (RCDATA; appended after the program for a --stub,
 which is built already). Nothing of the game is in it: the game is built on the
 player's PC from their own .wua. On the player's PC the .exe keeps the files in
 %LOCALAPPDATA%\\TTT2Ultimate\\launcher and runs the launcher with them, and
@@ -48,7 +48,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from self_update import BUILD_BRANCH, BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
+from self_update import BUILD_BRANCH, BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, packed, version  # noqa: E402
 
 ICON = REPO / 'launcher/app/io.github.petexy.TekkenTag2UltimateEdition.svg'
 # The release's program: the native launcher (launcher/app).
@@ -69,7 +69,8 @@ def git(*args):
 
 def tracked(allow_dirty):
     """{path: bytes} of Git's tracked files, as they are in the working tree
-    (with `allow_dirty`, also the new files it does not ignore)."""
+    (with `allow_dirty`, also the new files it does not ignore), but those a launcher folder does without
+    (self_update.packed: the README's pictures)."""
     if not allow_dirty and git('status', '--porcelain', '--untracked-files=no').strip():
         die('the working tree has uncommitted changes: commit them, or pass --allow-dirty (tests only)')
     entries = [line.split(b'\t', 1) for line in git('ls-files', '-s', '-z').split(b'\0') if line]
@@ -78,6 +79,7 @@ def tracked(allow_dirty):
     files = {}
     for info, path in entries:
         mode, path = info.split()[0], path.decode('utf-8')
+        if not packed(path): continue        # (the README's pictures: self_update.NOT_PACKED)
         if mode not in (b'100644', b'100755'): die(path + ' is not a plain file (a link or a submodule)')
         file = REPO / path
         if not file.is_file():

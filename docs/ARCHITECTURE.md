@@ -2474,7 +2474,9 @@ cross-builds the same program with MinGW-w64 (`TTT2_LAUNCHER_ONLY`, SDL 3
 built in, no time stamp) with Git's tracked files (it refuses uncommitted
 changes), its branch and commit named among them, as resource 100: the same
 commit makes the same bytes. One made on a branch other than main is a test
-build, whose files update from that branch.
+build, whose files update from that branch. The README's pictures
+(`docs/images/`) stay out of both (`self_update.NOT_PACKED`): GitHub's page
+shows them, a player's launcher folder does without them.
 
 ## Running the port
 

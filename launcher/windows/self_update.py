@@ -56,6 +56,14 @@ BUILD_COMMIT = 'launcher/windows/build-commit'
 BUILD_BRANCH = 'launcher/windows/build-branch'
 # What entry.cpp unpacked last: their SHA-256, then their paths.
 STAMP = 'local/launcher-files.txt'
+# Files of the project a player's launcher folder does without: the README's pictures (GitHub's page shows them).
+# make_launcher_exe.py leaves them out of the .exe, and a test build's update leaves them out of what it writes.
+NOT_PACKED = ('docs/images/',)
+
+
+def packed(path):
+    """Whether the project's file `path` goes into a player's launcher folder."""
+    return not path.startswith(NOT_PACKED)
 REPOSITORY = 'Petexy/Golden-Fist-Launcher'
 # The new launcher's worker environment: "1" when the launcher's program is built into the .exe these files came
 # from (a release or test build's own files, not a program the source ZIP's bridge builds from them). Its files'
@@ -503,7 +511,7 @@ def archive_url(commit):
 
 def archive_files(data, commit):
     """{path: bytes} of GitHub's ZIP of `commit`, as make_launcher_exe.py packs a checkout's: batch files with
-    Windows line ends. UpdateError when it is not this project at that commit."""
+    Windows line ends, without the files a launcher folder does without (packed). UpdateError when it is not this project at that commit."""
     short = commit[:7]
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
@@ -523,6 +531,7 @@ def archive_files(data, commit):
                     or (info.external_attr >> 16) & 0o170000 == 0o120000:
                 raise UpdateError('What was downloaded for %s holds %s, which is not a plain file of the project.'
                                   % (short, info.filename))
+            if not packed(path): continue
             content = archive.read(info)
             # cmd.exe can miss a batch file's labels when its lines end in LF only.
             if path.lower().endswith(('.cmd', '.bat')): content = content.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
